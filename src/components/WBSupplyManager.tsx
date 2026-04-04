@@ -341,7 +341,8 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
   const [productSearch, setProductSearch] = useState('');
   const [showFilledOrderCards, setShowFilledOrderCards] = useState(false);
   const [generatedOrderPdf, setGeneratedOrderPdf] = useState<{ fileName: string; dataUrl: string; totalQty: number; totalCost: number } | null>(null);
-  const [showOrderPdfConfirm, setShowOrderPdfConfirm] = useState(false);
+  const [orderHistory, setOrderHistory] = useState<Array<{ id: string; supplierId: string; supplierName: string; createdAt: string; fileName: string; dataUrl: string; totalQty: number; totalCost: number }>>([]);
+  const [orderHistoryOpen, setOrderHistoryOpen] = useState(false);
 
   // FBS Orders file calc
   const [fbsOrdersLoading, setFbsOrdersLoading] = useState(false);
@@ -706,6 +707,24 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
     };
     persist();
   }, [calcCostOverrides, selectedSupplierId]);
+
+  useEffect(() => {
+    const loadOrderHistory = async () => {
+      if (!selectedSupplierId) {
+        setOrderHistory([]);
+        return;
+      }
+      try {
+        const key = `supplier_order_history_v1:${selectedSupplierId}`;
+        const { data } = await supabase.from('app_settings').select('value').eq('key', key).maybeSingle();
+        const parsed = data?.value ? (typeof data.value === 'string' ? JSON.parse(data.value) : data.value) : [];
+        setOrderHistory(Array.isArray(parsed) ? parsed : []);
+      } catch {
+        setOrderHistory([]);
+      }
+    };
+    loadOrderHistory();
+  }, [selectedSupplierId]);
 
   // Track current token to trigger updates
   const selectedSupplier = suppliers.find(s => s.id === selectedSupplierId);
@@ -2902,11 +2921,31 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
             },
           });
 
-          const fileName = `supply_order_${new Date().toISOString().split('T')[0]}.pdf`;
+          const fileName = `supply_order_${new Date().toISOString().split('T')[0]}_${Date.now()}.pdf`;
           const dataUrl = doc.output('dataurlstring');
-          setGeneratedOrderPdf({ fileName, dataUrl, totalQty, totalCost });
-          setShowOrderPdfConfirm(true);
+          const generated = { fileName, dataUrl, totalQty, totalCost };
+          setGeneratedOrderPdf(generated);
           doc.save(fileName);
+
+          try {
+            const supplierName = suppliers.find(s => s.id === selectedSupplierId)?.name || 'Поставщик';
+            const historyItem = {
+              id: getSafeId(),
+              supplierId: String(selectedSupplierId || ''),
+              supplierName,
+              createdAt: new Date().toISOString(),
+              fileName,
+              dataUrl,
+              totalQty,
+              totalCost,
+            };
+            const nextHistory = [historyItem, ...(orderHistory || [])].slice(0, 100);
+            setOrderHistory(nextHistory);
+            if (selectedSupplierId) {
+              const key = `supplier_order_history_v1:${selectedSupplierId}`;
+              await supabase.from('app_settings').upsert([{ key, value: JSON.stringify(nextHistory) }], { onConflict: 'key' });
+            }
+          } catch {}
       } catch (e: any) {
           setError(e.message);
       }
@@ -4422,8 +4461,9 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
                 setCalcMissingCostOnly(false);
                 setCalcCostEditorOpen(true);
               }} disabled={!supplyOrderSummaryRows.length} className="px-4 py-2 rounded-lg border border-indigo-300 text-indigo-700 hover:bg-indigo-100 disabled:opacity-50">Себестоимость</button>
-              <button onClick={generateSupplyOrderDocument} disabled={!supplyOrderSummaryRows.length} className="px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50">Заказ поставщику / PDF</button>
-              {generatedOrderPdf ? <a href={generatedOrderPdf.dataUrl} download={generatedOrderPdf.fileName} className="px-4 py-2 rounded-lg bg-white border border-indigo-300 text-indigo-700 hover:bg-indigo-100">Скачать PDF</a> : null}
+              <button onClick={() => setOrderHistoryOpen(true)} disabled={!orderHistory.length} className="px-4 py-2 rounded-lg border border-indigo-300 text-indigo-700 hover:bg-indigo-100 disabled:opacity-50">История заказов</button>
+              <button onClick={generateSupplyOrderDocument} disabled={!supplyOrderSummaryRows.length} className="px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50">Скачать PDF</button>
+              {generatedOrderPdf ? <a href={generatedOrderPdf.dataUrl} download={generatedOrderPdf.fileName} className="px-4 py-2 rounded-lg bg-white border border-indigo-300 text-indigo-700 hover:bg-indigo-100">Открыть текущий PDF</a> : null}
             </div>
           </div>
           {supplyOrderSummaryRows.length > 0 && (
@@ -4465,14 +4505,30 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
         </div>
       )}
 
-      {showOrderPdfConfirm && generatedOrderPdf && (
-        <div className="fixed inset-0 z-[130] bg-black/50 flex items-center justify-center p-4" onClick={() => setShowOrderPdfConfirm(false)}>
-          <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl p-5" onClick={(e) => e.stopPropagation()}>
-            <div className="text-lg font-bold text-gray-900 mb-2">Отправить заказ?</div>
-            <div className="text-sm text-gray-600 mb-4">PDF сформирован и добавлен в раздел заказа товара. Сумма заказа: {generatedOrderPdf.totalCost.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽</div>
-            <div className="flex justify-end gap-2">
-              <button onClick={() => setShowOrderPdfConfirm(false)} className="px-4 py-2 rounded-lg border border-gray-300 hover:bg-gray-50">Пока нет</button>
-              <a href={generatedOrderPdf.dataUrl} download={generatedOrderPdf.fileName} className="px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">Да, скачать PDF</a>
+      {orderHistoryOpen && (
+        <div className="fixed inset-0 z-[130] bg-black/50 flex items-center justify-center p-4" onClick={() => setOrderHistoryOpen(false)}>
+          <div className="w-full max-w-3xl max-h-[85vh] overflow-hidden bg-white rounded-2xl shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="p-4 border-b border-gray-200 flex items-center justify-between">
+              <div>
+                <div className="text-lg font-bold text-gray-900">История заказов</div>
+                <div className="text-sm text-gray-500">Сохраненные PDF по текущему поставщику</div>
+              </div>
+              <button onClick={() => setOrderHistoryOpen(false)} className="px-3 py-2 rounded-lg border border-gray-300 hover:bg-gray-50">Закрыть</button>
+            </div>
+            <div className="p-4 overflow-auto max-h-[70vh] space-y-2">
+              {!orderHistory.length ? (
+                <div className="text-sm text-gray-500">История заказов пока пуста.</div>
+              ) : orderHistory.map((item) => (
+                <div key={item.id} className="border rounded-xl p-3 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                  <div>
+                    <div className="font-medium text-gray-900">{item.fileName}</div>
+                    <div className="text-xs text-gray-500">{new Date(item.createdAt).toLocaleString('ru-RU')} • {item.totalQty} шт. • {Number(item.totalCost || 0).toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽</div>
+                  </div>
+                  <div className="flex gap-2 flex-wrap">
+                    <a href={item.dataUrl} download={item.fileName} className="px-3 py-2 rounded-lg border border-indigo-300 text-indigo-700 hover:bg-indigo-50">Открыть PDF</a>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         </div>
