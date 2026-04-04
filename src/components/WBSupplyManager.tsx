@@ -343,6 +343,8 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
   const [generatedOrderPdf, setGeneratedOrderPdf] = useState<{ fileName: string; dataUrl: string; totalQty: number; totalCost: number } | null>(null);
   const [orderHistory, setOrderHistory] = useState<Array<{ id: string; supplierId: string; supplierName: string; createdAt: string; fileName: string; dataUrl: string; totalQty: number; totalCost: number }>>([]);
   const [orderHistoryOpen, setOrderHistoryOpen] = useState(false);
+  const [orderPdfNameModalOpen, setOrderPdfNameModalOpen] = useState(false);
+  const [orderPdfFileName, setOrderPdfFileName] = useState('');
 
   // FBS Orders file calc
   const [fbsOrdersLoading, setFbsOrdersLoading] = useState(false);
@@ -2801,7 +2803,7 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
   const fbsUsedBlockItems = new Set((fbsBlockGroups || []).flatMap((g) => (g.items || []).map((x) => normalizeBlockName(String(x || '')))));
   const fbsAvailableSourceNames = fbsSourceNames.filter((nm) => !fbsUsedBlockItems.has(normalizeBlockName(String(nm || ''))) || fbsNewBlockItems.includes(nm) || fbsEditingBlockItems.includes(nm));
 
-  const generateSupplyOrderDocument = async () => {
+  const generateSupplyOrderDocument = async (customFileName?: string) => {
       const itemsToOrder = buildSupplyOrderItems();
 
       if (itemsToOrder.length === 0) {
@@ -2921,7 +2923,8 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
             },
           });
 
-          const fileName = `supply_order_${new Date().toISOString().split('T')[0]}_${Date.now()}.pdf`;
+          const normalizedName = String(customFileName || '').trim().replace(/\.pdf$/i, '');
+          const fileName = `${normalizedName || `supply_order_${new Date().toISOString().split('T')[0]}_${Date.now()}`}.pdf`;
           const dataUrl = doc.output('dataurlstring');
           const generated = { fileName, dataUrl, totalQty, totalCost };
           setGeneratedOrderPdf(generated);
@@ -4454,7 +4457,8 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
               <button onClick={() => {
                 const next: Record<string, string> = {};
                 supplyOrderSummaryRows.forEach((row) => {
-                  next[String(row.nmId || row.article || row.title || '')] = String(row.costPerUnit || '');
+                  const key = String(row.nmId || row.article || row.title || '');
+                  next[key] = String(row.costPerUnit || '');
                 });
                 setCalcCostEditorValues(next);
                 setCalcCostEditorSearch('');
@@ -4462,7 +4466,12 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
                 setCalcCostEditorOpen(true);
               }} disabled={!supplyOrderSummaryRows.length} className="px-4 py-2 rounded-lg border border-indigo-300 text-indigo-700 hover:bg-indigo-100 disabled:opacity-50">Себестоимость</button>
               <button onClick={() => setOrderHistoryOpen(true)} className="px-4 py-2 rounded-lg border border-indigo-300 text-indigo-700 hover:bg-indigo-100">История заказов</button>
-              <button onClick={generateSupplyOrderDocument} disabled={!supplyOrderSummaryRows.length} className="px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50">Скачать PDF</button>
+              <button onClick={() => {
+                const supplierName = suppliers.find((s) => s.id === selectedSupplierIdSupplyOrder)?.name || 'Заказ';
+                const defaultName = `Заказ_${supplierName}_${new Date().toLocaleDateString('ru-RU').replace(/\./g, '-')}`;
+                setOrderPdfFileName(defaultName);
+                setOrderPdfNameModalOpen(true);
+              }} disabled={!supplyOrderSummaryRows.length} className="px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50">Скачать PDF</button>
               {generatedOrderPdf ? <a href={generatedOrderPdf.dataUrl} download={generatedOrderPdf.fileName} className="px-4 py-2 rounded-lg bg-white border border-indigo-300 text-indigo-700 hover:bg-indigo-100">Открыть текущий PDF</a> : null}
             </div>
           </div>
@@ -4502,6 +4511,34 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
               </table>
             </div>
           )}
+        </div>
+      )}
+
+      {orderPdfNameModalOpen && (
+        <div className="fixed inset-0 z-[131] bg-black/50 flex items-center justify-center p-4" onClick={() => setOrderPdfNameModalOpen(false)}>
+          <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl p-5" onClick={(e) => e.stopPropagation()}>
+            <div className="text-lg font-bold text-gray-900 mb-2">Название PDF</div>
+            <div className="text-sm text-gray-500 mb-4">Введите название файла для заказа</div>
+            <input
+              type="text"
+              value={orderPdfFileName}
+              onChange={(e) => setOrderPdfFileName(e.target.value)}
+              className="w-full border rounded-lg px-3 py-2 mb-4"
+              placeholder="Название файла"
+            />
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setOrderPdfNameModalOpen(false)} className="px-4 py-2 rounded-lg border border-gray-300 hover:bg-gray-50">Отмена</button>
+              <button
+                onClick={async () => {
+                  await generateSupplyOrderDocument(orderPdfFileName);
+                  setOrderPdfNameModalOpen(false);
+                }}
+                className="px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700"
+              >
+                Сохранить PDF
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
