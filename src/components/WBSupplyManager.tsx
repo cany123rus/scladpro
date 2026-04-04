@@ -2723,7 +2723,7 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
     const next = { ...(calcCostOverrides || {}) };
     Object.entries(calcCostEditorValues || {}).forEach(([k, v]) => {
       const n = Number(String(v || '').replace(',', '.'));
-      const row = (calcRows || []).find((r) => r.key === k);
+      const row = [...(calcRows || []), ...supplyOrderSummaryRows.map((r) => ({ key: String(r.nmId || r.article || r.title || ''), nmId: r.nmId, article: r.article, title: r.title, qty: r.qty }))].find((r: any) => String(r.key) === String(k));
       const safeValue = Number.isFinite(n) && n >= 0 ? n : 0;
       if (row) {
         getCalcCostKeyCandidates(row).forEach((candidate) => {
@@ -4466,13 +4466,19 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
                 setCalcCostEditorOpen(true);
               }} disabled={!supplyOrderSummaryRows.length} className="px-4 py-2 rounded-lg border border-indigo-300 text-indigo-700 hover:bg-indigo-100 disabled:opacity-50">Себестоимость</button>
               <button onClick={() => setOrderHistoryOpen(true)} className="px-4 py-2 rounded-lg border border-indigo-300 text-indigo-700 hover:bg-indigo-100">История заказов</button>
+              <button 
+                onClick={generateSupplyOrderExcel}
+                disabled={!supplyOrderSummaryRows.length}
+                className="px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+              >
+                Скачать Excel
+              </button>
               <button onClick={() => {
                 const supplierName = suppliers.find((s) => s.id === selectedSupplierIdSupplyOrder)?.name || 'Заказ';
                 const defaultName = `Заказ_${supplierName}_${new Date().toLocaleDateString('ru-RU').replace(/\./g, '-')}`;
                 setOrderPdfFileName(defaultName);
                 setOrderPdfNameModalOpen(true);
               }} disabled={!supplyOrderSummaryRows.length} className="px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50">Скачать PDF</button>
-              {generatedOrderPdf ? <a href={generatedOrderPdf.dataUrl} download={generatedOrderPdf.fileName} className="px-4 py-2 rounded-lg bg-white border border-indigo-300 text-indigo-700 hover:bg-indigo-100">Открыть текущий PDF</a> : null}
             </div>
           </div>
           {supplyOrderSummaryRows.length > 0 && (
@@ -4822,13 +4828,6 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
                           title="Фильтры"
                       >
                           <Filter className="w-5 h-5" />
-                      </button>
-                      <button 
-                          onClick={generateSupplyOrderExcel}
-                          className="flex items-center gap-2 bg-emerald-600 text-white px-4 py-2 rounded-lg hover:bg-emerald-700 transition-colors"
-                      >
-                          <Download className="w-4 h-4" />
-                          Скачать Excel
                       </button>
                   </div>
                   </div>
