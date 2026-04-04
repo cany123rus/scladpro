@@ -6,7 +6,7 @@ import {
   LayoutDashboard, Map as MapIcon, Package, Truck, ClipboardCheck, Users,
   ShieldCheck, Printer, Box, CheckSquare, Terminal, MessageSquare,
   Send, UserCog, LogOut, Plus, Search, Bell, Settings, ChevronRight, ChevronLeft, ChevronDown, ChevronUp, Calendar,
-  Pencil, Trash2, History, Save, X, Upload, ArrowLeft, Undo2, AlertCircle, CheckCircle2, QrCode, FileSpreadsheet, Lock, LockOpen, Camera, Download, FileText, File, FileClock, Clock, Menu, Database, Power, Link, RefreshCw, ShoppingCart, BarChart2, ShoppingBag, RotateCcw, Wallet
+  Pencil, Trash2, History, Save, X, Upload, ArrowLeft, Undo2, AlertCircle, CheckCircle2, QrCode, FileSpreadsheet, Lock, LockOpen, Camera, Download, FileText, File, FileClock, Clock, Menu, Database, Power, Link, RefreshCw, ShoppingCart, BarChart2, ShoppingBag, RotateCcw, Wallet, Megaphone
 } from 'lucide-react';
 const WBProducts = React.lazy(() => import('../components/WBProducts').then((m) => ({ default: m.WBProducts })));
 const WBSupplyManager = React.lazy(() => import('../components/WBSupplyManager').then((m) => ({ default: m.WBSupplyManager })));
@@ -107,6 +107,7 @@ const ASSEMBLY_BUTTONS = [
   { id: 'cw_calendar_employee_pick', label: 'Сборка: Календарь - Показывать сотрудника в выборе' },
   { id: 'cw_schedule_employee_pick', label: 'Сборка: График - Показывать сотрудника в выборе (админ)' },
   { id: 'cw_schedule_notify_pick', label: 'Сборка: График - Показывать сотрудника в выборе уведомлений Telegram' },
+  { id: 'warehouse_telegram_pick', label: 'Склад: Показывать сотрудника в выборе для Telegram' },
   { id: 'cw_calendar_schedule_open', label: 'Сборка: Календарь - Кнопка График' },
   { id: 'cw_calendar_schedule_employee_pick', label: 'Сборка: График - Выбор сотрудника (админ)' },
   { id: 'cw_form_save', label: 'Сборка: Форма - Сохранить/Обновить запись' },
@@ -1155,6 +1156,8 @@ export default function Dashboard() {
   const [uploadedSavingCosts, setUploadedSavingCosts] = useState(false);
   const [uploadedCostEditorOpen, setUploadedCostEditorOpen] = useState(false);
   const [uploadedCostEditorSearch, setUploadedCostEditorSearch] = useState('');
+  const [uploadedCostEditorFilter, setUploadedCostEditorFilter] = useState<'all' | 'with_price' | 'without_price'>('all');
+  const [uploadedCostEditorLockedKeys, setUploadedCostEditorLockedKeys] = useState<string[] | null>(null);
   const [uploadedCostEditorValues, setUploadedCostEditorValues] = useState<Record<string, string>>({});
   const [uploadedAnalyticsSuppliers, setUploadedAnalyticsSuppliers] = useState<Array<{ id: string; name: string }>>([]);
   const [uploadedSortKey, setUploadedSortKey] = useState<'code' | 'name' | 'sales_net' | 'returns_gross' | 'logistics_sum' | 'payout_sum' | 'payout_net' | 'fine_sum' | 'storage_sum' | 'withhold_sum' | 'to_pay_total' | 'sold_qty' | 'return_qty' | 'acquiring_sum' | 'acquiring_percent' | 'cost' | 'avg_profit' | 'profit_total'>('sales_net');
@@ -1164,6 +1167,7 @@ export default function Dashboard() {
   const [uploadedChartMetric, setUploadedChartMetric] = useState<'sales_net' | 'returns_gross' | 'logistics_sum' | 'payout_net' | 'fine_sum' | 'storage_sum' | 'withhold_sum' | 'to_pay_total' | 'sold_qty' | 'return_qty' | 'acquiring_sum'>('sales_net');
   const [uploadedChartHover, setUploadedChartHover] = useState<{ x: number; y: number; date: string; value: number } | null>(null);
   const [uploadedExtraCosts, setUploadedExtraCosts] = useState<number>(0);
+  const [uploadedTaxRateOverride, setUploadedTaxRateOverride] = useState<0.01 | 0.06 | null>(null);
   const [uploadedTurboMode, setUploadedTurboMode] = useState(false);
   const [uploadedShareLoading, setUploadedShareLoading] = useState(false);
   const [uploadedShareHistoryOpen, setUploadedShareHistoryOpen] = useState(false);
@@ -1219,6 +1223,8 @@ export default function Dashboard() {
   const [cwSelectedDate, setCwSelectedDate] = useState<Date | null>(null);
   const [cwWorkLogs, setCwWorkLogs] = useState<any[]>([]);
   const [cwWorkRates, setCwWorkRates] = useState<any[]>([]);
+  const [cwWorkRateSnapshots, setCwWorkRateSnapshots] = useState<Record<string, number>>({});
+  const [cwWorkRateHistory, setCwWorkRateHistory] = useState<Record<string, Array<{ changed_at: string; price: number }>>>({});
   const [cwPackagingRates, setCwPackagingRates] = useState<any[]>([]);
   const [cwForm, setCwForm] = useState({ quantity: '', work_rate_id: '', packaging: '', packaging_used: 'no', supplier_id: '' });
   const [cwFormItems, setCwFormItems] = useState<Array<{ supplier_id: string; work_rate_id: string; quantity: string; time_hours: string; time_minutes: string; packaging_used: '' | 'yes' | 'no'; packaging: string }>>([{ supplier_id: '', work_rate_id: '', quantity: '', time_hours: '', time_minutes: '', packaging_used: '', packaging: '' }]);
@@ -1245,7 +1251,36 @@ export default function Dashboard() {
   };
 
   const getCwTimeRate = () => cwWorkRates.find((r: any) => String(r?.name || '').trim().toLowerCase() === CW_TIME_RATE_NAME.toLowerCase());
+  const getDatesInRange = (start: string, end: string) => {
+    if (!start || !end) return [] as string[];
+    const out: string[] = [];
+    const cur = new Date(`${start}T00:00:00`);
+    const finish = new Date(`${end}T00:00:00`);
+    while (cur <= finish) {
+      out.push(cur.toISOString().split('T')[0]);
+      cur.setDate(cur.getDate() + 1);
+    }
+    return out;
+  };
   const getCwTimeRatePrice = () => Number(getCwTimeRate()?.price ?? CW_TIME_RATE_PRICE);
+  const getWorkLogSnapshotPrice = (log: any) => {
+    const snapshot = Number(cwWorkRateSnapshots[String(log?.id || '')] || 0);
+    if (snapshot > 0) return snapshot;
+    const rate = cwWorkRates.find((r: any) => String(r.id) === String(log?.work_rate_id));
+    return Number(rate?.price || 0);
+  };
+  const loadCwWorkRateMeta = async () => {
+    try {
+      const { data: snapRow } = await supabase.from('app_settings').select('value').eq('key', 'cw_work_rate_snapshots_v1').maybeSingle();
+      const { data: histRow } = await supabase.from('app_settings').select('value').eq('key', 'cw_work_rate_history_v1').maybeSingle();
+      let snaps: any = {};
+      let hist: any = {};
+      try { snaps = snapRow?.value ? (typeof snapRow.value === 'string' ? JSON.parse(snapRow.value) : snapRow.value) : {}; } catch {}
+      try { hist = histRow?.value ? (typeof histRow.value === 'string' ? JSON.parse(histRow.value) : histRow.value) : {}; } catch {}
+      setCwWorkRateSnapshots(snaps && typeof snaps === 'object' ? snaps : {});
+      setCwWorkRateHistory(hist && typeof hist === 'object' ? hist : {});
+    } catch {}
+  };
 
   const scheduleKeyForEmployee = (employeeId: string) => `employee_schedule_v1:${employeeId}`;
 
@@ -1324,6 +1359,8 @@ export default function Dashboard() {
     await supabase.from('app_settings').upsert([{ key: 'cw_schedule_auto_notify_dates_v1', value: JSON.stringify(clean) }], { onConflict: 'key' });
   };
   const [cwRateForm, setCwRateForm] = useState({ name: '', price: '' });
+  const [cwRateHistoryModal, setCwRateHistoryModal] = useState<{ open: boolean; rateId: string; rateName: string }>({ open: false, rateId: '', rateName: '' });
+  const [cwRateBulkModal, setCwRateBulkModal] = useState<{ open: boolean; rateId: string; rateName: string; price: string; start: string; end: string }>({ open: false, rateId: '', rateName: '', price: '', start: new Date().toISOString().split('T')[0], end: new Date().toISOString().split('T')[0] });
   const [cwPackagingRateForm, setCwPackagingRateForm] = useState({ name: '', price: '' });
   const [cwSelectedPeriod, setCwSelectedPeriod] = useState(new Date());
   const [cwReportModalOpen, setCwReportModalOpen] = useState(false);
@@ -1334,6 +1371,10 @@ export default function Dashboard() {
     start_date: new Date().toISOString().split('T')[0],
     end_date: new Date().toISOString().split('T')[0]
   });
+  const [cwReportExcludedDates, setCwReportExcludedDates] = useState<string[]>([]);
+  const [cwReportDatePickerOpen, setCwReportDatePickerOpen] = useState(false);
+  const [cwReportDatePickerMonth, setCwReportDatePickerMonth] = useState(new Date());
+  const [cwReportPickingEnd, setCwReportPickingEnd] = useState(false);
   const [cwReportResult, setCwReportResult] = useState<any[] | null>(null);
   const [cwScheduleModalOpen, setCwScheduleModalOpen] = useState(false);
   const [cwScheduleMonth, setCwScheduleMonth] = useState(new Date());
@@ -1377,6 +1418,7 @@ export default function Dashboard() {
   const [tempWorkerCommentTemplates, setTempWorkerCommentTemplates] = useState<string[]>([]);
   const [tempWorkerSupplierFilter, setTempWorkerSupplierFilter] = useState('all');
   const [tempWorkerPaidFilter, setTempWorkerPaidFilter] = useState<'all' | 'paid' | 'unpaid'>('all');
+  const [tempWorkerDateSort, setTempWorkerDateSort] = useState<'desc' | 'asc'>('desc');
   const [tempWorkerForm, setTempWorkerForm] = useState({
     supplier_id: '',
     date: new Date().toISOString().split('T')[0],
@@ -1394,6 +1436,8 @@ export default function Dashboard() {
     earnings: '',
     hours: ''
   });
+  const [tempWorkerPaymentModal, setTempWorkerPaymentModal] = useState<{ open: boolean; logId: string; mode: 'pay' | 'extra'; supplierId: string; amount: string; error?: string }>({ open: false, logId: '', mode: 'pay', supplierId: '', amount: '', error: '' });
+  const [tempWorkerPaymentsMap, setTempWorkerPaymentsMap] = useState<Record<string, Array<{ amount: number; supplier_id: string; created_at: string }>>>({});
 
   const [showAssemblyAccessModal, setShowAssemblyAccessModal] = useState(false);
   const [assemblyButtonAccess, setAssemblyButtonAccess] = useState<Record<string, ButtonAccessConfig>>({});
@@ -1423,18 +1467,22 @@ export default function Dashboard() {
         setTempWorkerPaidFilter('all');
         fetchTempWorkerLogs();
         loadTempWorkerMeta();
+        fetchCwWarehouseMoneyHistory();
     }
   }, [showTempWorkerHistory]);
 
   const loadTempWorkerMeta = async () => {
     try {
-      const { data } = await supabase.from('app_settings').select('key, value').in('key', ['temp_workers_list_v1', 'temp_worker_comment_templates_v1']);
+      const { data } = await supabase.from('app_settings').select('key, value').in('key', ['temp_workers_list_v1', 'temp_worker_comment_templates_v1', 'temp_worker_payments_v1']);
       const workersRaw = data?.find((x: any) => x.key === 'temp_workers_list_v1')?.value;
       const templatesRaw = data?.find((x: any) => x.key === 'temp_worker_comment_templates_v1')?.value;
+      const paymentsRaw = data?.find((x: any) => x.key === 'temp_worker_payments_v1')?.value;
       const workers = Array.isArray(workersRaw) ? workersRaw : (typeof workersRaw === 'string' ? JSON.parse(workersRaw || '[]') : []);
       const templates = Array.isArray(templatesRaw) ? templatesRaw : (typeof templatesRaw === 'string' ? JSON.parse(templatesRaw || '[]') : []);
+      const payments = paymentsRaw && typeof paymentsRaw === 'string' ? JSON.parse(paymentsRaw || '{}') : (paymentsRaw || {});
       setTempWorkersList(Array.from(new Set((workers || []).map((x: any) => String(x || '').trim()).filter(Boolean))));
       setTempWorkerCommentTemplates(Array.from(new Set((templates || []).map((x: any) => String(x || '').trim()).filter(Boolean))));
+      setTempWorkerPaymentsMap(payments && typeof payments === 'object' ? payments : {});
     } catch {}
   };
 
@@ -1450,23 +1498,53 @@ export default function Dashboard() {
     await supabase.from('app_settings').upsert([{ key: 'temp_worker_comment_templates_v1', value: JSON.stringify(clean) }], { onConflict: 'key' });
   };
 
+  const getTempWorkerPaidAmount = (log: any) => {
+    const payments = tempWorkerPaymentsMap[String(log?.id || '')] || [];
+    const partialPaid = (payments || []).reduce((sum: number, p: any) => sum + Number(p?.amount || 0), 0);
+    if (partialPaid > 0) return partialPaid;
+    if (Boolean(log?.is_paid)) return Number(log?.earnings || 0);
+    return 0;
+  };
+  const getTempWorkerRemainingAmount = (log: any) => Math.max(0, Number(log?.earnings || 0) - getTempWorkerPaidAmount(log));
+  const getTempWorkerPaymentsSummary = (log: any) => {
+    const payments = tempWorkerPaymentsMap[String(log?.id || '')] || [];
+    const grouped = new Map<string, number>();
+    (payments || []).forEach((p: any) => {
+      const supplierId = String(p?.supplier_id || '');
+      grouped.set(supplierId, (grouped.get(supplierId) || 0) + Number(p?.amount || 0));
+    });
+    if (grouped.size === 0 && Boolean(log?.is_paid) && log?.paid_by_supplier_id) {
+      grouped.set(String(log.paid_by_supplier_id), Number(log?.earnings || 0));
+    }
+    return Array.from(grouped.entries()).map(([supplierId, amount]) => ({
+      supplierId,
+      supplierName: suppliers.find((s: any) => String(s.id) === supplierId)?.name || `#${supplierId}`,
+      amount,
+    }));
+  };
+
   const filteredTempWorkerLogs = useMemo(() => {
-    return (tempWorkerLogs || []).filter((log: any) => {
+    const rows = (tempWorkerLogs || []).filter((log: any) => {
       const bySupplier = tempWorkerSupplierFilter === 'all' || String(log?.supplier_id || '') === String(tempWorkerSupplierFilter);
       const byPaid = tempWorkerPaidFilter === 'all'
         ? true
-        : (tempWorkerPaidFilter === 'paid' ? Boolean(log?.is_paid) : !Boolean(log?.is_paid));
+        : (tempWorkerPaidFilter === 'paid' ? getTempWorkerRemainingAmount(log) <= 0 : getTempWorkerRemainingAmount(log) > 0);
       return bySupplier && byPaid;
     });
-  }, [tempWorkerLogs, tempWorkerSupplierFilter, tempWorkerPaidFilter]);
+    return rows.sort((a: any, b: any) => {
+      const at = new Date(String(a?.work_date || a?.created_at || '')).getTime();
+      const bt = new Date(String(b?.work_date || b?.created_at || '')).getTime();
+      return tempWorkerDateSort === 'asc' ? at - bt : bt - at;
+    });
+  }, [tempWorkerLogs, tempWorkerSupplierFilter, tempWorkerPaidFilter, tempWorkerDateSort]);
 
   const tempUnpaidBySupplier = useMemo(() => {
     const grouped = new Map<string, { supplierId: string; supplierName: string; amount: number; shifts: number }>();
     (filteredTempWorkerLogs || []).forEach((log: any) => {
-      if (Boolean(log?.is_paid)) return;
+      if (getTempWorkerRemainingAmount(log) <= 0) return;
       const supplierId = String(log?.supplier_id || '');
       const supplierName = suppliers.find((s: any) => String(s.id) === supplierId)?.name || 'Без поставщика';
-      const amount = Number(log?.earnings || 0);
+      const amount = getTempWorkerRemainingAmount(log);
       const prev = grouped.get(supplierId) || { supplierId, supplierName, amount: 0, shifts: 0 };
       prev.amount += amount;
       prev.shifts += 1;
@@ -1630,31 +1708,16 @@ export default function Dashboard() {
   };
 
   const handleToggleTempWorkerPaid = async (logId: string, nextPaid: boolean, paidBySupplierId?: string | null) => {
-    try {
-      let { error } = await supabase
-        .from('temporary_workers_logs')
-        .update({ is_paid: nextPaid, paid_by_supplier_id: nextPaid ? (paidBySupplierId || null) : null })
-        .eq('id', logId);
-
-      if (error && /column .* does not exist|schema cache/i.test(String(error?.message || ''))) {
-        const fallback = await supabase
-          .from('temporary_workers_logs')
-          .update({ is_paid: nextPaid })
-          .eq('id', logId);
-        error = fallback.error as any;
-      }
-      if (error) throw error;
-
-      setTempWorkerLogs(prev => prev.map(log => log.id === logId ? { ...log, is_paid: nextPaid, paid_by_supplier_id: nextPaid ? (paidBySupplierId || null) : null } : log));
-      showToast(nextPaid ? 'Отмечено: оплачено' : 'Отмечено: не оплачено', 'success');
-    } catch (error: any) {
-      console.error('Error updating temp worker paid status:', error);
-      if (/column .* does not exist|schema cache/i.test(String(error?.message || ''))) {
-        showToast('В БД нет колонки is_paid. Добавьте её в temporary_workers_logs.', 'error');
-      } else {
-        showToast('Ошибка обновления оплаты: ' + (error?.message || 'неизвестно'), 'error');
-      }
+    if (!nextPaid) {
+      const nextMap = { ...(tempWorkerPaymentsMap || {}) } as Record<string, any[]>;
+      delete nextMap[String(logId)];
+      setTempWorkerPaymentsMap(nextMap);
+      await supabase.from('app_settings').upsert([{ key: 'temp_worker_payments_v1', value: JSON.stringify(nextMap) }], { onConflict: 'key' });
+      setTempWorkerLogs(prev => prev.map(log => log.id === logId ? { ...log, is_paid: false, paid_by_supplier_id: null } : log));
+      showToast('Оплата снята', 'success');
+      return;
     }
+    setTempWorkerPaymentModal({ open: true, logId: String(logId), mode: 'pay', supplierId: String(paidBySupplierId || ''), amount: '', error: '' });
   };
 
   const confirmPaidBySupplier = async () => {
@@ -1726,6 +1789,7 @@ export default function Dashboard() {
   const [cwWarehouseMoneyCollapsed, setCwWarehouseMoneyCollapsed] = useState(false);
   const [cwBoxesFormsCollapsed, setCwBoxesFormsCollapsed] = useState(false);
   const [cwWarehouseMoneyHistory, setCwWarehouseMoneyHistory] = useState<Array<{ id: string; amount: number; comment: string; created_at: string; type?: 'manual' | 'salary'; employee_id?: string; employee_name?: string; period_start?: string; period_end?: string }>>([]);
+  const cwWarehouseMoneyBalance = useMemo(() => cwWarehouseMoneyHistory.reduce((sum, row) => sum + Number(row.amount || 0), 0), [cwWarehouseMoneyHistory]);
   const [cwSalaryIssueForm, setCwSalaryIssueForm] = useState({ employee_id: '', period_key: '' });
   const [cwSalaryIssuePreview, setCwSalaryIssuePreview] = useState<{ amount: number; logsCount: number; periodLabel: string; periodStart: string; periodEnd: string } | null>(null);
   const [cwSalaryIssueLoading, setCwSalaryIssueLoading] = useState(false);
@@ -1977,6 +2041,7 @@ export default function Dashboard() {
       supabase.from('work_rates').select('*').is('deleted_at', null).then(({ data }) => setCwWorkRates(data || []));
       supabase.from('packaging_rates').select('*').is('deleted_at', null).then(({ data }) => setCwPackagingRates(data || []));
       supabase.from('suppliers').select('*').is('deleted_at', null).then(({ data }) => setSuppliers(data || []));
+      loadCwWorkRateMeta();
       if (completedWorkStep === 'BOXES') {
         fetchBoxStats();
         fetchBoxHistory();
@@ -2152,7 +2217,7 @@ export default function Dashboard() {
 
       const amount = (data || []).reduce((sum: number, row: any) => {
         const qty = Number(row?.quantity || 0);
-        const price = Number((row as any)?.work_rates?.price || 0);
+        const price = Number(cwWorkRateSnapshots[String(row?.id || '')] || (row as any)?.work_rates?.price || 0);
         return sum + qty * price;
       }, 0);
 
@@ -5021,6 +5086,22 @@ export default function Dashboard() {
     });
   };
 
+  const setAssemblyGroupRule = (buttonIds: string[], employeeIds: string[], rule: AccessRule) => {
+    setAssemblyButtonAccess((prev) => {
+      const next = { ...(prev || {}) } as Record<string, any>;
+      buttonIds.forEach((buttonId) => {
+        const cfg = { ...(next[buttonId] || {}) };
+        const employeesMap = { ...(cfg.employees || {}) };
+        employeeIds.forEach((employeeId) => {
+          employeesMap[String(employeeId)] = rule;
+        });
+        cfg.employees = employeesMap;
+        next[buttonId] = cfg;
+      });
+      return next;
+    });
+  };
+
   const saveAssemblyAccess = async () => {
     try {
       const raw = JSON.stringify(assemblyButtonAccess || {});
@@ -5212,6 +5293,7 @@ export default function Dashboard() {
   const [barterCatalogProducts, setBarterCatalogProducts] = useState<any[]>([]);
   const [barterCatalogLoading, setBarterCatalogLoading] = useState(false);
   const [barterMonth, setBarterMonth] = useState<string>('2026-03');
+  const [barterSection, setBarterSection] = useState<'barters_main' | 'external_ads_base'>('barters_main');
   const [barterMonthPickerOpen, setBarterMonthPickerOpen] = useState(false);
   const [barterMonthYear, setBarterMonthYear] = useState<number>(2026);
   const [barterRows, setBarterRows] = useState<Array<{
@@ -5240,6 +5322,22 @@ export default function Dashboard() {
   const [barterPreviewImage, setBarterPreviewImage] = useState<string | null>(null);
   const [barterPhotoMap, setBarterPhotoMap] = useState<Record<string, string>>({});
   const [barterPhotoLoading, setBarterPhotoLoading] = useState(false);
+  const [barterDuplicateModal, setBarterDuplicateModal] = useState<{ open: boolean; targetMonth: string }>({ open: false, targetMonth: new Date().toISOString().slice(0, 7) });
+  const [externalAdsBase, setExternalAdsBase] = useState<Array<{ id: string; nickname: string; socialLinks: Array<{ url: string; followers: string }>; comment: string; status: string; createdAt: string }>>([]);
+  const [externalAdsBaseModalOpen, setExternalAdsBaseModalOpen] = useState(false);
+  const [externalAdsBaseSaving, setExternalAdsBaseSaving] = useState(false);
+  const [externalAdsBaseSearch, setExternalAdsBaseSearch] = useState('');
+  const [assemblyAccessSearch, setAssemblyAccessSearch] = useState('');
+  const [assemblyAccessEmployeeSearch, setAssemblyAccessEmployeeSearch] = useState('');
+  const [collapsedAssemblyGroups, setCollapsedAssemblyGroups] = useState<Record<string, boolean>>({});
+  const [externalAdsBaseSort, setExternalAdsBaseSort] = useState<'date_desc' | 'date_asc' | 'nickname_asc' | 'followers_desc'>('date_desc');
+  const [externalAdsBaseEditingId, setExternalAdsBaseEditingId] = useState<string | null>(null);
+  const [externalAdsBaseForm, setExternalAdsBaseForm] = useState<{ nickname: string; socialLinks: Array<{ url: string; followers: string }>; comment: string; status: string }>({
+    nickname: '',
+    socialLinks: [{ url: '', followers: '' }],
+    comment: '',
+    status: 'new',
+  });
   const [sessionStartTime] = useState(new Date());
   const [rollingBackLogId, setRollingBackLogId] = useState<string | null>(null);
   const [activityLogsUsefulOnly, setActivityLogsUsefulOnly] = useState(true);
@@ -6040,6 +6138,92 @@ export default function Dashboard() {
   }, [activeTab]);
 
   useEffect(() => {
+    const loadExternalAdsBase = async () => {
+      try {
+        const { data } = await supabase.from('app_settings').select('value').eq('key', 'external_ads_base_v1').maybeSingle();
+        if (data?.value) {
+          const parsed = typeof data.value === 'string' ? JSON.parse(data.value) : data.value;
+          const rows = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.rows) ? parsed.rows : []);
+          setExternalAdsBase((rows || []).map((r: any, idx: number) => ({
+            id: String(r?.id || `ext-ads-${idx}-${Date.now()}`),
+            nickname: String(r?.nickname || ''),
+            socialLinks: Array.isArray(r?.socialLinks) && r.socialLinks.length
+              ? r.socialLinks.map((s: any) => ({ url: String(s?.url || ''), followers: String(s?.followers || '') }))
+              : [{ url: '', followers: '' }],
+            comment: String(r?.comment || ''),
+            status: String(r?.status || 'new'),
+            createdAt: String(r?.createdAt || new Date().toISOString()),
+          })));
+        }
+      } catch {}
+    };
+    loadExternalAdsBase();
+  }, []);
+
+  const saveExternalAdsBase = async (rows: Array<{ id: string; nickname: string; socialLinks: Array<{ url: string; followers: string }>; comment: string; status: string; createdAt: string }>) => {
+    try {
+      setExternalAdsBaseSaving(true);
+      const payload = { rows };
+      const { error } = await supabase.from('app_settings').upsert([{ key: 'external_ads_base_v1', value: JSON.stringify(payload) }], { onConflict: 'key' });
+      if (error) throw error;
+      setExternalAdsBase(rows);
+      return true;
+    } catch (e: any) {
+      showToast('Ошибка сохранения базы внешней рекламы: ' + (e?.message || 'неизвестно'), 'error');
+      return false;
+    } finally {
+      setExternalAdsBaseSaving(false);
+    }
+  };
+
+  const filteredExternalAdsBase = useMemo(() => {
+    const q = externalAdsBaseSearch.trim().toLowerCase();
+    let rows = !q ? [...(externalAdsBase || [])] : (externalAdsBase || []).filter((item) => {
+      const socialHay = (item.socialLinks || []).map((s) => `${s.url || ''} ${s.followers || ''}`).join(' ');
+      const hay = `${item.nickname || ''} ${item.comment || ''} ${item.status || ''} ${socialHay}`.toLowerCase();
+      return hay.includes(q);
+    });
+
+    const maxFollowers = (item: any) => Math.max(0, ...(item?.socialLinks || []).map((s: any) => Number(String(s?.followers || '').replace(/\s+/g, '').replace(',', '.')) || 0));
+
+    rows.sort((a: any, b: any) => {
+      if (externalAdsBaseSort === 'date_asc') return String(a.createdAt || '').localeCompare(String(b.createdAt || ''));
+      if (externalAdsBaseSort === 'nickname_asc') return String(a.nickname || '').localeCompare(String(b.nickname || ''), 'ru');
+      if (externalAdsBaseSort === 'followers_desc') return maxFollowers(b) - maxFollowers(a);
+      return String(b.createdAt || '').localeCompare(String(a.createdAt || ''));
+    });
+
+    return rows;
+  }, [externalAdsBase, externalAdsBaseSearch, externalAdsBaseSort]);
+
+  const groupedAssemblyButtons = useMemo(() => {
+    const q = String(assemblyAccessSearch || '').trim().toLowerCase();
+    const filtered = ASSEMBLY_BUTTONS.filter((btn) => {
+      if (!q) return true;
+      return String(btn.label || '').toLowerCase().includes(q) || String(btn.id || '').toLowerCase().includes(q);
+    });
+
+    const sectionOrder = ['Склад', 'Сборка', 'График', 'Календарь', 'Форма'];
+    const groups = new Map<string, typeof filtered>();
+
+    filtered.forEach((btn) => {
+      const label = String(btn.label || '').trim();
+      const prefix = label.includes(':') ? label.split(':')[0].trim() : 'Прочее';
+      if (!groups.has(prefix)) groups.set(prefix, []);
+      groups.get(prefix)!.push(btn);
+    });
+
+    return Array.from(groups.entries())
+      .sort((a, b) => {
+        const ai = sectionOrder.indexOf(a[0]);
+        const bi = sectionOrder.indexOf(b[0]);
+        if (ai !== -1 || bi !== -1) return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+        return a[0].localeCompare(b[0], 'ru');
+      })
+      .map(([title, items]) => ({ title, items }));
+  }, [assemblyAccessSearch]);
+
+  useEffect(() => {
     const loadBarters = async () => {
       try {
         const { data } = await supabase.from('app_settings').select('value').eq('key', 'barters_external_ads_v1').maybeSingle();
@@ -6317,6 +6501,18 @@ export default function Dashboard() {
       return true;
     });
   }, [barterRows, barterMonth, barterTopSupplierId]);
+
+  useEffect(() => {
+    if (!barterTopSupplierId) return;
+    const months = Array.from(new Set((barterRows || [])
+      .filter((r: any) => String(r?.supplier_id || '') === String(barterTopSupplierId))
+      .map((r: any) => String(r?.month || ''))
+      .filter(Boolean)))
+      .sort();
+    if (months.length && !months.includes(barterMonth)) {
+      setBarterMonth(months[months.length - 1]);
+    }
+  }, [barterTopSupplierId, barterRows, barterMonth]);
 
   const monthStats = useMemo(() => {
     const rows = monthRows || [];
@@ -7041,9 +7237,8 @@ export default function Dashboard() {
       setUploadedSavingCosts(true);
       const nextByCode: Record<string, number> = { ...(uploadedPersistedCostByCode || {}) };
       Object.entries(uploadedCostByKey || {}).forEach(([key, val]) => {
-        const code = String(key.split('|')[0] || '').trim();
         const num = Number(String(val ?? '').replace(',', '.'));
-        if (code && Number.isFinite(num) && String(val).trim() !== '') nextByCode[code] = num;
+        if (key && Number.isFinite(num) && String(val).trim() !== '') nextByCode[key] = num;
       });
       await persistUploadedCostsByCode(nextByCode);
       setUploadedPersistedCostByCode(nextByCode);
@@ -7057,17 +7252,47 @@ export default function Dashboard() {
   };
 
 
-  const getUploadedCostValue = (row: any) => {
+  const getUploadedCostKeyCandidates = (row: any) => {
     const code = String(row?.code || '').trim();
-    const name = String(row?.name || '');
-    const key = `${code}|${name}`;
-    const fromKey = uploadedCostByKey[key];
-    if (fromKey !== undefined && String(fromKey).trim() !== '') {
-      const n = Number(String(fromKey).replace(',', '.'));
-      return Number.isFinite(n) ? n : 0;
+    const name = String(row?.name || '').trim();
+    return Array.from(new Set([code, name ? `name:${name}` : '', code && name ? `${code}|${name}` : ''].filter(Boolean)));
+  };
+
+  const getUploadedCostValue = (row: any, persistedMap?: Record<string, number>, rowMap?: Record<string, string>) => {
+    const keyMap = rowMap || uploadedCostByKey;
+    for (const candidate of getUploadedCostKeyCandidates(row)) {
+      const fromKey = keyMap[candidate];
+      if (fromKey !== undefined && String(fromKey).trim() !== '') {
+        const n = Number(String(fromKey).replace(',', '.'));
+        if (Number.isFinite(n) && n > 0) return n;
+      }
     }
-    const persisted = uploadedPersistedCostByCode[code];
-    return Number.isFinite(Number(persisted)) ? Number(persisted) : 0;
+    const persistedSource = persistedMap || uploadedPersistedCostByCode;
+    for (const candidate of getUploadedCostKeyCandidates(row)) {
+      const persisted = persistedSource[candidate];
+      if (Number.isFinite(Number(persisted)) && Number(persisted) > 0) return Number(persisted);
+    }
+
+    const directCandidates = [
+      row?.cost,
+      row?.unit_cost,
+      row?.unitCost,
+      row?.cost_price,
+      row?.costPrice,
+      row?.purchase_cost,
+      row?.purchaseCost,
+      row?.prime_cost,
+      row?.primeCost,
+      row?.sebestoimost,
+      row?.['Себестоимость'],
+    ];
+    for (const candidate of directCandidates) {
+      if (candidate === undefined || candidate === null || String(candidate).trim() === '') continue;
+      const n = Number(String(candidate).replace(/\s+/g, '').replace(',', '.'));
+      if (Number.isFinite(n) && n > 0) return n;
+    }
+
+    return 0;
   };
 
   const uploadedCostEditorItems = useMemo(() => {
@@ -7078,24 +7303,46 @@ export default function Dashboard() {
       if (!map.has(code)) map.set(code, r);
     });
     const q = uploadedCostEditorSearch.trim().toLowerCase();
-    return Array.from(map.values())
+    let rows = Array.from(map.values())
       .filter((r: any) => {
+        const editorKey = `${String(r?.code || '').trim()}|${String(r?.name || '').trim()}`;
+        if (Array.isArray(uploadedCostEditorLockedKeys) && uploadedCostEditorLockedKeys.length > 0) {
+          if (!uploadedCostEditorLockedKeys.includes(editorKey)) return false;
+        } else {
+          const hasPrice = getUploadedCostValue(r) > 0;
+          if (uploadedCostEditorFilter === 'with_price' && !hasPrice) return false;
+          if (uploadedCostEditorFilter === 'without_price' && hasPrice) return false;
+        }
         if (!q) return true;
         return String(r?.code || '').toLowerCase().includes(q) || String(r?.name || '').toLowerCase().includes(q);
       })
       .sort((a: any, b: any) => String(a?.name || '').localeCompare(String(b?.name || ''), 'ru'));
-  }, [uploadedReportAnalytics, uploadedCostEditorSearch]);
+
+    if (Array.isArray(uploadedCostEditorLockedKeys) && uploadedCostEditorLockedKeys.length > 0) {
+      const order = new Map(uploadedCostEditorLockedKeys.map((k, idx) => [k, idx]));
+      rows = rows.sort((a: any, b: any) => {
+        const ak = `${String(a?.code || '').trim()}|${String(a?.name || '').trim()}`;
+        const bk = `${String(b?.code || '').trim()}|${String(b?.name || '').trim()}`;
+        return Number(order.get(ak) ?? 999999) - Number(order.get(bk) ?? 999999);
+      });
+    }
+    return rows;
+  }, [uploadedReportAnalytics, uploadedCostEditorSearch, uploadedCostEditorFilter, uploadedCostByKey, uploadedPersistedCostByCode]);
 
   const openUploadedCostEditor = () => {
     const init: Record<string, string> = {};
     (uploadedReportAnalytics || []).forEach((r: any) => {
-      const code = String(r?.code || '').trim();
-      if (!code) return;
-      const v = uploadedPersistedCostByCode[code];
-      if (v != null) init[code] = String(v);
+      const v = getUploadedCostValue(r);
+      if (v > 0) {
+        const code = String(r?.code || '').trim();
+        const name = String(r?.name || '').trim();
+        if (code) init[`${code}|${name}`] = String(v);
+      }
     });
     setUploadedCostEditorValues(init);
     setUploadedCostEditorSearch('');
+    setUploadedCostEditorFilter('all');
+    setUploadedCostEditorLockedKeys(null);
     setUploadedCostEditorOpen(true);
   };
 
@@ -7116,9 +7363,10 @@ export default function Dashboard() {
       setUploadedPersistedCostByCode(nextByCode);
       const seeded: Record<string, string> = {};
       (uploadedReportAnalytics || []).forEach((r: any) => {
+        const value = getUploadedCostValue(r, nextByCode);
         const code = String(r?.code || '').trim();
         const key = `${code}|${r?.name || ''}`;
-        if (code && nextByCode[code] != null) seeded[key] = String(nextByCode[code]);
+        if (value > 0) seeded[key] = String(value);
       });
       setUploadedCostByKey(seeded);
       setUploadedCostEditorOpen(false);
@@ -7610,10 +7858,11 @@ export default function Dashboard() {
     analytics.forEach((r: any) => {
       const code = String(r?.code || '').trim();
       const key = `${code}|${r?.name || ''}`;
-      if (code && uploadedPersistedCostByCode[code] != null) {
-        seededCosts[key] = String(uploadedPersistedCostByCode[code]);
+      const resolvedCost = getUploadedCostValue(r);
+      if (code && Number.isFinite(Number(resolvedCost)) && Number(resolvedCost) > 0) {
+        seededCosts[key] = String(resolvedCost);
       } else if (code) {
-        missingCostValues[code] = '';
+        missingCostValues[key] = '';
         missingCount += 1;
       }
     });
@@ -8980,13 +9229,16 @@ export default function Dashboard() {
     return 0;
   };
 
+  const getAnalyticsCostsKey = (supplierId?: string | null) => `analytics_costs_v1:${String(supplierId || 'global')}`;
+  const visibleUploadedAnalyticsSuppliers = (uploadedAnalyticsSuppliers || []).filter((s: any) => String(currentEmployee?.role || '').toLowerCase() === 'admin' || String(s?.name || '').trim() !== 'ИП Власенко И А');
+
   const getUploadedTaxRate = (summary: any) => {
+    if (uploadedTaxRateOverride != null) return uploadedTaxRateOverride;
     const base = summary?.period_start || summary?.period_end || summary?.created_at || '';
     const y = new Date(base).getFullYear();
     return getTaxRateByYear(y);
   };
   const getUploadedTaxValue = (summary: any) => {
-    if (summary?.tax_sum != null && Number.isFinite(Number(summary.tax_sum))) return Number(summary.tax_sum || 0);
     return Number(summary?.sales_net || 0) * getUploadedTaxRate(summary);
   };
   const getCurrentUploadedTaxRate = () => getUploadedTaxRate(uploadedReportSummary);
@@ -9243,17 +9495,14 @@ export default function Dashboard() {
     }
   };
   const getUploadedRowTax = (row: any) => {
-    if (row?.tax_sum != null && Number.isFinite(Number(row.tax_sum))) return Number(row.tax_sum || 0);
-    const base = row?.period_start || row?.period_end || uploadedReportSummary?.period_start || uploadedReportSummary?.period_end;
-    const y = new Date(base || '').getFullYear();
-    const rate = getTaxRateByYear(y);
-    return Number(row?.sales_net || 0) * rate;
+    return Number(row?.sales_net || 0) * getCurrentUploadedTaxRate();
   };
   const getUploadedHeadlineProfit = (summary: any) => {
-    const base = Number(summary?.profit_total || 0);
+    const rows = sortedFilteredUploadedAnalytics || [];
+    const profitAfterTax = rows.reduce((acc: number, row: any) => acc + getUploadedProfitAfterTax(row), 0);
     const storage = Number(summary?.storage_sum || 0);
     const withhold = Number(summary?.withhold_sum || 0);
-    return base - storage - withhold;
+    return profitAfterTax - storage - withhold;
   };
   const getUploadedHeadlineProfitNet = (summary: any) => getUploadedHeadlineProfit(summary) - Number(uploadedExtraCosts || 0);
   const getUploadedProfitAfterTax = (row: any) => {
@@ -9383,7 +9632,7 @@ export default function Dashboard() {
     // Lazy-load data by active tab to reduce startup memory/load spikes.
     if (activeTab === 'orders') fetchOrders();
     if (activeTab === 'reports') fetchReportsData();
-    if (activeTab === 'employees') fetchEmployees();
+    if (activeTab === 'employees' || activeTab === 'warehouse') fetchEmployees();
     if (activeTab === 'trash') fetchTrashItems();
     if (activeTab === 'reception') fetchReceptions();
     if (activeTab === 'completed') {
@@ -10625,60 +10874,81 @@ export default function Dashboard() {
   const sendEmployeeReport = async () => {
     if (!cwSelectedEmployee || !cwSelectedEmployee.telegram_chat_id) return;
 
-    const start = new Date(employeeReportRange.start);
-    const end = new Date(employeeReportRange.end);
+    const selectedEmployeeId = String(cwSelectedEmployee.id);
+    const startKey = employeeReportRange.start;
+    const endKey = employeeReportRange.end;
 
-    // Filter logs for the range
     const logs = cwWorkLogs.filter(log => {
-        if (!log.date) return false;
-        const logDate = new Date(log.date);
-        return logDate >= start && logDate <= end;
+      if (!log.date || !log.employee_id) return false;
+
+      const logEmployeeId = String(log.employee_id);
+      if (logEmployeeId !== selectedEmployeeId) return false;
+
+      return log.date >= startKey && log.date <= endKey;
     });
 
     if (logs.length === 0) {
-        showToast('Нет данных за выбранный период', 'info');
-        return;
+      showToast('Нет данных за выбранный период', 'info');
+      return;
     }
 
-    // Group by date
-    const dailyStats: {[key: string]: {amount: number, total: number}} = {};
+    const dailyStats: { [key: string]: { amount: number; total: number } } = {};
     let totalSum = 0;
 
     logs.forEach(log => {
-        const rate = cwWorkRates.find(r => r.id === log.work_rate_id);
-        const price = rate?.price || 0;
-        const sum = log.quantity * price;
+      const dateKey = (log.date || '').split('T')[0];
+      if (!dateKey) return;
 
-        if (!dailyStats[log.date]) {
-            dailyStats[log.date] = { amount: 0, total: 0 };
-        }
-        dailyStats[log.date].amount += log.quantity;
-        dailyStats[log.date].total += sum;
-        totalSum += sum;
+      const rate = cwWorkRates.find(r => String(r.id) === String(log.work_rate_id));
+      const price = Number(rate?.price || 0);
+      const quantity = Number(log.quantity || 0);
+      const sum = Math.round(quantity * price);
+
+      if (!dailyStats[dateKey]) {
+        dailyStats[dateKey] = { amount: 0, total: 0 };
+      }
+
+      dailyStats[dateKey].amount += quantity;
+      dailyStats[dateKey].total += sum;
+      totalSum += sum;
     });
 
-    // Format message
-    const startStr = start.toLocaleDateString('ru-RU');
-    const endStr = end.toLocaleDateString('ru-RU');
-    let message = `📊 *Отчет за период ${startStr} - ${endStr}*\n`;
+    const formatDate = (dateKey: string) => {
+      const [year, month, day] = dateKey.split('-');
+      if (!year || !month || !day) return dateKey;
+      return `${day}.${month}.${year}`;
+    };
+
+    let message = `📊 Отчет за период ${formatDate(startKey)} - ${formatDate(endKey)}\n`;
     message += `👤 Сотрудник: ${cwSelectedEmployee.full_name}\n\n`;
 
-    Object.entries(dailyStats).sort().forEach(([date, stats]) => {
-        const dateStr = new Date(date).toLocaleDateString('ru-RU');
-        message += `📅 ${dateStr}: ${stats.amount} шт. - *${stats.total} ₽*\n`;
-    });
+    Object.entries(dailyStats)
+      .sort(([dateA], [dateB]) => dateA.localeCompare(dateB))
+      .forEach(([date, stats]) => {
+        message += `📅 ${formatDate(date)}: ${stats.amount} шт. - ${stats.total} ₽\n`;
+      });
 
-    message += `\n💰 **ИТОГО: ${totalSum} ₽**`;
+    message += `\n💰 ИТОГО: ${totalSum} ₽`;
 
-    // Use the specific bot token provided by the user for employee reports
-    const token = '8525065676:AAF-cjwf1EvT56-TkALsbN1D0JAYR3Gqozo';
+    const token = telegramBotToken?.trim();
+
+    if (!token) {
+      showToast('Не задан Telegram Bot Token для отправки отчета', 'error');
+      return;
+    }
 
     try {
-        await telegramService.sendMessage(token, cwSelectedEmployee.telegram_chat_id, message, 'Markdown');
-        showToast('Отчет отправлен сотруднику', 'success');
-        setIsEmployeeReportModalOpen(false);
+      const response = await telegramService.sendMessage(token, cwSelectedEmployee.telegram_chat_id, message);
+
+      if (!response?.ok) {
+        throw new Error(response?.description || 'Telegram API error');
+      }
+
+      showToast('Отчет отправлен сотруднику', 'success');
+      setIsEmployeeReportModalOpen(false);
     } catch (e) {
-        showToast('Ошибка отправки', 'error');
+      console.error('Error sending employee report:', e);
+      showToast(e instanceof Error ? `Ошибка отправки: ${e.message}` : 'Ошибка отправки', 'error');
     }
   };
 
@@ -12346,7 +12616,14 @@ export default function Dashboard() {
                 warehouseSearchResults={warehouseSearchResults}
                 warehouseShareEmployeeId={warehouseShareEmployeeId}
                 setWarehouseShareEmployeeId={setWarehouseShareEmployeeId}
-                warehouseShareEmployees={(employees || []).map((e: any) => ({ id: e.id, full_name: e.full_name, telegram_chat_id: e.telegram_chat_id }))}
+                warehouseShareEmployees={(employees || [])
+                  .filter((e: any) => e && e.id)
+                  .filter((e: any) => isButtonVisibleForEmployee('warehouse_telegram_pick', String(e.id)))
+                  .map((e: any) => ({
+                    id: String(e.id),
+                    full_name: String(e.full_name || e.name || e.login || e.email || `Сотрудник ${e.id}`),
+                    telegram_chat_id: e.telegram_chat_id ? String(e.telegram_chat_id) : '',
+                  }))}
                 handleDownloadWarehouseSearchPdf={handleDownloadWarehouseSearchPdf}
                 handleSendWarehouseSearchToTelegram={handleSendWarehouseSearchToTelegram}
                 warehousePdfGenerating={warehousePdfGenerating}
@@ -12563,7 +12840,30 @@ export default function Dashboard() {
             <div className="max-w-6xl mx-auto">
               <div className="oc-card p-5 md:p-6 mb-4">
                 <h2 className="text-2xl font-bold text-slate-900">Бартеры / Внешняя реклама</h2>
-                <p className="text-slate-600 mt-1">Список товаров для бартеров и внешней рекламы.</p>
+                <p className="text-slate-600 mt-1">Внутри раздела теперь есть отдельные подразделы с собственными кнопками перехода.</p>
+                <div className="mt-4 sticky top-2 z-20 rounded-2xl border border-slate-200 bg-slate-50/95 backdrop-blur p-1.5 inline-flex flex-col sm:flex-row gap-1.5 w-full sm:w-auto shadow-sm">
+                  <button
+                    type="button"
+                    onClick={() => setBarterSection('barters_main')}
+                    className={`px-4 py-2.5 rounded-xl text-sm font-medium transition text-left sm:text-center ${barterSection === 'barters_main' ? 'bg-white text-indigo-700 shadow-sm border border-indigo-100' : 'text-slate-700 hover:bg-white/70'}`}
+                  >
+                    <div className="font-semibold inline-flex items-center gap-2"><Megaphone className="h-4 w-4 shrink-0" />Бартеры / Внешняя реклама</div>
+                    <div className={`text-[11px] mt-0.5 ${barterSection === 'barters_main' ? 'text-indigo-500' : 'text-slate-500'}`}>Товары, бартеры, реклама, планы</div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBarterSection('external_ads_base')}
+                    className={`px-4 py-2.5 rounded-xl text-sm font-medium transition text-left sm:text-center ${barterSection === 'external_ads_base' ? 'bg-white text-indigo-700 shadow-sm border border-indigo-100' : 'text-slate-700 hover:bg-white/70'}`}
+                  >
+                    <div className="font-semibold inline-flex items-center gap-2"><Database className="h-4 w-4 shrink-0" />База Внешней рекламы</div>
+                    <div className={`text-[11px] mt-0.5 ${barterSection === 'external_ads_base' ? 'text-indigo-500' : 'text-slate-500'}`}>Блогеры, ссылки, статусы, контакты</div>
+                  </button>
+                </div>
+                {barterSection === 'barters_main' && <>
+                <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
+                  <div className="text-base font-bold text-slate-900">Бартеры / Внешняя реклама</div>
+                  <div className="text-xs text-slate-500 mt-1">Основной подраздел для товаров, бартерных размещений, внешней рекламы и месячной аналитики.</div>
+                </div>
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   <select value={barterTopSupplierId} onChange={(e) => setBarterTopSupplierId(e.target.value)} className="oc-select min-w-[240px]">
                     <option value="">Сначала выберите поставщика</option>
@@ -12687,6 +12987,13 @@ export default function Dashboard() {
                     </>
                   )}
                   <button
+                    onClick={() => setBarterDuplicateModal({ open: true, targetMonth: barterMonth })}
+                    className="btn-ghost disabled:opacity-60"
+                    disabled={!barterTopSupplierId || !(monthRows || []).length}
+                  >
+                    Дублировать карточки
+                  </button>
+                  <button
                     onClick={() => {
                       const allCollapsed = (monthRows || []).every((r: any) => !!barterCollapsedCards[r.id]);
                       const next: Record<string, boolean> = { ...(barterCollapsedCards || {}) };
@@ -12697,8 +13004,129 @@ export default function Dashboard() {
                   >
                     {((monthRows || []).every((r: any) => !!barterCollapsedCards[r.id])) ? 'Развернуть все карточки' : 'Свернуть все карточки'}
                   </button>
-                </div>
-                <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-3">
+                </div></>}
+                {barterSection === 'external_ads_base' && <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-3">
+                    <div>
+                      <div className="text-base font-bold text-slate-900">База Внешней рекламы</div>
+                      <div className="text-xs text-slate-500 mt-1">Отдельный подраздел для блогеров, ссылок на соцсети, подписчиков и комментариев</div>
+                    </div>
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                      <div className="text-sm text-slate-600">Всего записей: <span className="font-semibold text-slate-900">{externalAdsBase.length}</span></div>
+                      <button
+                        onClick={() => {
+                          setExternalAdsBaseEditingId(null);
+                          setExternalAdsBaseForm({ nickname: '', socialLinks: [{ url: '', followers: '' }], comment: '', status: 'new' });
+                          setExternalAdsBaseModalOpen(true);
+                        }}
+                        className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700"
+                      >
+                        <Plus className="h-4 w-4" /> Создать запись
+                      </button>
+                    </div>
+                  </div>
+                  <div className="mb-3 grid grid-cols-1 md:grid-cols-[1fr_220px] gap-2">
+                    <input
+                      value={externalAdsBaseSearch}
+                      onChange={(e) => setExternalAdsBaseSearch(e.target.value)}
+                      placeholder="Поиск по нику, ссылке, подписчикам, статусу или комментарию"
+                      className="oc-input"
+                    />
+                    <select value={externalAdsBaseSort} onChange={(e) => setExternalAdsBaseSort(e.target.value as any)} className="oc-select">
+                      <option value="date_desc">Сначала новые</option>
+                      <option value="date_asc">Сначала старые</option>
+                      <option value="nickname_asc">По нику</option>
+                      <option value="followers_desc">По подписчикам</option>
+                    </select>
+                  </div>
+                  {filteredExternalAdsBase.length === 0 ? (
+                    <div className="text-sm text-slate-500">{externalAdsBase.length === 0 ? 'Пока пусто. Нажми «Создать запись», чтобы добавить первую запись.' : 'Поиск ничего не нашёл.'}</div>
+                  ) : (
+                    <div className="space-y-3">
+                      {filteredExternalAdsBase.map((item) => (
+                        <div key={`ext-ads-base-${item.id}`} className="rounded-xl border border-slate-200 bg-white p-3">
+                          <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="text-sm font-semibold text-slate-900 break-words">{item.nickname || 'Без ника'}</div>
+                              <div className="text-xs text-slate-500 mt-1">Добавлено: {item.createdAt ? new Date(item.createdAt).toLocaleString('ru-RU') : '-'}</div>
+                            </div>
+                            <div className="flex items-center gap-2 self-start">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setExternalAdsBaseEditingId(String(item.id));
+                                  setExternalAdsBaseForm({
+                                    nickname: String(item.nickname || ''),
+                                    socialLinks: Array.isArray(item.socialLinks) && item.socialLinks.length ? item.socialLinks.map((s) => ({ url: String(s.url || ''), followers: String(s.followers || '') })) : [{ url: '', followers: '' }],
+                                    comment: String(item.comment || ''),
+                                    status: String(item.status || 'new'),
+                                  });
+                                  setExternalAdsBaseModalOpen(true);
+                                }}
+                                className="px-3 py-1.5 text-xs rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50"
+                              >
+                                Редактировать
+                              </button>
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  const next = (externalAdsBase || []).filter((x) => String(x.id) !== String(item.id));
+                                  const ok = await saveExternalAdsBase(next as any);
+                                  if (ok) showToast('Запись удалена', 'success');
+                                }}
+                                className="px-3 py-1.5 text-xs rounded-lg border border-rose-300 text-rose-700 hover:bg-rose-50"
+                              >
+                                Удалить
+                              </button>
+                            </div>
+                          </div>
+                          <div className="mt-3 flex flex-wrap items-center gap-2">
+                            <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${item.status === 'agreed' ? 'bg-emerald-100 text-emerald-700' : item.status === 'waiting' ? 'bg-amber-100 text-amber-700' : item.status === 'contacted' ? 'bg-blue-100 text-blue-700' : item.status === 'rejected' ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-700'}`}>
+                              {item.status === 'agreed' ? 'Договорились' : item.status === 'waiting' ? 'Ждём ответ' : item.status === 'contacted' ? 'Написали' : item.status === 'rejected' ? 'Отказ' : 'Новый'}
+                            </span>
+                          </div>
+                          <div className="mt-3 space-y-2">
+                            {(item.socialLinks || []).map((social, idx) => (
+                              <div key={`ext-ads-social-${item.id}-${idx}`} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <div className="text-xs text-slate-500">Соцсеть {idx + 1}</div>
+                                    <div className="text-sm text-slate-800 break-all">{social.url || '-'}</div>
+                                    <div className="text-xs text-slate-600 mt-1">Подписчики: <span className="font-medium text-slate-900">{social.followers || '-'}</span></div>
+                                  </div>
+                                  <div className="flex items-center gap-2 shrink-0">
+                                    {String(social.url || '').trim() ? (
+                                      <>
+                                        <a href={String(social.url)} target="_blank" rel="noopener noreferrer" className="px-2 py-1 text-xs rounded border border-slate-300 text-slate-700 hover:bg-white">Открыть</a>
+                                        <button
+                                          type="button"
+                                          onClick={async () => {
+                                            try {
+                                              await navigator.clipboard.writeText(String(social.url || ''));
+                                              showToast('Ссылка скопирована', 'success');
+                                            } catch {
+                                              showToast('Не удалось скопировать ссылку', 'error');
+                                            }
+                                          }}
+                                          className="px-2 py-1 text-xs rounded border border-slate-300 text-slate-700 hover:bg-white"
+                                        >
+                                          Копировать
+                                        </button>
+                                      </>
+                                    ) : null}
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                          <div className="mt-3 text-sm text-slate-700 whitespace-pre-wrap break-words">{item.comment || 'Комментарий не указан'}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>}
+
+                {barterSection === 'barters_main' && <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-3">
                   <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-4 shadow-sm">
                     <div className="text-xs uppercase tracking-wide text-slate-500">Карточки</div>
                     <div className="mt-2 text-3xl font-bold text-slate-900 leading-none">{monthStats.cards}</div>
@@ -12728,9 +13156,169 @@ export default function Dashboard() {
                     <div className="text-xs uppercase tracking-wide text-purple-700">Цена рекламы</div>
                     <div className="mt-2 text-2xl font-bold text-purple-900 leading-none">{monthStats.adCost.toFixed(2)} ₽</div>
                   </div>
-                </div>
+                </div>}
               </div>
 
+              {barterDuplicateModal.open && (
+                <div className="fixed inset-0 z-[120] bg-black/50 flex items-center justify-center p-4" onClick={() => setBarterDuplicateModal({ open: false, targetMonth: barterMonth })}>
+                  <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl p-4 sm:p-6" onClick={(e) => e.stopPropagation()}>
+                    <div className="text-lg font-bold mb-4">Дублировать карточки</div>
+                    <div className="space-y-3">
+                      <input type="month" value={barterDuplicateModal.targetMonth} onChange={(e) => setBarterDuplicateModal(prev => ({ ...prev, targetMonth: e.target.value }))} className="oc-input" />
+                      <button
+                        onClick={async () => {
+                          if (!barterTopSupplierId || !barterDuplicateModal.targetMonth) return;
+                          const sourceRows = (monthRows || []).filter((r: any) => String(r?.supplier_id || '') === String(barterTopSupplierId));
+                          const filteredExisting = (barterRows || []).filter((r: any) => !(String(r?.supplier_id || '') === String(barterTopSupplierId) && String(r?.month || '') === String(barterDuplicateModal.targetMonth)));
+                          const duplicated = sourceRows.map((r: any) => ({ ...r, id: `${r.id}-dup-${barterDuplicateModal.targetMonth}-${Date.now()}-${Math.random().toString(36).slice(2,7)}`, month: barterDuplicateModal.targetMonth }));
+                          const next = [...filteredExisting, ...duplicated];
+                          setBarterRows(next as any);
+                          await supabase.from('app_settings').upsert([{ key: 'barters_v1', value: JSON.stringify(next) }], { onConflict: 'key' });
+                          setBarterMonth(barterDuplicateModal.targetMonth);
+                          setBarterDuplicateModal({ open: false, targetMonth: barterDuplicateModal.targetMonth });
+                          showToast('Карточки продублированы', 'success');
+                        }}
+                        className="w-full btn-primary py-3"
+                      >
+                        Дублировать в месяц
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {externalAdsBaseModalOpen && (
+                <div className="fixed inset-0 z-[120] bg-black/50 flex items-end md:items-center justify-center p-2 md:p-4" onClick={() => setExternalAdsBaseModalOpen(false)}>
+                  <div className="w-full max-w-2xl bg-white rounded-t-3xl md:rounded-2xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+                    <div className="sticky top-0 z-10 bg-white border-b px-4 pt-2 pb-3 md:px-6 md:pt-5 md:pb-4">
+                      <div className="mx-auto mb-2 h-1.5 w-12 rounded-full bg-gray-300 md:hidden" />
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="text-lg font-bold text-slate-900">База Внешней рекламы</div>
+                          <div className="text-xs text-slate-500 mt-1">Создание карточки блогера / внешней рекламы</div>
+                        </div>
+                        <button onClick={() => setExternalAdsBaseModalOpen(false)} className="p-2 rounded-lg hover:bg-slate-100">
+                          <X className="h-5 w-5 text-slate-500" />
+                        </button>
+                      </div>
+                    </div>
+                    <div className="flex-1 overflow-y-auto px-4 py-4 md:px-6 space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">Ник блогера</label>
+                        <input
+                          value={externalAdsBaseForm.nickname}
+                          onChange={(e) => setExternalAdsBaseForm((prev) => ({ ...prev, nickname: e.target.value }))}
+                          placeholder="Например: @bloger_name"
+                          className="oc-input"
+                        />
+                      </div>
+
+                      <div>
+                        <div className="flex items-center justify-between gap-3 mb-2">
+                          <label className="block text-sm font-medium text-slate-700">Соцсети блогера</label>
+                          <button
+                            type="button"
+                            onClick={() => setExternalAdsBaseForm((prev) => ({ ...prev, socialLinks: [...(prev.socialLinks || []), { url: '', followers: '' }] }))}
+                            className="inline-flex items-center gap-1 px-3 py-1.5 text-xs rounded-lg border border-indigo-300 text-indigo-700 hover:bg-indigo-50"
+                          >
+                            <Plus className="h-3.5 w-3.5" /> Добавить соцсеть
+                          </button>
+                        </div>
+                        <div className="space-y-3">
+                          {(externalAdsBaseForm.socialLinks || []).map((social, idx) => (
+                            <div key={`ext-ads-form-social-${idx}`} className="rounded-xl border border-slate-200 p-3 space-y-3 bg-slate-50">
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="text-sm font-medium text-slate-800">Соцсеть {idx + 1}</div>
+                                {(externalAdsBaseForm.socialLinks || []).length > 1 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setExternalAdsBaseForm((prev) => ({ ...prev, socialLinks: prev.socialLinks.filter((_, i) => i !== idx) }))}
+                                    className="px-2 py-1 text-xs rounded border border-rose-300 text-rose-700 hover:bg-rose-50"
+                                  >
+                                    Удалить
+                                  </button>
+                                )}
+                              </div>
+                              <input
+                                value={social.url}
+                                onChange={(e) => setExternalAdsBaseForm((prev) => ({ ...prev, socialLinks: prev.socialLinks.map((x, i) => i === idx ? { ...x, url: e.target.value } : x) }))}
+                                placeholder="Ссылка на соцсеть"
+                                className="oc-input"
+                              />
+                              <input
+                                value={social.followers}
+                                onChange={(e) => setExternalAdsBaseForm((prev) => ({ ...prev, socialLinks: prev.socialLinks.map((x, i) => i === idx ? { ...x, followers: e.target.value } : x) }))}
+                                placeholder="Количество подписчиков"
+                                className="oc-input"
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">Статус</label>
+                        <select
+                          value={externalAdsBaseForm.status}
+                          onChange={(e) => setExternalAdsBaseForm((prev) => ({ ...prev, status: e.target.value }))}
+                          className="oc-select"
+                        >
+                          <option value="new">Новый</option>
+                          <option value="contacted">Написали</option>
+                          <option value="waiting">Ждём ответ</option>
+                          <option value="agreed">Договорились</option>
+                          <option value="rejected">Отказ</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">Комментарий</label>
+                        <textarea
+                          value={externalAdsBaseForm.comment}
+                          onChange={(e) => setExternalAdsBaseForm((prev) => ({ ...prev, comment: e.target.value }))}
+                          placeholder="Комментарий"
+                          rows={4}
+                          className="oc-input min-h-[120px]"
+                        />
+                      </div>
+                    </div>
+                    <div className="border-t px-4 py-3 md:px-6 bg-white flex flex-col-reverse md:flex-row gap-2 md:justify-end">
+                      <button onClick={() => { setExternalAdsBaseModalOpen(false); setExternalAdsBaseEditingId(null); }} className="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50">Отмена</button>
+                      <button
+                        onClick={async () => {
+                          const nickname = String(externalAdsBaseForm.nickname || '').trim();
+                          const socialLinks = (externalAdsBaseForm.socialLinks || []).map((x) => ({ url: String(x.url || '').trim(), followers: String(x.followers || '').trim() })).filter((x) => x.url || x.followers);
+                          const comment = String(externalAdsBaseForm.comment || '').trim();
+                          const status = String(externalAdsBaseForm.status || 'new').trim() || 'new';
+                          if (!nickname) {
+                            showToast('Введите ник блогера', 'error');
+                            return;
+                          }
+                          if (!socialLinks.length) {
+                            showToast('Добавьте хотя бы одну соцсеть', 'error');
+                            return;
+                          }
+                          const next = externalAdsBaseEditingId
+                            ? (externalAdsBase || []).map((item) => String(item.id) === String(externalAdsBaseEditingId) ? { ...item, nickname, socialLinks, comment, status } : item)
+                            : [{ id: `ext-ads-${Date.now()}`, nickname, socialLinks, comment, status, createdAt: new Date().toISOString() }, ...(externalAdsBase || [])];
+                          const ok = await saveExternalAdsBase(next as any);
+                          if (!ok) return;
+                          setExternalAdsBaseModalOpen(false);
+                          setExternalAdsBaseEditingId(null);
+                          setExternalAdsBaseForm({ nickname: '', socialLinks: [{ url: '', followers: '' }], comment: '', status: 'new' });
+                          showToast(externalAdsBaseEditingId ? 'Запись обновлена' : 'Запись добавлена в Базу Внешней рекламы', 'success');
+                        }}
+                        disabled={externalAdsBaseSaving}
+                        className="px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
+                      >
+                        {externalAdsBaseSaving ? 'Сохранение...' : (externalAdsBaseEditingId ? 'Сохранить изменения' : 'Создать')}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {barterSection === 'barters_main' && (
               <div className="oc-card p-4">
                 {!barterTopSupplierId ? (
                   <div className="text-sm text-slate-500">Выберите поставщика вверху, чтобы загрузить данные.</div>
@@ -12918,6 +13506,7 @@ export default function Dashboard() {
                   </div>
                 )}
               </div>
+              )}
 
               {barterPreviewImage && (
                 <div className="fixed inset-0 z-[85] bg-black/80 flex items-center justify-center p-4" onClick={() => setBarterPreviewImage(null)}>
@@ -12932,7 +13521,7 @@ export default function Dashboard() {
                       <div className="text-base font-semibold text-slate-900">Добавить товар</div>
                       <button className="text-slate-500 hover:text-slate-700" onClick={() => setBarterModalOpen(false)}><X className="h-4 w-4" /></button>
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mb-3">
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-2 mb-3">
                       <select value={barterSupplierId} onChange={(e) => setBarterSupplierId(e.target.value)} className="oc-select">
                         <option value="">Выберите поставщика</option>
                         {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -13875,7 +14464,7 @@ export default function Dashboard() {
                         className="w-full md:w-[420px] px-3 py-2 border border-gray-300 rounded-lg bg-white"
                       >
                         <option value="">- Выберите поставщика -</option>
-                        {(uploadedAnalyticsSuppliers || []).map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                        {visibleUploadedAnalyticsSuppliers.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
                       </select>
                       {(uploadedAnalyticsSuppliers || []).length === 0 && (
                         <div className="mt-2 text-xs text-amber-600">Поставщики не загрузились. Нажмите «Отчёты» или обновите страницу.</div>
@@ -14519,7 +15108,7 @@ export default function Dashboard() {
                   <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
                     <div className="bg-gray-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-gray-500">Номенклатур</div><div className="font-bold">{uploadedSummaryForView.items}</div></div>
                     <div className="bg-gray-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-gray-500">Продажи</div><div className="font-bold">{Number(uploadedSummaryForView.sales_net || 0).toLocaleString('ru-RU')}</div></div>
-                    <div className="bg-gray-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-gray-500">Налоги</div><div className="font-bold">{Number(getUploadedTaxValue(uploadedSummaryForView)).toLocaleString('ru-RU', { maximumFractionDigits: 2 })}</div></div>
+                    <div className="bg-gray-50 rounded-lg p-2 min-w-[170px] shrink-0"><div className="flex items-center justify-between gap-2"><div className="text-xs text-gray-500">Налоги</div><button type="button" onClick={() => setUploadedTaxRateOverride((prev) => prev === 0.01 ? 0.06 : 0.01)} className="text-[11px] px-2 py-0.5 rounded-full border border-indigo-200 text-indigo-700 bg-white hover:bg-indigo-50">{Math.round(getCurrentUploadedTaxRate() * 100)}%</button></div><div className="font-bold">{Number(getUploadedTaxValue(uploadedSummaryForView)).toLocaleString('ru-RU', { maximumFractionDigits: 2 })}</div></div>
                     <div className="bg-gray-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-gray-500">Возвраты</div><div className="font-bold">{Number(uploadedSummaryForView.returns_gross || 0).toLocaleString('ru-RU')}</div></div>
                     <div className="bg-gray-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-gray-500">Логистика</div><div className="font-bold">{Number(uploadedSummaryForView.logistics_sum || 0).toLocaleString('ru-RU')}</div></div>
                     <div className="bg-gray-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-gray-500">К перечислению</div><div className="font-bold">{Number(uploadedSummaryForView.payout_net || 0).toLocaleString('ru-RU')}</div></div>
@@ -14544,7 +15133,7 @@ export default function Dashboard() {
                   <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
                     <div className="bg-gray-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-gray-500">Номенклатур</div><div className="font-bold">{uploadedSummaryForView.items}</div></div>
                     <div className="bg-gray-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-gray-500">Продажи</div><div className="font-bold">{Number(uploadedSummaryForView.sales_net || 0).toLocaleString('ru-RU')}</div></div>
-                    <div className="bg-gray-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-gray-500">Налоги</div><div className="font-bold">{Number(getUploadedTaxValue(uploadedSummaryForView)).toLocaleString('ru-RU', { maximumFractionDigits: 2 })}</div></div>
+                    <div className="bg-gray-50 rounded-lg p-2 min-w-[170px] shrink-0"><div className="flex items-center justify-between gap-2"><div className="text-xs text-gray-500">Налоги</div><button type="button" onClick={() => setUploadedTaxRateOverride((prev) => prev === 0.01 ? 0.06 : 0.01)} className="text-[11px] px-2 py-0.5 rounded-full border border-indigo-200 text-indigo-700 bg-white hover:bg-indigo-50">{Math.round(getCurrentUploadedTaxRate() * 100)}%</button></div><div className="font-bold">{Number(getUploadedTaxValue(uploadedSummaryForView)).toLocaleString('ru-RU', { maximumFractionDigits: 2 })}</div></div>
                     <div className="bg-gray-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-gray-500">Возвраты</div><div className="font-bold">{Number(uploadedSummaryForView.returns_gross || 0).toLocaleString('ru-RU')}</div></div>
                     <div className="bg-gray-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-gray-500">Логистика</div><div className="font-bold">{Number(uploadedSummaryForView.logistics_sum || 0).toLocaleString('ru-RU')}</div></div>
                     <div className="bg-gray-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-gray-500">К перечислению</div><div className="font-bold">{Number(uploadedSummaryForView.payout_net || 0).toLocaleString('ru-RU')}</div></div>
@@ -14956,7 +15545,7 @@ export default function Dashboard() {
               <div className="w-full max-w-5xl max-h-[90vh] overflow-hidden bg-white rounded-2xl shadow-2xl" onClick={(e) => e.stopPropagation()}>
                 <div className="p-4 border-b border-gray-200 flex items-center justify-between gap-3">
                   <div className="font-semibold text-gray-900">Редактор себестоимости</div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap justify-end">
                     <input
                       type="text"
                       value={uploadedCostEditorSearch}
@@ -14964,6 +15553,26 @@ export default function Dashboard() {
                       placeholder="Поиск по коду/названию"
                       className="w-64 px-3 py-2 text-sm border border-gray-300 rounded-lg"
                     />
+                    <select
+                      value={uploadedCostEditorFilter}
+                      onChange={(e) => {
+                        const nextFilter = e.target.value as any;
+                        setUploadedCostEditorFilter(nextFilter);
+                        if (nextFilter === 'without_price') {
+                          const locked = (uploadedReportAnalytics || [])
+                            .filter((r: any) => getUploadedCostValue(r) <= 0)
+                            .map((r: any) => `${String(r?.code || '').trim()}|${String(r?.name || '').trim()}`);
+                          setUploadedCostEditorLockedKeys(locked);
+                        } else {
+                          setUploadedCostEditorLockedKeys(null);
+                        }
+                      }}
+                      className="px-3 py-2 text-sm border border-gray-300 rounded-lg"
+                    >
+                      <option value="all">Все товары</option>
+                      <option value="with_price">С ценой</option>
+                      <option value="without_price">Без цены</option>
+                    </select>
                     <button type="button" onClick={saveUploadedCostsFromEditor} disabled={uploadedSavingCosts} className="px-3 py-2 text-sm rounded-lg border border-emerald-300 text-emerald-700 hover:bg-emerald-50 disabled:opacity-60">
                       {uploadedSavingCosts ? 'Сохраняю...' : 'Сохранить'}
                     </button>
@@ -14974,6 +15583,7 @@ export default function Dashboard() {
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                     {uploadedCostEditorItems.map((r: any) => {
                       const code = String(r?.code || '').trim();
+                      const editorKey = `${code}|${String(r?.name || '').trim()}`;
                       return (
                         <div key={code} className="border border-gray-200 rounded-xl p-3 bg-white">
                           <div className="flex gap-3">
@@ -14990,8 +15600,16 @@ export default function Dashboard() {
                                   type="number"
                                   min="0"
                                   step="0.01"
-                                  value={uploadedCostEditorValues[code] ?? ''}
-                                  onChange={(e) => setUploadedCostEditorValues((prev) => ({ ...prev, [code]: e.target.value }))}
+                                  value={uploadedCostEditorValues[editorKey] ?? ''}
+                                  onChange={(e) => {
+                                    const value = e.target.value;
+                                    const num = Number(String(value || '').replace(',', '.'));
+                                    setUploadedCostEditorValues((prev) => ({ ...prev, [editorKey]: value }));
+                                    setUploadedCostByKey((prev) => ({ ...prev, [editorKey]: value }));
+                                    if (Number.isFinite(num) && num >= 0) {
+                                      setUploadedPersistedCostByCode((prev) => ({ ...prev, [editorKey]: num }));
+                                    }
+                                  }}
                                   className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm"
                                   placeholder="Себестоимость"
                                 />
@@ -16499,6 +17117,7 @@ export default function Dashboard() {
             </div>
 
               {completedWorkStep === 'RATES' && (
+                <>
                 <div className="oc-card p-4 sm:p-6">
                   <h3 className="font-bold text-lg mb-4">Расценки на работы</h3>
                   <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 mb-6">
@@ -16523,8 +17142,15 @@ export default function Dashboard() {
 
                         if (editingRateId) {
                             const before = cwWorkRates.find((r: any) => String(r.id) === String(editingRateId));
-                            await supabase.from('work_rates').update({ name: cwRateForm.name, price: parseFloat(cwRateForm.price) }).eq('id', editingRateId);
-                            await logAssemblyChange('work_rates', 'update', before || null, { ...(before || {}), name: cwRateForm.name, price: parseFloat(cwRateForm.price) });
+                            const newPrice = parseFloat(cwRateForm.price);
+                            await supabase.from('work_rates').update({ name: cwRateForm.name, price: newPrice }).eq('id', editingRateId);
+                            const nextRateHistory = { ...(cwWorkRateHistory || {}) } as Record<string, Array<{ changed_at: string; price: number }>>;
+                            const rateKey = String(editingRateId);
+                            const currentHistory = Array.isArray(nextRateHistory[rateKey]) ? nextRateHistory[rateKey] : [];
+                            nextRateHistory[rateKey] = [...currentHistory, { changed_at: new Date().toISOString(), price: newPrice }];
+                            setCwWorkRateHistory(nextRateHistory);
+                            await supabase.from('app_settings').upsert([{ key: 'cw_work_rate_history_v1', value: JSON.stringify(nextRateHistory) }], { onConflict: 'key' });
+                            await logAssemblyChange('work_rates', 'update', before || null, { ...(before || {}), name: cwRateForm.name, price: newPrice });
                             setEditingRateId(null);
                         } else {
                             const { data: createdRate } = await supabase.from('work_rates').insert([{ name: cwRateForm.name, price: parseFloat(cwRateForm.price) }]).select('*').maybeSingle();
@@ -16546,8 +17172,20 @@ export default function Dashboard() {
                     {cwWorkRates.map(rate => (
                       <div key={rate.id} className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
                         <span className="font-medium">{rate.name}</span>
-                        <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-2 sm:gap-4 flex-wrap justify-end">
                           <span className="font-bold text-green-600">{rate.price} ₽</span>
+                          <button
+                            onClick={() => setCwRateHistoryModal({ open: true, rateId: String(rate.id), rateName: String(rate.name || '') })}
+                            className="text-slate-500 hover:text-slate-700 text-xs px-2 py-1 rounded border border-slate-200"
+                          >
+                            История
+                          </button>
+                          <button
+                            onClick={() => setCwRateBulkModal({ open: true, rateId: String(rate.id), rateName: String(rate.name || ''), price: String(rate.price || ''), start: new Date().toISOString().split('T')[0], end: new Date().toISOString().split('T')[0] })}
+                            className="text-indigo-600 hover:text-indigo-800 text-xs px-2 py-1 rounded border border-indigo-200"
+                          >
+                            Обновить
+                          </button>
                           <button
                             onClick={() => {
                                 setEditingRateId(rate.id);
@@ -16570,6 +17208,77 @@ export default function Dashboard() {
                     ))}
                   </div>
                 </div>
+
+                {cwRateHistoryModal.open && (
+                  <div className="fixed inset-0 z-[90] bg-black/50 flex items-center justify-center p-4" onClick={() => setCwRateHistoryModal({ open: false, rateId: '', rateName: '' })}>
+                    <div className="w-full max-w-lg bg-white rounded-2xl shadow-2xl p-4 sm:p-6" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center justify-between mb-4">
+                        <div>
+                          <div className="text-lg font-bold">История расценки</div>
+                          <div className="text-sm text-gray-500">{cwRateHistoryModal.rateName || '-'}</div>
+                        </div>
+                        <button onClick={() => setCwRateHistoryModal({ open: false, rateId: '', rateName: '' })} className="p-2 hover:bg-gray-100 rounded-lg"><X className="h-5 w-5" /></button>
+                      </div>
+                      <div className="space-y-2 max-h-[60vh] overflow-y-auto">
+                        {(cwWorkRateHistory[cwRateHistoryModal.rateId] || []).length === 0 ? (
+                          <div className="text-sm text-gray-500">История изменений пока пустая.</div>
+                        ) : (
+                          (cwWorkRateHistory[cwRateHistoryModal.rateId] || []).slice().reverse().map((row, idx) => (
+                            <div key={`rate-h-${idx}`} className="border rounded-xl p-3 bg-gray-50 flex items-center justify-between gap-3">
+                              <div className="text-sm text-gray-700">{new Date(row.changed_at).toLocaleString('ru-RU')}</div>
+                              <div className="font-bold text-indigo-700">{Number(row.price || 0).toLocaleString('ru-RU')} ₽</div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {cwRateBulkModal.open && (
+                  <div className="fixed inset-0 z-[90] bg-black/50 flex items-center justify-center p-4" onClick={() => setCwRateBulkModal({ open: false, rateId: '', rateName: '', price: '', start: new Date().toISOString().split('T')[0], end: new Date().toISOString().split('T')[0] })}>
+                    <div className="w-full max-w-lg bg-white rounded-2xl shadow-2xl p-4 sm:p-6" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center justify-between mb-4">
+                        <div>
+                          <div className="text-lg font-bold">Обновить цену по периоду</div>
+                          <div className="text-sm text-gray-500">{cwRateBulkModal.rateName || '-'}</div>
+                        </div>
+                        <button onClick={() => setCwRateBulkModal({ open: false, rateId: '', rateName: '', price: '', start: new Date().toISOString().split('T')[0], end: new Date().toISOString().split('T')[0] })} className="p-2 hover:bg-gray-100 rounded-lg"><X className="h-5 w-5" /></button>
+                      </div>
+                      <div className="space-y-3">
+                        <input value={cwRateBulkModal.price} onChange={(e) => setCwRateBulkModal(prev => ({ ...prev, price: e.target.value }))} type="number" placeholder="Новая цена" className="oc-input" />
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <input value={cwRateBulkModal.start} onChange={(e) => setCwRateBulkModal(prev => ({ ...prev, start: e.target.value }))} type="date" className="oc-input" />
+                          <input value={cwRateBulkModal.end} onChange={(e) => setCwRateBulkModal(prev => ({ ...prev, end: e.target.value }))} type="date" className="oc-input" />
+                        </div>
+                        <button
+                          onClick={async () => {
+                            const newPrice = Number(cwRateBulkModal.price || 0);
+                            if (!cwRateBulkModal.rateId || newPrice <= 0 || !cwRateBulkModal.start || !cwRateBulkModal.end) return;
+                            const { data: logs } = await supabase.from('work_logs').select('id, date').eq('work_rate_id', cwRateBulkModal.rateId).gte('date', cwRateBulkModal.start).lte('date', cwRateBulkModal.end).is('deleted_at', null);
+                            const nextSnapshots = { ...(cwWorkRateSnapshots || {}) } as Record<string, number>;
+                            (logs || []).forEach((log: any) => {
+                              nextSnapshots[String(log.id)] = newPrice;
+                            });
+                            setCwWorkRateSnapshots(nextSnapshots);
+                            await supabase.from('app_settings').upsert([{ key: 'cw_work_rate_snapshots_v1', value: JSON.stringify(nextSnapshots) }], { onConflict: 'key' });
+                            const nextRateHistory = { ...(cwWorkRateHistory || {}) } as Record<string, Array<{ changed_at: string; price: number }>>;
+                            const currentHistory = Array.isArray(nextRateHistory[cwRateBulkModal.rateId]) ? nextRateHistory[cwRateBulkModal.rateId] : [];
+                            nextRateHistory[cwRateBulkModal.rateId] = [...currentHistory, { changed_at: new Date().toISOString(), price: newPrice }];
+                            setCwWorkRateHistory(nextRateHistory);
+                            await supabase.from('app_settings').upsert([{ key: 'cw_work_rate_history_v1', value: JSON.stringify(nextRateHistory) }], { onConflict: 'key' });
+                            setCwRateBulkModal({ open: false, rateId: '', rateName: '', price: '', start: new Date().toISOString().split('T')[0], end: new Date().toISOString().split('T')[0] });
+                            showToast('Цены по периоду обновлены', 'success');
+                          }}
+                          className="w-full btn-primary py-3"
+                        >
+                          Обновить цены за период
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                </>
               )}
 
               {completedWorkStep === 'PACKAGING' && (
@@ -17077,284 +17786,7 @@ export default function Dashboard() {
                     </div>
                   </div>
 
-                  <div className="oc-card p-4 sm:p-6">
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center gap-2">
-                        <h3 className="font-bold text-lg text-gray-900">Деньги на складе</h3>
-                        <button type="button" onClick={() => setCwWarehouseMoneyCollapsed(v => !v)} className="p-1 rounded border border-slate-200 hover:bg-slate-50">
-                          <ChevronDown className={`h-4 w-4 transition-transform ${cwWarehouseMoneyCollapsed ? '-rotate-90' : ''}`} />
-                        </button>
-                      </div>
-                      <div className="text-2xl font-extrabold text-emerald-700">
-                        {Math.floor(cwWarehouseMoneyHistory.reduce((sum, row) => sum + Number(row.amount || 0), 0)).toLocaleString('ru-RU')} ₽
-                      </div>
-                    </div>
-
-                    <div className={cwWarehouseMoneyCollapsed ? 'hidden' : ''}>
-                    <div className="grid grid-cols-1 md:grid-cols-[180px_1fr_140px_140px] gap-2 mb-3">
-                      <input
-                        type="number"
-                        step="0.01"
-                        placeholder="Сумма"
-                        value={cwWarehouseMoneyForm.amount}
-                        onChange={(e) => setCwWarehouseMoneyForm(prev => ({ ...prev, amount: e.target.value }))}
-                        className="oc-select"
-                      />
-                      <input
-                        type="text"
-                        placeholder="Комментарий (необязательно)"
-                        value={cwWarehouseMoneyForm.comment}
-                        onChange={(e) => setCwWarehouseMoneyForm(prev => ({ ...prev, comment: e.target.value }))}
-                        className="oc-select"
-                      />
-                      <button
-                        onClick={async () => {
-                          const amountRaw = Number(cwWarehouseMoneyForm.amount || 0);
-                          const amount = Math.abs(amountRaw);
-                          if (!Number.isFinite(amount) || amount === 0) {
-                            showToast('Введите сумму', 'error');
-                            return;
-                          }
-
-                          const { error } = await supabase.from('warehouse_money_log').insert([{
-                            amount,
-                            comment: cwWarehouseMoneyForm.comment.trim(),
-                            type: 'manual',
-                          }]);
-
-                          if (error) {
-                            if (/relation .* does not exist|schema cache/i.test(String(error.message || ''))) {
-                              showToast('Нет таблицы warehouse_money_log в БД. Нужно создать миграцию.', 'error');
-                            } else {
-                              showToast('Ошибка добавления операции: ' + (error.message || 'неизвестно'), 'error');
-                            }
-                            return;
-                          }
-
-                          setCwWarehouseMoneyForm({ amount: '', comment: '' });
-                          await fetchCwWarehouseMoneyHistory();
-                          showToast('Операция добавлена', 'success');
-                        }}
-                        className="w-full py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700"
-                      >
-                        Добавить
-                      </button>
-                      <button
-                        onClick={async () => {
-                          const amountRaw = Number(cwWarehouseMoneyForm.amount || 0);
-                          const amount = Math.abs(amountRaw);
-                          if (!Number.isFinite(amount) || amount === 0) {
-                            showToast('Введите сумму', 'error');
-                            return;
-                          }
-
-                          const { error } = await supabase.from('warehouse_money_log').insert([{
-                            amount: -amount,
-                            comment: cwWarehouseMoneyForm.comment.trim() || 'Вычет',
-                            type: 'manual',
-                          }]);
-
-                          if (error) {
-                            if (/relation .* does not exist|schema cache/i.test(String(error.message || ''))) {
-                              showToast('Нет таблицы warehouse_money_log в БД. Нужно создать миграцию.', 'error');
-                            } else {
-                              showToast('Ошибка вычета: ' + (error.message || 'неизвестно'), 'error');
-                            }
-                            return;
-                          }
-
-                          setCwWarehouseMoneyForm({ amount: '', comment: '' });
-                          await fetchCwWarehouseMoneyHistory();
-                          showToast('Вычет добавлен', 'success');
-                        }}
-                        className="w-full py-2 bg-rose-600 text-white rounded-lg hover:bg-rose-700"
-                      >
-                        Вычесть
-                      </button>
-                    </div>
-
-                    <div className="mb-3 border rounded-lg p-3 bg-slate-50">
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="font-semibold text-slate-900">Выдать ЗП</div>
-                        <button
-                          onClick={calculateSalaryPreview}
-                          disabled={cwSalaryIssueLoading}
-                          className="px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50"
-                        >
-                          {cwSalaryIssueLoading ? 'Считаю...' : 'Рассчитать'}
-                        </button>
-                      </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr] gap-2 mb-2">
-                        <select
-                          value={cwSalaryIssueForm.employee_id}
-                          onChange={(e) => setCwSalaryIssueForm(prev => ({ ...prev, employee_id: e.target.value }))}
-                          className="oc-select"
-                        >
-                          <option value="">Выберите сотрудника</option>
-                          {employees
-                            .filter((e: any) => String(e.role || '').toLowerCase() !== 'admin' && String(e.login || '').toLowerCase() !== 'admin')
-                            .map((e: any) => (
-                              <option key={`salary-emp-${e.id}`} value={e.id}>{e.full_name}</option>
-                            ))}
-                        </select>
-                        <select
-                          value={cwSalaryIssueForm.period_key}
-                          onChange={(e) => setCwSalaryIssueForm(prev => ({ ...prev, period_key: e.target.value }))}
-                          className="oc-select"
-                        >
-                          <option value="">Выберите период</option>
-                          {cwSalaryPeriods.map((p) => (
-                            <option key={`salary-period-${p.key}`} value={p.key}>{p.label}</option>
-                          ))}
-                        </select>
-                      </div>
-
-                      {cwSalaryIssuePreview && (
-                        <div className="rounded-lg bg-white border p-3">
-                          <div className="text-sm text-gray-600">Период: {cwSalaryIssuePreview.periodLabel}</div>
-                          <div className="text-sm text-gray-600">Записей: {cwSalaryIssuePreview.logsCount}</div>
-                          <div className="text-lg font-bold text-indigo-700 mt-1">К выплате: {cwSalaryIssuePreview.amount.toFixed(2)} ₽</div>
-                          <button
-                            onClick={async () => {
-                              const balance = cwWarehouseMoneyHistory.reduce((sum, row) => sum + Number(row.amount || 0), 0);
-                              if (cwSalaryIssuePreview.amount <= 0) {
-                                showToast('Сумма к выплате должна быть больше 0', 'error');
-                                return;
-                              }
-                              if (balance < cwSalaryIssuePreview.amount) {
-                                showToast('Недостаточно денег на складе', 'error');
-                                return;
-                              }
-                              const emp = employees.find((e: any) => String(e.id) === String(cwSalaryIssueForm.employee_id));
-
-                              const { error } = await supabase.from('warehouse_money_log').insert([{
-                                amount: -Number(cwSalaryIssuePreview.amount.toFixed(2)),
-                                comment: `Выдача ЗП: ${emp?.full_name || 'Сотрудник'} (${cwSalaryIssuePreview.periodLabel})`,
-                                type: 'salary',
-                                employee_id: emp?.id,
-                                employee_name: emp?.full_name,
-                                period_start: cwSalaryIssuePreview.periodStart,
-                                period_end: cwSalaryIssuePreview.periodEnd,
-                              }]);
-
-                              if (error) {
-                                showToast('Ошибка выдачи ЗП: ' + (error.message || 'неизвестно'), 'error');
-                                return;
-                              }
-
-                              await fetchCwWarehouseMoneyHistory();
-                              showToast('ЗП выдана и отражена в истории', 'success');
-                            }}
-                            className="mt-2 w-full py-2 bg-rose-600 text-white rounded-lg hover:bg-rose-700"
-                          >
-                            Выдать
-                          </button>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="max-h-60 overflow-y-auto border rounded-lg">
-                      {cwWarehouseMoneyHistory.length === 0 ? (
-                        <div className="p-3 text-sm text-gray-500">Пока нет операций.</div>
-                      ) : (
-                        <div className="divide-y">
-                          {cwWarehouseMoneyHistory.map((row) => (
-                            <div key={row.id} className="p-3 flex items-center justify-between gap-3 text-sm">
-                              <div>
-                                <div className="font-medium text-gray-900">{row.comment || 'Без комментария'}</div>
-                                <div className="text-xs text-gray-500">{new Date(row.created_at).toLocaleString('ru-RU')}</div>
-                              </div>
-                              <div className="flex items-center gap-3">
-                                <div className={`font-bold ${Number(row.amount) >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
-                                  {Number(row.amount) >= 0 ? '+' : ''}{Math.floor(Number(row.amount || 0)).toLocaleString('ru-RU')} ₽
-                                </div>
-                                {(currentEmployee?.role === 'admin' || /юл|juli/i.test(String(currentEmployee?.full_name || currentEmployee?.login || ''))) && (
-                                  <>
-                                    <button
-                                      onClick={async () => {
-                                        const currentAmount = Number(row.amount || 0);
-                                        const nextAmountRaw = window.prompt('Сумма (можно со знаком):', String(currentAmount));
-                                        if (nextAmountRaw == null) return;
-                                        const nextAmount = Number(String(nextAmountRaw).replace(',', '.'));
-                                        if (!Number.isFinite(nextAmount)) {
-                                          showToast('Некорректная сумма', 'error');
-                                          return;
-                                        }
-                                        const nextComment = window.prompt('Комментарий:', String(row.comment || ''));
-                                        if (nextComment == null) return;
-
-                                        const { data: upd, error } = await supabase
-                                          .from('warehouse_money_log')
-                                          .update({ amount: nextAmount, comment: String(nextComment).trim() })
-                                          .eq('id', row.id)
-                                          .is('deleted_at', null)
-                                          .select('id, amount, comment')
-                                          .maybeSingle();
-                                        if (error) {
-                                          showToast('Ошибка редактирования: ' + (error.message || 'неизвестно'), 'error');
-                                          return;
-                                        }
-                                        if (!upd?.id) {
-                                          // Fallback for strict RLS setups: recreate row via delete+insert
-                                          const { error: delErr } = await supabase.from('warehouse_money_log').delete().eq('id', row.id);
-                                          if (delErr) {
-                                            showToast('Запись не обновлена (нет доступа на редактирование)', 'error');
-                                            return;
-                                          }
-                                          const { error: insErr } = await supabase.from('warehouse_money_log').insert([{
-                                            amount: nextAmount,
-                                            comment: String(nextComment).trim(),
-                                            type: row.type || 'manual',
-                                            employee_id: row.employee_id || null,
-                                            employee_name: row.employee_name || null,
-                                            period_start: row.period_start || null,
-                                            period_end: row.period_end || null,
-                                            created_at: row.created_at || new Date().toISOString(),
-                                          }]);
-                                          if (insErr) {
-                                            showToast('Ошибка редактирования: ' + (insErr.message || 'неизвестно'), 'error');
-                                            return;
-                                          }
-                                        }
-                                        setCwWarehouseMoneyHistory((prev) => prev.map((x) => String(x.id) === String(row.id) ? { ...x, amount: nextAmount, comment: String(nextComment).trim() } : x));
-                                        await fetchCwWarehouseMoneyHistory();
-                                        showToast('Запись обновлена', 'success');
-                                      }}
-                                      className="p-1.5 rounded-md text-indigo-600 hover:bg-indigo-50"
-                                      title="Редактировать запись"
-                                    >
-                                      <Pencil className="h-4 w-4" />
-                                    </button>
-                                    <button
-                                      onClick={async () => {
-                                        if (!window.confirm('Удалить запись?')) return;
-                                        const { error } = await supabase.from('warehouse_money_log').delete().eq('id', row.id);
-                                        if (error) {
-                                          showToast('Ошибка удаления: ' + (error.message || 'неизвестно'), 'error');
-                                          return;
-                                        }
-                                        await fetchCwWarehouseMoneyHistory();
-                                        showToast('Запись удалена', 'success');
-                                      }}
-                                      className="p-1.5 rounded-md text-rose-600 hover:bg-rose-50"
-                                      title="Удалить запись"
-                                    >
-                                      <Trash2 className="h-4 w-4" />
-                                    </button>
-                                  </>
-                                )}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                    </div>
-
-                  </div>
-
-                  {/* Forms */}
+                                    {/* Forms */}
                   <div className="oc-card p-4 sm:p-6 mb-4">
                     <div className="flex items-center justify-between">
                       <h3 className="font-bold text-lg text-gray-900">ФБС / Коробки</h3>
@@ -18241,7 +18673,7 @@ export default function Dashboard() {
                                                   const rate = cwWorkRates.find(r => r.id === log.work_rate_id);
                                                   const isAdminRate = /админ/i.test(String(rate?.name || ''));
                                                   if (!isAdminRate) return sum;
-                                                  return sum + (Number(log.quantity || 0) * Number(rate?.price || 0));
+                                                  return sum + (Number(log.quantity || 0) * Number(getWorkLogSnapshotPrice(log) || 0));
                                                 }, 0);
                                                 return <><span className="text-gray-500 mr-2">Заработано (Админ):</span><span className="font-bold text-green-700 text-lg">{Math.floor(amountAdmin).toLocaleString('ru-RU')} ₽</span></>;
                                               }
@@ -18251,7 +18683,7 @@ export default function Dashboard() {
                                                 return m === cwSelectedPeriod.getMonth() + 1 && y === cwSelectedPeriod.getFullYear();
                                               }).reduce((sum, log) => {
                                                 const rate = cwWorkRates.find(r => r.id === log.work_rate_id);
-                                                return sum + (Number(log.quantity || 0) * Number(rate?.price || 0));
+                                                return sum + (Number(log.quantity || 0) * Number(getWorkLogSnapshotPrice(log) || 0));
                                               }, 0);
                                               return <><span className="text-gray-500 mr-2">Заработано:</span><span className="font-bold text-green-700 text-lg">{Math.floor(amount).toLocaleString('ru-RU')} ₽</span></>;
                                             })()}
@@ -18287,7 +18719,7 @@ export default function Dashboard() {
                                     const dayLogs = cwWorkLogs.filter(l => l.date && l.date.startsWith(dateStr));
                                     const dayTotal = dayLogs.reduce((sum, log) => {
                                         const rate = cwWorkRates.find(r => r.id === log.work_rate_id);
-                                        return sum + (Number(log.quantity || 0) * Number(rate?.price || 0));
+                                        return sum + (Number(log.quantity || 0) * Number(getWorkLogSnapshotPrice(log) || 0));
                                     }, 0);
                                     const dayQtyUnits = dayLogs
                                       .filter((log) => !isTimeBasedWorkRate(log.work_rate_id))
@@ -18317,7 +18749,7 @@ export default function Dashboard() {
                                                 ? `${Math.floor(dayLogs.reduce((s, log) => {
                                                     const rate = cwWorkRates.find(r => r.id === log.work_rate_id);
                                                     const isAdminRate = /админ/i.test(String(rate?.name || ''));
-                                                    return isAdminRate ? s + (Number(log.quantity || 0) * Number(rate?.price || 0)) : s;
+                                                    return isAdminRate ? s + (Number(log.quantity || 0) * Number(getWorkLogSnapshotPrice(log) || 0)) : s;
                                                   }, 0)).toLocaleString('ru-RU')}₽`
                                                 : `${Math.floor(dayTotal).toLocaleString('ru-RU')}₽`}
                                             </div>
@@ -18480,6 +18912,11 @@ export default function Dashboard() {
                                           supplier_id: item.supplier_id || null,
                                         };
                                         await supabase.from('work_logs').update(updatedPayload).eq('id', editingWorkLogId);
+                                        const nextSnapshots = { ...(cwWorkRateSnapshots || {}) } as Record<string, number>;
+                                        const selectedRate = cwWorkRates.find((r: any) => String(r.id) === String(updatedPayload.work_rate_id));
+                                        nextSnapshots[String(editingWorkLogId)] = Number(selectedRate?.price || 0);
+                                        setCwWorkRateSnapshots(nextSnapshots);
+                                        await supabase.from('app_settings').upsert([{ key: 'cw_work_rate_snapshots_v1', value: JSON.stringify(nextSnapshots) }], { onConflict: 'key' });
                                         await logAssemblyChange('work_logs', 'update', before || null, { ...(before || {}), ...updatedPayload, id: editingWorkLogId });
                                         setEditingWorkLogId(null);
                                         showToast('Запись обновлена', 'success');
@@ -18510,11 +18947,38 @@ export default function Dashboard() {
                                         }
 
                                         if (!itemsToInsert.length) return showToast('Добавьте хотя бы один корректный товар/операцию', 'error');
-                                        const { data: createdWorkLogs } = await supabase.from('work_logs').insert(itemsToInsert).select('*');
-                                        (createdWorkLogs || []).forEach((row: any) => {
-                                          logAssemblyChange('work_logs', 'create', null, row);
-                                        });
-                                        showToast(`Добавлено записей: ${itemsToInsert.length}`, 'success');
+                                        const dates = Array.from(new Set(itemsToInsert.map((x: any) => x.date)));
+                                        const { data: existingLogs } = await supabase.from('work_logs').select('*').eq('employee_id', cwSelectedEmployee.id).in('date', dates as any).is('deleted_at', null);
+                                        const nextSnapshots = { ...(cwWorkRateSnapshots || {}) } as Record<string, number>;
+                                        let createdCount = 0;
+                                        let updatedCount = 0;
+                                        for (const item of itemsToInsert) {
+                                          const existing = (existingLogs || []).find((row: any) =>
+                                            String(row.employee_id) === String(item.employee_id) &&
+                                            String(row.date) === String(item.date) &&
+                                            String(row.work_rate_id) === String(item.work_rate_id) &&
+                                            String(row.supplier_id || '') === String(item.supplier_id || '') &&
+                                            Boolean(row.packaging_used) === Boolean(item.packaging_used) &&
+                                            String(row.packaging || '') === String(item.packaging || '')
+                                          );
+                                          if (existing) {
+                                            const newQty = Number(existing.quantity || 0) + Number(item.quantity || 0);
+                                            await supabase.from('work_logs').update({ quantity: newQty }).eq('id', existing.id);
+                                            updatedCount += 1;
+                                            await logAssemblyChange('work_logs', 'update', existing, { ...existing, quantity: newQty });
+                                          } else {
+                                            const { data: created } = await supabase.from('work_logs').insert([item]).select('*').maybeSingle();
+                                            if (created) {
+                                              const rate = cwWorkRates.find((r: any) => String(r.id) === String(created.work_rate_id));
+                                              nextSnapshots[String(created.id)] = Number(rate?.price || 0);
+                                              createdCount += 1;
+                                              logAssemblyChange('work_logs', 'create', null, created);
+                                            }
+                                          }
+                                        }
+                                        setCwWorkRateSnapshots(nextSnapshots);
+                                        await supabase.from('app_settings').upsert([{ key: 'cw_work_rate_snapshots_v1', value: JSON.stringify(nextSnapshots) }], { onConflict: 'key' });
+                                        showToast(`Создано: ${createdCount}, обновлено: ${updatedCount}`, 'success');
                                       }
 
                                       setCompletedWorkStep('CALENDAR');
@@ -18605,43 +19069,129 @@ export default function Dashboard() {
 
               {/* Report Modal */}
               {cwReportModalOpen && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 overflow-y-auto py-4 px-2">
-                  <div className={`bg-white p-4 md:p-6 rounded-xl w-full transition-all max-h-[94vh] overflow-auto ${cwReportResult ? 'max-w-6xl' : 'max-w-md'}`}>
-                    <h3 className="text-xl font-bold mb-4">Отчет по выполненной работе</h3>
+                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 overflow-y-auto py-4 px-2">
+                  <div className={`bg-white p-4 md:p-6 rounded-2xl shadow-2xl w-full transition-all max-h-[94vh] overflow-auto ${cwReportResult ? 'max-w-6xl' : 'max-w-2xl'}`}>
+                    <h3 className="text-xl font-bold mb-4 text-slate-900">Отчет по выполненной работе</h3>
 
-                    <div className={`grid gap-4 mb-6 ${cwReportResult ? 'grid-cols-1 md:grid-cols-3' : 'grid-cols-1'}`}>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Период</label>
-                        <div className="grid grid-cols-2 gap-2">
-                          <input
-                            type="date"
-                            value={cwReportForm.start_date}
-                            onChange={e => setCwReportForm({...cwReportForm, start_date: e.target.value})}
-                            className="w-full p-2 border rounded-lg text-sm"
-                          />
-                          <input
-                            type="date"
-                            value={cwReportForm.end_date}
-                            onChange={e => setCwReportForm({...cwReportForm, end_date: e.target.value})}
-                            className="w-full p-2 border rounded-lg text-sm"
-                          />
+                    <div className={`grid gap-4 mb-6 items-start ${cwReportResult ? 'grid-cols-1 xl:grid-cols-[1.3fr_0.85fr_0.85fr]' : 'grid-cols-1'}`}>
+                      <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-slate-50 to-white p-4 shadow-sm">
+                        <div className="flex items-center justify-between mb-3 gap-3">
+                          <div>
+                            <label className="block text-sm font-semibold text-slate-800 mb-1">Период отчёта</label>
+                            <div className="text-xs text-slate-500">Выбери диапазон дат и при необходимости исключи отдельные дни</div>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCwReportDatePickerOpen(true);
+                            setCwReportPickingEnd(false);
+                            setCwReportDatePickerMonth(new Date(`${cwReportForm.start_date || new Date().toISOString().split('T')[0]}T12:00:00`));
+                          }}
+                          className="w-full rounded-2xl border border-slate-200 bg-white p-4 text-left hover:border-indigo-300 hover:bg-indigo-50 transition"
+                        >
+                          <div className="text-xs text-slate-500 mb-1">Период</div>
+                          <div className="text-sm font-semibold text-slate-900">{new Date(`${cwReportForm.start_date}T12:00:00`).toLocaleDateString('ru-RU')} — {new Date(`${cwReportForm.end_date}T12:00:00`).toLocaleDateString('ru-RU')}</div>
+                          <div className="text-xs text-slate-500 mt-1">Нажми, чтобы выбрать начало и конец периода в одном календаре</div>
+                        </button>
+                        <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="text-sm font-medium text-slate-700">Исключить даты из периода</div>
+                            <div className="text-xs text-slate-500">Нажми на день, чтобы исключить его из отчёта</div>
+                          </div>
+                          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2 max-h-56 overflow-y-auto">
+                            {getDatesInRange(cwReportForm.start_date, cwReportForm.end_date).map((dateStr) => {
+                              const excluded = cwReportExcludedDates.includes(dateStr);
+                              return (
+                                <button
+                                  key={`cw-report-date-${dateStr}`}
+                                  type="button"
+                                  onClick={() => setCwReportExcludedDates((prev) => excluded ? prev.filter((x) => x !== dateStr) : [...prev, dateStr])}
+                                  className={`rounded-xl border px-3 py-2 text-left transition-all ${excluded ? 'bg-rose-100 border-rose-300 text-rose-700 shadow-sm' : 'bg-white border-slate-200 text-slate-700 hover:border-indigo-300 hover:bg-indigo-50'}`}
+                                >
+                                  <div className="text-xs text-slate-500">{new Date(`${dateStr}T12:00:00`).toLocaleDateString('ru-RU', { month: 'short' })}</div>
+                                  <div className="font-semibold text-sm">{new Date(`${dateStr}T12:00:00`).toLocaleDateString('ru-RU', { day: '2-digit' })}</div>
+                                  <div className="text-[11px] mt-1">{excluded ? 'Исключено' : 'В отчёте'}</div>
+                                </button>
+                              );
+                            })}
+                          </div>
                         </div>
                       </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Сотрудник</label>
+                      {cwReportDatePickerOpen && (
+                        <div className="fixed inset-0 z-[80] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setCwReportDatePickerOpen(false)}>
+                          <div className="w-full max-w-xl bg-white rounded-2xl shadow-2xl p-4" onClick={(e) => e.stopPropagation()}>
+                            <div className="flex items-center justify-between mb-4">
+                              <div>
+                                <div className="text-lg font-bold text-slate-900">Выбор периода</div>
+                                <div className="text-xs text-slate-500">Сначала выбери дату начала, потом дату конца</div>
+                              </div>
+                              <button onClick={() => setCwReportDatePickerOpen(false)} className="p-2 rounded-lg hover:bg-slate-100"><X className="h-5 w-5" /></button>
+                            </div>
+                            <div className="flex items-center justify-between mb-3">
+                              <button type="button" onClick={() => setCwReportDatePickerMonth(new Date(cwReportDatePickerMonth.getFullYear(), cwReportDatePickerMonth.getMonth() - 1, 1))} className="p-2 rounded-lg hover:bg-slate-100"><ChevronLeft className="h-4 w-4" /></button>
+                              <div className="font-semibold capitalize">{cwReportDatePickerMonth.toLocaleString('ru-RU', { month: 'long', year: 'numeric' })}</div>
+                              <button type="button" onClick={() => setCwReportDatePickerMonth(new Date(cwReportDatePickerMonth.getFullYear(), cwReportDatePickerMonth.getMonth() + 1, 1))} className="p-2 rounded-lg hover:bg-slate-100"><ChevronRight className="h-4 w-4" /></button>
+                            </div>
+                            <div className="grid grid-cols-7 gap-1 mb-2 text-center text-[10px] font-medium text-gray-400">{['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map((d) => <div key={`cw-r-${d}`}>{d}</div>)}</div>
+                            <div className="grid grid-cols-7 gap-1">
+                              {(() => {
+                                const year = cwReportDatePickerMonth.getFullYear();
+                                const month = cwReportDatePickerMonth.getMonth();
+                                const daysInMonth = new Date(year, month + 1, 0).getDate();
+                                const firstDay = new Date(year, month, 1).getDay() || 7;
+                                const cells: any[] = [];
+                                for (let i = 1; i < firstDay; i++) cells.push(<div key={`cw-r-empty-${i}`} />);
+                                for (let d = 1; d <= daysInMonth; d++) {
+                                  const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+                                  const start = cwReportForm.start_date;
+                                  const end = cwReportForm.end_date;
+                                  const inRange = start && end && dateStr >= start && dateStr <= end;
+                                  const isStart = dateStr === start;
+                                  const isEnd = dateStr === end;
+                                  cells.push(
+                                    <button key={`cw-r-day-${d}`} type="button" onClick={() => {
+                                      if (!cwReportPickingEnd) {
+                                        setCwReportForm(prev => ({ ...prev, start_date: dateStr, end_date: dateStr }));
+                                        setCwReportPickingEnd(true);
+                                        setCwReportExcludedDates([]);
+                                      } else {
+                                        const startDate = cwReportForm.start_date;
+                                        if (!startDate || dateStr < startDate) setCwReportForm(prev => ({ ...prev, start_date: dateStr, end_date: startDate || dateStr }));
+                                        else setCwReportForm(prev => ({ ...prev, end_date: dateStr }));
+                                        setCwReportPickingEnd(false);
+                                        setCwReportExcludedDates([]);
+                                        setCwReportDatePickerOpen(false);
+                                      }
+                                    }} className={`min-h-[52px] rounded-xl border p-2 text-left ${isStart || isEnd ? 'bg-indigo-600 border-indigo-600 text-white' : inRange ? 'bg-indigo-50 border-indigo-200 text-indigo-900' : 'bg-white border-slate-200 text-slate-800 hover:border-indigo-300'}`}>
+                                      <div className="text-xs font-semibold">{d}</div>
+                                      {isStart && <div className="text-[10px] mt-1">Старт</div>}
+                                      {isEnd && !isStart && <div className="text-[10px] mt-1">Конец</div>}
+                                    </button>
+                                  );
+                                }
+                                return cells;
+                              })()}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                        <label className="block text-sm font-semibold text-slate-800 mb-2">Сотрудник</label>
                         <select
                           value={cwReportForm.employee_id}
                           onChange={e => setCwReportForm({...cwReportForm, employee_id: e.target.value})}
                           className="w-full p-2 border rounded-lg text-sm"
                         >
                           <option value="">Выберите сотрудника...</option>
+                          <option value="__ALL__">Все сотрудники</option>
                           {employees
                             .filter(e => String(e.role || '').toLowerCase() !== 'admin' && String(e.login || '').toLowerCase() !== 'admin')
                             .map(e => <option key={e.id} value={e.id}>{e.full_name}</option>)}
                         </select>
                       </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Поставщик</label>
+                      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                        <label className="block text-sm font-semibold text-slate-800 mb-2">Поставщик</label>
                         <select
                           value={cwReportForm.supplier_id}
                           onChange={e => setCwReportForm({...cwReportForm, supplier_id: e.target.value})}
@@ -18660,6 +19210,7 @@ export default function Dashboard() {
                           <thead className="bg-gray-50 text-gray-700 font-medium">
                             <tr>
                               <th className="p-3 rounded-tl-lg">Дата</th>
+                              {cwReportForm.employee_id === '__ALL__' && <th className="p-3">Сотрудник</th>}
                               {cwReportForm.supplier_id === '__ALL__' && <th className="p-3">Поставщик</th>}
                               <th className="p-3">Вид работы</th>
                               <th className="p-3 text-right">Кол-во</th>
@@ -18671,6 +19222,7 @@ export default function Dashboard() {
                             {cwReportResult.map((item, idx) => (
                               <tr key={idx} className="hover:bg-gray-50">
                                 <td className="p-3">{new Date(item.date).toLocaleDateString('ru-RU')}</td>
+                                {cwReportForm.employee_id === '__ALL__' && <td className="p-3">{item.employee_name || '-'}</td>}
                                 {cwReportForm.supplier_id === '__ALL__' && <td className="p-3">{item.supplier_name || '-'}</td>}
                                 <td className="p-3">{item.work_name}</td>
                                 <td className="p-3 text-right">{item.quantity}</td>
@@ -18680,13 +19232,17 @@ export default function Dashboard() {
                             ))}
                             {cwReportResult.length === 0 && (
                               <tr>
-                                <td colSpan={cwReportForm.supplier_id === '__ALL__' ? 6 : 5} className="p-4 text-center text-gray-500">Нет данных за выбранный период</td>
+                                <td colSpan={(cwReportForm.employee_id === '__ALL__' ? 1 : 0) + (cwReportForm.supplier_id === '__ALL__' ? 1 : 0) + 5} className="p-4 text-center text-gray-500">Нет данных за выбранный период</td>
                               </tr>
                             )}
                           </tbody>
                           <tfoot className="bg-gray-50 font-bold">
                             <tr>
-                              <td colSpan={cwReportForm.supplier_id === '__ALL__' ? 5 : 4} className="p-3 text-right">Итого:</td>
+                              <td colSpan={(cwReportForm.employee_id === '__ALL__' ? 1 : 0) + (cwReportForm.supplier_id === '__ALL__' ? 1 : 0) + 2} className="p-3 text-right">Итого:</td>
+                              <td className="p-3 text-right text-slate-700">
+                                {cwReportResult.reduce((sum, item) => sum + Number(item.quantity || 0), 0)}
+                              </td>
+                              <td className="p-3"></td>
                               <td className="p-3 text-right text-indigo-600">
                                 {cwReportResult.reduce((sum, item) => sum + item.total, 0)} ₽
                               </td>
@@ -18716,28 +19272,35 @@ export default function Dashboard() {
 
                             let query = supabase
                               .from('work_logs')
-                              .select('date, quantity, work_rate_id, supplier_id')
-                              .eq('employee_id', cwReportForm.employee_id)
+                              .select('date, quantity, work_rate_id, supplier_id, employee_id')
+                              .is('deleted_at', null)
                               .gte('date', cwReportForm.start_date)
                               .lte('date', cwReportForm.end_date)
                               .order('date', { ascending: true });
+
+                            if (cwReportForm.employee_id !== '__ALL__') {
+                              query = query.eq('employee_id', cwReportForm.employee_id);
+                            }
 
                             if (cwReportForm.supplier_id !== '__ALL__') {
                               query = query.eq('supplier_id', cwReportForm.supplier_id);
                             }
 
                             const { data: logs } = await query;
+                            const filteredLogs = (logs || []).filter((log: any) => !cwReportExcludedDates.includes(String(log.date || '')));
 
-                            const result = (logs || []).map(log => {
+                            const result = filteredLogs.map(log => {
                               const rate = cwWorkRates.find(r => r.id === log.work_rate_id);
                               const supplierName = suppliers.find(s => String(s.id) === String((log as any).supplier_id || ''))?.name || '-';
+                              const employeeName = employees.find(e => String(e.id) === String((log as any).employee_id || ''))?.full_name || '-';
                               return {
                                 date: log.date,
                                 supplier_name: supplierName,
+                                employee_name: employeeName,
                                 work_name: rate?.name || 'Неизвестно',
-                                quantity: log.quantity,
-                                price: rate?.price || 0,
-                                total: log.quantity * (rate?.price || 0)
+                                quantity: Number(log.quantity || 0),
+                                price: Number(rate?.price || 0),
+                                total: Number(log.quantity || 0) * Number(rate?.price || 0)
                               };
                             });
 
@@ -19362,201 +19925,287 @@ export default function Dashboard() {
           )}
 
           {cwScheduleModalOpen && (
-            <div className="fixed inset-0 z-[65] bg-black/50 flex items-center justify-center p-1 sm:p-3" onClick={() => setCwScheduleModalOpen(false)}>
-              <div className="w-full max-w-3xl h-[96vh] sm:h-auto bg-white rounded-2xl shadow-2xl p-3 sm:p-4 md:p-6 overflow-auto" onClick={(e) => e.stopPropagation()}>
-                <div className="flex items-center justify-between gap-2 mb-3">
-                  <div>
-                    <div className="text-lg font-bold text-gray-900">График выходов</div>
-                    <div className="text-xs text-gray-500">Отмечай даты, когда сотрудник выходит на работу</div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {String(currentEmployee?.role || '').toLowerCase() === 'admin' && (
-                      <>
-                        <button onClick={async () => { await loadAutoScheduleNotifyDates(); setCwScheduleNotifyEmployeeIds(['']); setCwScheduleNotifyOpen(true); }} className="px-2 py-1.5 text-xs rounded border border-sky-200 text-sky-700 hover:bg-sky-50 inline-flex items-center gap-1"><Send className="w-3.5 h-3.5" /> Telegram</button>
-                        <button onClick={async () => { await loadScheduleRules(); setCwScheduleRulesOpen(true); }} className="px-3 py-1.5 text-xs rounded border border-indigo-200 text-indigo-700 hover:bg-indigo-50">Правила графика</button>
-                      </>
-                    )}
-                    <button onClick={() => setCwScheduleModalOpen(false)} className="p-2 hover:bg-gray-100 rounded-lg"><X className="w-5 h-5" /></button>
-                  </div>
-                </div>
-
-                {String(currentEmployee?.role || '').toLowerCase() === 'admin' && hasAssemblyButtonAccess('cw_calendar_schedule_employee_pick') && (
-                  <div className="mb-3">
-                    <label className="block text-xs text-gray-500 mb-1">Сотрудник</label>
-                    <select
-                      value={cwScheduleEmployeeId}
-                      onChange={async (e) => {
-                        const id = e.target.value;
-                        setCwScheduleEmployeeId(id);
-                        if (id) await loadEmployeeSchedule(id);
-                      }}
-                      className="oc-select"
-                    >
-                      <option value="">Выберите сотрудника...</option>
-                      {employees
-                        .filter((e) => String(e.role || '').toLowerCase() !== 'admin' && String(e.login || '').toLowerCase() !== 'admin')
-                        .filter((e) => isScheduleEmployeeVisible(e))
-                        .map((e) => (
-                          <option key={`sched-emp-${e.id}`} value={e.id}>{e.full_name}</option>
-                        ))}
-                    </select>
-                  </div>
-                )}
-
-                <div className="flex items-center justify-between mb-3 gap-2">
-                  <div className="font-semibold text-gray-800 capitalize">{cwScheduleMonth.toLocaleString('ru-RU', { month: 'long', year: 'numeric' })}</div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setCwScheduleMode((m) => m === 'work' ? 'off' : 'work')}
-                      className={`px-3 py-1.5 text-xs rounded-full border ${cwScheduleMode === 'off' ? 'bg-rose-50 border-rose-200 text-rose-700' : 'bg-blue-50 border-blue-200 text-blue-700'}`}
-                    >
-                      {cwScheduleMode === 'off' ? 'Режим: Выходные' : 'Режим: Рабочие'}
-                    </button>
-                    <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
-                      <button onClick={() => setCwScheduleMonth(new Date(cwScheduleMonth.getFullYear(), cwScheduleMonth.getMonth() - 1, 1))} className="p-1 hover:bg-white rounded"><ChevronLeft className="h-4 w-4" /></button>
-                      <button onClick={() => setCwScheduleMonth(new Date(cwScheduleMonth.getFullYear(), cwScheduleMonth.getMonth() + 1, 1))} className="p-1 hover:bg-white rounded"><ChevronRight className="h-4 w-4" /></button>
+            <div className="fixed inset-0 z-[65] bg-black/50 flex items-end sm:items-center justify-center p-2 sm:p-3" onClick={() => setCwScheduleModalOpen(false)}>
+              <div className="w-full max-w-3xl h-[88vh] sm:h-auto bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+                <div className="sticky top-0 z-20 bg-white px-3 pt-2 pb-2 sm:px-4 sm:pt-4 md:px-6 md:pt-6 border-b">
+                  <div className="mx-auto mb-1.5 h-1.5 w-12 rounded-full bg-gray-300 sm:hidden" />
+                  <div className="flex items-center justify-between gap-2 mb-2 pr-12 md:pr-0">
+                    <div>
+                      <div className="text-base sm:text-lg font-bold text-gray-900 leading-tight">График выходов</div>
+                      <div className="text-[11px] sm:text-xs text-gray-500 leading-tight">Отмечай даты, когда сотрудник выходит на работу</div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {String(currentEmployee?.role || '').toLowerCase() === 'admin' && (
+                        <>
+                          <button onClick={async () => { await loadAutoScheduleNotifyDates(); setCwScheduleNotifyEmployeeIds(['']); setCwScheduleNotifyOpen(true); }} className="px-2 py-1.5 text-xs rounded border border-sky-200 text-sky-700 hover:bg-sky-50 inline-flex items-center gap-1"><Send className="w-3.5 h-3.5" /> Telegram</button>
+                          <button onClick={async () => { await loadScheduleRules(); setCwScheduleRulesOpen(true); }} className="px-3 py-1.5 text-xs rounded border border-indigo-200 text-indigo-700 hover:bg-indigo-50">Правила графика</button>
+                        </>
+                      )}
+                      <button
+                        onClick={() => setCwScheduleModalOpen(false)}
+                        className="fixed right-4 top-4 z-30 inline-flex h-11 w-11 items-center justify-center rounded-full border border-gray-200 bg-white shadow-md hover:bg-gray-50 md:static md:h-auto md:w-auto md:rounded-lg md:border-0 md:bg-transparent md:shadow-none md:p-2"
+                        aria-label="Закрыть график выходов"
+                      ><X className="w-5 h-5" /></button>
                     </div>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-7 gap-1 sm:gap-2 mb-2 text-center text-[10px] sm:text-xs font-medium text-gray-400">
-                  {['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map((d) => <div key={`sched-d-${d}`}>{d}</div>)}
-                </div>
-                <div className="grid grid-cols-7 gap-1 sm:gap-2">
-                  {(() => {
-                    const year = cwScheduleMonth.getFullYear();
-                    const month = cwScheduleMonth.getMonth();
-                    const daysInMonth = new Date(year, month + 1, 0).getDate();
-                    const firstDay = new Date(year, month, 1).getDay() || 7;
-                    const cells: any[] = [];
-                    for (let i = 1; i < firstDay; i++) cells.push(<div key={`sched-empty-${i}`} />);
-                    for (let d = 1; d <= daysInMonth; d++) {
-                      const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-                      const checkedWork = cwScheduleDraftDates.includes(dateStr);
-                      const checkedOff = cwScheduleDraftOffDates.includes(dateStr);
-                      const checked = cwScheduleMode === 'off' ? checkedOff : checkedWork;
-                      cells.push(
-                        <button
-                          key={`sched-day-${d}`}
-                          onClick={() => {
-                            const isAdmin = String(currentEmployee?.role || '').toLowerCase() === 'admin';
-                            if (!cwScheduleEmployeeId) return;
-                            if (checked && cwScheduleLocked && !isAdmin) return; // only admin can remove after save
-                            if (cwScheduleMode === 'off') {
-                              const next = checkedOff ? cwScheduleDraftOffDates.filter((x) => x !== dateStr) : [...cwScheduleDraftOffDates, dateStr];
-                              setCwScheduleDraftOffDates(Array.from(new Set(next)).sort());
-                            } else {
-                              const next = checkedWork ? cwScheduleDraftDates.filter((x) => x !== dateStr) : [...cwScheduleDraftDates, dateStr];
-                              setCwScheduleDraftDates(Array.from(new Set(next)).sort());
-                            }
-                          }}
-                          className={`min-h-[54px] sm:min-h-[64px] border rounded-lg sm:rounded-xl p-1.5 sm:p-2 text-left transition-all ${checked ? (cwScheduleMode === 'off' ? 'bg-rose-50 border-rose-300' : 'bg-blue-50 border-blue-300') : 'bg-white border-gray-200 hover:border-blue-300'} ${checked && cwScheduleLocked && String(currentEmployee?.role || '').toLowerCase() !== 'admin' ? 'opacity-90' : ''}`}
-                        >
-                          <div className="text-xs sm:text-sm font-medium text-gray-700">{d}</div>
-                          {checked && <div className={`text-[9px] sm:text-[10px] mt-0.5 sm:mt-1 ${cwScheduleMode === 'off' ? 'text-rose-700' : 'text-blue-700'}`}>{cwScheduleMode === 'off' ? 'Выходной' : 'Рабочий'}</div>}
-                        </button>
-                      );
-                    }
-                    return cells;
-                  })()}
-                </div>
-
-                <div className="mt-4 space-y-2">
-                  {!!cwScheduleInlineError && (
-                    <div className="text-sm rounded-lg border border-rose-200 bg-rose-50 text-rose-700 px-3 py-2">{cwScheduleInlineError}</div>
+                <div className="flex-1 overflow-y-auto custom-scrollbar px-3 pb-4 sm:px-4 md:px-6">
+                  {String(currentEmployee?.role || '').toLowerCase() === 'admin' && hasAssemblyButtonAccess('cw_calendar_schedule_employee_pick') && (
+                    <div className="mb-3 pt-1">
+                      <label className="block text-xs text-gray-500 mb-1">Сотрудник</label>
+                      <select
+                        value={cwScheduleEmployeeId}
+                        onChange={async (e) => {
+                          const id = e.target.value;
+                          setCwScheduleEmployeeId(id);
+                          if (id) await loadEmployeeSchedule(id);
+                        }}
+                        className="oc-select"
+                      >
+                        <option value="">Выберите сотрудника...</option>
+                        {employees
+                          .filter((e) => String(e.role || '').toLowerCase() !== 'admin' && String(e.login || '').toLowerCase() !== 'admin')
+                          .filter((e) => isScheduleEmployeeVisible(e))
+                          .map((e) => (
+                            <option key={`sched-emp-${e.id}`} value={e.id}>{e.full_name}</option>
+                          ))}
+                      </select>
+                    </div>
                   )}
-                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                    <div className="text-xs text-gray-500">После сохранения отмена выхода доступна только администратору.</div>
-                    <button
-                    onClick={async () => {
-                      if (!cwScheduleEmployeeId) return;
-                      setCwScheduleInlineError('');
-                      const isAdmin = String(currentEmployee?.role || '').toLowerCase() === 'admin';
 
-                      if (!isAdmin) {
-                        const now = new Date();
-                        const day = now.getDate();
-                        const inWin1 = Math.abs(day - Number(cwScheduleRuleStart1 || 1)) <= 3;
-                        const inWin2 = Math.abs(day - Number(cwScheduleRuleStart2 || 14)) <= 3;
-                        if (!inWin1 && !inWin2) {
-                          setCwScheduleInlineError(`График можно заполнять в диапазоне ±3 дня от ${cwScheduleRuleStart1} и ${cwScheduleRuleStart2} числа`);
-                          return;
-                        }
-                        const selectedStartDay = inWin2 && !inWin1 ? Number(cwScheduleRuleStart2 || 14) : Number(cwScheduleRuleStart1 || 1);
-                        const start = new Date(now.getFullYear(), now.getMonth(), selectedStartDay);
-                        const end = new Date(start);
-                        if (selectedStartDay === Number(cwScheduleRuleStart2 || 14) && cwScheduleRuleSecondToMonthEnd) {
-                          end.setMonth(end.getMonth() + 1, 0);
-                        } else {
-                          end.setDate(end.getDate() + 13);
-                        }
-                        const inWindow = (d: string) => {
-                          const dt = new Date(`${d}T00:00:00`);
-                          return dt >= start && dt <= end;
-                        };
-                        if (![...cwScheduleDraftDates, ...cwScheduleDraftOffDates].every(inWindow)) {
-                          setCwScheduleInlineError('Можно указывать только даты в окне ближайших 14 дней');
-                          return;
-                        }
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-3 gap-2">
+                    <div className="font-semibold text-gray-800 capitalize text-sm sm:text-base">{cwScheduleMonth.toLocaleString('ru-RU', { month: 'long', year: 'numeric' })}</div>
+                    <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+                      <button
+                        type="button"
+                        onClick={() => setCwScheduleMode((m) => m === 'work' ? 'off' : 'work')}
+                        className={`w-full sm:w-auto px-3 py-2 text-xs rounded-full border ${cwScheduleMode === 'off' ? 'bg-rose-50 border-rose-200 text-rose-700' : 'bg-blue-50 border-blue-200 text-blue-700'}`}
+                      >
+                        {cwScheduleMode === 'off' ? 'Режим: Выходные' : 'Режим: Рабочие'}
+                      </button>
+                      <div className="flex gap-1 bg-gray-100 rounded-lg p-1 self-start sm:self-auto">
+                        <button onClick={() => setCwScheduleMonth(new Date(cwScheduleMonth.getFullYear(), cwScheduleMonth.getMonth() - 1, 1))} className="p-1 hover:bg-white rounded"><ChevronLeft className="h-4 w-4" /></button>
+                        <button onClick={() => setCwScheduleMonth(new Date(cwScheduleMonth.getFullYear(), cwScheduleMonth.getMonth() + 1, 1))} className="p-1 hover:bg-white rounded"><ChevronRight className="h-4 w-4" /></button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-7 gap-1 mb-2 text-center text-[10px] sm:text-xs font-medium text-gray-400">
+                    {['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map((d) => <div key={`sched-d-${d}`}>{d}</div>)}
+                  </div>
+                  <div className="grid grid-cols-7 gap-1 sm:gap-2">
+                    {(() => {
+                      const year = cwScheduleMonth.getFullYear();
+                      const month = cwScheduleMonth.getMonth();
+                      const daysInMonth = new Date(year, month + 1, 0).getDate();
+                      const firstDay = new Date(year, month, 1).getDay() || 7;
+                      const cells: any[] = [];
+                      for (let i = 1; i < firstDay; i++) cells.push(<div key={`sched-empty-${i}`} />);
+                      for (let d = 1; d <= daysInMonth; d++) {
+                        const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+                        const checkedWork = cwScheduleDraftDates.includes(dateStr);
+                        const checkedOff = cwScheduleDraftOffDates.includes(dateStr);
+                        const checked = cwScheduleMode === 'off' ? checkedOff : checkedWork;
+                        cells.push(
+                          <button
+                            key={`sched-day-${d}`}
+                            onClick={() => {
+                              const isAdmin = String(currentEmployee?.role || '').toLowerCase() === 'admin';
+                              if (!cwScheduleEmployeeId) return;
+                              if (checked && cwScheduleLocked && !isAdmin) return;
+                              if (cwScheduleMode === 'off') {
+                                const next = checkedOff ? cwScheduleDraftOffDates.filter((x) => x !== dateStr) : [...cwScheduleDraftOffDates, dateStr];
+                                setCwScheduleDraftOffDates(Array.from(new Set(next)).sort());
+                              } else {
+                                const next = checkedWork ? cwScheduleDraftDates.filter((x) => x !== dateStr) : [...cwScheduleDraftDates, dateStr];
+                                setCwScheduleDraftDates(Array.from(new Set(next)).sort());
+                              }
+                            }}
+                            className={`min-h-[52px] sm:min-h-[64px] border rounded-lg sm:rounded-xl p-1 sm:p-2 text-left transition-all ${checked ? (cwScheduleMode === 'off' ? 'bg-rose-50 border-rose-300' : 'bg-blue-50 border-blue-300') : 'bg-white border-gray-200 hover:border-blue-300'} ${checked && cwScheduleLocked && String(currentEmployee?.role || '').toLowerCase() !== 'admin' ? 'opacity-90' : ''}`}
+                          >
+                            <div className="text-xs sm:text-sm font-medium text-gray-700">{d}</div>
+                            {checked && <div className={`text-[9px] sm:text-[10px] mt-0.5 sm:mt-1 ${cwScheduleMode === 'off' ? 'text-rose-700' : 'text-blue-700'}`}>{cwScheduleMode === 'off' ? 'Выходной' : 'Рабочий'}</div>}
+                          </button>
+                        );
                       }
+                      return cells;
+                    })()}
+                  </div>
 
-                      const offInMonth = cwScheduleDraftOffDates.filter((d) => {
-                        const dt = new Date(`${d}T00:00:00`);
-                        return dt.getFullYear() === cwScheduleMonth.getFullYear() && dt.getMonth() === cwScheduleMonth.getMonth();
-                      }).length;
-                      if (offInMonth > Number(cwScheduleRuleMaxOffDays || 0)) {
-                        setCwScheduleInlineError(`Превышен лимит выходных: максимум ${cwScheduleRuleMaxOffDays} в месяц`);
-                        return;
-                      }
+                  <div className="mt-4 space-y-2 pb-24 sm:pb-2">
+                    {!!cwScheduleInlineError && (
+                      <div className="text-sm rounded-lg border border-rose-200 bg-rose-50 text-rose-700 px-3 py-2">{cwScheduleInlineError}</div>
+                    )}
+                    <div className="hidden sm:flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                      <div className="text-xs text-gray-500">После сохранения отмена выхода доступна только администратору.</div>
+                      <button
+                        onClick={async () => {
+                          if (!cwScheduleEmployeeId) return;
+                          setCwScheduleInlineError('');
+                          const isAdmin = String(currentEmployee?.role || '').toLowerCase() === 'admin';
 
-                      // Rule: Серега и Юля не могут иметь выходной в один день
-                      if (cwScheduleRuleMutualOffEnabled) {
-                        const targetEmp = employees.find((e) => String(e.id) === String(cwScheduleEmployeeId));
-                        const targetName = String(targetEmp?.full_name || targetEmp?.login || '').toLowerCase();
-                        const isSerega = /серег|serg|seryo|seryog/i.test(targetName);
-                        const isYulia = /юл|yuli|juli/i.test(targetName);
-                        if (isSerega || isYulia) {
-                          const counterpart = employees.find((e) => {
-                            const n = String(e.full_name || e.login || '').toLowerCase();
-                            return isSerega ? /юл|yuli|juli/i.test(n) : /серег|serg|seryo|seryog/i.test(n);
-                          });
-                          if (counterpart?.id) {
-                            const key = scheduleKeyForEmployee(String(counterpart.id));
-                            const { data } = await supabase.from('app_settings').select('value').eq('key', key).maybeSingle();
-                            const parsed = data?.value ? (typeof data.value === 'string' ? JSON.parse(data.value) : data.value) : {};
-                            const cpOff: string[] = Array.isArray(parsed?.offDates) ? parsed.offDates : [];
-                            const clash = cwScheduleDraftOffDates.find((d) => cpOff.includes(d));
-                            if (clash) {
-                              setCwScheduleInlineError(`У сотрудника ${counterpart.full_name} уже выбран выходной ${new Date(`${clash}T12:00:00`).toLocaleDateString('ru-RU')}`);
+                          if (!isAdmin) {
+                            const now = new Date();
+                            const day = now.getDate();
+                            const inWin1 = Math.abs(day - Number(cwScheduleRuleStart1 || 1)) <= 3;
+                            const inWin2 = Math.abs(day - Number(cwScheduleRuleStart2 || 14)) <= 3;
+                            if (!inWin1 && !inWin2) {
+                              setCwScheduleInlineError(`График можно заполнять в диапазоне ±3 дня от ${cwScheduleRuleStart1} и ${cwScheduleRuleStart2} числа`);
+                              return;
+                            }
+                            const selectedStartDay = inWin2 && !inWin1 ? Number(cwScheduleRuleStart2 || 14) : Number(cwScheduleRuleStart1 || 1);
+                            const start = new Date(now.getFullYear(), now.getMonth(), selectedStartDay);
+                            const end = new Date(start);
+                            if (selectedStartDay === Number(cwScheduleRuleStart2 || 14) && cwScheduleRuleSecondToMonthEnd) {
+                              end.setMonth(end.getMonth() + 1, 0);
+                            } else {
+                              end.setDate(end.getDate() + 13);
+                            }
+                            const inWindow = (d: string) => {
+                              const dt = new Date(`${d}T00:00:00`);
+                              return dt >= start && dt <= end;
+                            };
+                            if (![...cwScheduleDraftDates, ...cwScheduleDraftOffDates].every(inWindow)) {
+                              setCwScheduleInlineError('Можно указывать только даты в окне ближайших 14 дней');
                               return;
                             }
                           }
-                        }
-                      }
 
-                      await saveEmployeeSchedule(cwScheduleEmployeeId, cwScheduleDraftDates, cwScheduleDraftOffDates, true);
-                      setCwScheduleInlineError('');
-                      showToast('График сохранён', 'success');
-                    }}
-                    className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700"
-                  >
-                    Сохранить график
-                  </button>
+                          const offInMonth = cwScheduleDraftOffDates.filter((d) => {
+                            const dt = new Date(`${d}T00:00:00`);
+                            return dt.getFullYear() === cwScheduleMonth.getFullYear() && dt.getMonth() === cwScheduleMonth.getMonth();
+                          }).length;
+                          if (offInMonth > Number(cwScheduleRuleMaxOffDays || 0)) {
+                            setCwScheduleInlineError(`Превышен лимит выходных: максимум ${cwScheduleRuleMaxOffDays} в месяц`);
+                            return;
+                          }
+
+                          if (cwScheduleRuleMutualOffEnabled) {
+                            const targetEmp = employees.find((e) => String(e.id) === String(cwScheduleEmployeeId));
+                            const targetName = String(targetEmp?.full_name || targetEmp?.login || '').toLowerCase();
+                            const isSerega = /серег|serg|seryo|seryog/i.test(targetName);
+                            const isYulia = /юл|yuli|juli/i.test(targetName);
+                            if (isSerega || isYulia) {
+                              const counterpart = employees.find((e) => {
+                                const n = String(e.full_name || e.login || '').toLowerCase();
+                                return isSerega ? /юл|yuli|juli/i.test(n) : /серег|serg|seryo|seryog/i.test(n);
+                              });
+                              if (counterpart?.id) {
+                                const key = scheduleKeyForEmployee(String(counterpart.id));
+                                const { data } = await supabase.from('app_settings').select('value').eq('key', key).maybeSingle();
+                                const parsed = data?.value ? (typeof data.value === 'string' ? JSON.parse(data.value) : data.value) : {};
+                                const cpOff: string[] = Array.isArray(parsed?.offDates) ? parsed.offDates : [];
+                                const clash = cwScheduleDraftOffDates.find((d) => cpOff.includes(d));
+                                if (clash) {
+                                  setCwScheduleInlineError(`У сотрудника ${counterpart.full_name} уже выбран выходной ${new Date(`${clash}T12:00:00`).toLocaleDateString('ru-RU')}`);
+                                  return;
+                                }
+                              }
+                            }
+                          }
+
+                          await saveEmployeeSchedule(cwScheduleEmployeeId, cwScheduleDraftDates, cwScheduleDraftOffDates, true);
+                          setCwScheduleInlineError('');
+                          showToast('График сохранён', 'success');
+                        }}
+                        className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700"
+                      >
+                        Сохранить график
+                      </button>
+                    </div>
+                    <div className="sm:hidden fixed inset-x-0 bottom-0 z-20 border-t bg-white/95 backdrop-blur px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+                      <div className="text-[11px] text-gray-500 mb-2">После сохранения отмена выхода доступна только администратору.</div>
+                      <button
+                        onClick={async () => {
+                          if (!cwScheduleEmployeeId) return;
+                          setCwScheduleInlineError('');
+                          const isAdmin = String(currentEmployee?.role || '').toLowerCase() === 'admin';
+
+                          if (!isAdmin) {
+                            const now = new Date();
+                            const day = now.getDate();
+                            const inWin1 = Math.abs(day - Number(cwScheduleRuleStart1 || 1)) <= 3;
+                            const inWin2 = Math.abs(day - Number(cwScheduleRuleStart2 || 14)) <= 3;
+                            if (!inWin1 && !inWin2) {
+                              setCwScheduleInlineError(`График можно заполнять в диапазоне ±3 дня от ${cwScheduleRuleStart1} и ${cwScheduleRuleStart2} числа`);
+                              return;
+                            }
+                            const selectedStartDay = inWin2 && !inWin1 ? Number(cwScheduleRuleStart2 || 14) : Number(cwScheduleRuleStart1 || 1);
+                            const start = new Date(now.getFullYear(), now.getMonth(), selectedStartDay);
+                            const end = new Date(start);
+                            if (selectedStartDay === Number(cwScheduleRuleStart2 || 14) && cwScheduleRuleSecondToMonthEnd) {
+                              end.setMonth(end.getMonth() + 1, 0);
+                            } else {
+                              end.setDate(end.getDate() + 13);
+                            }
+                            const inWindow = (d: string) => {
+                              const dt = new Date(`${d}T00:00:00`);
+                              return dt >= start && dt <= end;
+                            };
+                            if (![...cwScheduleDraftDates, ...cwScheduleDraftOffDates].every(inWindow)) {
+                              setCwScheduleInlineError('Можно указывать только даты в окне ближайших 14 дней');
+                              return;
+                            }
+                          }
+
+                          const offInMonth = cwScheduleDraftOffDates.filter((d) => {
+                            const dt = new Date(`${d}T00:00:00`);
+                            return dt.getFullYear() === cwScheduleMonth.getFullYear() && dt.getMonth() === cwScheduleMonth.getMonth();
+                          }).length;
+                          if (offInMonth > Number(cwScheduleRuleMaxOffDays || 0)) {
+                            setCwScheduleInlineError(`Превышен лимит выходных: максимум ${cwScheduleRuleMaxOffDays} в месяц`);
+                            return;
+                          }
+
+                          if (cwScheduleRuleMutualOffEnabled) {
+                            const targetEmp = employees.find((e) => String(e.id) === String(cwScheduleEmployeeId));
+                            const targetName = String(targetEmp?.full_name || targetEmp?.login || '').toLowerCase();
+                            const isSerega = /серег|serg|seryo|seryog/i.test(targetName);
+                            const isYulia = /юл|yuli|juli/i.test(targetName);
+                            if (isSerega || isYulia) {
+                              const counterpart = employees.find((e) => {
+                                const n = String(e.full_name || e.login || '').toLowerCase();
+                                return isSerega ? /юл|yuli|juli/i.test(n) : /серег|serg|seryo|seryog/i.test(n);
+                              });
+                              if (counterpart?.id) {
+                                const key = scheduleKeyForEmployee(String(counterpart.id));
+                                const { data } = await supabase.from('app_settings').select('value').eq('key', key).maybeSingle();
+                                const parsed = data?.value ? (typeof data.value === 'string' ? JSON.parse(data.value) : data.value) : {};
+                                const cpOff: string[] = Array.isArray(parsed?.offDates) ? parsed.offDates : [];
+                                const clash = cwScheduleDraftOffDates.find((d) => cpOff.includes(d));
+                                if (clash) {
+                                  setCwScheduleInlineError(`У сотрудника ${counterpart.full_name} уже выбран выходной ${new Date(`${clash}T12:00:00`).toLocaleDateString('ru-RU')}`);
+                                  return;
+                                }
+                              }
+                            }
+                          }
+
+                          await saveEmployeeSchedule(cwScheduleEmployeeId, cwScheduleDraftDates, cwScheduleDraftOffDates, true);
+                          setCwScheduleInlineError('');
+                          showToast('График сохранён', 'success');
+                        }}
+                        className="w-full px-4 py-3 rounded-xl bg-blue-600 text-white font-medium shadow-lg hover:bg-blue-700"
+                      >
+                        Сохранить график
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
           )}
 
           {showTempWorkerHistory && (
-            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 transition-opacity p-2 md:p-4" onClick={() => setShowTempWorkerHistory(false)}>
-              <div className="bg-white rounded-xl shadow-2xl p-4 md:p-6 w-[98vw] max-w-[1500px] h-[90vh] flex flex-col transform transition-all scale-100" onClick={e => e.stopPropagation()}>
-                <div className="mb-6 border-b pb-4">
+            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-end md:items-center justify-center z-50 transition-opacity p-2 md:p-4" onClick={() => setShowTempWorkerHistory(false)}>
+              <div className="bg-white rounded-t-3xl md:rounded-xl shadow-2xl w-[98vw] max-w-[1500px] h-[88vh] md:h-[90vh] flex flex-col overflow-hidden transform transition-all scale-100" onClick={e => e.stopPropagation()}>
+                <div className="sticky top-0 z-20 bg-white px-4 pt-2 pb-2 md:px-6 md:pt-6 md:pb-4 border-b">
+                  <div className="mx-auto mb-1.5 h-1.5 w-12 rounded-full bg-gray-300 md:hidden" />
                   <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                     <div className="pr-0 md:pr-4">
-                      <h2 className="text-xl md:text-2xl font-bold text-gray-900">История временных сотрудников</h2>
-                      <p className="text-gray-500 text-sm mt-1">Журнал смен и выплат</p>
+                      <h2 className="text-base md:text-2xl font-bold text-gray-900 leading-tight">История временных сотрудников</h2>
+                      <p className="text-[11px] md:text-sm text-gray-500 mt-0.5 md:mt-1 leading-tight">Журнал смен и выплат</p>
                     </div>
                     <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end sm:gap-3 w-full md:w-auto">
                       <button
@@ -19581,15 +20230,32 @@ export default function Dashboard() {
                           <Plus className="w-4 h-4 shrink-0" />
                           <span className="text-center">Добавить смену</span>
                       </button>
-                      <button onClick={() => setShowTempWorkerHistory(false)} className="self-end md:self-auto p-2 hover:bg-gray-100 rounded-lg transition-colors">
+                      <button
+                          onClick={() => setShowTempWorkerHistory(false)}
+                          className="fixed right-4 top-4 z-30 inline-flex h-11 w-11 items-center justify-center rounded-full border border-gray-200 bg-white shadow-md hover:bg-gray-50 md:static md:h-auto md:w-auto md:rounded-lg md:border-0 md:bg-transparent md:shadow-none md:p-2"
+                          aria-label="Закрыть окно истории"
+                      >
                           <X className="h-6 w-6 text-gray-500" />
                       </button>
                     </div>
                   </div>
                 </div>
 
-                <div className="mb-3 md:hidden text-xs text-gray-600 bg-gray-50 border rounded-lg p-2">
-                  Не оплачено: <span className="font-semibold text-rose-700">{tempUnpaidBySupplier.total.toFixed(2)} ₽</span> • Смен: <span className="font-semibold">{tempUnpaidBySupplier.shifts}</span>
+                <div className="mb-3 md:hidden -mx-1 px-1 overflow-x-auto">
+                  <div className="flex gap-2 min-w-max pb-1">
+                    <div className="min-w-[170px] rounded-xl border border-rose-200 bg-rose-50 px-3 py-2">
+                      <div className="text-[11px] text-rose-700">Не оплачено всего</div>
+                      <div className="text-lg font-bold text-rose-800 leading-tight">{tempUnpaidBySupplier.total.toFixed(2)} ₽</div>
+                    </div>
+                    <div className="min-w-[150px] rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
+                      <div className="text-[11px] text-amber-700">Не оплаченных смен</div>
+                      <div className="text-lg font-bold text-amber-800 leading-tight">{tempUnpaidBySupplier.shifts}</div>
+                    </div>
+                    <div className="min-w-[170px] rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2">
+                      <div className="text-[11px] text-indigo-700">Поставщиков с долгом</div>
+                      <div className="text-lg font-bold text-indigo-800 leading-tight">{tempUnpaidBySupplier.rows.length}</div>
+                    </div>
+                  </div>
                 </div>
 
                 <div className="hidden md:grid mb-4 grid-cols-1 md:grid-cols-3 gap-3">
@@ -19606,6 +20272,20 @@ export default function Dashboard() {
                     <div className="text-2xl font-bold text-indigo-800">{tempUnpaidBySupplier.rows.length}</div>
                   </div>
                 </div>
+
+                {tempUnpaidBySupplier.rows.length > 0 && (
+                  <div className="md:hidden mb-3 -mx-1 px-1 overflow-x-auto">
+                    <div className="flex gap-2 min-w-max pb-1">
+                      {tempUnpaidBySupplier.rows.map((r) => (
+                        <div key={`temp-unpaid-mobile-${r.supplierId || 'none'}`} className="w-[220px] rounded-xl border border-gray-200 bg-gray-50 p-3 shrink-0">
+                          <div className="text-sm font-medium text-gray-900 truncate" title={r.supplierName}>{r.supplierName}</div>
+                          <div className="mt-1 text-xs text-gray-500">Смен: {r.shifts}</div>
+                          <div className="mt-2 text-sm font-bold text-rose-700">{r.amount.toFixed(2)} ₽</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {tempUnpaidBySupplier.rows.length > 0 && (
                   <div className="hidden md:block mb-4 bg-white border rounded-xl p-3">
@@ -19644,9 +20324,61 @@ export default function Dashboard() {
                     <option value="paid">Оплачено</option>
                     <option value="unpaid">Не оплачено</option>
                   </select>
+                  <select
+                    value={tempWorkerDateSort}
+                    onChange={(e) => setTempWorkerDateSort(e.target.value as 'desc' | 'asc')}
+                    className="oc-input"
+                  >
+                    <option value="desc">Сначала новые</option>
+                    <option value="asc">Сначала старые</option>
+                  </select>
                 </div>
 
-                <div className="flex-1 overflow-y-auto custom-scrollbar">
+                <div className="flex-1 overflow-y-auto custom-scrollbar px-0.5 md:px-0 pb-4">
+                  <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+                    <div className="flex items-center justify-between mb-2 gap-2">
+                      <div className="font-semibold text-emerald-900">Деньги на складе</div>
+                      <div className="text-lg font-extrabold text-emerald-700">{Math.floor(cwWarehouseMoneyBalance).toLocaleString('ru-RU')} ₽</div>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-[160px_1fr_120px_120px] gap-2 mb-3">
+                      <input type="number" step="0.01" placeholder="Сумма" value={cwWarehouseMoneyForm.amount} onChange={(e) => setCwWarehouseMoneyForm(prev => ({ ...prev, amount: e.target.value }))} className="oc-select" />
+                      <input type="text" placeholder="Комментарий (необязательно)" value={cwWarehouseMoneyForm.comment} onChange={(e) => setCwWarehouseMoneyForm(prev => ({ ...prev, comment: e.target.value }))} className="oc-select" />
+                      <button onClick={async () => {
+                        const amountRaw = Number(cwWarehouseMoneyForm.amount || 0); const amount = Math.abs(amountRaw);
+                        if (!Number.isFinite(amount) || amount === 0) { showToast('Введите сумму', 'error'); return; }
+                        const { error } = await supabase.from('warehouse_money_log').insert([{ amount, comment: cwWarehouseMoneyForm.comment.trim(), type: 'manual' }]);
+                        if (error) { showToast('Ошибка добавления операции: ' + (error.message || 'неизвестно'), 'error'); return; }
+                        setCwWarehouseMoneyForm({ amount: '', comment: '' }); await fetchCwWarehouseMoneyHistory(); showToast('Операция добавлена', 'success');
+                      }} className="w-full py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">Добавить</button>
+                      <button onClick={async () => {
+                        const amountRaw = Number(cwWarehouseMoneyForm.amount || 0); const amount = Math.abs(amountRaw);
+                        if (!Number.isFinite(amount) || amount === 0) { showToast('Введите сумму', 'error'); return; }
+                        if (cwWarehouseMoneyBalance < amount) { showToast('Недостаточно денег на складе', 'error'); return; }
+                        const { error } = await supabase.from('warehouse_money_log').insert([{ amount: -amount, comment: cwWarehouseMoneyForm.comment.trim(), type: 'manual' }]);
+                        if (error) { showToast('Ошибка списания операции: ' + (error.message || 'неизвестно'), 'error'); return; }
+                        setCwWarehouseMoneyForm({ amount: '', comment: '' }); await fetchCwWarehouseMoneyHistory(); showToast('Операция списана', 'success');
+                      }} className="w-full py-2 bg-rose-600 text-white rounded-lg hover:bg-rose-700">Списать</button>
+                    </div>
+                    <div className="max-h-48 overflow-y-auto border rounded-lg bg-white">
+                      {cwWarehouseMoneyHistory.length === 0 ? (
+                        <div className="p-3 text-sm text-gray-500">Пока нет операций.</div>
+                      ) : (
+                        <div className="divide-y">
+                          {cwWarehouseMoneyHistory.map((row) => (
+                            <div key={`temp-money-${row.id}`} className="p-3 flex items-center justify-between gap-3 text-sm">
+                              <div>
+                                <div className="font-medium text-gray-900">{row.comment || 'Без комментария'}</div>
+                                <div className="text-xs text-gray-500">{new Date(row.created_at).toLocaleString('ru-RU')}</div>
+                              </div>
+                              <div className={`font-bold ${Number(row.amount) >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                                {Number(row.amount) >= 0 ? '+' : ''}{Math.floor(Number(row.amount || 0)).toLocaleString('ru-RU')} ₽
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
                     <div className="md:hidden space-y-2">
                       {filteredTempWorkerLogs.map((log) => {
                         const supplier = suppliers.find(s => s.id === log.supplier_id);
@@ -19658,7 +20390,12 @@ export default function Dashboard() {
                                 <div className="text-sm font-semibold text-gray-900">{supplier?.name || '-'}</div>
                                 <div className="text-xs text-gray-500">{log?.date ? new Date(log.date).toLocaleDateString('ru-RU') : '-'}</div>
                               </div>
-                              <div className="text-sm font-bold text-green-600">{log.earnings} ₽</div>
+                              <div className="text-sm font-bold text-green-600">
+                                {log.earnings} ₽
+                                {getTempWorkerPaidAmount(log) > 0 && Number(log.earnings || 0) !== getTempWorkerPaidAmount(log) && (
+                                  <span className="ml-1 text-[10px] text-emerald-700">/ оплачено {getTempWorkerPaidAmount(log).toFixed(2)} ₽</span>
+                                )}
+                              </div>
                             </div>
                             <div className="mt-2 text-sm text-gray-800">{log.worker_name || log.worker || '-'}</div>
                             <div className="text-xs text-gray-600 mt-1">{log.work_comment || log.comment || '-'}</div>
@@ -19673,14 +20410,28 @@ export default function Dashboard() {
                                   checked={Boolean(log.is_paid)}
                                   onChange={(e) => {
                                     const next = e.target.checked;
-                                    if (next) setPaidByModal({ isOpen: true, target: 'temp', logId: String(log.id), supplierId: '' });
+                                    if (next) setTempWorkerPaymentModal({ open: true, logId: String(log.id), mode: 'pay', supplierId: '', amount: '', error: '' });
                                     else handleToggleTempWorkerPaid(log.id, false, null);
                                   }}
                                   className="h-4 w-4 rounded border-gray-300 text-green-600 focus:ring-green-500"
                                 />
-                                <span className={`text-xs font-medium ${log.is_paid ? 'text-green-700' : 'text-gray-500'}`}>{log.is_paid ? 'Оплачено' : 'Не оплачено'}</span>
+                                <span className={`text-xs font-medium ${getTempWorkerRemainingAmount(log) <= 0 ? 'text-green-700' : 'text-gray-500'}`}>{getTempWorkerRemainingAmount(log) <= 0 ? 'Оплачено' : 'Не оплачено'}</span>
+                                {getTempWorkerPaidAmount(log) > 0 && (
+                                  <span className="text-[10px] text-emerald-700">Оплачено: {getTempWorkerPaidAmount(log).toFixed(2)} ₽</span>
+                                )}
+                                {getTempWorkerPaymentsSummary(log).map((p) => (
+                                  <span key={`temp-pay-mobile-${log.id}-${p.supplierId}`} className="text-[10px] text-gray-500">{p.supplierName}: {p.amount.toFixed(2)} ₽</span>
+                                ))}
                               </label>
-                              <div className="flex items-center gap-1">
+                              <div className="flex items-center gap-1 flex-wrap justify-end">
+                                {getTempWorkerRemainingAmount(log) > 0 && getTempWorkerPaidAmount(log) > 0 && (
+                                  <button
+                                    onClick={() => setTempWorkerPaymentModal({ open: true, logId: String(log.id), mode: 'extra', supplierId: '', amount: '', error: '' })}
+                                    className="inline-flex items-center gap-1 px-2 py-1 text-xs text-emerald-700 hover:bg-emerald-50 rounded-lg transition-colors"
+                                  >
+                                    Доплата
+                                  </button>
+                                )}
                                 <button
                                   onClick={() => handleOpenEditTempWorkerLog(log)}
                                   disabled={!hasAssemblyButtonAccess('temp_shift_edit')}
@@ -19730,7 +20481,12 @@ export default function Dashboard() {
                                         <td className="p-4 text-gray-900">{log.worker_name || log.worker || '-'}</td>
                                         <td className="p-4 text-gray-600 max-w-[260px] truncate" title={log.work_comment || log.comment || ''}>{log.work_comment || log.comment || '-'}</td>
                                         <td className="p-4 text-gray-600">{log.hours} ч.</td>
-                                        <td className="p-4 font-bold text-green-600">{log.earnings} ₽</td>
+                                        <td className="p-4 font-bold text-green-600">
+                                          {log.earnings} ₽
+                                          {getTempWorkerPaidAmount(log) > 0 && Number(log.earnings || 0) !== getTempWorkerPaidAmount(log) && (
+                                            <span className="ml-2 text-xs text-emerald-700">оплачено {getTempWorkerPaidAmount(log).toFixed(2)} ₽</span>
+                                          )}
+                                        </td>
                                         <td className="p-4">
                                           <label className="inline-flex items-center gap-2 cursor-pointer select-none">
                                             <input
@@ -19738,18 +20494,21 @@ export default function Dashboard() {
                                               checked={Boolean(log.is_paid)}
                                               onChange={(e) => {
                                                 const next = e.target.checked;
-                                                if (next) setPaidByModal({ isOpen: true, target: 'temp', logId: String(log.id), supplierId: '' });
+                                                if (next) setTempWorkerPaymentModal({ open: true, logId: String(log.id), mode: 'pay', supplierId: '', amount: '', error: '' });
                                                 else handleToggleTempWorkerPaid(log.id, false, null);
                                               }}
                                               className="h-4 w-4 rounded border-gray-300 text-green-600 focus:ring-green-500"
                                             />
                                             <div className="flex flex-col">
-                                              <span className={`text-sm font-medium ${log.is_paid ? 'text-green-700' : 'text-gray-500'}`}>
-                                                {log.is_paid ? 'Оплачено' : 'Не оплачено'}
+                                              <span className={`text-sm font-medium ${getTempWorkerRemainingAmount(log) <= 0 ? 'text-green-700' : 'text-gray-500'}`}>
+                                                {getTempWorkerRemainingAmount(log) <= 0 ? 'Оплачено' : 'Не оплачено'}
                                               </span>
-                                              {log.is_paid && log.paid_by_supplier_id && (
-                                                <span className="text-[10px] text-gray-500">Оплатил: {suppliers.find(s => String(s.id) === String(log.paid_by_supplier_id))?.name || `#${log.paid_by_supplier_id}`}</span>
+                                              {getTempWorkerPaidAmount(log) > 0 && (
+                                                <span className="text-[10px] text-emerald-700">Оплачено: {getTempWorkerPaidAmount(log).toFixed(2)} ₽</span>
                                               )}
+                                              {getTempWorkerPaymentsSummary(log).map((p) => (
+                                                <span key={`temp-pay-table-${log.id}-${p.supplierId}`} className="text-[10px] text-gray-500">{p.supplierName}: {p.amount.toFixed(2)} ₽</span>
+                                              ))}
                                             </div>
                                           </label>
                                         </td>
@@ -19791,6 +20550,60 @@ export default function Dashboard() {
                             )}
                         </tbody>
                     </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {tempWorkerPaymentModal.open && (
+            <div className="fixed inset-0 z-[80] bg-black/50 flex items-center justify-center p-4" onClick={() => setTempWorkerPaymentModal({ open: false, logId: '', mode: 'pay', supplierId: '', amount: '', error: '' })}>
+              <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl p-4 sm:p-6" onClick={(e) => e.stopPropagation()}>
+                <div className="text-lg font-bold mb-4">{tempWorkerPaymentModal.mode === 'extra' ? 'Доплата' : 'Оплата записи'}</div>
+                <div className="space-y-3">
+                  {(() => {
+                    const log = (tempWorkerLogs || []).find((x: any) => String(x.id) === String(tempWorkerPaymentModal.logId));
+                    const earnings = Number(log?.earnings || 0);
+                    const paid = getTempWorkerPaidAmount(log);
+                    const remaining = getTempWorkerRemainingAmount(log);
+                    return (
+                      <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm space-y-1">
+                        <div>Заработок: <b>{earnings.toFixed(2)} ₽</b></div>
+                        {paid > 0 && <div>Уже оплачено: <b>{paid.toFixed(2)} ₽</b></div>}
+                        <div>Остаток: <b>{remaining.toFixed(2)} ₽</b></div>
+                      </div>
+                    );
+                  })()}
+                  {!!tempWorkerPaymentModal.error && <div className="rounded-lg border border-rose-200 bg-rose-50 text-rose-700 px-3 py-2 text-sm">{tempWorkerPaymentModal.error}</div>}
+                  <select value={tempWorkerPaymentModal.supplierId} onChange={(e) => setTempWorkerPaymentModal(prev => ({ ...prev, supplierId: e.target.value, error: '' }))} className="oc-input">
+                    <option value="">Выберите поставщика</option>
+                    {suppliers.map(s => <option key={s.id} value={String(s.id)}>{s.name}</option>)}
+                  </select>
+                  <input value={tempWorkerPaymentModal.amount} onChange={(e) => setTempWorkerPaymentModal(prev => ({ ...prev, amount: e.target.value, error: '' }))} type="number" step="0.01" placeholder="Сумма оплаты" className="oc-input" />
+                  <button
+                    onClick={async () => {
+                      const log = (tempWorkerLogs || []).find((x: any) => String(x.id) === String(tempWorkerPaymentModal.logId));
+                      const amount = Number(tempWorkerPaymentModal.amount || 0);
+                      const remaining = getTempWorkerRemainingAmount(log);
+                      if (!log || !tempWorkerPaymentModal.supplierId || !Number.isFinite(amount) || amount <= 0 || amount > remaining) {
+                        setTempWorkerPaymentModal(prev => ({ ...prev, error: 'Введите корректную сумму не больше остатка' }));
+                        return;
+                      }
+                      const nextMap = { ...(tempWorkerPaymentsMap || {}) } as Record<string, any[]>;
+                      const key = String(log.id);
+                      const prev = Array.isArray(nextMap[key]) ? nextMap[key] : [];
+                      nextMap[key] = [...prev, { amount, supplier_id: String(tempWorkerPaymentModal.supplierId), created_at: new Date().toISOString() }];
+                      setTempWorkerPaymentsMap(nextMap);
+                      await supabase.from('app_settings').upsert([{ key: 'temp_worker_payments_v1', value: JSON.stringify(nextMap) }], { onConflict: 'key' });
+                      const totalPaid = nextMap[key].reduce((s: number, p: any) => s + Number(p.amount || 0), 0);
+                      const nextPaid = totalPaid >= Number(log.earnings || 0);
+                      setTempWorkerLogs(prevLogs => prevLogs.map((x: any) => String(x.id) === key ? { ...x, is_paid: nextPaid, paid_by_supplier_id: String(tempWorkerPaymentModal.supplierId) } : x));
+                      setTempWorkerPaymentModal({ open: false, logId: '', mode: 'pay', supplierId: '', amount: '', error: '' });
+                      showToast('Оплата сохранена', 'success');
+                    }}
+                    className="w-full btn-primary py-3"
+                  >
+                    Сохранить оплату
+                  </button>
                 </div>
               </div>
             </div>
@@ -20061,35 +20874,113 @@ export default function Dashboard() {
                     <div><span className="font-semibold">Выключено</span> - скрыть / запретить</div>
                   </div>
 
-                  <div className="space-y-4">
-                    {ASSEMBLY_BUTTONS.map((btn) => (
-                      <div key={btn.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-5 hover:shadow-md transition-shadow">
-                        <div className="flex items-center justify-between gap-2 mb-3">
-                          <div className="font-semibold text-slate-900">{btn.label}</div>
-                          <span className="text-[11px] uppercase tracking-wide px-2.5 py-1 rounded-full bg-slate-100 text-slate-600">Кнопка</span>
+                  <div className="mb-5 grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <input
+                      value={assemblyAccessSearch}
+                      onChange={(e) => setAssemblyAccessSearch(e.target.value)}
+                      placeholder="Поиск по названию кнопки или раздела"
+                      className="oc-input"
+                    />
+                    <input
+                      value={assemblyAccessEmployeeSearch}
+                      onChange={(e) => setAssemblyAccessEmployeeSearch(e.target.value)}
+                      placeholder="Поиск по сотруднику"
+                      className="oc-input"
+                    />
+                  </div>
+
+                  <div className="space-y-6">
+                    {groupedAssemblyButtons.map((group) => (
+                      <div key={`assembly-group-${group.title}`} className="space-y-4">
+                        <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                          <div className="flex items-center gap-3 flex-1 min-w-0">
+                            <div className="h-px flex-1 bg-slate-200" />
+                            <button
+                              type="button"
+                              onClick={() => setCollapsedAssemblyGroups((prev) => ({ ...prev, [group.title]: !prev[group.title] }))}
+                              className="text-xs sm:text-sm font-semibold uppercase tracking-wide text-slate-500 hover:text-slate-700 inline-flex items-center gap-2"
+                            >
+                              <ChevronDown className={`h-4 w-4 transition-transform ${collapsedAssemblyGroups[group.title] ? '-rotate-90' : 'rotate-0'}`} />
+                              {group.title}
+                            </button>
+                            <div className="h-px flex-1 bg-slate-200" />
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const employeeIds = (employees || [])
+                                  .filter((emp) => String(emp.role || '').toLowerCase() !== 'admin' && String(emp.login || '').toLowerCase() !== 'admin')
+                                  .filter((emp) => {
+                                    const q = String(assemblyAccessEmployeeSearch || '').trim().toLowerCase();
+                                    if (!q) return true;
+                                    const hay = `${emp.full_name || ''} ${emp.login || ''} ${emp.email || ''}`.toLowerCase();
+                                    return hay.includes(q);
+                                  })
+                                  .map((emp) => String(emp.id));
+                                setAssemblyGroupRule(group.items.map((x) => x.id), employeeIds, 'allow');
+                              }}
+                              className="px-3 py-1.5 rounded-lg border border-emerald-300 text-emerald-700 hover:bg-emerald-50 text-xs"
+                            >
+                              Включить группу
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const employeeIds = (employees || [])
+                                  .filter((emp) => String(emp.role || '').toLowerCase() !== 'admin' && String(emp.login || '').toLowerCase() !== 'admin')
+                                  .filter((emp) => {
+                                    const q = String(assemblyAccessEmployeeSearch || '').trim().toLowerCase();
+                                    if (!q) return true;
+                                    const hay = `${emp.full_name || ''} ${emp.login || ''} ${emp.email || ''}`.toLowerCase();
+                                    return hay.includes(q);
+                                  })
+                                  .map((emp) => String(emp.id));
+                                setAssemblyGroupRule(group.items.map((x) => x.id), employeeIds, 'deny');
+                              }}
+                              className="px-3 py-1.5 rounded-lg border border-rose-300 text-rose-700 hover:bg-rose-50 text-xs"
+                            >
+                              Выключить группу
+                            </button>
+                          </div>
                         </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
-                          {employees
-                            .filter((emp) => String(emp.role || '').toLowerCase() !== 'admin' && String(emp.login || '').toLowerCase() !== 'admin')
-                            .map((emp) => {
-                              const enabled = isButtonVisibleForEmployee(btn.id, String(emp.id));
-                              return (
-                                <div key={`${btn.id}-${emp.id}`} className="border rounded-xl p-2.5 bg-slate-50">
-                                  <div className="text-xs text-slate-700 font-medium truncate">{emp.full_name}</div>
-                                  <button
-                                    type="button"
-                                    onClick={() => updateAssemblyAccessEmployee(btn.id, String(emp.id), enabled ? 'deny' : 'allow')}
-                                    className={`mt-2 inline-flex items-center gap-2 px-3 py-1.5 rounded-full border transition-colors ${enabled ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-slate-100 border-slate-200 text-slate-600'}`}
-                                  >
-                                    <span className={`w-8 h-4 rounded-full relative ${enabled ? 'bg-emerald-500' : 'bg-slate-400'}`}>
-                                      <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${enabled ? 'left-4' : 'left-0.5'}`} />
-                                    </span>
-                                    <span className="font-medium">{enabled ? 'Показывать' : 'Скрыть'}</span>
-                                  </button>
-                                </div>
-                              );
-                            })}
-                        </div>
+
+                        {!collapsedAssemblyGroups[group.title] && group.items.map((btn) => (
+                          <div key={btn.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-5 hover:shadow-md transition-shadow">
+                            <div className="flex items-center justify-between gap-2 mb-3">
+                              <div className="font-semibold text-slate-900">{btn.label}</div>
+                              <span className="text-[11px] uppercase tracking-wide px-2.5 py-1 rounded-full bg-slate-100 text-slate-600">Кнопка</span>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
+                              {employees
+                                .filter((emp) => String(emp.role || '').toLowerCase() !== 'admin' && String(emp.login || '').toLowerCase() !== 'admin')
+                                .filter((emp) => {
+                                  const q = String(assemblyAccessEmployeeSearch || '').trim().toLowerCase();
+                                  if (!q) return true;
+                                  const hay = `${emp.full_name || ''} ${emp.login || ''} ${emp.email || ''}`.toLowerCase();
+                                  return hay.includes(q);
+                                })
+                                .map((emp) => {
+                                  const enabled = isButtonVisibleForEmployee(btn.id, String(emp.id));
+                                  return (
+                                    <div key={`${btn.id}-${emp.id}`} className="border rounded-xl p-2.5 bg-slate-50">
+                                      <div className="text-xs text-slate-700 font-medium truncate">{emp.full_name}</div>
+                                      <button
+                                        type="button"
+                                        onClick={() => updateAssemblyAccessEmployee(btn.id, String(emp.id), enabled ? 'deny' : 'allow')}
+                                        className={`mt-2 inline-flex items-center gap-2 px-3 py-1.5 rounded-full border transition-colors ${enabled ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-slate-100 border-slate-200 text-slate-600'}`}
+                                      >
+                                        <span className={`w-8 h-4 rounded-full relative ${enabled ? 'bg-emerald-500' : 'bg-slate-400'}`}>
+                                          <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${enabled ? 'left-4' : 'left-0.5'}`} />
+                                        </span>
+                                        <span className="font-medium">{enabled ? 'Показывать' : 'Скрыть'}</span>
+                                      </button>
+                                    </div>
+                                  );
+                                })}
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     ))}
                   </div>
