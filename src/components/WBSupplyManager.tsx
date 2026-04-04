@@ -2087,6 +2087,26 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
     return supplyOrderSummaryRows.reduce((sum, row) => sum + Number(row.totalCost || 0), 0);
   }, [supplyOrderSummaryRows]);
 
+  const orderCostItems = useMemo(() => {
+    const map = new Map<string, { key: string; nmId?: number; article: string; title: string; qty: number }>();
+
+    supplyOrderSummaryRows.forEach((row) => {
+      const key = String(row.nmId || row.article || row.title || '');
+      map.set(key, { key, nmId: row.nmId, article: row.article, title: row.title, qty: row.qty });
+    });
+
+    (orderHistory || []).forEach((h: any) => {
+      const pdfName = String(h?.fileName || '');
+      const title = pdfName.replace(/\.pdf$/i, '');
+      const key = title;
+      if (!map.has(key)) {
+        map.set(key, { key, article: '', title, qty: Number(h?.totalQty || 0) });
+      }
+    });
+
+    return Array.from(map.values());
+  }, [supplyOrderSummaryRows, orderHistory]);
+
   const parseFbsOrdersFile = async (file: File) => {
       setFbsOrdersLoading(true);
       setError(null);
@@ -4486,13 +4506,12 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
             <div className="flex gap-2 flex-wrap">
               <button onClick={() => {
                 const next: Record<string, string> = {};
-                supplyOrderSummaryRows.forEach((row) => {
-                  const key = String(row.nmId || row.article || row.title || '');
-                  next[key] = String(row.costPerUnit || '');
+                orderCostItems.forEach((row) => {
+                  next[row.key] = String(getOrderStoredCost(row) || '');
                 });
                 setOrderCostEditorValues(next);
                 setOrderCostEditorOpen(true);
-              }} disabled={!supplyOrderSummaryRows.length} className="px-4 py-2 rounded-lg border border-indigo-300 text-indigo-700 hover:bg-indigo-100 disabled:opacity-50">Себестоимость</button>
+              }} className="px-4 py-2 rounded-lg border border-indigo-300 text-indigo-700 hover:bg-indigo-100">Себестоимость</button>
               <button onClick={() => setOrderHistoryOpen(true)} className="px-4 py-2 rounded-lg border border-indigo-300 text-indigo-700 hover:bg-indigo-100">История заказов</button>
               <button 
                 onClick={generateSupplyOrderExcel}
@@ -4571,6 +4590,89 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
               >
                 Сохранить PDF
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {orderCostEditorOpen && (
+        <div className="fixed inset-0 z-[131] bg-black/55 flex items-center justify-center p-4" onClick={() => setOrderCostEditorOpen(false)}>
+          <div className="w-full max-w-5xl max-h-[90vh] overflow-hidden bg-white rounded-2xl shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="p-4 border-b border-gray-200 flex items-center justify-between gap-3">
+              <div>
+                <div className="font-semibold text-gray-900">Себестоимость — Заказ товара</div>
+                <div className="text-xs text-gray-500 mt-1">Только карточки товаров, которые были в заказах текущего поставщика</div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const next = { ...(orderCostOverrides || {}) };
+                    orderCostItems.forEach((row) => {
+                      const raw = orderCostEditorValues[row.key] ?? '';
+                      const n = Number(String(raw || '').replace(',', '.'));
+                      const safeValue = Number.isFinite(n) && n >= 0 ? n : 0;
+                      getCalcCostKeyCandidates({ key: row.key, nmId: row.nmId, article: row.article, title: row.title }).forEach((candidate) => {
+                        next[candidate] = safeValue;
+                      });
+                    });
+                    setOrderCostOverrides(next);
+                    try {
+                      if (selectedSupplierIdSupplyOrder) {
+                        const key = `supply_order_cost_overrides_v1:${selectedSupplierIdSupplyOrder}`;
+                        await supabase.from('app_settings').upsert([{ key, value: JSON.stringify(next) }], { onConflict: 'key' });
+                      }
+                      setSuccessMsg('Себестоимость заказа сохранена');
+                      setTimeout(() => setSuccessMsg(null), 2500);
+                    } catch {}
+                    setOrderCostEditorOpen(false);
+                  }}
+                  className="px-3 py-2 text-sm rounded-lg border border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+                >
+                  Сохранить
+                </button>
+                <button type="button" onClick={() => setOrderCostEditorOpen(false)} className="px-3 py-2 text-sm rounded-lg border border-gray-300 hover:bg-gray-50">Закрыть</button>
+              </div>
+            </div>
+            <div className="p-4 overflow-auto max-h-[78vh]">
+              {orderCostItems.length === 0 ? (
+                <div className="text-sm text-gray-500">Нет карточек товаров для настройки себестоимости.</div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                  {orderCostItems.map((r) => {
+                    const code = String(r?.nmId || r?.article || '');
+                    const photo = calcPhotoByNmId[String(r?.nmId || '')] || '';
+                    const valueKey = String(r.key || '');
+                    return (
+                      <div key={`order-cost-${valueKey}`} className="border border-gray-200 rounded-xl p-3 bg-white">
+                        <div className="flex gap-3">
+                          {photo ? (
+                            <img src={photo} alt={r?.title || code} className="w-20 h-24 object-contain rounded border border-gray-200 bg-white p-1" />
+                          ) : (
+                            <div className="w-20 h-24 rounded border border-gray-200 bg-gray-100 text-gray-400 text-xs flex items-center justify-center">N/A</div>
+                          )}
+                          <div className="min-w-0 flex-1">
+                            <div className="text-xs text-gray-500">{code || 'Без артикула'}</div>
+                            <div className="text-sm text-gray-900 leading-5 break-words">{r?.title || '-'}</div>
+                            <div className="mt-1 text-xs text-gray-500">Кол-во: {r.qty}</div>
+                            <div className="mt-2">
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                value={orderCostEditorValues[valueKey] ?? ''}
+                                onChange={(e) => setOrderCostEditorValues((prev) => ({ ...prev, [valueKey]: e.target.value }))}
+                                className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm"
+                                placeholder="Себестоимость"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -4762,85 +4864,6 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
                       ))}
                     </div>
                   )}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {orderCostEditorOpen && (
-            <div className="fixed inset-0 z-[121] bg-black/55 flex items-center justify-center p-4" onClick={() => setOrderCostEditorOpen(false)}>
-              <div className="w-full max-w-5xl max-h-[90vh] overflow-hidden bg-white rounded-2xl shadow-2xl" onClick={(e) => e.stopPropagation()}>
-                <div className="p-4 border-b border-gray-200 flex items-center justify-between gap-3">
-                  <div>
-                    <div className="font-semibold text-gray-900">Себестоимость — Заказ товара</div>
-                    <div className="text-xs text-gray-500 mt-1">Цены сохраняются только для этого раздела и текущего поставщика</div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        const next = { ...(orderCostOverrides || {}) };
-                        supplyOrderSummaryRows.forEach((row) => {
-                          const raw = orderCostEditorValues[String(row.nmId || row.article || row.title || '')] ?? '';
-                          const n = Number(String(raw || '').replace(',', '.'));
-                          const safeValue = Number.isFinite(n) && n >= 0 ? n : 0;
-                          getCalcCostKeyCandidates({ key: String(row.nmId || row.article || row.title || ''), nmId: row.nmId, article: row.article, title: row.title }).forEach((candidate) => {
-                            next[candidate] = safeValue;
-                          });
-                        });
-                        setOrderCostOverrides(next);
-                        try {
-                          if (selectedSupplierIdSupplyOrder) {
-                            const key = `supply_order_cost_overrides_v1:${selectedSupplierIdSupplyOrder}`;
-                            await supabase.from('app_settings').upsert([{ key, value: JSON.stringify(next) }], { onConflict: 'key' });
-                          }
-                          setSuccessMsg('Себестоимость заказа сохранена');
-                          setTimeout(() => setSuccessMsg(null), 2500);
-                        } catch {}
-                        setOrderCostEditorOpen(false);
-                      }}
-                      className="px-3 py-2 text-sm rounded-lg border border-emerald-300 text-emerald-700 hover:bg-emerald-50"
-                    >
-                      Сохранить
-                    </button>
-                    <button type="button" onClick={() => setOrderCostEditorOpen(false)} className="px-3 py-2 text-sm rounded-lg border border-gray-300 hover:bg-gray-50">Закрыть</button>
-                  </div>
-                </div>
-                <div className="p-4 overflow-auto max-h-[78vh]">
-                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                    {supplyOrderSummaryRows.map((r) => {
-                      const code = String(r?.nmId || r?.article || '');
-                      const photo = calcPhotoByNmId[String(r?.nmId || '')] || '';
-                      const valueKey = String(r.nmId || r.article || r.title || '');
-                      return (
-                        <div key={`order-cost-${valueKey}`} className="border border-gray-200 rounded-xl p-3 bg-white">
-                          <div className="flex gap-3">
-                            {photo ? (
-                              <img src={photo} alt={r?.title || code} className="w-20 h-24 object-contain rounded border border-gray-200 bg-white p-1" />
-                            ) : (
-                              <div className="w-20 h-24 rounded border border-gray-200 bg-gray-100 text-gray-400 text-xs flex items-center justify-center">N/A</div>
-                            )}
-                            <div className="min-w-0 flex-1">
-                              <div className="text-xs text-gray-500">{code}</div>
-                              <div className="text-sm text-gray-900 leading-5 break-words">{r?.title || '-'}</div>
-                              <div className="mt-1 text-xs text-gray-500">Кол-во: {r.qty}</div>
-                              <div className="mt-2">
-                                <input
-                                  type="number"
-                                  min="0"
-                                  step="0.01"
-                                  value={orderCostEditorValues[valueKey] ?? ''}
-                                  onChange={(e) => setOrderCostEditorValues((prev) => ({ ...prev, [valueKey]: e.target.value }))}
-                                  className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm"
-                                  placeholder="Себестоимость"
-                                />
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
                 </div>
               </div>
             </div>
