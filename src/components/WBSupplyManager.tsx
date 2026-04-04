@@ -2619,8 +2619,8 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
   };
 
   const calcMissingCostKeys = new Set((calcRows || []).filter((r) => getCalcStoredCost(r) <= 0).map((r) => r.key));
-  const calcCostEditorItems = calcRows.filter((r) => {
-    if (calcMissingCostOnly && !calcMissingCostKeys.has(r.key)) return false;
+  const calcCostEditorItems = (calcRows.length ? calcRows : supplyOrderSummaryRows.map((row) => ({ key: String(row.nmId || row.article || row.title || ''), nmId: row.nmId, article: row.article, title: row.title, qty: row.qty, sizes: row.sizes.map((s) => s.size) }))).filter((r) => {
+    if (calcRows.length && calcMissingCostOnly && !calcMissingCostKeys.has(r.key)) return false;
     const q = calcCostEditorSearch.trim().toLowerCase();
     if (!q) return true;
     return String(r.title || '').toLowerCase().includes(q) || String(r.nmId || '').includes(q) || String(r.article || '').toLowerCase().includes(q);
@@ -3644,7 +3644,7 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
           >
               <div className="flex items-center gap-2">
                   <ShoppingCart className="w-4 h-4" />
-                  Заказ поставщику
+                  Заказ товара
               </div>
           </button>
           <button 
@@ -4412,7 +4412,16 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
               </div>
             </div>
             <div className="flex gap-2 flex-wrap">
-              <button onClick={() => openCalcCostEditor(false)} disabled={!supplyOrderSummaryRows.length} className="px-4 py-2 rounded-lg border border-indigo-300 text-indigo-700 hover:bg-indigo-100 disabled:opacity-50">Себестоимость</button>
+              <button onClick={() => {
+                const next: Record<string, string> = {};
+                supplyOrderSummaryRows.forEach((row) => {
+                  next[String(row.nmId || row.article || row.title || '')] = String(row.costPerUnit || '');
+                });
+                setCalcCostEditorValues(next);
+                setCalcCostEditorSearch('');
+                setCalcMissingCostOnly(false);
+                setCalcCostEditorOpen(true);
+              }} disabled={!supplyOrderSummaryRows.length} className="px-4 py-2 rounded-lg border border-indigo-300 text-indigo-700 hover:bg-indigo-100 disabled:opacity-50">Себестоимость</button>
               <button onClick={generateSupplyOrderDocument} disabled={!supplyOrderSummaryRows.length} className="px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50">Заказ поставщику / PDF</button>
               {generatedOrderPdf ? <a href={generatedOrderPdf.dataUrl} download={generatedOrderPdf.fileName} className="px-4 py-2 rounded-lg bg-white border border-indigo-300 text-indigo-700 hover:bg-indigo-100">Скачать PDF</a> : null}
             </div>
@@ -4671,7 +4680,7 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
               <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50 rounded-t-xl">
                   <h2 className="font-semibold flex items-center gap-2">
                       <ShoppingCart className="w-5 h-5 text-purple-500" />
-                      Формирование заказа поставщику
+                      Заказ товара
                   </h2>
                   <div className="flex gap-2">
                       <button 
@@ -4759,7 +4768,7 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
                                   const matchesBrand = !selectedBrand || p.brand === selectedBrand || p.characteristics?.find(c => c.name === 'Бренд')?.value === selectedBrand;
                                   const matchesCategory = !selectedCategory || (p as any).subjectName === selectedCategory;
                                   const hasFilledCard = sortSizes(p.sizes).some((size) => Number(supplyOrderItems[`${p.nmID}_${size.techSize}`] || 0) > 0);
-                                  const matchesFilledState = showFilledOrderCards ? true : !hasFilledCard;
+                                  const matchesFilledState = showFilledOrderCards ? hasFilledCard : true;
                                   
                                   return matchesSearch && matchesBrand && matchesCategory && matchesFilledState;
                               })
