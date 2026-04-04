@@ -1224,7 +1224,7 @@ export default function Dashboard() {
   const [cwWorkLogs, setCwWorkLogs] = useState<any[]>([]);
   const [cwWorkRates, setCwWorkRates] = useState<any[]>([]);
   const [cwWorkRateSnapshots, setCwWorkRateSnapshots] = useState<Record<string, number>>({});
-  const [cwWorkRateHistory, setCwWorkRateHistory] = useState<Record<string, Array<{ changed_at: string; price: number }>>>({});
+  const [cwWorkRateHistory, setCwWorkRateHistory] = useState<Record<string, Array<{ changed_at: string; price: number; old_price?: number | null; new_price?: number | null; name?: string }>>>({});
   const [cwPackagingRates, setCwPackagingRates] = useState<any[]>([]);
   const [cwForm, setCwForm] = useState({ quantity: '', work_rate_id: '', packaging: '', packaging_used: 'no', supplier_id: '' });
   const [cwFormItems, setCwFormItems] = useState<Array<{ supplier_id: string; work_rate_id: string; quantity: string; time_hours: string; time_minutes: string; packaging_used: '' | 'yes' | 'no'; packaging: string }>>([{ supplier_id: '', work_rate_id: '', quantity: '', time_hours: '', time_minutes: '', packaging_used: '', packaging: '' }]);
@@ -1360,7 +1360,7 @@ export default function Dashboard() {
   };
   const [cwRateForm, setCwRateForm] = useState({ name: '', price: '' });
   const [cwRateHistoryModal, setCwRateHistoryModal] = useState<{ open: boolean; rateId: string; rateName: string }>({ open: false, rateId: '', rateName: '' });
-  const [cwRateBulkModal, setCwRateBulkModal] = useState<{ open: boolean; rateId: string; rateName: string; price: string; start: string; end: string }>({ open: false, rateId: '', rateName: '', price: '', start: new Date().toISOString().split('T')[0], end: new Date().toISOString().split('T')[0] });
+  const [cwRateBulkModal, setCwRateBulkModal] = useState<{ open: boolean; rateId: string; rateName: string; oldPrice: string; price: string; start: string; end: string }>({ open: false, rateId: '', rateName: '', oldPrice: '', price: '', start: new Date().toISOString().split('T')[0], end: new Date().toISOString().split('T')[0] });
   const [cwPackagingRateForm, setCwPackagingRateForm] = useState({ name: '', price: '' });
   const [cwSelectedPeriod, setCwSelectedPeriod] = useState(new Date());
   const [cwReportModalOpen, setCwReportModalOpen] = useState(false);
@@ -10878,57 +10878,11 @@ export default function Dashboard() {
     const startKey = employeeReportRange.start;
     const endKey = employeeReportRange.end;
 
-    const logs = cwWorkLogs.filter(log => {
-      if (!log.date || !log.employee_id) return false;
-
-      const logEmployeeId = String(log.employee_id);
-      if (logEmployeeId !== selectedEmployeeId) return false;
-
-      return log.date >= startKey && log.date <= endKey;
-    });
-
-    if (logs.length === 0) {
-      showToast('Нет данных за выбранный период', 'info');
-      return;
-    }
-
-    const dailyStats: { [key: string]: { amount: number; total: number } } = {};
-    let totalSum = 0;
-
-    logs.forEach(log => {
-      const dateKey = (log.date || '').split('T')[0];
-      if (!dateKey) return;
-
-      const rate = cwWorkRates.find(r => String(r.id) === String(log.work_rate_id));
-      const price = Number(rate?.price || 0);
-      const quantity = Number(log.quantity || 0);
-      const sum = Math.round(quantity * price);
-
-      if (!dailyStats[dateKey]) {
-        dailyStats[dateKey] = { amount: 0, total: 0 };
-      }
-
-      dailyStats[dateKey].amount += quantity;
-      dailyStats[dateKey].total += sum;
-      totalSum += sum;
-    });
-
     const formatDate = (dateKey: string) => {
       const [year, month, day] = dateKey.split('-');
       if (!year || !month || !day) return dateKey;
       return `${day}.${month}.${year}`;
     };
-
-    let message = `📊 Отчет за период ${formatDate(startKey)} - ${formatDate(endKey)}\n`;
-    message += `👤 Сотрудник: ${cwSelectedEmployee.full_name}\n\n`;
-
-    Object.entries(dailyStats)
-      .sort(([dateA], [dateB]) => dateA.localeCompare(dateB))
-      .forEach(([date, stats]) => {
-        message += `📅 ${formatDate(date)}: ${stats.amount} шт. - ${stats.total} ₽\n`;
-      });
-
-    message += `\n💰 ИТОГО: ${totalSum} ₽`;
 
     const token = telegramBotToken?.trim();
 
@@ -10938,6 +10892,65 @@ export default function Dashboard() {
     }
 
     try {
+      const { data: logs, error } = await supabase
+        .from('work_logs')
+        .select('id, employee_id, date, quantity, work_rate_id, deleted_at')
+        .eq('employee_id', cwSelectedEmployee.id)
+        .gte('date', startKey)
+        .lte('date', endKey)
+        .is('deleted_at', null);
+
+      if (error) {
+        throw error;
+      }
+
+      const filteredLogs = (logs || []).filter(log => {
+        if (!log?.date || !log?.employee_id) return false;
+
+        const logEmployeeId = String(log.employee_id);
+        if (logEmployeeId !== selectedEmployeeId) return false;
+
+        const dateKey = String(log.date).split('T')[0];
+        return dateKey >= startKey && dateKey <= endKey;
+      });
+
+      if (filteredLogs.length === 0) {
+        showToast('Нет данных за выбранный период', 'info');
+        return;
+      }
+
+      const dailyStats: { [key: string]: { amount: number; total: number } } = {};
+      let totalSum = 0;
+
+      filteredLogs.forEach(log => {
+        const dateKey = String(log.date || '').split('T')[0];
+        if (!dateKey) return;
+
+        const rate = cwWorkRates.find(r => String(r.id) === String(log.work_rate_id));
+        const price = Number(rate?.price || 0);
+        const quantity = Number(log.quantity || 0);
+        const sum = Math.round(quantity * price);
+
+        if (!dailyStats[dateKey]) {
+          dailyStats[dateKey] = { amount: 0, total: 0 };
+        }
+
+        dailyStats[dateKey].amount += quantity;
+        dailyStats[dateKey].total += sum;
+        totalSum += sum;
+      });
+
+      let message = `📊 Отчет за период ${formatDate(startKey)} - ${formatDate(endKey)}\n`;
+      message += `👤 Сотрудник: ${cwSelectedEmployee.full_name}\n\n`;
+
+      Object.entries(dailyStats)
+        .sort(([dateA], [dateB]) => dateA.localeCompare(dateB))
+        .forEach(([date, stats]) => {
+          message += `📅 ${formatDate(date)}: ${stats.amount} шт. - ${stats.total} ₽\n`;
+        });
+
+      message += `\n💰 ИТОГО: ${totalSum} ₽`;
+
       const response = await telegramService.sendMessage(token, cwSelectedEmployee.telegram_chat_id, message);
 
       if (!response?.ok) {
@@ -17144,10 +17157,11 @@ export default function Dashboard() {
                             const before = cwWorkRates.find((r: any) => String(r.id) === String(editingRateId));
                             const newPrice = parseFloat(cwRateForm.price);
                             await supabase.from('work_rates').update({ name: cwRateForm.name, price: newPrice }).eq('id', editingRateId);
-                            const nextRateHistory = { ...(cwWorkRateHistory || {}) } as Record<string, Array<{ changed_at: string; price: number }>>;
+                            const nextRateHistory = { ...(cwWorkRateHistory || {}) } as Record<string, Array<{ changed_at: string; price: number; old_price?: number | null; new_price?: number | null; name?: string }>>;
                             const rateKey = String(editingRateId);
                             const currentHistory = Array.isArray(nextRateHistory[rateKey]) ? nextRateHistory[rateKey] : [];
-                            nextRateHistory[rateKey] = [...currentHistory, { changed_at: new Date().toISOString(), price: newPrice }];
+                            const oldPrice = Number(before?.price ?? 0);
+                            nextRateHistory[rateKey] = [...currentHistory, { changed_at: new Date().toISOString(), price: newPrice, old_price: oldPrice, new_price: newPrice, name: cwRateForm.name }];
                             setCwWorkRateHistory(nextRateHistory);
                             await supabase.from('app_settings').upsert([{ key: 'cw_work_rate_history_v1', value: JSON.stringify(nextRateHistory) }], { onConflict: 'key' });
                             await logAssemblyChange('work_rates', 'update', before || null, { ...(before || {}), name: cwRateForm.name, price: newPrice });
@@ -17161,6 +17175,18 @@ export default function Dashboard() {
                         // Refresh rates
                         const { data } = await supabase.from('work_rates').select('*').is('deleted_at', null);
                         setCwWorkRates(data || []);
+                        if (cwSelectedEmployee?.id) {
+                          const startOfMonth = new Date(cwSelectedPeriod.getFullYear(), cwSelectedPeriod.getMonth(), 1).toISOString().split('T')[0];
+                          const endOfMonth = new Date(cwSelectedPeriod.getFullYear(), cwSelectedPeriod.getMonth() + 1, 0).toISOString().split('T')[0];
+                          const { data: refreshedLogs } = await supabase
+                            .from('work_logs')
+                            .select('*')
+                            .eq('employee_id', cwSelectedEmployee.id)
+                            .gte('date', startOfMonth)
+                            .lte('date', endOfMonth)
+                            .is('deleted_at', null);
+                          setCwWorkLogs(refreshedLogs || []);
+                        }
                       }}
                       disabled={!hasAssemblyButtonAccess('cw_rates_save')}
                       className={`px-4 py-2 ${editingRateId ? 'btn-success' : 'btn-primary'} ${!hasAssemblyButtonAccess('cw_rates_save') ? 'opacity-50 cursor-not-allowed' : ''}`}
@@ -17181,7 +17207,7 @@ export default function Dashboard() {
                             История
                           </button>
                           <button
-                            onClick={() => setCwRateBulkModal({ open: true, rateId: String(rate.id), rateName: String(rate.name || ''), price: String(rate.price || ''), start: new Date().toISOString().split('T')[0], end: new Date().toISOString().split('T')[0] })}
+                            onClick={() => setCwRateBulkModal({ open: true, rateId: String(rate.id), rateName: String(rate.name || ''), oldPrice: String(rate.price || ''), price: String(rate.price || ''), start: new Date().toISOString().split('T')[0], end: new Date().toISOString().split('T')[0] })}
                             className="text-indigo-600 hover:text-indigo-800 text-xs px-2 py-1 rounded border border-indigo-200"
                           >
                             Обновить
@@ -17225,8 +17251,20 @@ export default function Dashboard() {
                         ) : (
                           (cwWorkRateHistory[cwRateHistoryModal.rateId] || []).slice().reverse().map((row, idx) => (
                             <div key={`rate-h-${idx}`} className="border rounded-xl p-3 bg-gray-50 flex items-center justify-between gap-3">
-                              <div className="text-sm text-gray-700">{new Date(row.changed_at).toLocaleString('ru-RU')}</div>
-                              <div className="font-bold text-indigo-700">{Number(row.price || 0).toLocaleString('ru-RU')} ₽</div>
+                              <div>
+                                <div className="text-sm text-gray-700">{new Date(row.changed_at).toLocaleString('ru-RU')}</div>
+                                {row?.name ? <div className="text-xs text-gray-500">{row.name}</div> : null}
+                              </div>
+                              <div className="text-right">
+                                {(row.old_price ?? null) !== null && (row.new_price ?? null) !== null && Number(row.old_price) !== Number(row.new_price) ? (
+                                  <>
+                                    <div className="text-xs text-gray-500">{Number(row.old_price || 0).toLocaleString('ru-RU')} ₽ → {Number(row.new_price || 0).toLocaleString('ru-RU')} ₽</div>
+                                    <div className="font-bold text-indigo-700">Новая: {Number(row.new_price || row.price || 0).toLocaleString('ru-RU')} ₽</div>
+                                  </>
+                                ) : (
+                                  <div className="font-bold text-indigo-700">{Number(row.new_price || row.price || 0).toLocaleString('ru-RU')} ₽</div>
+                                )}
+                              </div>
                             </div>
                           ))
                         )}
@@ -17236,16 +17274,17 @@ export default function Dashboard() {
                 )}
 
                 {cwRateBulkModal.open && (
-                  <div className="fixed inset-0 z-[90] bg-black/50 flex items-center justify-center p-4" onClick={() => setCwRateBulkModal({ open: false, rateId: '', rateName: '', price: '', start: new Date().toISOString().split('T')[0], end: new Date().toISOString().split('T')[0] })}>
+                  <div className="fixed inset-0 z-[90] bg-black/50 flex items-center justify-center p-4" onClick={() => setCwRateBulkModal({ open: false, rateId: '', rateName: '', oldPrice: '', price: '', start: new Date().toISOString().split('T')[0], end: new Date().toISOString().split('T')[0] })}>
                     <div className="w-full max-w-lg bg-white rounded-2xl shadow-2xl p-4 sm:p-6" onClick={(e) => e.stopPropagation()}>
                       <div className="flex items-center justify-between mb-4">
                         <div>
                           <div className="text-lg font-bold">Обновить цену по периоду</div>
                           <div className="text-sm text-gray-500">{cwRateBulkModal.rateName || '-'}</div>
                         </div>
-                        <button onClick={() => setCwRateBulkModal({ open: false, rateId: '', rateName: '', price: '', start: new Date().toISOString().split('T')[0], end: new Date().toISOString().split('T')[0] })} className="p-2 hover:bg-gray-100 rounded-lg"><X className="h-5 w-5" /></button>
+                        <button onClick={() => setCwRateBulkModal({ open: false, rateId: '', rateName: '', oldPrice: '', price: '', start: new Date().toISOString().split('T')[0], end: new Date().toISOString().split('T')[0] })} className="p-2 hover:bg-gray-100 rounded-lg"><X className="h-5 w-5" /></button>
                       </div>
                       <div className="space-y-3">
+                        <div className="text-sm text-gray-500">Текущая цена: <span className="font-semibold text-gray-700">{cwRateBulkModal.oldPrice || '0'} ₽</span></div>
                         <input value={cwRateBulkModal.price} onChange={(e) => setCwRateBulkModal(prev => ({ ...prev, price: e.target.value }))} type="number" placeholder="Новая цена" className="oc-input" />
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           <input value={cwRateBulkModal.start} onChange={(e) => setCwRateBulkModal(prev => ({ ...prev, start: e.target.value }))} type="date" className="oc-input" />
@@ -17262,12 +17301,15 @@ export default function Dashboard() {
                             });
                             setCwWorkRateSnapshots(nextSnapshots);
                             await supabase.from('app_settings').upsert([{ key: 'cw_work_rate_snapshots_v1', value: JSON.stringify(nextSnapshots) }], { onConflict: 'key' });
-                            const nextRateHistory = { ...(cwWorkRateHistory || {}) } as Record<string, Array<{ changed_at: string; price: number }>>;
+                            const nextRateHistory = { ...(cwWorkRateHistory || {}) } as Record<string, Array<{ changed_at: string; price: number; old_price?: number | null; new_price?: number | null; name?: string }>>;
                             const currentHistory = Array.isArray(nextRateHistory[cwRateBulkModal.rateId]) ? nextRateHistory[cwRateBulkModal.rateId] : [];
-                            nextRateHistory[cwRateBulkModal.rateId] = [...currentHistory, { changed_at: new Date().toISOString(), price: newPrice }];
+                            const oldPrice = Number(cwRateBulkModal.oldPrice || 0);
+                            nextRateHistory[cwRateBulkModal.rateId] = [...currentHistory, { changed_at: new Date().toISOString(), price: newPrice, old_price: oldPrice, new_price: newPrice, name: cwRateBulkModal.rateName }];
                             setCwWorkRateHistory(nextRateHistory);
                             await supabase.from('app_settings').upsert([{ key: 'cw_work_rate_history_v1', value: JSON.stringify(nextRateHistory) }], { onConflict: 'key' });
-                            setCwRateBulkModal({ open: false, rateId: '', rateName: '', price: '', start: new Date().toISOString().split('T')[0], end: new Date().toISOString().split('T')[0] });
+                            const { data: refreshedRates } = await supabase.from('work_rates').select('*').is('deleted_at', null);
+                            setCwWorkRates(refreshedRates || []);
+                            setCwRateBulkModal({ open: false, rateId: '', rateName: '', oldPrice: '', price: '', start: new Date().toISOString().split('T')[0], end: new Date().toISOString().split('T')[0] });
                             showToast('Цены по периоду обновлены', 'success');
                           }}
                           className="w-full btn-primary py-3"
