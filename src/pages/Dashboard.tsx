@@ -17278,43 +17278,39 @@ export default function Dashboard() {
                     <div className="w-full max-w-lg bg-white rounded-2xl shadow-2xl p-4 sm:p-6" onClick={(e) => e.stopPropagation()}>
                       <div className="flex items-center justify-between mb-4">
                         <div>
-                          <div className="text-lg font-bold">Обновить цену по периоду</div>
+                          <div className="text-lg font-bold">Обновить цену с даты</div>
                           <div className="text-sm text-gray-500">{cwRateBulkModal.rateName || '-'}</div>
                         </div>
                         <button onClick={() => setCwRateBulkModal({ open: false, rateId: '', rateName: '', oldPrice: '', price: '', start: new Date().toISOString().split('T')[0], end: new Date().toISOString().split('T')[0] })} className="p-2 hover:bg-gray-100 rounded-lg"><X className="h-5 w-5" /></button>
                       </div>
                       <div className="space-y-3">
                         <div className="text-sm text-gray-500">Текущая цена: <span className="font-semibold text-gray-700">{cwRateBulkModal.oldPrice || '0'} ₽</span></div>
+                        <div className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+                          Старые записи в календаре не будут пересчитаны. Новая цена начнет применяться только к новым операциям с выбранной даты.
+                        </div>
                         <input value={cwRateBulkModal.price} onChange={(e) => setCwRateBulkModal(prev => ({ ...prev, price: e.target.value }))} type="number" placeholder="Новая цена" className="oc-input" />
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="grid grid-cols-1 gap-3">
                           <input value={cwRateBulkModal.start} onChange={(e) => setCwRateBulkModal(prev => ({ ...prev, start: e.target.value }))} type="date" className="oc-input" />
-                          <input value={cwRateBulkModal.end} onChange={(e) => setCwRateBulkModal(prev => ({ ...prev, end: e.target.value }))} type="date" className="oc-input" />
                         </div>
                         <button
                           onClick={async () => {
                             const newPrice = Number(cwRateBulkModal.price || 0);
-                            if (!cwRateBulkModal.rateId || newPrice <= 0 || !cwRateBulkModal.start || !cwRateBulkModal.end) return;
-                            const { data: logs } = await supabase.from('work_logs').select('id, date').eq('work_rate_id', cwRateBulkModal.rateId).gte('date', cwRateBulkModal.start).lte('date', cwRateBulkModal.end).is('deleted_at', null);
-                            const nextSnapshots = { ...(cwWorkRateSnapshots || {}) } as Record<string, number>;
-                            (logs || []).forEach((log: any) => {
-                              nextSnapshots[String(log.id)] = newPrice;
-                            });
-                            setCwWorkRateSnapshots(nextSnapshots);
-                            await supabase.from('app_settings').upsert([{ key: 'cw_work_rate_snapshots_v1', value: JSON.stringify(nextSnapshots) }], { onConflict: 'key' });
+                            if (!cwRateBulkModal.rateId || newPrice <= 0 || !cwRateBulkModal.start) return;
                             const nextRateHistory = { ...(cwWorkRateHistory || {}) } as Record<string, Array<{ changed_at: string; price: number; old_price?: number | null; new_price?: number | null; name?: string }>>;
                             const currentHistory = Array.isArray(nextRateHistory[cwRateBulkModal.rateId]) ? nextRateHistory[cwRateBulkModal.rateId] : [];
                             const oldPrice = Number(cwRateBulkModal.oldPrice || 0);
-                            nextRateHistory[cwRateBulkModal.rateId] = [...currentHistory, { changed_at: new Date().toISOString(), price: newPrice, old_price: oldPrice, new_price: newPrice, name: cwRateBulkModal.rateName }];
+                            nextRateHistory[cwRateBulkModal.rateId] = [...currentHistory, { changed_at: new Date().toISOString(), price: newPrice, old_price: oldPrice, new_price: newPrice, name: `${cwRateBulkModal.rateName} (с ${new Date(`${cwRateBulkModal.start}T00:00:00`).toLocaleDateString('ru-RU')})` }];
                             setCwWorkRateHistory(nextRateHistory);
                             await supabase.from('app_settings').upsert([{ key: 'cw_work_rate_history_v1', value: JSON.stringify(nextRateHistory) }], { onConflict: 'key' });
+                            await supabase.from('work_rates').update({ price: newPrice }).eq('id', cwRateBulkModal.rateId);
                             const { data: refreshedRates } = await supabase.from('work_rates').select('*').is('deleted_at', null);
                             setCwWorkRates(refreshedRates || []);
                             setCwRateBulkModal({ open: false, rateId: '', rateName: '', oldPrice: '', price: '', start: new Date().toISOString().split('T')[0], end: new Date().toISOString().split('T')[0] });
-                            showToast('Цены по периоду обновлены', 'success');
+                            showToast('Новая цена сохранена. Старые записи не пересчитаны', 'success');
                           }}
                           className="w-full btn-primary py-3"
                         >
-                          Обновить цены за период
+                          Сохранить новую цену с этой даты
                         </button>
                       </div>
                     </div>
