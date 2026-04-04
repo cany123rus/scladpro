@@ -3644,7 +3644,7 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
         
         <div className="flex items-center gap-4">
             {/* Supplier Selector (only for Управление FBS) */}
-            {(activeTab === 'fbs' || activeTab === 'supply_order' || activeTab === 'fbs_calc') && (
+            {(activeTab === 'fbs') && (
               <div className="flex items-center gap-2">
                   <span className="text-sm font-medium">Поставщик:</span>
                   <select 
@@ -4461,7 +4461,7 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
                 setCalcMissingCostOnly(false);
                 setCalcCostEditorOpen(true);
               }} disabled={!supplyOrderSummaryRows.length} className="px-4 py-2 rounded-lg border border-indigo-300 text-indigo-700 hover:bg-indigo-100 disabled:opacity-50">Себестоимость</button>
-              <button onClick={() => setOrderHistoryOpen(true)} disabled={!orderHistory.length} className="px-4 py-2 rounded-lg border border-indigo-300 text-indigo-700 hover:bg-indigo-100 disabled:opacity-50">История заказов</button>
+              <button onClick={() => setOrderHistoryOpen(true)} className="px-4 py-2 rounded-lg border border-indigo-300 text-indigo-700 hover:bg-indigo-100">История заказов</button>
               <button onClick={generateSupplyOrderDocument} disabled={!supplyOrderSummaryRows.length} className="px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50">Скачать PDF</button>
               {generatedOrderPdf ? <a href={generatedOrderPdf.dataUrl} download={generatedOrderPdf.fileName} className="px-4 py-2 rounded-lg bg-white border border-indigo-300 text-indigo-700 hover:bg-indigo-100">Открыть текущий PDF</a> : null}
             </div>
@@ -4526,6 +4526,21 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
                   </div>
                   <div className="flex gap-2 flex-wrap">
                     <a href={item.dataUrl} download={item.fileName} className="px-3 py-2 rounded-lg border border-indigo-300 text-indigo-700 hover:bg-indigo-50">Открыть PDF</a>
+                    <button
+                      onClick={async () => {
+                        const next = (orderHistory || []).filter((x) => String(x.id) !== String(item.id));
+                        setOrderHistory(next);
+                        try {
+                          if (selectedSupplierId) {
+                            const key = `supplier_order_history_v1:${selectedSupplierId}`;
+                            await supabase.from('app_settings').upsert([{ key, value: JSON.stringify(next) }], { onConflict: 'key' });
+                          }
+                        } catch {}
+                      }}
+                      className="px-3 py-2 rounded-lg border border-rose-300 text-rose-700 hover:bg-rose-50"
+                    >
+                      Удалить
+                    </button>
                   </div>
                 </div>
               ))}
@@ -4537,6 +4552,18 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
       {/* Content: FBS Calc Tab */}
       {activeTab === 'fbs_calc' && (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 md:p-6 space-y-4">
+          <div>
+            <label className="text-xs text-gray-500">Поставщик</label>
+            <select
+              className="w-full md:w-[420px] border rounded-lg p-2 bg-white"
+              value={selectedSupplierIdCalc}
+              onChange={(e) => setSelectedSupplierIdCalc(e.target.value)}
+            >
+              {suppliers.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+          </div>
           <div className="flex flex-col md:flex-row md:items-end gap-3">
             <div className="flex-1">
               <label className="text-xs text-gray-500">Поставка FBS</label>
@@ -4733,7 +4760,20 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
       {/* Content: Supply Order Tab */}
       {activeTab === 'supply_order' && (
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col min-h-[380px] md:h-[calc(100vh-10rem)]">
-              <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50 rounded-t-xl">
+              <div className="p-4 border-b border-gray-100 bg-gray-50 rounded-t-xl space-y-3">
+                  <div>
+                      <label className="text-xs text-gray-500">Поставщик</label>
+                      <select
+                          className="w-full md:w-[420px] border rounded-lg p-2 bg-white"
+                          value={selectedSupplierIdSupplyOrder}
+                          onChange={(e) => setSelectedSupplierIdSupplyOrder(e.target.value)}
+                      >
+                          {suppliers.map((s) => (
+                              <option key={s.id} value={s.id}>{s.name}</option>
+                          ))}
+                      </select>
+                  </div>
+                  <div className="flex justify-between items-center">
                   <h2 className="font-semibold flex items-center gap-2">
                       <ShoppingCart className="w-5 h-5 text-purple-500" />
                       Заказ товара
@@ -4753,6 +4793,7 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
                           <Download className="w-4 h-4" />
                           Скачать Excel
                       </button>
+                  </div>
                   </div>
               </div>
 
