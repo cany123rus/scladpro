@@ -346,6 +346,7 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
   const [orderPdfNameModalOpen, setOrderPdfNameModalOpen] = useState(false);
   const [orderPdfFileName, setOrderPdfFileName] = useState('');
   const [orderMissingCostsModalOpen, setOrderMissingCostsModalOpen] = useState(false);
+  const [pendingOrderExport, setPendingOrderExport] = useState<null | { type: 'pdf'; fileName?: string } | { type: 'excel' }>(null);
 
   // FBS Orders file calc
   const [fbsOrdersLoading, setFbsOrdersLoading] = useState(false);
@@ -2858,6 +2859,7 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
       }
 
       if (orderMissingCostItems.length > 0) {
+          setPendingOrderExport({ type: 'pdf', fileName: customFileName });
           setOrderMissingCostsModalOpen(true);
           return;
       }
@@ -3012,6 +3014,7 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
           return;
       }
       if (orderMissingCostItems.length > 0) {
+          setPendingOrderExport({ type: 'excel' });
           setOrderMissingCostsModalOpen(true);
           return;
       }
@@ -4633,6 +4636,13 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
                     }
                   } catch {}
                   setOrderMissingCostsModalOpen(false);
+                  const pending = pendingOrderExport;
+                  setPendingOrderExport(null);
+                  if (pending?.type === 'pdf') {
+                    await generateSupplyOrderDocument(pending.fileName);
+                  } else if (pending?.type === 'excel') {
+                    await generateSupplyOrderExcel();
+                  }
                 }}
                 className="px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700"
               >
