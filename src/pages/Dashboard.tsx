@@ -6553,8 +6553,8 @@ export default function Dashboard() {
       }));
 
     setBarterRows((prev) => {
-      const exists = new Set((prev || []).map((r) => `${r.supplier_id}__${r.product_id}`));
-      const append = newRows.filter((r) => !exists.has(`${r.supplier_id}__${r.product_id}`));
+      const exists = new Set((prev || []).map((r) => `${r.supplier_id}__${r.product_id}__${r.month}`));
+      const append = newRows.filter((r) => !exists.has(`${r.supplier_id}__${r.product_id}__${r.month}`));
       return [...(prev || []), ...append];
     });
 

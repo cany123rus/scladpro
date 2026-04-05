@@ -4500,7 +4500,7 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
         </div>
       )}
 
-      {(generatedOrderPdf || supplyOrderSummaryRows.length > 0) && (
+      {activeTab === 'supply_order' && (
         <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4 mb-4 space-y-4">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
             <div>
