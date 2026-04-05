@@ -2866,9 +2866,9 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
 
       try {
           const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-          const supplierName = suppliers.find(s => s.id === selectedSupplierId)?.name || 'Поставщик';
+          const supplierName = suppliers.find(s => s.id === selectedSupplierIdSupplyOrder)?.name || 'Поставщик';
           const totalQty = itemsToOrder.reduce((sum, item) => sum + item.sizes.reduce((s, i) => s + i.quantity, 0), 0);
-          const totalCost = itemsToOrder.reduce((sum, item) => sum + item.sizes.reduce((s, i) => s + (Number(i.quantity || 0) * Number(getCalcStoredCost({
+          const totalCost = itemsToOrder.reduce((sum, item) => sum + item.sizes.reduce((s, i) => s + (Number(i.quantity || 0) * Number(getOrderStoredCost({
             key: `${item.product?.nmID || ''}_${i.size}`,
             nmId: item.product?.nmID,
             article: item.product?.vendorCode || '',
@@ -2987,7 +2987,7 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
             const supplierName = suppliers.find(s => s.id === selectedSupplierId)?.name || 'Поставщик';
             const historyItem = {
               id: getSafeId(),
-              supplierId: String(selectedSupplierId || ''),
+              supplierId: String(selectedSupplierIdSupplyOrder || ''),
               supplierName,
               createdAt: new Date().toISOString(),
               fileName,
@@ -2997,8 +2997,8 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
             };
             const nextHistory = [historyItem, ...(orderHistory || [])].slice(0, 100);
             setOrderHistory(nextHistory);
-            if (selectedSupplierId) {
-              const key = `supplier_order_history_v1:${selectedSupplierId}`;
+            if (selectedSupplierIdSupplyOrder) {
+              const key = `supplier_order_history_v1:${selectedSupplierIdSupplyOrder}`;
               await supabase.from('app_settings').upsert([{ key, value: JSON.stringify(nextHistory) }], { onConflict: 'key' });
             }
           } catch {}
@@ -3020,7 +3020,7 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
       }
 
       try {
-          const supplierName = suppliers.find(s => s.id === selectedSupplierId)?.name || 'Поставщик';
+          const supplierName = suppliers.find(s => s.id === selectedSupplierIdSupplyOrder)?.name || 'Поставщик';
           const wb = new ExcelJS.Workbook();
           const ws = wb.addWorksheet('Заказ поставщику');
 
