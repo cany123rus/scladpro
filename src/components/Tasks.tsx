@@ -126,9 +126,9 @@ const SortableTaskItem = memo(({ task, onToggleComplete, onDelete, onEdit, taskA
             target="_blank"
             rel="noopener noreferrer"
             className="mt-1 inline-flex max-w-full items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 truncate"
-            title={`Файл сборки — ${taskAssemblyFile.supplierName || 'Поставщик'}`}
+            title="Файл сборки"
           >
-            📎 Файл сборки — {taskAssemblyFile.supplierName || 'Поставщик'}
+            📎 Файл сборки
           </a>
         ) : task.priority === 2 ? (
           <div className="mt-1 text-xs text-rose-600">📎 Файл сборки не прикреплен</div>
