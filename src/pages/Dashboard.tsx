@@ -6246,6 +6246,7 @@ export default function Dashboard() {
               ad_views: Array.isArray(r?.ad_views) ? (r.ad_views.length ? r.ad_views : Array((Array.isArray(r?.ad_links) ? r.ad_links.length : 2)).fill('')) : Array((Array.isArray(r?.ad_links) ? r.ad_links.length : 2)).fill(''),
             }));
             setBarterRows(normalized);
+            setBarterDbReady(true);
             return;
           }
         }
