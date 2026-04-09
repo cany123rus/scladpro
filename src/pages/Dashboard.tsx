@@ -1441,7 +1441,7 @@ export default function Dashboard() {
     earnings: '',
     hours: ''
   });
-  const [tempWorkerPaymentModal, setTempWorkerPaymentModal] = useState<{ open: boolean; logId: string; mode: 'pay' | 'extra'; supplierId: string; amount: string; error?: string }>({ open: false, logId: '', mode: 'pay', supplierId: '', amount: '', error: '' });
+  const [tempWorkerPaymentModal, setTempWorkerPaymentModal] = useState<{ open: boolean; logId: string; mode: 'pay' | 'extra' | 'edit'; supplierId: string; amount: string; error?: string }>({ open: false, logId: '', mode: 'pay', supplierId: '', amount: '', error: '' });
   const [tempWorkerPaymentsMap, setTempWorkerPaymentsMap] = useState<Record<string, Array<{ amount: number; supplier_id: string; created_at: string }>>>({});
 
   const [showAssemblyAccessModal, setShowAssemblyAccessModal] = useState(false);
@@ -1710,6 +1710,12 @@ export default function Dashboard() {
       console.error('Error deleting temp worker log:', error);
       showToast('Ошибка удаления: ' + (error?.message || 'неизвестно'), 'error');
     }
+  };
+
+  const handleOpenEditTempWorkerPayment = (log: any) => {
+    const payments = (tempWorkerPaymentsMap[String(log?.id)] || []) as Array<{ amount: number; supplier_id: string; created_at: string }>;
+    const first = payments[0];
+    setTempWorkerPaymentModal({ open: true, logId: String(log?.id || ''), mode: 'edit', supplierId: String(first?.supplier_id || log?.paid_by_supplier_id || ''), amount: String(first?.amount || getTempWorkerPaidAmount(log) || ''), error: '' });
   };
 
   const handleToggleTempWorkerPaid = async (logId: string, nextPaid: boolean, paidBySupplierId?: string | null) => {
@@ -20469,7 +20475,7 @@ export default function Dashboard() {
                               <label className="inline-flex items-center gap-2 cursor-pointer select-none">
                                 <input
                                   type="checkbox"
-                                  checked={Boolean(log.is_paid)}
+                                  checked={getTempWorkerRemainingAmount(log) <= 0}
                                   onChange={(e) => {
                                     const next = e.target.checked;
                                     if (next) setTempWorkerPaymentModal({ open: true, logId: String(log.id), mode: 'pay', supplierId: '', amount: '', error: '' });
@@ -20492,6 +20498,14 @@ export default function Dashboard() {
                                     className="inline-flex items-center gap-1 px-2 py-1 text-xs text-emerald-700 hover:bg-emerald-50 rounded-lg transition-colors"
                                   >
                                     Доплата
+                                  </button>
+                                )}
+                                {getTempWorkerPaidAmount(log) > 0 && (
+                                  <button
+                                    onClick={() => handleOpenEditTempWorkerPayment(log)}
+                                    className="inline-flex items-center gap-1 px-2 py-1 text-xs text-violet-700 hover:bg-violet-50 rounded-lg transition-colors"
+                                  >
+                                    Изм. оплату
                                   </button>
                                 )}
                                 <button
@@ -20553,7 +20567,7 @@ export default function Dashboard() {
                                           <label className="inline-flex items-center gap-2 cursor-pointer select-none">
                                             <input
                                               type="checkbox"
-                                              checked={Boolean(log.is_paid)}
+                                              checked={getTempWorkerRemainingAmount(log) <= 0}
                                               onChange={(e) => {
                                                 const next = e.target.checked;
                                                 if (next) setTempWorkerPaymentModal({ open: true, logId: String(log.id), mode: 'pay', supplierId: '', amount: '', error: '' });
@@ -20567,6 +20581,9 @@ export default function Dashboard() {
                                               </span>
                                               {getTempWorkerPaidAmount(log) > 0 && (
                                                 <span className="text-[10px] text-emerald-700">Оплачено: {getTempWorkerPaidAmount(log).toFixed(2)} ₽</span>
+                                              )}
+                                              {getTempWorkerPaidAmount(log) > 0 && (
+                                                <button onClick={() => handleOpenEditTempWorkerPayment(log)} className="mt-1 text-[10px] text-violet-700 hover:text-violet-900 text-left">Редактировать оплату</button>
                                               )}
                                               {getTempWorkerPaymentsSummary(log).map((p) => (
                                                 <span key={`temp-pay-table-${log.id}-${p.supplierId}`} className="text-[10px] text-gray-500">{p.supplierName}: {p.amount.toFixed(2)} ₽</span>
@@ -20620,7 +20637,7 @@ export default function Dashboard() {
           {tempWorkerPaymentModal.open && (
             <div className="fixed inset-0 z-[80] bg-black/50 flex items-center justify-center p-4" onClick={() => setTempWorkerPaymentModal({ open: false, logId: '', mode: 'pay', supplierId: '', amount: '', error: '' })}>
               <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl p-4 sm:p-6" onClick={(e) => e.stopPropagation()}>
-                <div className="text-lg font-bold mb-4">{tempWorkerPaymentModal.mode === 'extra' ? 'Доплата' : 'Оплата записи'}</div>
+                <div className="flex items-center justify-between gap-3 mb-4"><div className="text-lg font-bold">{tempWorkerPaymentModal.mode === 'extra' ? 'Доплата' : tempWorkerPaymentModal.mode === 'edit' ? 'Редактировать оплату' : 'Оплата записи'}</div><button onClick={() => setTempWorkerPaymentModal({ open: false, logId: '', mode: 'pay', supplierId: '', amount: '', error: '' })} className="px-3 py-2 rounded-lg border border-gray-300 hover:bg-gray-50">Закрыть</button></div>
                 <div className="space-y-3">
                   {(() => {
                     const log = (tempWorkerLogs || []).find((x: any) => String(x.id) === String(tempWorkerPaymentModal.logId));
@@ -20632,6 +20649,7 @@ export default function Dashboard() {
                         <div>Заработок: <b>{earnings.toFixed(2)} ₽</b></div>
                         {paid > 0 && <div>Уже оплачено: <b>{paid.toFixed(2)} ₽</b></div>}
                         <div>Остаток: <b>{remaining.toFixed(2)} ₽</b></div>
+                        <div>Оплачено сейчас: <b>{paid.toFixed(2)} ₽</b></div>
                       </div>
                     );
                   })()}
@@ -20645,15 +20663,22 @@ export default function Dashboard() {
                     onClick={async () => {
                       const log = (tempWorkerLogs || []).find((x: any) => String(x.id) === String(tempWorkerPaymentModal.logId));
                       const amount = Number(tempWorkerPaymentModal.amount || 0);
-                      const remaining = getTempWorkerRemainingAmount(log);
+                      const alreadyPaid = getTempWorkerPaidAmount(log);
+                      const currentStored = ((tempWorkerPaymentsMap[String(log?.id)] || [])[0]?.amount) ? Number((tempWorkerPaymentsMap[String(log?.id)] || [])[0].amount) : 0;
+                      const paidExcludingCurrent = tempWorkerPaymentModal.mode === 'edit' ? Math.max(0, alreadyPaid - currentStored) : alreadyPaid;
+                      const remaining = Math.max(0, Number(log?.earnings || 0) - paidExcludingCurrent);
                       if (!log || !tempWorkerPaymentModal.supplierId || !Number.isFinite(amount) || amount <= 0 || amount > remaining) {
-                        setTempWorkerPaymentModal(prev => ({ ...prev, error: 'Введите корректную сумму не больше остатка' }));
+                        setTempWorkerPaymentModal(prev => ({ ...prev, error: `Введите корректную сумму (доступно ${remaining.toFixed(2)} ₽)` }));
                         return;
                       }
                       const nextMap = { ...(tempWorkerPaymentsMap || {}) } as Record<string, any[]>;
                       const key = String(log.id);
-                      const prev = Array.isArray(nextMap[key]) ? nextMap[key] : [];
-                      nextMap[key] = [...prev, { amount, supplier_id: String(tempWorkerPaymentModal.supplierId), created_at: new Date().toISOString() }];
+                      if (tempWorkerPaymentModal.mode === 'edit') {
+                        nextMap[key] = [{ amount, supplier_id: String(tempWorkerPaymentModal.supplierId), created_at: new Date().toISOString() }];
+                      } else {
+                        const prev = Array.isArray(nextMap[key]) ? nextMap[key] : [];
+                        nextMap[key] = [...prev, { amount, supplier_id: String(tempWorkerPaymentModal.supplierId), created_at: new Date().toISOString() }];
+                      }
                       setTempWorkerPaymentsMap(nextMap);
                       await supabase.from('app_settings').upsert([{ key: 'temp_worker_payments_v1', value: JSON.stringify(nextMap) }], { onConflict: 'key' });
                       const totalPaid = nextMap[key].reduce((s: number, p: any) => s + Number(p.amount || 0), 0);
