@@ -493,6 +493,11 @@ export default function Dashboard() {
     if (activeTab === 'orders') fetchOrders();
   }, [activeTab]);
 
+  useEffect(() => {
+    if (!activeTab) return;
+    logUiAction('Навигация', 'Переход в раздел', String(activeTab));
+  }, [activeTab]);
+
   const handleCreateOrder = async () => {
     if (!newOrder.product_name) {
       showToast('Введите название товара', 'error');
@@ -5392,6 +5397,10 @@ export default function Dashboard() {
     }
   };
 
+  const logUiAction = async (section: string, action: string, details?: string) => {
+    await logAction(`UI: ${section}`, `${action}${details ? ` | ${details}` : ''}`, currentEmployee?.id);
+  };
+
   const logEmployeeChange = async (op: 'create' | 'update' | 'delete', beforeData: any | null, afterData: any | null) => {
     const details = JSON.stringify({ kind: 'employee_change', op, before: beforeData, after: afterData });
     await logAction('Изменение сотрудника', details, currentEmployee?.id);
@@ -5959,7 +5968,7 @@ export default function Dashboard() {
           .order('created_at', { ascending: false })
           .limit(100);
 
-        const list = (data || []).map((row: any) => {
+        const rawList = (data || []).map((row: any) => {
           const meta = parseLoginDevice(row.details || '');
           return {
             id: row.id,
@@ -5970,6 +5979,13 @@ export default function Dashboard() {
             browser: meta?.browser || '-',
             ip: meta?.ip || '-',
           };
+        });
+        const seen = new Set<string>();
+        const list = rawList.filter((d: any) => {
+          const key = String(d.device_id || `${d.platform}|${d.browser}|${d.ip}`);
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
         });
         setEmployeeDevices(list);
       } finally {
@@ -6060,7 +6076,7 @@ export default function Dashboard() {
         .eq('action', 'Вход в систему')
         .order('created_at', { ascending: false })
         .limit(100);
-      const list = (fresh || []).map((row: any) => {
+      const rawList = (fresh || []).map((row: any) => {
         const meta = parseLoginDevice(row.details || '');
         return {
           id: row.id,
@@ -6071,6 +6087,13 @@ export default function Dashboard() {
           browser: meta?.browser || '-',
           ip: meta?.ip || '-',
         };
+      });
+      const seen = new Set<string>();
+      const list = rawList.filter((d: any) => {
+        const key = String(d.device_id || `${d.platform}|${d.browser}|${d.ip}`);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
       });
       setEmployeeDevices(list);
     } catch (e: any) {
