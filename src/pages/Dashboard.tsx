@@ -18694,22 +18694,20 @@ export default function Dashboard() {
 
                                     <div className="flex flex-wrap gap-2 w-full md:w-auto text-sm">
                                         {(!currentEmployee || ['admin', 'Менеджер', 'Управляющий'].includes(currentEmployee.role)) && (
-                                          <>
-                                            <button
-                                              onClick={() => setShowPalletModal(true)}
-                                              className="bg-amber-50 px-3 py-2 rounded-lg border border-amber-100 text-amber-700 font-bold hover:bg-amber-100 transition-colors text-xs sm:text-sm"
-                                            >
-                                              Паллетирование
-                                            </button>
-                                            <button
-                                                onClick={() => setShowTempWorkerHistory(true)}
-                                                disabled={!hasAssemblyButtonAccess('cw_calendar_temp_workers')}
-                                                className={`bg-indigo-50 px-3 py-2 rounded-lg border border-indigo-100 text-indigo-700 font-bold hover:bg-indigo-100 transition-colors text-xs sm:text-sm ${!hasAssemblyButtonAccess('cw_calendar_temp_workers') ? 'opacity-50 cursor-not-allowed' : ''}`}
-                                            >
-                                                Временные сотрудники
-                                            </button>
-                                          </>
+                                          <button
+                                            onClick={() => setShowPalletModal(true)}
+                                            className="bg-amber-50 px-3 py-2 rounded-lg border border-amber-100 text-amber-700 font-bold hover:bg-amber-100 transition-colors text-xs sm:text-sm"
+                                          >
+                                            Паллетирование
+                                          </button>
                                         )}
+                                        <button
+                                            onClick={() => setShowTempWorkerHistory(true)}
+                                            disabled={!hasAssemblyButtonAccess('cw_calendar_temp_workers')}
+                                            className={`bg-indigo-50 px-3 py-2 rounded-lg border border-indigo-100 text-indigo-700 font-bold hover:bg-indigo-100 transition-colors text-xs sm:text-sm ${!hasAssemblyButtonAccess('cw_calendar_temp_workers') ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                        >
+                                            Временные сотрудники
+                                        </button>
                                         {(currentEmployee) && (
                                           <button
                                             onClick={async () => {
