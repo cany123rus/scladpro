@@ -2896,6 +2896,7 @@ export default function Dashboard() {
   const honestSignInputRef = useRef<HTMLInputElement>(null);
   const [modalScanInput, setModalScanInput] = useState('');
   const [showNewBoxQR, setShowNewBoxQR] = useState(false);
+  const [showGenerateBoxQR, setShowGenerateBoxQR] = useState(false);
   const [suppliesList, setSuppliesList] = useState<Supply[]>([]);
   const [showUnlockConfirmation, setShowUnlockConfirmation] = useState(false);
   const [supplyToUnlock, setSupplyToUnlock] = useState<any>(null);
@@ -3344,6 +3345,30 @@ export default function Dashboard() {
     setSupplyStep('BOX');
     fetchBoxItems(existing?.id || ''); // Fetch items if existing
     fetchBoxesList(currentSupply.id);
+  };
+
+  const createNextBoxInCurrentSupply = async () => {
+    if (!currentSupply?.id) {
+      showToast('Сначала откройте поставку', 'error');
+      return;
+    }
+    const { data: existingBoxes } = await supabase.from('boxes').select('name').eq('supply_id', currentSupply.id);
+    const nums = (existingBoxes || []).map((b: any) => parseInt(String(b?.name || '').trim(), 10)).filter((n: number) => Number.isFinite(n));
+    const nextNumber = (nums.length ? Math.max(...nums) : 0) + 1;
+    const nextName = String(nextNumber);
+    const { data: newBox, error } = await supabase.from('boxes').insert([{ name: nextName, supply_id: currentSupply.id }]).select().single();
+    if (error) {
+      showToast('Ошибка создания коробки: ' + error.message, 'error');
+      return;
+    }
+    await logAction('Создание коробки', `Создана коробка: ${newBox.name} в поставке ${currentSupply.name} (QR генерация)`, currentEmployee?.id);
+    setCurrentBox(newBox);
+    setSupplyStep('BOX');
+    setScannedItem(null);
+    if (itemInputRef.current) itemInputRef.current.value = '';
+    if (honestSignInputRef.current) honestSignInputRef.current.value = '';
+    await fetchBoxesList(currentSupply.id);
+    showToast(`Создана коробка №${nextName}`, 'success');
   };
 
   const fetchBoxItems = async (boxId: string) => {
@@ -5908,6 +5933,10 @@ export default function Dashboard() {
            if (itemInputRef.current) itemInputRef.current.value = '';
            if (honestSignInputRef.current) honestSignInputRef.current.value = '';
            showToast('Коробка закрыта (QR)', 'success');
+        }
+        if (code.trim() === 'ACTION:GENERATE_BOX' || code.includes('GENERATE_BOX') || code.includes('ACTION;GENERATE_BOX')) {
+           setShowGenerateBoxQR(false);
+           createNextBoxInCurrentSupply().catch((err) => console.error('QR generate box failed', err));
         }
         buffer = '';
       } else if (char.length === 1) {
@@ -11486,6 +11515,9 @@ export default function Dashboard() {
                         <button onClick={() => setShowNewBoxQR(true)} className="flex-1 md:flex-none justify-center px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 flex items-center">
                           <QrCode className="h-4 w-4 mr-2" /> <span className="whitespace-nowrap">QR: Новая коробка</span>
                         </button>
+                        <button onClick={() => setShowGenerateBoxQR(true)} className="flex-1 md:flex-none justify-center px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 flex items-center">
+                          <QrCode className="h-4 w-4 mr-2" /> <span className="whitespace-nowrap">QR генерация коробки</span>
+                        </button>
                         <button onClick={handleDownloadExcel} className="flex-1 md:flex-none justify-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center">
                           <FileSpreadsheet className="h-4 w-4 mr-2" /> Excel
                         </button>
@@ -11665,6 +11697,64 @@ export default function Dashboard() {
               )}
 
               {/* QR Modal */}
+              {showGenerateBoxQR && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowGenerateBoxQR(false)}>
+                  <div className="bg-white p-8 rounded-xl text-center" onClick={e => e.stopPropagation()}>
+                    <form onSubmit={async (e) => {
+                      e.preventDefault();
+                      if (modalScanInput.trim() === 'ACTION:GENERATE_BOX' || modalScanInput.includes('GENERATE_BOX')) {
+                        setShowGenerateBoxQR(false);
+                        setModalScanInput('');
+                        await createNextBoxInCurrentSupply();
+                      }
+                    }}>
+                      <input
+                        autoFocus
+                        value={modalScanInput}
+                        onChange={e => setModalScanInput(e.target.value)}
+                        className="opacity-0 absolute top-0 left-0 h-0 w-0"
+                        onBlur={e => setTimeout(() => e.target.focus(), 10)}
+                      />
+                    </form>
+                    <h3 className="text-xl font-bold mb-4">QR генерация коробки</h3>
+                    <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-100 inline-block" id="generate-box-qr">
+                      <QRCodeSVG value="ACTION:GENERATE_BOX" size={200} />
+                    </div>
+                    <p className="text-gray-500 mt-4 text-sm">Отсканируйте этот код, чтобы<br/>создать новую коробку по порядку в текущей поставке</p>
+                    <div className="flex justify-center gap-3 mt-6">
+                      <button onClick={() => {
+                        const win = window.open();
+                        if (win) {
+                          const svg = document.getElementById('generate-box-qr')?.innerHTML;
+                          win.document.write(`
+                            <html>
+                              <head>
+                                <style>
+                                  @page { size: 58mm 40mm; margin: 0; }
+                                  body { width: 58mm; height: 40mm; margin: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; font-family: sans-serif; overflow: hidden; }
+                                  .qr-container { width: 28mm; height: 28mm; display: flex; align-items: center; justify-content: center; }
+                                  .qr-container svg { width: 100% !important; height: 100% !important; }
+                                  .label { font-size: 10px; font-weight: bold; margin-top: 2px; text-align: center; white-space: nowrap; }
+                                </style>
+                              </head>
+                              <body>
+                                <div class="qr-container">${svg}</div>
+                                <div class="label">QR генерация коробки</div>
+                                <script>setTimeout(() => { window.print(); window.close(); }, 500);</script>
+                              </body>
+                            </html>
+                          `);
+                          win.document.close();
+                        }
+                      }} className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium flex items-center">
+                        <Printer className="h-4 w-4 mr-2" /> Печать
+                      </button>
+                      <button onClick={() => setShowGenerateBoxQR(false)} className="px-6 py-2 bg-gray-100 rounded-lg hover:bg-gray-200 font-medium">Закрыть</button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {showNewBoxQR && (
                 <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowNewBoxQR(false)}>
                   <div className="bg-white p-8 rounded-xl text-center" onClick={e => e.stopPropagation()}>
