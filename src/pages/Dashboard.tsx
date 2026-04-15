@@ -11828,12 +11828,15 @@ export default function Dashboard() {
               {showSupplyProductsModal && (
                 <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowSupplyProductsModal(false)}>
                   <div className="bg-white rounded-xl w-[95vw] max-w-5xl max-h-[85vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
-                    <div className="p-4 border-b flex items-center justify-between">
+                    <div className="p-4 border-b flex items-center justify-between gap-3">
                       <div>
                         <h3 className="text-xl font-bold">Товары в поставке</h3>
                         <div className="text-sm text-gray-500">{currentSupply?.name || ''}</div>
                       </div>
-                      <button onClick={() => setShowSupplyProductsModal(false)} className="px-4 py-2 bg-gray-100 rounded-lg hover:bg-gray-200">Закрыть</button>
+                      <div className="flex items-center gap-2">
+                        <button onClick={openSupplyProductsModal} disabled={supplyProductsLoading} className="px-4 py-2 bg-sky-100 text-sky-800 rounded-lg hover:bg-sky-200 disabled:opacity-50">{supplyProductsLoading ? 'Обновляю...' : 'Обновить фото'}</button>
+                        <button onClick={() => setShowSupplyProductsModal(false)} className="px-4 py-2 bg-gray-100 rounded-lg hover:bg-gray-200">Закрыть</button>
+                      </div>
                     </div>
                     <div className="p-4 overflow-auto">
                       {supplyProductsLoading ? (
