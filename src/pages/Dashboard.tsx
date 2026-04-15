@@ -2902,6 +2902,9 @@ export default function Dashboard() {
   const [supplyToUnlock, setSupplyToUnlock] = useState<any>(null);
   const [boxesList, setBoxesList] = useState<SupplyBox[]>([]);
   const [boxItems, setBoxItems] = useState<SupplyItem[]>([]);
+  const [showSupplyProductsModal, setShowSupplyProductsModal] = useState(false);
+  const [supplyProductsLoading, setSupplyProductsLoading] = useState(false);
+  const [supplyProductsRows, setSupplyProductsRows] = useState<Array<{ key: string; image?: string; article: string; title: string; sizesText: string; totalQty: number }>>([]);
   const [supplyStats, setSupplyStats] = useState({ boxes: 0, items: 0 });
   const [apiBoxCount, setApiBoxCount] = useState('1');
   const [loadingApiBoxes, setLoadingApiBoxes] = useState(false);
@@ -3422,6 +3425,70 @@ export default function Dashboard() {
     if (honestSignInputRef.current) honestSignInputRef.current.value = '';
     await fetchBoxesList(currentSupply.id);
     showToast(`Создана коробка №${nextName}`, 'success');
+  };
+
+  const openSupplyProductsModal = async () => {
+    if (!currentSupply?.id) return;
+    try {
+      setSupplyProductsLoading(true);
+      setShowSupplyProductsModal(true);
+
+      const { data: boxes } = await supabase.from('boxes').select('id,name').eq('supply_id', currentSupply.id);
+      const boxIds = (boxes || []).map((b: any) => b.id).filter(Boolean);
+      if (!boxIds.length) {
+        setSupplyProductsRows([]);
+        return;
+      }
+
+      const { data: items } = await supabase
+        .from('supply_items')
+        .select('quantity, product:products(id,name,wb_sku,barcode,size,color), box_id')
+        .in('box_id', boxIds)
+        .is('deleted_at', null);
+
+      const wbRows = await ensureSupplierProductsIndex(currentSupply.supplier_id);
+      const wbByBarcode = new Map<string, any>();
+      const wbByNm = new Map<string, any>();
+      Object.values(wbRows || {}).forEach((row: any) => {
+        if (row?.barcode) wbByBarcode.set(String(row.barcode), row);
+        if (row?.nmID || row?.nmId) wbByNm.set(String(row.nmID || row.nmId), row);
+      });
+
+      const grouped = new Map<string, { image?: string; article: string; title: string; sizes: Record<string, number>; totalQty: number }>();
+      (items || []).forEach((item: any) => {
+        const p = item?.product || {};
+        const qty = Number(item?.quantity || 1);
+        const barcode = String(p?.barcode || '').trim();
+        const wbSku = String(p?.wb_sku || '').trim();
+        const wb = wbByBarcode.get(barcode) || wbByNm.get(wbSku) || null;
+        const article = String(wb?.vendorCode || p?.wb_sku || p?.barcode || '—');
+        const title = String(wb?.title || p?.name || 'Товар');
+        const image = Array.isArray(wb?.photos) ? String(wb.photos[0]?.big || wb.photos[0]?.tm || '') : String(wb?.image || '');
+        const size = String(p?.size || wb?.size || 'Без размера');
+        const key = String(wb?.nmID || wb?.nmId || p?.wb_sku || p?.barcode || `${title}-${article}`);
+        if (!grouped.has(key)) grouped.set(key, { image, article, title, sizes: {}, totalQty: 0 });
+        const row = grouped.get(key)!;
+        row.sizes[size] = (row.sizes[size] || 0) + qty;
+        row.totalQty += qty;
+      });
+
+      const rows = Array.from(grouped.entries()).map(([key, row]) => ({
+        key,
+        image: row.image,
+        article: row.article,
+        title: row.title,
+        sizesText: Object.entries(row.sizes).map(([size, qty]) => `${size}: ${qty}`).join(', '),
+        totalQty: row.totalQty,
+      }));
+
+      setSupplyProductsRows(rows);
+    } catch (e) {
+      console.error('openSupplyProductsModal error', e);
+      setSupplyProductsRows([]);
+      showToast('Ошибка загрузки товаров поставки', 'error');
+    } finally {
+      setSupplyProductsLoading(false);
+    }
   };
 
   const fetchBoxItems = async (boxId: string) => {
@@ -11574,6 +11641,9 @@ export default function Dashboard() {
                         <button onClick={() => setSupplySyncOpen(true)} className="flex-1 md:flex-none justify-center px-4 py-2 bg-amber-100 text-amber-800 rounded-lg hover:bg-amber-200 flex items-center">
                           <RefreshCw className="h-4 w-4 mr-2" /> Синхронизировать
                         </button>
+                        <button onClick={openSupplyProductsModal} className="flex-1 md:flex-none justify-center px-4 py-2 bg-sky-100 text-sky-800 rounded-lg hover:bg-sky-200 flex items-center">
+                          <Package className="h-4 w-4 mr-2" /> Товар
+                        </button>
                         <button onClick={handleDownloadExcel} className="flex-1 md:flex-none justify-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center">
                           <FileSpreadsheet className="h-4 w-4 mr-2" /> Excel
                         </button>
@@ -11753,6 +11823,43 @@ export default function Dashboard() {
               )}
 
               {/* QR Modal */}
+              {showSupplyProductsModal && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowSupplyProductsModal(false)}>
+                  <div className="bg-white rounded-xl w-[95vw] max-w-5xl max-h-[85vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+                    <div className="p-4 border-b flex items-center justify-between">
+                      <div>
+                        <h3 className="text-xl font-bold">Товары в поставке</h3>
+                        <div className="text-sm text-gray-500">{currentSupply?.name || ''}</div>
+                      </div>
+                      <button onClick={() => setShowSupplyProductsModal(false)} className="px-4 py-2 bg-gray-100 rounded-lg hover:bg-gray-200">Закрыть</button>
+                    </div>
+                    <div className="p-4 overflow-auto">
+                      {supplyProductsLoading ? (
+                        <div className="text-gray-500">Загрузка...</div>
+                      ) : !supplyProductsRows.length ? (
+                        <div className="text-gray-500">Товары в поставке не найдены.</div>
+                      ) : (
+                        <div className="space-y-3">
+                          {supplyProductsRows.map((row) => (
+                            <div key={row.key} className="border rounded-xl p-3 flex gap-4 items-start">
+                              <div className="w-20 h-20 rounded-lg border bg-gray-50 overflow-hidden flex items-center justify-center shrink-0">
+                                {row.image ? <img src={row.image} alt={row.title} className="w-full h-full object-cover" /> : <div className="text-xs text-gray-400">Нет фото</div>}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <div className="font-semibold text-gray-900">{row.article}</div>
+                                <div className="text-sm text-gray-700 break-words">{row.title}</div>
+                                <div className="text-sm text-gray-500 mt-1">{row.sizesText}</div>
+                                <div className="text-sm font-medium text-sky-700 mt-1">Всего: {row.totalQty}</div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {supplySyncOpen && (
                 <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setSupplySyncOpen(false)}>
                   <div className="bg-white p-8 rounded-xl text-center w-full max-w-lg" onClick={e => e.stopPropagation()}>
