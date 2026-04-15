@@ -3506,22 +3506,31 @@ export default function Dashboard() {
         .limit(10000);
       if (error) throw error;
 
-      const photoByKey: Record<string, string> = {};
+      const photoByNm: Record<string, string> = {};
+      const photoByBarcode: Record<string, string> = {};
+      const photoByVendor: Record<string, string> = {};
       (data || []).forEach((row: any) => {
         const p = row?.product_json || {};
         const nm = String(row?.nm_id || p?.nmID || p?.nmId || '').trim();
+        const barcode = String(p?.barcode || p?.skus?.[0] || '').trim();
+        const vendor = String(p?.vendorCode || p?.article || '').trim().toLowerCase();
         const first = (Array.isArray(p?.photos) && p.photos[0]) || (Array.isArray(p?.mediaFiles) && p.mediaFiles[0]) || '';
         let src = typeof first === 'string' ? first : (first?.big || first?.tm || first?.c246x328 || '');
         src = String(p?.photoUrl || p?.image || p?.image_url || src || '').trim();
         if (src && src.startsWith('//')) src = `https:${src}`;
-        if (!nm || !/^https?:\/\//i.test(src)) return;
-        photoByKey[`${String(row?.supplier_id)}__${nm}`] = src;
+        if (!/^https?:\/\//i.test(src)) return;
+        if (nm) photoByNm[`${String(row?.supplier_id)}__${nm}`] = src;
+        if (barcode) photoByBarcode[`${String(row?.supplier_id)}__${barcode}`] = src;
+        if (vendor) photoByVendor[`${String(row?.supplier_id)}__${vendor}`] = src;
       });
 
       let updated = 0;
-      setSupplyProductsRows((prev) => (prev || []).map((r) => {
-        const key = `${String(currentSupply?.supplier_id || '')}__${String(r?.nmId || r?.key || '')}`;
-        const src = photoByKey[key] || '';
+      setSupplyProductsRows((prev) => (prev || []).map((r: any) => {
+        const supplierKey = String(currentSupply?.supplier_id || '');
+        const byNm = photoByNm[`${supplierKey}__${String(r?.nmId || r?.key || '')}`] || '';
+        const byBarcode = photoByBarcode[`${supplierKey}__${String(r?.article || '').trim()}`] || '';
+        const byVendor = photoByVendor[`${supplierKey}__${String(r?.article || '').trim().toLowerCase()}`] || '';
+        const src = byNm || byBarcode || byVendor || '';
         if (src && src !== r.image) {
           updated += 1;
           return { ...r, image: src };
