@@ -2904,7 +2904,8 @@ export default function Dashboard() {
   const [boxItems, setBoxItems] = useState<SupplyItem[]>([]);
   const [showSupplyProductsModal, setShowSupplyProductsModal] = useState(false);
   const [supplyProductsLoading, setSupplyProductsLoading] = useState(false);
-  const [supplyProductsRows, setSupplyProductsRows] = useState<Array<{ key: string; image?: string; article: string; title: string; sizesText: string; totalQty: number }>>([]);
+  const [supplyProductsPhotoLoading, setSupplyProductsPhotoLoading] = useState(false);
+  const [supplyProductsRows, setSupplyProductsRows] = useState<Array<{ key: string; nmId?: string; image?: string; article: string; title: string; sizesText: string; totalQty: number }>>([]);
   const [supplyStats, setSupplyStats] = useState({ boxes: 0, items: 0 });
   const [apiBoxCount, setApiBoxCount] = useState('1');
   const [loadingApiBoxes, setLoadingApiBoxes] = useState(false);
@@ -3476,6 +3477,7 @@ export default function Dashboard() {
 
       const rows = Array.from(grouped.entries()).map(([key, row]) => ({
         key,
+        nmId: String(key || ''),
         image: row.image,
         article: row.article,
         title: row.title,
@@ -3490,6 +3492,47 @@ export default function Dashboard() {
       showToast('Ошибка загрузки товаров поставки', 'error');
     } finally {
       setSupplyProductsLoading(false);
+    }
+  };
+
+  const refreshSupplyProductsPhotos = async () => {
+    try {
+      if (!currentSupply?.supplier_id || !supplyProductsRows.length) return;
+      setSupplyProductsPhotoLoading(true);
+      const { data, error } = await supabase
+        .from('wb_products_cache')
+        .select('supplier_id, nm_id, product_json')
+        .eq('supplier_id', currentSupply.supplier_id)
+        .limit(10000);
+      if (error) throw error;
+
+      const photoByKey: Record<string, string> = {};
+      (data || []).forEach((row: any) => {
+        const p = row?.product_json || {};
+        const nm = String(row?.nm_id || p?.nmID || p?.nmId || '').trim();
+        const first = (Array.isArray(p?.photos) && p.photos[0]) || (Array.isArray(p?.mediaFiles) && p.mediaFiles[0]) || '';
+        let src = typeof first === 'string' ? first : (first?.big || first?.tm || first?.c246x328 || '');
+        src = String(p?.photoUrl || p?.image || p?.image_url || src || '').trim();
+        if (src && src.startsWith('//')) src = `https:${src}`;
+        if (!nm || !/^https?:\/\//i.test(src)) return;
+        photoByKey[`${String(row?.supplier_id)}__${nm}`] = src;
+      });
+
+      let updated = 0;
+      setSupplyProductsRows((prev) => (prev || []).map((r) => {
+        const key = `${String(currentSupply?.supplier_id || '')}__${String(r?.nmId || r?.key || '')}`;
+        const src = photoByKey[key] || '';
+        if (src && src !== r.image) {
+          updated += 1;
+          return { ...r, image: src };
+        }
+        return r;
+      }));
+      showToast(`Фото обновлены: ${updated}`, 'success');
+    } catch (e: any) {
+      showToast('Ошибка обновления фото: ' + (e?.message || 'неизвестно'), 'error');
+    } finally {
+      setSupplyProductsPhotoLoading(false);
     }
   };
 
@@ -11834,7 +11877,7 @@ export default function Dashboard() {
                         <div className="text-sm text-gray-500">{currentSupply?.name || ''}</div>
                       </div>
                       <div className="flex items-center gap-2">
-                        <button onClick={openSupplyProductsModal} disabled={supplyProductsLoading} className="px-4 py-2 bg-sky-100 text-sky-800 rounded-lg hover:bg-sky-200 disabled:opacity-50">{supplyProductsLoading ? 'Обновляю...' : 'Обновить фото'}</button>
+                        <button onClick={refreshSupplyProductsPhotos} disabled={supplyProductsPhotoLoading || supplyProductsLoading} className="px-4 py-2 bg-sky-100 text-sky-800 rounded-lg hover:bg-sky-200 disabled:opacity-50">{supplyProductsPhotoLoading ? 'Обновляю...' : 'Обновить фото'}</button>
                         <button onClick={() => setShowSupplyProductsModal(false)} className="px-4 py-2 bg-gray-100 rounded-lg hover:bg-gray-200">Закрыть</button>
                       </div>
                     </div>
