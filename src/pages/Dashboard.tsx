@@ -2911,6 +2911,9 @@ export default function Dashboard() {
   const [fboBoxesTotalLabels, setFboBoxesTotalLabels] = useState<number>(0);
   const [fboBoxesRangeFrom, setFboBoxesRangeFrom] = useState<string>('1');
   const [fboBoxesRangeTo, setFboBoxesRangeTo] = useState<string>('');
+  const [supplySyncExcelFile, setSupplySyncExcelFile] = useState<File | null>(null);
+  const [supplySyncOpen, setSupplySyncOpen] = useState(false);
+  const [supplySyncLoading, setSupplySyncLoading] = useState(false);
 
   useEffect(() => {
     if (!fboBoxesSupplierId && selectedSupplierId) {
@@ -2994,6 +2997,56 @@ export default function Dashboard() {
   };
 
   // Supplies Functions
+  const handleSyncSupplyBoxesFromExcel = async () => {
+    try {
+      if (!currentSupply?.id) return showToast('Сначала откройте поставку', 'error');
+      if (!supplySyncExcelFile) return showToast('Загрузите Excel файл', 'error');
+
+      const sizeError = ensureExcelFileSize(supplySyncExcelFile as File);
+      if (sizeError) return showToast(sizeError, 'error');
+
+      setSupplySyncLoading(true);
+      const buffer = await supplySyncExcelFile.arrayBuffer();
+      const rows = await readFirstSheetAsJson<Record<string, any>>(buffer, { defval: '' });
+      if (!rows.length) return showToast('В файле нет строк', 'error');
+      const rowLimitError = ensureExcelRowLimit(rows.length);
+      if (rowLimitError) return showToast(rowLimitError, 'error');
+
+      const { codes } = parseFboBoxCodesFromRows(rows);
+      if (!codes.length) return showToast('Не найдены коды коробок в файле', 'error');
+
+      const { data: supplyBoxes } = await supabase.from('boxes').select('id,name').eq('supply_id', currentSupply.id);
+      const orderedBoxes = (supplyBoxes || [])
+        .slice()
+        .sort((a: any, b: any) => {
+          const an = parseInt(String(a?.name || ''), 10);
+          const bn = parseInt(String(b?.name || ''), 10);
+          const av = Number.isFinite(an) ? an : Number.MAX_SAFE_INTEGER;
+          const bv = Number.isFinite(bn) ? bn : Number.MAX_SAFE_INTEGER;
+          return av - bv;
+        });
+
+      if (!orderedBoxes.length) return showToast('В поставке нет коробок для синхронизации', 'error');
+      if (codes.length < orderedBoxes.length) return showToast(`В файле меньше кодов, чем коробок в поставке (${codes.length} < ${orderedBoxes.length})`, 'error');
+
+      for (let i = 0; i < orderedBoxes.length; i++) {
+        const box = orderedBoxes[i];
+        const nextName = String(codes[i] || '').trim();
+        if (!nextName) continue;
+        await supabase.from('boxes').update({ name: nextName }).eq('id', box.id);
+      }
+
+      await fetchBoxesList(currentSupply.id);
+      setSupplySyncOpen(false);
+      setSupplySyncExcelFile(null);
+      showToast('Коробки синхронизированы', 'success');
+    } catch (e: any) {
+      showToast(`Ошибка синхронизации: ${e?.message || e}`, 'error');
+    } finally {
+      setSupplySyncLoading(false);
+    }
+  };
+
   const handleGenerateFboBoxesLabelsFromExcel = async () => {
     try {
       if (!fboBoxesSupplierId) return showToast('Сначала выберите поставщика для коробок FBO', 'error');
@@ -11518,6 +11571,9 @@ export default function Dashboard() {
                         <button onClick={() => setShowGenerateBoxQR(true)} className="flex-1 md:flex-none justify-center px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 flex items-center">
                           <QrCode className="h-4 w-4 mr-2" /> <span className="whitespace-nowrap">QR генерация коробки</span>
                         </button>
+                        <button onClick={() => setSupplySyncOpen(true)} className="flex-1 md:flex-none justify-center px-4 py-2 bg-amber-100 text-amber-800 rounded-lg hover:bg-amber-200 flex items-center">
+                          <RefreshCw className="h-4 w-4 mr-2" /> Синхронизировать
+                        </button>
                         <button onClick={handleDownloadExcel} className="flex-1 md:flex-none justify-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center">
                           <FileSpreadsheet className="h-4 w-4 mr-2" /> Excel
                         </button>
@@ -11697,6 +11753,26 @@ export default function Dashboard() {
               )}
 
               {/* QR Modal */}
+              {supplySyncOpen && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setSupplySyncOpen(false)}>
+                  <div className="bg-white p-8 rounded-xl text-center w-full max-w-lg" onClick={e => e.stopPropagation()}>
+                    <h3 className="text-xl font-bold mb-4">Синхронизировать коробки</h3>
+                    <p className="text-gray-500 mb-4 text-sm">Загрузите Excel файл как в разделе «Коробки (FBO)». Номера коробок в текущей поставке будут заменены по порядку на реальные коды из файла.</p>
+                    <label className="inline-flex items-center gap-2 px-4 py-3 bg-gray-100 hover:bg-gray-200 rounded-lg cursor-pointer mb-4">
+                      <FileSpreadsheet className="h-4 w-4" />
+                      <span>{supplySyncExcelFile ? supplySyncExcelFile.name : 'Выбрать Excel файл'}</span>
+                      <input type="file" accept=".xlsx,.xls" className="hidden" onChange={(e) => setSupplySyncExcelFile(e.target.files?.[0] || null)} />
+                    </label>
+                    <div className="flex justify-center gap-3 mt-2">
+                      <button onClick={handleSyncSupplyBoxesFromExcel} disabled={!supplySyncExcelFile || supplySyncLoading} className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium disabled:opacity-50">
+                        {supplySyncLoading ? 'Синхронизация...' : 'Синхронизировать'}
+                      </button>
+                      <button onClick={() => setSupplySyncOpen(false)} className="px-6 py-2 bg-gray-100 rounded-lg hover:bg-gray-200 font-medium">Закрыть</button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {showGenerateBoxQR && (
                 <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowGenerateBoxQR(false)}>
                   <div className="bg-white p-8 rounded-xl text-center" onClick={e => e.stopPropagation()}>
