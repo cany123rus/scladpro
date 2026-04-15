@@ -3461,9 +3461,10 @@ export default function Dashboard() {
         const barcode = String(p?.barcode || '').trim();
         const wbSku = String(p?.wb_sku || '').trim();
         const wb = wbByBarcode.get(barcode) || wbByNm.get(wbSku) || null;
-        const article = String(wb?.vendorCode || p?.wb_sku || p?.barcode || '—');
-        const title = String(wb?.title || p?.name || 'Товар');
-        const image = Array.isArray(wb?.photos) ? String(wb.photos[0]?.big || wb.photos[0]?.tm || '') : String(wb?.image || '');
+        const article = String(wb?.vendorCode || wb?.article || p?.wb_sku || p?.barcode || '—');
+        const title = String(wb?.title || wb?.name || p?.name || 'Товар');
+        const firstPhoto = (Array.isArray(wb?.photos) && wb.photos[0]) || (Array.isArray(wb?.mediaFiles) && wb.mediaFiles[0]) || '';
+        const image = String(wb?.photoUrl || wb?.image || wb?.image_url || firstPhoto?.big || firstPhoto?.tm || firstPhoto || '');
         const size = String(p?.size || wb?.size || 'Без размера');
         const key = String(wb?.nmID || wb?.nmId || p?.wb_sku || p?.barcode || `${title}-${article}`);
         if (!grouped.has(key)) grouped.set(key, { image, article, title, sizes: {}, totalQty: 0 });
