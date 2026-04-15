@@ -3464,7 +3464,8 @@ export default function Dashboard() {
         const article = String(wb?.vendorCode || wb?.article || p?.wb_sku || p?.barcode || '—');
         const title = String(wb?.title || wb?.name || p?.name || 'Товар');
         const firstPhoto = (Array.isArray(wb?.photos) && wb.photos[0]) || (Array.isArray(wb?.mediaFiles) && wb.mediaFiles[0]) || '';
-        const image = String(wb?.photoUrl || wb?.image || wb?.image_url || firstPhoto?.big || firstPhoto?.tm || firstPhoto || '');
+        const rawImage = String(wb?.photoUrl || wb?.image || wb?.image_url || firstPhoto?.big || firstPhoto?.tm || firstPhoto || '').trim();
+        const image = /^https?:\/\//i.test(rawImage) ? rawImage : '';
         const size = String(p?.size || wb?.size || 'Без размера');
         const key = String(wb?.nmID || wb?.nmId || p?.wb_sku || p?.barcode || `${title}-${article}`);
         if (!grouped.has(key)) grouped.set(key, { image, article, title, sizes: {}, totalQty: 0 });
