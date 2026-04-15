@@ -11899,7 +11899,7 @@ export default function Dashboard() {
                         <div className="space-y-3">
                           {supplyProductsRows.map((row) => (
                             <div key={row.key} className="border rounded-xl p-3 flex gap-4 items-start">
-                              <div className="w-20 h-20 rounded-lg border bg-gray-50 overflow-hidden flex items-center justify-center shrink-0">
+                              <div className="w-48 h-48 rounded-lg border bg-gray-50 overflow-hidden flex items-center justify-center shrink-0">
                                 {row.image ? <img src={row.image} alt={row.title} className="w-full h-full object-cover" /> : <div className="text-xs text-gray-400">Нет фото</div>}
                               </div>
                               <div className="min-w-0 flex-1">
