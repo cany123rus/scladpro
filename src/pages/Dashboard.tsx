@@ -3766,7 +3766,12 @@ export default function Dashboard() {
           return;
         }
 
-        // Check uniqueness (optional, but good practice)
+        const pendingDuplicate = pendingScansRef.current.some((x) => x.code === code);
+        if (pendingDuplicate) {
+          showToast('Этот Честный Знак уже добавлен в очередь!', 'error');
+          return;
+        }
+
         const { data: existing } = await supabase.from('supply_items').select('id').eq('honest_sign_code', code).maybeSingle();
         if (existing) {
           showToast('Этот Честный Знак уже отсканирован!', 'error');
@@ -3774,6 +3779,8 @@ export default function Dashboard() {
         }
 
         pendingScansRef.current.push({ boxId: currentBox.id, productId: scannedItem.id, code });
+        setBoxItems((prev) => ([{ id: `pending-${Date.now()}-${Math.random()}`, box_id: currentBox.id, product_id: scannedItem.id, honest_sign_code: code, created_at: new Date().toISOString(), deleted_at: null, product: scannedItem } as any, ...(prev || [])]));
+        setSupplyStats((prev) => ({ ...prev, items: Number(prev.items || 0) + 1 }));
 
         if (flushScansTimeoutRef.current) {
           window.clearTimeout(flushScansTimeoutRef.current);
@@ -3783,7 +3790,7 @@ export default function Dashboard() {
           flushPendingScans().catch((err) => {
             console.error('Batch flush failed', err);
           });
-        }, 220);
+        }, 90);
 
         showToast('Товар добавлен', 'success');
         setScannedItem(null);
