@@ -3303,6 +3303,7 @@ export default function Dashboard() {
       }
       await logAction('Создание поставки', `Создана поставка: ${newSupply.name}`, currentEmployee?.id);
       setCurrentSupply(newSupply);
+      await fetchSuppliesList();
       fetchBoxesList(newSupply.id);
       fetchSupplyStats(newSupply.id);
     }
