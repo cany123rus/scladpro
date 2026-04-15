@@ -3442,7 +3442,7 @@ export default function Dashboard() {
 
       const { data: items } = await supabase
         .from('supply_items')
-        .select('quantity, product:products(id,name,wb_sku,barcode,size,color), box_id')
+        .select('id, box_id, product_id, honest_sign_code, created_at, deleted_at, product:products(id,name,wb_sku,barcode,size,color)')
         .in('box_id', boxIds)
         .is('deleted_at', null);
 
@@ -3457,7 +3457,7 @@ export default function Dashboard() {
       const grouped = new Map<string, { image?: string; article: string; title: string; sizes: Record<string, number>; totalQty: number }>();
       (items || []).forEach((item: any) => {
         const p = item?.product || {};
-        const qty = Number(item?.quantity || 1);
+        const qty = 1;
         const barcode = String(p?.barcode || '').trim();
         const wbSku = String(p?.wb_sku || '').trim();
         const wb = wbByBarcode.get(barcode) || wbByNm.get(wbSku) || null;
