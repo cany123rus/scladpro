@@ -1443,6 +1443,7 @@ export default function Dashboard() {
   });
   const [tempWorkerPaymentModal, setTempWorkerPaymentModal] = useState<{ open: boolean; logId: string; mode: 'pay' | 'extra' | 'edit'; supplierId: string; amount: string; error?: string }>({ open: false, logId: '', mode: 'pay', supplierId: '', amount: '', error: '' });
   const [tempWorkerPaymentsMap, setTempWorkerPaymentsMap] = useState<Record<string, Array<{ amount: number; supplier_id: string; created_at: string }>>>({});
+  const [tempWorkerMetaLoaded, setTempWorkerMetaLoaded] = useState(false);
 
   const [showAssemblyAccessModal, setShowAssemblyAccessModal] = useState(false);
   const [assemblyButtonAccess, setAssemblyButtonAccess] = useState<Record<string, ButtonAccessConfig>>({});
@@ -1470,6 +1471,7 @@ export default function Dashboard() {
     if (showTempWorkerHistory) {
         setTempWorkerSupplierFilter('all');
         setTempWorkerPaidFilter('all');
+        setTempWorkerMetaLoaded(false);
         fetchTempWorkerLogs();
         loadTempWorkerMeta();
         fetchCwWarehouseMoneyHistory();
@@ -1489,6 +1491,7 @@ export default function Dashboard() {
       setTempWorkerCommentTemplates(Array.from(new Set((templates || []).map((x: any) => String(x || '').trim()).filter(Boolean))));
       setTempWorkerPaymentsMap(payments && typeof payments === 'object' ? payments : {});
     } catch {}
+    finally { setTempWorkerMetaLoaded(true); }
   };
 
   const saveTempWorkersList = async (items: string[]) => {
