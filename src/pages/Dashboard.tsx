@@ -3647,6 +3647,11 @@ export default function Dashboard() {
       return;
     }
 
+    if (input.trim() === 'ACTION:GENERATE_BOX' || input.trim() === 'action:generate_box' || input.includes('GENERATE_BOX') || input.includes('generate_box') || input.includes('ACTION;GENERATE_BOX')) {
+      await createNextBoxInCurrentSupply();
+      return;
+    }
+
     // Search scanned item in WB products cache (shared DB table), not in manual products section.
     let product = null;
     let matchedCard: any = null;
