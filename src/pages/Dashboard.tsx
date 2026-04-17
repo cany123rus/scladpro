@@ -3383,11 +3383,18 @@ export default function Dashboard() {
        showToast('Раскладка исправлена', 'info');
     }
 
+    const normalized = String(input || '').trim();
+    if (normalized === 'ACTION:GENERATE_BOX' || normalized === 'action:generate_box') {
+      await createNextBoxInCurrentSupply();
+      return;
+    }
+
     // Check if box exists in this supply
     const { data: existing } = await supabase.from('boxes').select('*').eq('name', input).eq('supply_id', currentSupply.id).maybeSingle();
 
     if (existing) {
       setCurrentBox(existing);
+      fetchBoxItems(existing.id);
     } else {
       // Create new box
       const { data: newBox, error } = await supabase.from('boxes').insert([{
@@ -3401,9 +3408,9 @@ export default function Dashboard() {
       }
       await logAction('Создание коробки', `Создана коробка: ${newBox.name} в поставке ${currentSupply.name}`, currentEmployee?.id);
       setCurrentBox(newBox);
+      fetchBoxItems(newBox.id);
     }
     setSupplyStep('BOX');
-    fetchBoxItems(existing?.id || ''); // Fetch items if existing
     fetchBoxesList(currentSupply.id);
   };
 
