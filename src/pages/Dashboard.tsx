@@ -2945,9 +2945,12 @@ export default function Dashboard() {
   const [offlineFboSession, setOfflineFboSession] = useState<OfflineFboSession | null>(null);
   const [offlineFboValidation, setOfflineFboValidation] = useState<OfflineFboValidationSummary | null>(null);
   const [offlineFboValidationLoading, setOfflineFboValidationLoading] = useState(false);
+  const [offlineFboUploadLoading, setOfflineFboUploadLoading] = useState(false);
 
 
   const getOfflineFboStorageKey = (supplyId: string) => `fbo_offline_session_v1_${supplyId}`;
+  const OFFLINE_FBO_DB_NAME = 'skladpro_offline_fbo_v1';
+  const OFFLINE_FBO_DB_STORE = 'sessions';
 
   const buildEmptyOfflineFboSession = (supply: Supply): OfflineFboSession => ({
     supply_id: supply.id,
@@ -2958,31 +2961,106 @@ export default function Dashboard() {
     updated_at: new Date().toISOString(),
   });
 
-  const readOfflineFboSession = (supply: Supply): OfflineFboSession => {
+  const normalizeOfflineFboSession = (supply: Supply, parsed: any): OfflineFboSession => ({
+    ...buildEmptyOfflineFboSession(supply),
+    ...parsed,
+    supply_id: supply.id,
+    supplier_id: supply.supplier_id,
+    supply_name: supply.name,
+    boxes: Array.isArray(parsed?.boxes) ? parsed.boxes : [],
+    items: Array.isArray(parsed?.items) ? parsed.items : [],
+    updated_at: String(parsed?.updated_at || new Date().toISOString()),
+  });
+
+  const openOfflineFboDb = (): Promise<IDBDatabase> => new Promise((resolve, reject) => {
+    if (typeof indexedDB === 'undefined') {
+      reject(new Error('IndexedDB недоступен'));
+      return;
+    }
+    const request = indexedDB.open(OFFLINE_FBO_DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(OFFLINE_FBO_DB_STORE)) {
+        db.createObjectStore(OFFLINE_FBO_DB_STORE, { keyPath: 'supply_id' });
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error('Не удалось открыть IndexedDB'));
+  });
+
+  const readLegacyOfflineFboSession = (supply: Supply): OfflineFboSession | null => {
     try {
       const raw = localStorage.getItem(getOfflineFboStorageKey(supply.id));
-      if (!raw) return buildEmptyOfflineFboSession(supply);
-      const parsed = JSON.parse(raw || '{}');
-      return {
-        ...buildEmptyOfflineFboSession(supply),
-        ...parsed,
-        supply_id: supply.id,
-        supplier_id: supply.supplier_id,
-        supply_name: supply.name,
-        boxes: Array.isArray(parsed?.boxes) ? parsed.boxes : [],
-        items: Array.isArray(parsed?.items) ? parsed.items : [],
-        updated_at: String(parsed?.updated_at || new Date().toISOString()),
-      };
+      if (!raw) return null;
+      return normalizeOfflineFboSession(supply, JSON.parse(raw || '{}'));
     } catch {
-      return buildEmptyOfflineFboSession(supply);
+      return null;
     }
   };
 
-  const writeOfflineFboSession = (session: OfflineFboSession) => {
-    localStorage.setItem(getOfflineFboStorageKey(session.supply_id), JSON.stringify({
-      ...session,
-      updated_at: new Date().toISOString(),
-    }));
+  const readOfflineFboSessionFromDevice = async (supply: Supply): Promise<OfflineFboSession> => {
+    const fallback = buildEmptyOfflineFboSession(supply);
+    try {
+      const db = await openOfflineFboDb();
+      const stored = await new Promise<any>((resolve, reject) => {
+        const tx = db.transaction(OFFLINE_FBO_DB_STORE, 'readonly');
+        const store = tx.objectStore(OFFLINE_FBO_DB_STORE);
+        const request = store.get(supply.id);
+        request.onsuccess = () => resolve(request.result || null);
+        request.onerror = () => reject(request.error || new Error('Не удалось прочитать оффлайн-сессию'));
+      });
+      db.close();
+      if (stored) {
+        return normalizeOfflineFboSession(supply, stored);
+      }
+    } catch (e) {
+      console.error('readOfflineFboSessionFromDevice error', e);
+    }
+
+    const legacy = readLegacyOfflineFboSession(supply);
+    if (legacy) {
+      await writeOfflineFboSessionToDevice(legacy);
+      localStorage.removeItem(getOfflineFboStorageKey(supply.id));
+      return legacy;
+    }
+    return fallback;
+  };
+
+  const writeOfflineFboSessionToDevice = async (session: OfflineFboSession) => {
+    try {
+      const db = await openOfflineFboDb();
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(OFFLINE_FBO_DB_STORE, 'readwrite');
+        const store = tx.objectStore(OFFLINE_FBO_DB_STORE);
+        const request = store.put({
+          ...session,
+          updated_at: new Date().toISOString(),
+        });
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error || new Error('Не удалось сохранить оффлайн-сессию'));
+      });
+      db.close();
+      localStorage.removeItem(getOfflineFboStorageKey(session.supply_id));
+    } catch (e) {
+      console.error('writeOfflineFboSessionToDevice error', e);
+    }
+  };
+
+  const clearOfflineFboSessionFromDevice = async (supplyId: string) => {
+    localStorage.removeItem(getOfflineFboStorageKey(supplyId));
+    try {
+      const db = await openOfflineFboDb();
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(OFFLINE_FBO_DB_STORE, 'readwrite');
+        const store = tx.objectStore(OFFLINE_FBO_DB_STORE);
+        const request = store.delete(supplyId);
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error || new Error('Не удалось удалить оффлайн-сессию'));
+      });
+      db.close();
+    } catch (e) {
+      console.error('clearOfflineFboSessionFromDevice error', e);
+    }
   };
 
   const applyOfflineFboSessionToUi = useCallback((session: OfflineFboSession, activeBoxId?: string | null) => {
@@ -2996,25 +3074,25 @@ export default function Dashboard() {
     if (!currentSupply) return null;
     const base = offlineFboSession && offlineFboSession.supply_id === currentSupply.id
       ? offlineFboSession
-      : readOfflineFboSession(currentSupply);
+      : buildEmptyOfflineFboSession(currentSupply);
     const next = mutate({
       ...base,
       boxes: [...(base.boxes || [])],
       items: [...(base.items || [])],
       updated_at: new Date().toISOString(),
     });
-    writeOfflineFboSession(next);
+    writeOfflineFboSessionToDevice(next).catch(() => undefined);
     setOfflineFboSession(next);
     applyOfflineFboSessionToUi(next, activeBoxId);
     return next;
   };
 
   const validateOfflineFboSession = async () => {
-    if (!currentSupply) return;
+    if (!currentSupply) return null;
 
     const session = offlineFboSession && offlineFboSession.supply_id === currentSupply.id
       ? offlineFboSession
-      : readOfflineFboSession(currentSupply);
+      : await readOfflineFboSessionFromDevice(currentSupply);
 
     if (!session || !(session.boxes || []).length) {
       const summary: OfflineFboValidationSummary = {
@@ -3029,7 +3107,7 @@ export default function Dashboard() {
       };
       setOfflineFboValidation(summary);
       showToast(summary.message, 'error');
-      return;
+      return summary;
     }
 
     if (!(session.items || []).length) {
@@ -3045,7 +3123,7 @@ export default function Dashboard() {
       };
       setOfflineFboValidation(summary);
       showToast(summary.message, 'error');
-      return;
+      return summary;
     }
 
     setOfflineFboValidationLoading(true);
@@ -3118,9 +3196,10 @@ export default function Dashboard() {
       };
       setOfflineFboValidation(summary);
       showToast(summary.message, ok ? 'success' : 'error');
+      return summary;
     } catch (e: any) {
       console.error('validateOfflineFboSession error', e);
-      setOfflineFboValidation({
+      const summary: OfflineFboValidationSummary = {
         checkedAt: new Date().toISOString(),
         boxesCount: session.boxes.length,
         itemsCount: session.items.length,
@@ -3129,18 +3208,105 @@ export default function Dashboard() {
         missingProducts: [],
         ok: false,
         message: 'Ошибка проверки оффлайн-сессии: ' + (e?.message || 'неизвестно'),
-      });
-      showToast('Ошибка проверки оффлайн-сессии: ' + (e?.message || 'неизвестно'), 'error');
+      };
+      setOfflineFboValidation(summary);
+      showToast(summary.message, 'error');
+      return summary;
     } finally {
       setOfflineFboValidationLoading(false);
     }
   };
 
+  const uploadOfflineFboSessionToDb = async () => {
+    if (!currentSupply) return;
+
+    const session = offlineFboSession && offlineFboSession.supply_id === currentSupply.id
+      ? offlineFboSession
+      : await readOfflineFboSessionFromDevice(currentSupply);
+
+    if (!session || !(session.items || []).length) {
+      showToast('Нет оффлайн-данных для загрузки', 'error');
+      return;
+    }
+
+    const summary = await validateOfflineFboSession();
+    if (!summary?.ok) {
+      showToast('Сначала исправьте ошибки проверки', 'error');
+      return;
+    }
+
+    setOfflineFboUploadLoading(true);
+    try {
+      const { data: existingBoxes, error: existingBoxesError } = await supabase
+        .from('boxes')
+        .select('id, name')
+        .eq('supply_id', currentSupply.id)
+        .is('deleted_at', null);
+      if (existingBoxesError) throw existingBoxesError;
+
+      const boxMap = new Map<string, string>((existingBoxes || []).map((box: any) => [String(box.name), String(box.id)]));
+      const missingNames = (session.boxes || [])
+        .map((box) => String(box.name || '').trim())
+        .filter((name) => name && !boxMap.has(name));
+
+      if (missingNames.length) {
+        const { data: insertedBoxes, error: insertBoxesError } = await supabase
+          .from('boxes')
+          .insert(missingNames.map((name) => ({ name, supply_id: currentSupply.id })))
+          .select('id, name');
+        if (insertBoxesError) throw insertBoxesError;
+        (insertedBoxes || []).forEach((box: any) => {
+          boxMap.set(String(box.name), String(box.id));
+        });
+      }
+
+      const payload = (session.items || []).map((item) => {
+        const sourceBox = (session.boxes || []).find((box) => box.id === item.box_id);
+        const dbBoxId = boxMap.get(String(sourceBox?.name || ''));
+        return dbBoxId ? {
+          box_id: dbBoxId,
+          product_id: item.product_id,
+          honest_sign_code: item.honest_sign_code,
+        } : null;
+      }).filter(Boolean) as Array<{ box_id: string; product_id: string; honest_sign_code: string }>;
+
+      for (let i = 0; i < payload.length; i += 500) {
+        const chunk = payload.slice(i, i + 500);
+        if (!chunk.length) continue;
+        const { error } = await supabase.from('supply_items').insert(chunk);
+        if (error) throw error;
+      }
+
+      await clearOfflineFboSessionFromDevice(currentSupply.id);
+      setOfflineFboSession(null);
+      setOfflineFboValidation(null);
+      setCurrentBox(null);
+      setScannedItem(null);
+      setSupplyStep('SUPPLY');
+      setFboOfflineMode(false);
+      await fetchBoxesList(currentSupply.id);
+      await fetchSupplyStats(currentSupply.id);
+      showToast(`Оффлайн-сессия загружена в БД: ${payload.length} сканов`, 'success');
+    } catch (e: any) {
+      console.error('uploadOfflineFboSessionToDb error', e);
+      showToast('Ошибка загрузки оффлайн-сессии: ' + (e?.message || 'неизвестно'), 'error');
+    } finally {
+      setOfflineFboUploadLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (!currentSupply?.id || !fboOfflineMode) return;
-    const session = readOfflineFboSession(currentSupply);
-    setOfflineFboSession(session);
-    applyOfflineFboSessionToUi(session, currentBox?.id || null);
+    let cancelled = false;
+    (async () => {
+      const session = await readOfflineFboSessionFromDevice(currentSupply);
+      if (cancelled) return;
+      setOfflineFboSession(session);
+      applyOfflineFboSessionToUi(session, currentBox?.id || null);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [currentSupply?.id, fboOfflineMode, currentBox?.id, applyOfflineFboSessionToUi]);
 
   useEffect(() => {
@@ -3627,7 +3793,7 @@ export default function Dashboard() {
       const existing = (offlineFboSession?.boxes || []).find((box) => String(box.name) === String(input));
       if (existing) {
         setCurrentBox(existing);
-        applyOfflineFboSessionToUi(offlineFboSession || readOfflineFboSession(currentSupply), existing.id);
+        applyOfflineFboSessionToUi(offlineFboSession || buildEmptyOfflineFboSession(currentSupply), existing.id);
       } else {
         const newBox: SupplyBox = {
           id: `offline-box-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -3840,7 +4006,7 @@ export default function Dashboard() {
       return;
     }
     if (fboOfflineMode && currentSupply) {
-      const session = offlineFboSession && offlineFboSession.supply_id === currentSupply.id ? offlineFboSession : readOfflineFboSession(currentSupply);
+      const session = offlineFboSession && offlineFboSession.supply_id === currentSupply.id ? offlineFboSession : buildEmptyOfflineFboSession(currentSupply);
       setBoxItems((session.items || []).filter((item) => item.box_id === boxId).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at))));
       return;
     }
@@ -4089,7 +4255,7 @@ export default function Dashboard() {
         }
 
         if (fboOfflineMode && currentSupply) {
-          const session = offlineFboSession && offlineFboSession.supply_id === currentSupply.id ? offlineFboSession : readOfflineFboSession(currentSupply);
+          const session = offlineFboSession && offlineFboSession.supply_id === currentSupply.id ? offlineFboSession : buildEmptyOfflineFboSession(currentSupply);
           const offlineDuplicate = (session.items || []).some((item) => item.honest_sign_code === code);
           if (offlineDuplicate) {
             playScanTone('error');
@@ -12028,7 +12194,7 @@ export default function Dashboard() {
                           <p className="text-gray-500">{supplyStats.boxes} коробок • {supplyStats.items} товаров</p>
                           {fboOfflineMode && (
                             <div className="mt-2 inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-medium">
-                              Оффлайн режим • {boxesList.length} коробок • {offlineFboSession?.items?.length || 0} сканов
+                              Оффлайн режим (IndexedDB) • {boxesList.length} коробок • {offlineFboSession?.items?.length || 0} сканов
                             </div>
                           )}
                         </div>
@@ -12062,13 +12228,22 @@ export default function Dashboard() {
                           <Database className="h-4 w-4 mr-2" /> {fboOfflineMode ? 'Оффлайн включен' : 'Оффлайн режим'}
                         </button>
                         {fboOfflineMode && (
-                          <button
-                            onClick={validateOfflineFboSession}
-                            disabled={offlineFboValidationLoading}
-                            className="flex-1 md:flex-none justify-center px-4 py-2 bg-sky-100 text-sky-800 rounded-lg hover:bg-sky-200 disabled:opacity-50 flex items-center"
-                          >
-                            <CheckCircle2 className="h-4 w-4 mr-2" /> {offlineFboValidationLoading ? 'Проверка...' : 'Проверка'}
-                          </button>
+                          <>
+                            <button
+                              onClick={validateOfflineFboSession}
+                              disabled={offlineFboValidationLoading || offlineFboUploadLoading}
+                              className="flex-1 md:flex-none justify-center px-4 py-2 bg-sky-100 text-sky-800 rounded-lg hover:bg-sky-200 disabled:opacity-50 flex items-center"
+                            >
+                              <CheckCircle2 className="h-4 w-4 mr-2" /> {offlineFboValidationLoading ? 'Проверка...' : 'Проверка'}
+                            </button>
+                            <button
+                              onClick={uploadOfflineFboSessionToDb}
+                              disabled={offlineFboUploadLoading || offlineFboValidationLoading}
+                              className="flex-1 md:flex-none justify-center px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50 flex items-center"
+                            >
+                              <Upload className="h-4 w-4 mr-2" /> {offlineFboUploadLoading ? 'Загрузка...' : 'Загрузить в БД'}
+                            </button>
+                          </>
                         )}
                         <button onClick={() => setSupplySyncOpen(true)} className="flex-1 md:flex-none justify-center px-4 py-2 bg-amber-100 text-amber-800 rounded-lg hover:bg-amber-200 flex items-center">
                           <RefreshCw className="h-4 w-4 mr-2" /> Синхронизировать
@@ -12206,7 +12381,7 @@ export default function Dashboard() {
                       <div>
                         <h1 className="text-xl font-bold text-gray-900">Коробка {currentBox.name}</h1>
                         <p className="text-gray-500 text-sm">Сканируйте товары для добавления</p>
-                        {fboOfflineMode && <div className="mt-2 inline-flex items-center px-2 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-medium">Оффлайн • локально сохраняется только в браузере</div>}
+                        {fboOfflineMode && <div className="mt-2 inline-flex items-center px-2 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-medium">Оффлайн • локально на устройстве через IndexedDB</div>}
                       </div>
                     </div>
                     <button onClick={() => setShowNewBoxQR(true)} className="self-start sm:self-auto px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 text-sm flex items-center">
@@ -12270,7 +12445,7 @@ export default function Dashboard() {
                       <div>
                         <h1 className="text-xl font-bold text-gray-900">Коробка {currentBox?.name}</h1>
                         <p className="text-gray-500 text-sm">Сканируйте товары для добавления</p>
-                        {fboOfflineMode && <div className="mt-2 inline-flex items-center px-2 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-medium">Оффлайн • запись в БД отключена</div>}
+                        {fboOfflineMode && <div className="mt-2 inline-flex items-center px-2 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-medium">Оффлайн • сканы хранятся на устройстве, запись в БД по кнопке</div>}
                       </div>
                     </div>
                     <button onClick={() => setShowNewBoxQR(true)} className="self-start sm:self-auto px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 text-sm flex items-center">
