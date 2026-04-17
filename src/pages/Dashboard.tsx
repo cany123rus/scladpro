@@ -74,6 +74,14 @@ interface SupplyItem {
   product?: Product;
 }
 
+interface OfflineFboSession {
+  supply_id: string;
+  supplier_id: string;
+  supply_name: string;
+  boxes: SupplyBox[];
+  items: SupplyItem[];
+  updated_at: string;
+}
 
 
 type AccessRule = 'inherit' | 'allow' | 'deny';
@@ -2922,6 +2930,86 @@ export default function Dashboard() {
   const [supplySyncExcelFile, setSupplySyncExcelFile] = useState<File | null>(null);
   const [supplySyncOpen, setSupplySyncOpen] = useState(false);
   const [supplySyncLoading, setSupplySyncLoading] = useState(false);
+  const [fboOfflineMode, setFboOfflineMode] = useState(false);
+  const [offlineFboSession, setOfflineFboSession] = useState<OfflineFboSession | null>(null);
+
+
+  const getOfflineFboStorageKey = (supplyId: string) => `fbo_offline_session_v1_${supplyId}`;
+
+  const buildEmptyOfflineFboSession = (supply: Supply): OfflineFboSession => ({
+    supply_id: supply.id,
+    supplier_id: supply.supplier_id,
+    supply_name: supply.name,
+    boxes: [],
+    items: [],
+    updated_at: new Date().toISOString(),
+  });
+
+  const readOfflineFboSession = (supply: Supply): OfflineFboSession => {
+    try {
+      const raw = localStorage.getItem(getOfflineFboStorageKey(supply.id));
+      if (!raw) return buildEmptyOfflineFboSession(supply);
+      const parsed = JSON.parse(raw || '{}');
+      return {
+        ...buildEmptyOfflineFboSession(supply),
+        ...parsed,
+        supply_id: supply.id,
+        supplier_id: supply.supplier_id,
+        supply_name: supply.name,
+        boxes: Array.isArray(parsed?.boxes) ? parsed.boxes : [],
+        items: Array.isArray(parsed?.items) ? parsed.items : [],
+        updated_at: String(parsed?.updated_at || new Date().toISOString()),
+      };
+    } catch {
+      return buildEmptyOfflineFboSession(supply);
+    }
+  };
+
+  const writeOfflineFboSession = (session: OfflineFboSession) => {
+    localStorage.setItem(getOfflineFboStorageKey(session.supply_id), JSON.stringify({
+      ...session,
+      updated_at: new Date().toISOString(),
+    }));
+  };
+
+  const applyOfflineFboSessionToUi = useCallback((session: OfflineFboSession, activeBoxId?: string | null) => {
+    setBoxesList(session.boxes || []);
+    setSupplyStats({ boxes: (session.boxes || []).length, items: (session.items || []).length });
+    const boxId = activeBoxId || currentBox?.id || '';
+    setBoxItems(boxId ? (session.items || []).filter((item) => item.box_id === boxId) : []);
+  }, [currentBox?.id]);
+
+  const updateOfflineFboSession = (mutate: (session: OfflineFboSession) => OfflineFboSession, activeBoxId?: string | null) => {
+    if (!currentSupply) return null;
+    const base = offlineFboSession && offlineFboSession.supply_id === currentSupply.id
+      ? offlineFboSession
+      : readOfflineFboSession(currentSupply);
+    const next = mutate({
+      ...base,
+      boxes: [...(base.boxes || [])],
+      items: [...(base.items || [])],
+      updated_at: new Date().toISOString(),
+    });
+    writeOfflineFboSession(next);
+    setOfflineFboSession(next);
+    applyOfflineFboSessionToUi(next, activeBoxId);
+    return next;
+  };
+
+  useEffect(() => {
+    if (!currentSupply?.id || !fboOfflineMode) return;
+    const session = readOfflineFboSession(currentSupply);
+    setOfflineFboSession(session);
+    applyOfflineFboSessionToUi(session, currentBox?.id || null);
+  }, [currentSupply?.id, fboOfflineMode, currentBox?.id, applyOfflineFboSessionToUi]);
+
+  useEffect(() => {
+    if (!currentSupply?.id || fboOfflineMode) return;
+    setOfflineFboSession(null);
+    fetchBoxesList(currentSupply.id);
+    fetchSupplyStats(currentSupply.id);
+    if (currentBox?.id) fetchBoxItems(currentBox.id);
+  }, [currentSupply?.id, fboOfflineMode]);
 
   useEffect(() => {
     if (!fboBoxesSupplierId && selectedSupplierId) {
@@ -3391,6 +3479,27 @@ export default function Dashboard() {
       return;
     }
 
+    if (fboOfflineMode) {
+      const existing = (offlineFboSession?.boxes || []).find((box) => String(box.name) === String(input));
+      if (existing) {
+        setCurrentBox(existing);
+        applyOfflineFboSessionToUi(offlineFboSession || readOfflineFboSession(currentSupply), existing.id);
+      } else {
+        const newBox: SupplyBox = {
+          id: `offline-box-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          name: input,
+          supply_id: currentSupply.id,
+          created_at: new Date().toISOString(),
+        };
+        updateOfflineFboSession((session) => ({ ...session, boxes: [newBox, ...(session.boxes || [])] }), newBox.id);
+        setCurrentBox(newBox);
+        setBoxItems([]);
+        showToast(`Оффлайн: создана коробка ${newBox.name}`, 'success');
+      }
+      setSupplyStep('BOX');
+      return;
+    }
+
     // Check if box exists in this supply
     const { data: existing } = await supabase.from('boxes').select('*').eq('name', input).eq('supply_id', currentSupply.id).maybeSingle();
 
@@ -3420,6 +3529,30 @@ export default function Dashboard() {
     if (!currentSupply?.id) {
       return;
     }
+
+    if (fboOfflineMode) {
+      const existingBoxes = offlineFboSession?.boxes || [];
+      const used = new Set((existingBoxes || []).map((b: any) => parseInt(String(b?.name || '').trim(), 10)).filter((n: number) => Number.isFinite(n) && n > 0));
+      let nextNumber = 1;
+      while (used.has(nextNumber)) nextNumber += 1;
+      const nextName = String(nextNumber);
+      const newBox: SupplyBox = {
+        id: `offline-box-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        name: nextName,
+        supply_id: currentSupply.id,
+        created_at: new Date().toISOString(),
+      };
+      updateOfflineFboSession((session) => ({ ...session, boxes: [newBox, ...(session.boxes || [])] }), newBox.id);
+      setCurrentBox(newBox);
+      setSupplyStep('BOX');
+      setScannedItem(null);
+      if (itemInputRef.current) itemInputRef.current.value = '';
+      if (honestSignInputRef.current) honestSignInputRef.current.value = '';
+      setBoxItems([]);
+      showToast(`Оффлайн: создана коробка №${nextName}`, 'success');
+      return;
+    }
+
     const { data: existingBoxes } = await supabase.from('boxes').select('name').eq('supply_id', currentSupply.id).is('deleted_at', null);
     const used = new Set((existingBoxes || []).map((b: any) => parseInt(String(b?.name || '').trim(), 10)).filter((n: number) => Number.isFinite(n) && n > 0));
     let nextNumber = 1;
@@ -3562,13 +3695,18 @@ export default function Dashboard() {
       setBoxItems([]);
       return;
     }
+    if (fboOfflineMode && currentSupply) {
+      const session = offlineFboSession && offlineFboSession.supply_id === currentSupply.id ? offlineFboSession : readOfflineFboSession(currentSupply);
+      setBoxItems((session.items || []).filter((item) => item.box_id === boxId).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at))));
+      return;
+    }
     const { data } = await supabase.from('supply_items').select('*, product:products(*)').eq('box_id', boxId).order('created_at', { ascending: false });
     setBoxItems(data || []);
   };
 
   useEffect(() => {
     if (currentBox) fetchBoxItems(currentBox.id);
-  }, [currentBox]);
+  }, [currentBox, fboOfflineMode, offlineFboSession]);
 
   const ensureWbSkuIndex = async (supplierId: string) => {
     if (wbSkuIndexRef.current[supplierId]) return wbSkuIndexRef.current[supplierId];
@@ -3806,6 +3944,30 @@ export default function Dashboard() {
           return;
         }
 
+        if (fboOfflineMode && currentSupply) {
+          const session = offlineFboSession && offlineFboSession.supply_id === currentSupply.id ? offlineFboSession : readOfflineFboSession(currentSupply);
+          const offlineDuplicate = (session.items || []).some((item) => item.honest_sign_code === code);
+          if (offlineDuplicate) {
+            playScanTone('error');
+            showToast('Этот Честный Знак уже добавлен в оффлайн-сессию!', 'error');
+            return;
+          }
+          const newItem: SupplyItem = {
+            id: `offline-item-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            box_id: currentBox.id,
+            product_id: scannedItem.id,
+            honest_sign_code: code,
+            created_at: new Date().toISOString(),
+            product: scannedItem,
+          };
+          updateOfflineFboSession((currentSession) => ({ ...currentSession, items: [newItem, ...(currentSession.items || [])] }), currentBox.id);
+          playScanTone('success');
+          showToast('Товар добавлен в оффлайн-сессию', 'success');
+          setScannedItem(null);
+          setSupplyStep('BOX');
+          return;
+        }
+
         const pendingDuplicate = pendingScansRef.current.some((x) => x.code === code);
         if (pendingDuplicate) {
           playScanTone('error');
@@ -3855,6 +4017,21 @@ export default function Dashboard() {
   const handleDeleteBox = async (boxId: string) => {
     if (!window.confirm('Вы уверены, что хотите удалить эту коробку?')) return;
     try {
+      if (fboOfflineMode && currentSupply) {
+        updateOfflineFboSession((session) => ({
+          ...session,
+          boxes: (session.boxes || []).filter((box) => box.id !== boxId),
+          items: (session.items || []).filter((item) => item.box_id !== boxId),
+        }));
+        if (currentBox?.id === boxId) {
+          setCurrentBox(null);
+          setSupplyStep('SUPPLY');
+          setBoxItems([]);
+        }
+        showToast('Оффлайн-коробка удалена', 'success');
+        return;
+      }
+
       const { data: box } = await supabase.from('boxes').select('name').eq('id', boxId).single();
       const { error } = await supabase.from('boxes').update({ deleted_at: new Date().toISOString() }).eq('id', boxId);
       if (error) throw error;
@@ -11705,6 +11882,11 @@ export default function Dashboard() {
                         <div>
                           <h1 className="text-2xl font-bold text-gray-900">Поставка {currentSupply.name}</h1>
                           <p className="text-gray-500">{supplyStats.boxes} коробок • {supplyStats.items} товаров</p>
+                          {fboOfflineMode && (
+                            <div className="mt-2 inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-medium">
+                              Оффлайн режим • {boxesList.length} коробок • {offlineFboSession?.items?.length || 0} сканов
+                            </div>
+                          )}
                         </div>
                       </div>
                       <div className="flex flex-wrap gap-2">
@@ -11732,6 +11914,21 @@ export default function Dashboard() {
                         <button onClick={() => setShowGenerateBoxQR(true)} className="flex-1 md:flex-none justify-center px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 flex items-center">
                           <QrCode className="h-4 w-4 mr-2" /> <span className="whitespace-nowrap">QR генерация коробки</span>
                         </button>
+                        <button onClick={() => setFboOfflineMode((prev) => !prev)} className={`flex-1 md:flex-none justify-center px-4 py-2 rounded-lg flex items-center ${fboOfflineMode ? 'bg-amber-600 text-white hover:bg-amber-700' : 'bg-amber-100 text-amber-800 hover:bg-amber-200'}`}>
+                          <Database className="h-4 w-4 mr-2" /> {fboOfflineMode ? 'Оффлайн включен' : 'Оффлайн режим'}
+                        </button>
+                        {fboOfflineMode && (
+                          <button
+                            onClick={() => {
+                              const session = currentSupply ? (offlineFboSession && offlineFboSession.supply_id === currentSupply.id ? offlineFboSession : readOfflineFboSession(currentSupply)) : null;
+                              if (!session) return showToast('Нет активной оффлайн-сессии', 'error');
+                              showToast(`Оффлайн проверка: коробок ${session.boxes.length}, сканов ${session.items.length}`, 'info');
+                            }}
+                            className="flex-1 md:flex-none justify-center px-4 py-2 bg-sky-100 text-sky-800 rounded-lg hover:bg-sky-200 flex items-center"
+                          >
+                            <CheckCircle2 className="h-4 w-4 mr-2" /> Проверка
+                          </button>
+                        )}
                         <button onClick={() => setSupplySyncOpen(true)} className="flex-1 md:flex-none justify-center px-4 py-2 bg-amber-100 text-amber-800 rounded-lg hover:bg-amber-200 flex items-center">
                           <RefreshCw className="h-4 w-4 mr-2" /> Синхронизировать
                         </button>
@@ -11820,6 +12017,7 @@ export default function Dashboard() {
                       <div>
                         <h1 className="text-xl font-bold text-gray-900">Коробка {currentBox.name}</h1>
                         <p className="text-gray-500 text-sm">Сканируйте товары для добавления</p>
+                        {fboOfflineMode && <div className="mt-2 inline-flex items-center px-2 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-medium">Оффлайн • локально сохраняется только в браузере</div>}
                       </div>
                     </div>
                     <button onClick={() => setShowNewBoxQR(true)} className="self-start sm:self-auto px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 text-sm flex items-center">
@@ -11883,6 +12081,7 @@ export default function Dashboard() {
                       <div>
                         <h1 className="text-xl font-bold text-gray-900">Коробка {currentBox?.name}</h1>
                         <p className="text-gray-500 text-sm">Сканируйте товары для добавления</p>
+                        {fboOfflineMode && <div className="mt-2 inline-flex items-center px-2 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-medium">Оффлайн • запись в БД отключена</div>}
                       </div>
                     </div>
                     <button onClick={() => setShowNewBoxQR(true)} className="self-start sm:self-auto px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 text-sm flex items-center">
