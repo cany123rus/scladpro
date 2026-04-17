@@ -3996,12 +3996,29 @@ export default function Dashboard() {
         .in('box_id', boxIds)
         .is('deleted_at', null);
 
-      const wbRows = await ensureSupplierProductsIndex(currentSupply.supplier_id);
+      const { data: wbCacheRows, error: wbCacheError } = await supabase
+        .from('wb_products_cache')
+        .select('nm_id, product_json')
+        .eq('supplier_id', currentSupply.supplier_id)
+        .limit(10000);
+      if (wbCacheError) throw wbCacheError;
+
       const wbByBarcode = new Map<string, any>();
       const wbByNm = new Map<string, any>();
-      Object.values(wbRows || {}).forEach((row: any) => {
-        if (row?.barcode) wbByBarcode.set(String(row.barcode), row);
-        if (row?.nmID || row?.nmId) wbByNm.set(String(row.nmID || row.nmId), row);
+      (wbCacheRows || []).forEach((row: any) => {
+        const card = row?.product_json || {};
+        const nmId = String(row?.nm_id || card?.nmID || card?.nmId || '').trim();
+        if (nmId) wbByNm.set(nmId, card);
+        const topBarcode = String(card?.barcode || card?.skus?.[0] || '').trim();
+        if (topBarcode) wbByBarcode.set(topBarcode, card);
+        const sizes = Array.isArray(card?.sizes) ? card.sizes : [];
+        sizes.forEach((size: any) => {
+          const skus = Array.isArray(size?.skus) ? size.skus : [];
+          skus.forEach((sku: any) => {
+            const key = String(sku || '').trim();
+            if (key) wbByBarcode.set(key, card);
+          });
+        });
       });
 
       const grouped = new Map<string, { image?: string; article: string; title: string; sizes: Record<string, number>; sizeBarcodes: Record<string, Set<string>>; totalQty: number }>();
@@ -4010,7 +4027,7 @@ export default function Dashboard() {
         const qty = 1;
         const barcode = String(p?.barcode || '').trim();
         const wbSku = String(p?.wb_sku || '').trim();
-        const wb = wbByBarcode.get(barcode) || wbByNm.get(wbSku) || null;
+        const wb = wbByBarcode.get(barcode) || wbByBarcode.get(wbSku) || wbByNm.get(wbSku) || null;
         const article = String(wb?.vendorCode || wb?.article || p?.wb_sku || p?.barcode || '—');
         const title = String(wb?.title || wb?.name || p?.name || 'Товар');
         const firstPhoto = (Array.isArray(wb?.photos) && wb.photos[0]) || (Array.isArray(wb?.mediaFiles) && wb.mediaFiles[0]) || '';
