@@ -2942,6 +2942,9 @@ export default function Dashboard() {
   const [supplySyncOpen, setSupplySyncOpen] = useState(false);
   const [supplySyncLoading, setSupplySyncLoading] = useState(false);
   const [fboOfflineMode, setFboOfflineMode] = useState(false);
+  const [showNameSequencePrintModal, setShowNameSequencePrintModal] = useState(false);
+  const [nameSequencePrintForm, setNameSequencePrintForm] = useState({ name: '', quantity: '1' });
+  const [nameSequencePrintLoading, setNameSequencePrintLoading] = useState(false);
   const [offlineFboSession, setOfflineFboSession] = useState<OfflineFboSession | null>(null);
   const [offlineFboValidation, setOfflineFboValidation] = useState<OfflineFboValidationSummary | null>(null);
   const [offlineFboValidationLoading, setOfflineFboValidationLoading] = useState(false);
@@ -10803,6 +10806,14 @@ export default function Dashboard() {
       codeYpx: 196,
       footerXpx: 195,
       footerYpx: 230,
+    },
+    nameSequence: {
+      numberFont: 28,
+      nameFont: 11,
+      numberXpx: 195,
+      numberYpx: 120,
+      nameXpx: 195,
+      nameYpx: 226,
     }
   });
 
@@ -10860,6 +10871,14 @@ export default function Dashboard() {
             codeYpx: parsed?.fboBoxes?.codeY != null ? mmToPxY(parsed.fboBoxes.codeY) : prev.fboBoxes.codeYpx,
             footerXpx: parsed?.fboBoxes?.footerX != null ? mmToPxX(parsed.fboBoxes.footerX) : prev.fboBoxes.footerXpx,
             footerYpx: parsed?.fboBoxes?.footerY != null ? mmToPxY(parsed.fboBoxes.footerY) : prev.fboBoxes.footerYpx,
+          },
+          nameSequence: {
+            ...prev.nameSequence,
+            ...(parsed?.nameSequence || {}),
+            numberXpx: parsed?.nameSequence?.numberX != null ? mmToPxX(parsed.nameSequence.numberX) : prev.nameSequence.numberXpx,
+            numberYpx: parsed?.nameSequence?.numberY != null ? mmToPxY(parsed.nameSequence.numberY) : prev.nameSequence.numberYpx,
+            nameXpx: parsed?.nameSequence?.nameX != null ? mmToPxX(parsed.nameSequence.nameX) : prev.nameSequence.nameXpx,
+            nameYpx: parsed?.nameSequence?.nameY != null ? mmToPxY(parsed.nameSequence.nameY) : prev.nameSequence.nameYpx,
           },
         }));
       } catch {}
@@ -10922,7 +10941,7 @@ export default function Dashboard() {
 
   const startWbBlockDrag = (
     e: React.MouseEvent,
-    layout: 'withChz' | 'withoutChz' | 'fboBoxes',
+    layout: 'withChz' | 'withoutChz' | 'fboBoxes' | 'nameSequence',
     xKey: string,
     yKey: string,
     baseX: number,
@@ -10981,6 +11000,14 @@ export default function Dashboard() {
         supplierFont: wbLayoutEditor.fboBoxes.supplierFont,
         codeFont: wbLayoutEditor.fboBoxes.codeFont,
         footerFont: wbLayoutEditor.fboBoxes.footerFont,
+      },
+      nameSequence: {
+        numberX: pxToMmX(wbLayoutEditor.nameSequence.numberXpx),
+        numberY: pxToMmY(wbLayoutEditor.nameSequence.numberYpx),
+        nameX: pxToMmX(wbLayoutEditor.nameSequence.nameXpx),
+        nameY: pxToMmY(wbLayoutEditor.nameSequence.nameYpx),
+        numberFont: wbLayoutEditor.nameSequence.numberFont,
+        nameFont: wbLayoutEditor.nameSequence.nameFont,
       }
     };
   };
@@ -11015,39 +11042,44 @@ export default function Dashboard() {
     }
   };
 
-  const handleTestPrintWbLayout = async (template: 'withChz' | 'withoutChz' | 'fboBoxes') => {
+  const ensureRobotoPdfFont = async (doc: any) => {
+    try {
+      const fontUrls = [
+        { url: 'https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.66/fonts/Roboto/Roboto-Regular.ttf', name: 'Roboto', style: 'normal' },
+        { url: 'https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.66/fonts/Roboto/Roboto-Medium.ttf', name: 'Roboto', style: 'bold' }
+      ];
+
+      await Promise.all(fontUrls.map(async (font) => {
+        const res = await fetch(font.url);
+        if (!res.ok) throw new Error(`Failed to load ${font.url}`);
+        const blob = await res.blob();
+        const reader = new FileReader();
+        await new Promise<void>((resolve, reject) => {
+          reader.onloadend = () => {
+            const base64 = (reader.result as string).split(',')[1];
+            doc.addFileToVFS(font.name + '-' + font.style + '.ttf', base64);
+            doc.addFont(font.name + '-' + font.style + '.ttf', font.name, font.style);
+            resolve();
+          };
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+      }));
+
+      doc.setFont('Roboto', 'normal');
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const handleTestPrintWbLayout = async (template: 'withChz' | 'withoutChz' | 'fboBoxes' | 'nameSequence') => {
     try {
       const layout = getWbLayoutPayloadFromEditor();
       const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: [58, 40] });
       const canvas = document.createElement('canvas');
 
-      try {
-        const fontUrls = [
-          { url: 'https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.66/fonts/Roboto/Roboto-Regular.ttf', name: 'Roboto', style: 'normal' },
-          { url: 'https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.66/fonts/Roboto/Roboto-Medium.ttf', name: 'Roboto', style: 'bold' }
-        ];
-
-        await Promise.all(fontUrls.map(async (font) => {
-          const res = await fetch(font.url);
-          if (!res.ok) throw new Error(`Failed to load ${font.url}`);
-          const blob = await res.blob();
-          const reader = new FileReader();
-          await new Promise<void>((resolve, reject) => {
-            reader.onloadend = () => {
-              const base64 = (reader.result as string).split(',')[1];
-              doc.addFileToVFS(font.name + '-' + font.style + '.ttf', base64);
-              doc.addFont(font.name + '-' + font.style + '.ttf', font.name, font.style);
-              resolve();
-            };
-            reader.onerror = reject;
-            reader.readAsDataURL(blob);
-          });
-        }));
-
-        doc.setFont('Roboto');
-      } catch {
-        // Keep default font if external font is unavailable
-      }
+      await ensureRobotoPdfFont(doc);
 
       if (template === 'withChz') {
         const dmTextRaw = '0104624060099310000000010LmNpQd2335';
@@ -11099,7 +11131,7 @@ export default function Dashboard() {
         doc.text('Размер: M-L', x, y); y += 3.8;
         doc.text('Цвет: бордовый', x, y); y += 3.8;
         doc.text('Поставщик: ИП БЕКИРОВА_Л_Р', x, y);
-      } else {
+      } else if (template === 'fboBoxes') {
         const code = 'WBBOX001234567';
         bwipjs.toCanvas(canvas, { bcid: 'code128', text: code, scale: 3, height: 9, includetext: false, paddingwidth: 0, paddingheight: 0 });
 
@@ -11120,17 +11152,73 @@ export default function Dashboard() {
         doc.setFont('Roboto', 'normal');
         doc.setFontSize(layout.fboBoxes.footerFont);
         doc.text('ШК короба', layout.fboBoxes.footerX, layout.fboBoxes.footerY, { align: 'center' });
+      } else {
+        doc.setFont('Roboto', 'bold');
+        doc.setFontSize(layout.nameSequence.numberFont);
+        doc.text('1', layout.nameSequence.numberX, layout.nameSequence.numberY, { align: 'center' });
+
+        doc.setFont('Roboto', 'normal');
+        doc.setFontSize(layout.nameSequence.nameFont);
+        doc.text('Имя', layout.nameSequence.nameX, layout.nameSequence.nameY, { align: 'center' });
       }
 
       const blobUrl = doc.output('bloburl');
       const preview = window.open('', 'WBLayoutTestPrint', 'width=980,height=780');
       if (preview) {
-        const templateLabel = template === 'withChz' ? 'с ЧЗ' : template === 'withoutChz' ? 'без ЧЗ' : 'Короба FBO';
+        const templateLabel = template === 'withChz' ? 'с ЧЗ' : template === 'withoutChz' ? 'без ЧЗ' : template === 'fboBoxes' ? 'Короба FBO' : 'Номер + имя';
         preview.document.write(`<html><head><title>Пробная печать</title></head><body style="margin:0;background:#f3f4f6;font-family:Arial,sans-serif;"><div style="padding:10px;display:flex;justify-content:space-between;align-items:center;background:#fff;border-bottom:1px solid #ddd;"><strong>Пробная печать макета ${templateLabel}</strong><button onclick="frames['pdfFrame'].focus();frames['pdfFrame'].print();" style="padding:8px 14px;border:none;background:#4f46e5;color:#fff;border-radius:8px;cursor:pointer;">Печать</button></div><iframe name="pdfFrame" src="${blobUrl}" style="width:100%;height:calc(100vh - 52px);border:0;"></iframe></body></html>`);
         preview.document.close();
       }
     } catch (e: any) {
       showToast(`Ошибка пробной печати: ${e?.message || 'неизвестно'}`, 'error');
+    }
+  };
+
+  const handlePrintNameSequenceLabels = async () => {
+    try {
+      const rawName = String(nameSequencePrintForm.name || '').trim();
+      const qty = Math.min(500, Math.max(1, parseInt(nameSequencePrintForm.quantity || '1', 10) || 1));
+
+      if (!rawName) return showToast('Введите имя для этикеток', 'error');
+
+      setNameSequencePrintLoading(true);
+
+      const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: [58, 40] });
+      const layout = getWbLayoutPayloadFromEditor();
+      const hasUnicodeFont = await ensureRobotoPdfFont(doc);
+      if (!hasUnicodeFont && /[^\x00-\x7F]/.test(rawName)) {
+        showToast('Не удалось загрузить шрифт для кириллицы. Повтори печать ещё раз.', 'error');
+        return;
+      }
+
+      const printableName = hasUnicodeFont ? rawName : rawName.replace(/[^\x20-\x7E]/g, ' ').replace(/\s+/g, ' ').trim() || 'Name';
+
+      for (let i = 0; i < qty; i++) {
+        if (i > 0) doc.addPage([58, 40], 'landscape');
+
+        doc.setFont(hasUnicodeFont ? 'Roboto' : 'Helvetica', 'bold');
+        doc.setFontSize(layout.nameSequence.numberFont);
+        doc.text(String(i + 1), layout.nameSequence.numberX, layout.nameSequence.numberY, { align: 'center' });
+
+        doc.setFont(hasUnicodeFont ? 'Roboto' : 'Helvetica', 'normal');
+        doc.setFontSize(layout.nameSequence.nameFont);
+        const nameLines = doc.splitTextToSize(printableName, 52).slice(0, 2);
+        doc.text(nameLines, layout.nameSequence.nameX, layout.nameSequence.nameY, { align: 'center' });
+      }
+
+      const blobUrl = doc.output('bloburl');
+      const preview = window.open('', 'NameSequenceLabelsPrintPreview', 'width=980,height=780');
+      if (preview) {
+        preview.document.write(`<html><head><title>Печать номерных этикеток 58x40</title></head><body style="margin:0;background:#f3f4f6;font-family:Arial,sans-serif;"><div style="padding:10px;display:flex;justify-content:space-between;align-items:center;background:#fff;border-bottom:1px solid #ddd;"><strong>Печать номерных этикеток 58x40</strong><button onclick="frames['pdfFrame'].focus();frames['pdfFrame'].print();" style="padding:8px 14px;border:none;background:#4f46e5;color:#fff;border-radius:8px;cursor:pointer;">Печать</button></div><iframe name="pdfFrame" src="${blobUrl}" style="width:100%;height:calc(100vh - 52px);border:0;"></iframe></body></html>`);
+        preview.document.close();
+      }
+
+      setShowNameSequencePrintModal(false);
+      showToast(`Сформировано этикеток: ${qty}`, 'success');
+    } catch (e: any) {
+      showToast(`Ошибка печати этикеток: ${e?.message || 'неизвестно'}`, 'error');
+    } finally {
+      setNameSequencePrintLoading(false);
     }
   };
 
@@ -12349,6 +12437,19 @@ export default function Dashboard() {
                             <button onClick={() => setShowGenerateBoxQR(true)} className="inline-flex items-center justify-center rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-slate-800">
                               <QrCode className="h-4 w-4 mr-2" /> <span className="whitespace-nowrap">QR генерация коробки</span>
                             </button>
+                            <button
+                              onClick={() => {
+                                const supplierName = suppliers.find(s => String(s.id) === String(currentSupply?.supplier_id || ''))?.name || '';
+                                setNameSequencePrintForm(prev => ({
+                                  name: prev.name || supplierName,
+                                  quantity: prev.quantity || '1',
+                                }));
+                                setShowNameSequencePrintModal(true);
+                              }}
+                              className="inline-flex items-center justify-center rounded-xl bg-fuchsia-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-fuchsia-700"
+                            >
+                              <Printer className="h-4 w-4 mr-2" /> <span className="whitespace-nowrap">Печать имя + номер</span>
+                            </button>
                             <button onClick={() => setFboOfflineMode((prev) => !prev)} className={`relative inline-flex items-center justify-center rounded-xl px-4 py-2.5 text-sm font-medium shadow-sm ${fboOfflineMode ? 'bg-amber-600 text-white hover:bg-amber-700' : 'bg-amber-50 text-amber-800 hover:bg-amber-100'}`}>
                               <Database className="h-4 w-4 mr-2" /> {fboOfflineMode ? 'Оффлайн включен' : 'Оффлайн режим'}
                               {offlineFboUnsyncedStats.sessions > 0 && (
@@ -12879,6 +12980,55 @@ export default function Dashboard() {
                         <Printer className="h-4 w-4 mr-2" /> Печать
                       </button>
                       <button onClick={() => setShowGenerateBoxQR(false)} className="px-6 py-2 bg-gray-100 rounded-lg hover:bg-gray-200 font-medium">Закрыть</button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {showNameSequencePrintModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => !nameSequencePrintLoading && setShowNameSequencePrintModal(false)}>
+                  <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <h3 className="text-xl font-bold text-gray-900">Печать этикеток 58x40</h3>
+                        <p className="mt-1 text-sm text-gray-500">Сверху будет номер по порядку, внизу имя. Если введёшь 100, создастся 100 этикеток: 1, 2, 3 и так далее.</p>
+                      </div>
+                      <button onClick={() => !nameSequencePrintLoading && setShowNameSequencePrintModal(false)} className="rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600">
+                        <X className="h-5 w-5" />
+                      </button>
+                    </div>
+
+                    <div className="mt-5 space-y-4">
+                      <div>
+                        <label className="mb-1 block text-sm font-medium text-gray-700">Имя</label>
+                        <input
+                          autoFocus
+                          type="text"
+                          value={nameSequencePrintForm.name}
+                          onChange={(e) => setNameSequencePrintForm(prev => ({ ...prev, name: e.target.value }))}
+                          className="w-full rounded-xl border border-gray-200 px-4 py-3 outline-none focus:border-fuchsia-400 focus:ring-2 focus:ring-fuchsia-200"
+                          placeholder="Введите имя"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-sm font-medium text-gray-700">Количество</label>
+                        <input
+                          type="number"
+                          min={1}
+                          max={500}
+                          value={nameSequencePrintForm.quantity}
+                          onChange={(e) => setNameSequencePrintForm(prev => ({ ...prev, quantity: e.target.value }))}
+                          className="w-full rounded-xl border border-gray-200 px-4 py-3 outline-none focus:border-fuchsia-400 focus:ring-2 focus:ring-fuchsia-200"
+                          placeholder="1"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="mt-6 flex justify-end gap-3">
+                      <button onClick={() => setShowNameSequencePrintModal(false)} disabled={nameSequencePrintLoading} className="rounded-xl bg-gray-100 px-5 py-2.5 font-medium text-gray-700 hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-50">Отмена</button>
+                      <button onClick={handlePrintNameSequenceLabels} disabled={nameSequencePrintLoading} className="rounded-xl bg-fuchsia-600 px-5 py-2.5 font-medium text-white hover:bg-fuchsia-700 disabled:cursor-not-allowed disabled:opacity-50">
+                        {nameSequencePrintLoading ? 'Генерация...' : 'Печать'}
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -13424,10 +13574,10 @@ export default function Dashboard() {
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div className="oc-card p-6 space-y-4">
                   <div className="p-3 border rounded-lg bg-indigo-50 space-y-3">
-                    <div className="font-semibold text-indigo-900">Макеты печати WB (3 шаблона)</div>
+                    <div className="font-semibold text-indigo-900">Макеты печати WB (4 шаблона)</div>
                     <div className="text-xs text-indigo-800">Двигай ползунки курсором. Эти настройки напрямую влияют на печать в разделе "Товары WB".</div>
 
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+                    <div className="grid grid-cols-1 lg:grid-cols-4 gap-3">
                       <div className="p-2 bg-white rounded border">
                         <div className="text-xs font-semibold mb-2">С ЧЗ (QR + штрихкод)</div>
                         <label className="text-xs">Размер QR/DataMatrix: {wbLayoutEditor.withChz.dmSize.toFixed(1)} мм</label>
@@ -13469,20 +13619,32 @@ export default function Dashboard() {
                         <label className="text-xs">Размер кода: {wbLayoutEditor.fboBoxes.codeFont.toFixed(1)}</label>
                         <input type="range" min={7} max={12} step={0.1} value={wbLayoutEditor.fboBoxes.codeFont} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, fboBoxes: { ...prev.fboBoxes, codeFont: Number(e.target.value) } }))} className="w-full" />
                       </div>
+
+                      <div className="p-2 bg-white rounded border">
+                        <div className="text-xs font-semibold mb-2">Номер + имя</div>
+                        <label className="text-xs">Размер номера: {wbLayoutEditor.nameSequence.numberFont.toFixed(1)}</label>
+                        <input type="range" min={18} max={34} step={0.1} value={wbLayoutEditor.nameSequence.numberFont} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, nameSequence: { ...prev.nameSequence, numberFont: Number(e.target.value) } }))} className="w-full" />
+                        <label className="text-xs">Размер имени: {wbLayoutEditor.nameSequence.nameFont.toFixed(1)}</label>
+                        <input type="range" min={8} max={16} step={0.1} value={wbLayoutEditor.nameSequence.nameFont} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, nameSequence: { ...prev.nameSequence, nameFont: Number(e.target.value) } }))} className="w-full" />
+                        <div className="mt-3 rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-600">
+                          Макет для быстрой печати последовательности: сверху номер, снизу имя пользователя.
+                        </div>
+                      </div>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+                    <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
                       <button onClick={handleSaveWbLayoutEditor} className="w-full py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-medium">Сохранить макеты WB для печати</button>
                       <button onClick={() => handleTestPrintWbLayout('withChz')} className="w-full py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 text-sm font-medium">Пробная печать (с ЧЗ)</button>
                       <button onClick={() => handleTestPrintWbLayout('withoutChz')} className="w-full py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-800 text-sm font-medium">Пробная печать (без ЧЗ)</button>
                       <button onClick={() => handleTestPrintWbLayout('fboBoxes')} className="w-full py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 text-sm font-medium">Пробная печать (Короба FBO)</button>
+                      <button onClick={() => handleTestPrintWbLayout('nameSequence')} className="w-full py-2 bg-fuchsia-600 text-white rounded-lg hover:bg-fuchsia-700 text-sm font-medium">Пробная печать (Номер + имя)</button>
                     </div>
                   </div>
                 </div>
 
                 <div className="oc-card p-6">
                   <h3 className="font-semibold text-gray-900 mb-4">Предпросмотр 58×40 (XPrinter 420B)</h3>
-                  <p className="text-xs text-gray-500 mb-3">В реальном времени: двигаешь ползунки слева - сразу меняются размеры блоков в обоих макетах.</p>
+                  <p className="text-xs text-gray-500 mb-3">В реальном времени: двигаешь ползунки слева, и сразу меняются размеры блоков во всех макетах.</p>
 
                   <div className="space-y-4">
                     <div>
@@ -13579,6 +13741,18 @@ export default function Dashboard() {
                         </div>
                         <div className="absolute text-gray-700 border border-amber-300 rounded px-1 bg-white/70 cursor-move" onMouseDown={(e) => startWbBlockDrag(e, 'fboBoxes', 'footerXpx', 'footerYpx', wbLayoutEditor.fboBoxes.footerXpx, wbLayoutEditor.fboBoxes.footerYpx)} style={{ left: `${wbLayoutEditor.fboBoxes.footerXpx - mmToPreviewX(10)}px`, top: `${wbLayoutEditor.fboBoxes.footerYpx}px`, width: `${mmToPreviewX(20)}px`, textAlign: 'center', fontSize: `${ptToPreviewPx(wbLayoutEditor.fboBoxes.footerFont)}px` }}>
                           ШК короба
+                        </div>
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="text-xs font-semibold text-gray-700 mb-2">Макет 4: Номер + имя</div>
+                      <div className="mx-auto border border-gray-300 rounded-xl p-2 w-[390px] h-[270px] bg-white relative overflow-hidden">
+                        <div className="absolute text-black font-bold border border-cyan-300 rounded px-1 bg-white/70 cursor-move" onMouseDown={(e) => startWbBlockDrag(e, 'nameSequence', 'numberXpx', 'numberYpx', wbLayoutEditor.nameSequence.numberXpx, wbLayoutEditor.nameSequence.numberYpx)} style={{ left: `${wbLayoutEditor.nameSequence.numberXpx - mmToPreviewX(8)}px`, top: `${wbLayoutEditor.nameSequence.numberYpx}px`, width: `${mmToPreviewX(16)}px`, textAlign: 'center', fontSize: `${ptToPreviewPx(wbLayoutEditor.nameSequence.numberFont)}px` }}>
+                          1
+                        </div>
+                        <div className="absolute text-gray-800 border border-emerald-300 rounded px-1 bg-white/70 cursor-move" onMouseDown={(e) => startWbBlockDrag(e, 'nameSequence', 'nameXpx', 'nameYpx', wbLayoutEditor.nameSequence.nameXpx, wbLayoutEditor.nameSequence.nameYpx)} style={{ left: `${wbLayoutEditor.nameSequence.nameXpx - mmToPreviewX(16)}px`, top: `${wbLayoutEditor.nameSequence.nameYpx}px`, width: `${mmToPreviewX(32)}px`, textAlign: 'center', fontSize: `${ptToPreviewPx(wbLayoutEditor.nameSequence.nameFont)}px` }}>
+                          Имя
                         </div>
                       </div>
                     </div>
