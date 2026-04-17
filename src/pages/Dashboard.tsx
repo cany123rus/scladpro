@@ -12293,36 +12293,10 @@ export default function Dashboard() {
                                 Есть несинхронизированные данные: {offlineFboUnsyncedStats.sessions} сесс. , {offlineFboUnsyncedStats.items} сканов
                               </div>
                             )}
-                            {fboOfflineMode && (
-                              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-medium">
-                                Оффлайн режим (IndexedDB) • {boxesList.length} коробок • {offlineFboSession?.items?.length || 0} сканов
-                              </div>
-                            )}
                           </div>
                         </div>
                       </div>
                       <div className="flex flex-wrap gap-2">
-                        <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-lg px-2 py-1">
-                          <input
-                            type="number"
-                            min={1}
-                            max={500}
-                            value={apiBoxCount}
-                            onChange={(e) => setApiBoxCount(e.target.value)}
-                            className="w-20 p-1.5 text-sm border rounded"
-                            title="Количество коробок"
-                          />
-                          <button onClick={generateApiBoxesForCurrentSupply} disabled={loadingApiBoxes} className="px-3 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 text-sm">
-                            {loadingApiBoxes ? 'Генерация...' : 'Сгенерировать коробки по API'}
-                          </button>
-                          <button onClick={printCurrentSupplyBoxes58x40} className="px-3 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 text-sm flex items-center">
-                            <Printer className="h-4 w-4 mr-1" /> Печать коробок 58x40
-                          </button>
-                        </div>
-
-                        <button onClick={() => setShowNewBoxQR(true)} className="flex-1 md:flex-none justify-center px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 flex items-center">
-                          <QrCode className="h-4 w-4 mr-2" /> <span className="whitespace-nowrap">QR: Новая коробка</span>
-                        </button>
                         <button onClick={() => setShowGenerateBoxQR(true)} className="flex-1 md:flex-none justify-center px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 flex items-center">
                           <QrCode className="h-4 w-4 mr-2" /> <span className="whitespace-nowrap">QR генерация коробки</span>
                         </button>
@@ -12664,9 +12638,6 @@ export default function Dashboard() {
                         {fboOfflineMode && <div className="mt-2 inline-flex items-center px-2 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-medium">Оффлайн • локально на устройстве через IndexedDB</div>}
                       </div>
                     </div>
-                    <button onClick={() => setShowNewBoxQR(true)} className="self-start sm:self-auto px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 text-sm flex items-center">
-                      <QrCode className="h-4 w-4 mr-2" /> QR: Новая коробка
-                    </button>
                   </div>
 
                   <div className="bg-blue-50 rounded-xl p-8 text-center mb-6 border border-blue-100">
@@ -12728,9 +12699,6 @@ export default function Dashboard() {
                         {fboOfflineMode && <div className="mt-2 inline-flex items-center px-2 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-medium">Оффлайн • сканы хранятся на устройстве, запись в БД по кнопке</div>}
                       </div>
                     </div>
-                    <button onClick={() => setShowNewBoxQR(true)} className="self-start sm:self-auto px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 text-sm flex items-center">
-                      <QrCode className="h-4 w-4 mr-2" /> QR: Новая коробка
-                    </button>
                   </div>
 
                   <div className="bg-yellow-50 rounded-xl p-8 text-center mb-6 border border-yellow-100">
