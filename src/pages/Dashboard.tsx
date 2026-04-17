@@ -2946,6 +2946,11 @@ export default function Dashboard() {
   const [offlineFboValidation, setOfflineFboValidation] = useState<OfflineFboValidationSummary | null>(null);
   const [offlineFboValidationLoading, setOfflineFboValidationLoading] = useState(false);
   const [offlineFboUploadLoading, setOfflineFboUploadLoading] = useState(false);
+  const [showOfflineFboHistory, setShowOfflineFboHistory] = useState(false);
+  const [offlineFboHistorySessions, setOfflineFboHistorySessions] = useState<OfflineFboSession[]>([]);
+  const [offlineFboHistoryLoading, setOfflineFboHistoryLoading] = useState(false);
+  const [offlineFboUnsyncedStats, setOfflineFboUnsyncedStats] = useState({ sessions: 0, items: 0 });
+  const offlineFboSessionRef = useRef<OfflineFboSession | null>(null);
 
 
   const getOfflineFboStorageKey = (supplyId: string) => `fbo_offline_session_v1_${supplyId}`;
@@ -3041,6 +3046,7 @@ export default function Dashboard() {
       });
       db.close();
       localStorage.removeItem(getOfflineFboStorageKey(session.supply_id));
+      refreshOfflineFboDeviceStats().catch(() => undefined);
     } catch (e) {
       console.error('writeOfflineFboSessionToDevice error', e);
     }
@@ -3058,9 +3064,81 @@ export default function Dashboard() {
         request.onerror = () => reject(request.error || new Error('Не удалось удалить оффлайн-сессию'));
       });
       db.close();
+      refreshOfflineFboDeviceStats().catch(() => undefined);
     } catch (e) {
       console.error('clearOfflineFboSessionFromDevice error', e);
     }
+  };
+
+  const listOfflineFboSessionsFromDevice = async (): Promise<OfflineFboSession[]> => {
+    try {
+      const db = await openOfflineFboDb();
+      const rows = await new Promise<any[]>((resolve, reject) => {
+        const tx = db.transaction(OFFLINE_FBO_DB_STORE, 'readonly');
+        const store = tx.objectStore(OFFLINE_FBO_DB_STORE);
+        const request = store.getAll();
+        request.onsuccess = () => resolve(Array.isArray(request.result) ? request.result : []);
+        request.onerror = () => reject(request.error || new Error('Не удалось прочитать список оффлайн-сессий'));
+      });
+      db.close();
+      return (rows || [])
+        .filter((row) => row?.supply_id)
+        .sort((a, b) => String(b?.updated_at || '').localeCompare(String(a?.updated_at || '')));
+    } catch (e) {
+      console.error('listOfflineFboSessionsFromDevice error', e);
+      return [];
+    }
+  };
+
+  const refreshOfflineFboDeviceStats = async () => {
+    const sessions = await listOfflineFboSessionsFromDevice();
+    const normalized = sessions.filter((session) => (session?.boxes?.length || 0) || (session?.items?.length || 0));
+    setOfflineFboUnsyncedStats({
+      sessions: normalized.length,
+      items: normalized.reduce((acc, session) => acc + Number(session?.items?.length || 0), 0),
+    });
+    return normalized;
+  };
+
+  const loadOfflineFboHistory = async () => {
+    setOfflineFboHistoryLoading(true);
+    try {
+      const sessions = await refreshOfflineFboDeviceStats();
+      setOfflineFboHistorySessions(sessions);
+    } finally {
+      setOfflineFboHistoryLoading(false);
+    }
+  };
+
+  const handleOpenOfflineHistorySession = async (session: OfflineFboSession) => {
+    const targetSupply = suppliesList.find((s) => s.id === session.supply_id);
+    if (!targetSupply) {
+      showToast('Поставка для этой оффлайн-сессии не найдена в списке', 'error');
+      return;
+    }
+    setCurrentSupply(targetSupply);
+    setCurrentBox(session.boxes?.[0] || null);
+    setSupplyStep('SUPPLY');
+    setFboOfflineMode(true);
+    offlineFboSessionRef.current = session;
+    setOfflineFboSession(session);
+    applyOfflineFboSessionToUi(session, session.boxes?.[0]?.id || null);
+    setShowOfflineFboHistory(false);
+  };
+
+  const handleDeleteOfflineHistorySession = async (session: OfflineFboSession) => {
+    if (!window.confirm(`Удалить оффлайн-сессию ${session.supply_name || session.supply_id}?`)) return;
+    await clearOfflineFboSessionFromDevice(session.supply_id);
+    if (currentSupply?.id === session.supply_id) {
+      offlineFboSessionRef.current = null;
+      setOfflineFboSession(null);
+      setOfflineFboValidation(null);
+      if (fboOfflineMode) {
+        applyOfflineFboSessionToUi(buildEmptyOfflineFboSession(currentSupply), null);
+      }
+    }
+    await loadOfflineFboHistory();
+    showToast('Оффлайн-сессия удалена с устройства', 'success');
   };
 
   const applyOfflineFboSessionToUi = useCallback((session: OfflineFboSession, activeBoxId?: string | null) => {
@@ -3072,8 +3150,8 @@ export default function Dashboard() {
 
   const updateOfflineFboSession = (mutate: (session: OfflineFboSession) => OfflineFboSession, activeBoxId?: string | null) => {
     if (!currentSupply) return null;
-    const base = offlineFboSession && offlineFboSession.supply_id === currentSupply.id
-      ? offlineFboSession
+    const base = offlineFboSessionRef.current && offlineFboSessionRef.current.supply_id === currentSupply.id
+      ? offlineFboSessionRef.current
       : buildEmptyOfflineFboSession(currentSupply);
     const next = mutate({
       ...base,
@@ -3081,6 +3159,7 @@ export default function Dashboard() {
       items: [...(base.items || [])],
       updated_at: new Date().toISOString(),
     });
+    offlineFboSessionRef.current = next;
     writeOfflineFboSessionToDevice(next).catch(() => undefined);
     setOfflineFboSession(next);
     applyOfflineFboSessionToUi(next, activeBoxId);
@@ -3296,11 +3375,25 @@ export default function Dashboard() {
   };
 
   useEffect(() => {
+    offlineFboSessionRef.current = offlineFboSession;
+  }, [offlineFboSession]);
+
+  useEffect(() => {
+    refreshOfflineFboDeviceStats().catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    if (!showOfflineFboHistory) return;
+    loadOfflineFboHistory().catch(() => undefined);
+  }, [showOfflineFboHistory]);
+
+  useEffect(() => {
     if (!currentSupply?.id || !fboOfflineMode) return;
     let cancelled = false;
     (async () => {
       const session = await readOfflineFboSessionFromDevice(currentSupply);
       if (cancelled) return;
+      offlineFboSessionRef.current = session;
       setOfflineFboSession(session);
       applyOfflineFboSessionToUi(session, currentBox?.id || null);
     })();
@@ -3311,6 +3404,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (!currentSupply?.id || fboOfflineMode) return;
+    offlineFboSessionRef.current = null;
     setOfflineFboSession(null);
     fetchBoxesList(currentSupply.id);
     fetchSupplyStats(currentSupply.id);
@@ -4255,7 +4349,7 @@ export default function Dashboard() {
         }
 
         if (fboOfflineMode && currentSupply) {
-          const session = offlineFboSession && offlineFboSession.supply_id === currentSupply.id ? offlineFboSession : buildEmptyOfflineFboSession(currentSupply);
+          const session = offlineFboSessionRef.current && offlineFboSessionRef.current.supply_id === currentSupply.id ? offlineFboSessionRef.current : buildEmptyOfflineFboSession(currentSupply);
           const offlineDuplicate = (session.items || []).some((item) => item.honest_sign_code === code);
           if (offlineDuplicate) {
             playScanTone('error');
@@ -12192,11 +12286,19 @@ export default function Dashboard() {
                         <div>
                           <h1 className="text-2xl font-bold text-gray-900">Поставка {currentSupply.name}</h1>
                           <p className="text-gray-500">{supplyStats.boxes} коробок • {supplyStats.items} товаров</p>
-                          {fboOfflineMode && (
-                            <div className="mt-2 inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-medium">
-                              Оффлайн режим (IndexedDB) • {boxesList.length} коробок • {offlineFboSession?.items?.length || 0} сканов
-                            </div>
-                          )}
+                          <div className="mt-2 flex flex-wrap items-center gap-2">
+                            {offlineFboUnsyncedStats.sessions > 0 && (
+                              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-100 text-slate-700 text-xs font-medium border border-slate-200">
+                                <AlertCircle className="h-3.5 w-3.5 text-amber-500" />
+                                Есть несинхронизированные данные: {offlineFboUnsyncedStats.sessions} сесс. , {offlineFboUnsyncedStats.items} сканов
+                              </div>
+                            )}
+                            {fboOfflineMode && (
+                              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-medium">
+                                Оффлайн режим (IndexedDB) • {boxesList.length} коробок • {offlineFboSession?.items?.length || 0} сканов
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </div>
                       <div className="flex flex-wrap gap-2">
@@ -12224,8 +12326,21 @@ export default function Dashboard() {
                         <button onClick={() => setShowGenerateBoxQR(true)} className="flex-1 md:flex-none justify-center px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 flex items-center">
                           <QrCode className="h-4 w-4 mr-2" /> <span className="whitespace-nowrap">QR генерация коробки</span>
                         </button>
-                        <button onClick={() => setFboOfflineMode((prev) => !prev)} className={`flex-1 md:flex-none justify-center px-4 py-2 rounded-lg flex items-center ${fboOfflineMode ? 'bg-amber-600 text-white hover:bg-amber-700' : 'bg-amber-100 text-amber-800 hover:bg-amber-200'}`}>
+                        <button onClick={() => setFboOfflineMode((prev) => !prev)} className={`relative flex-1 md:flex-none justify-center px-4 py-2 rounded-lg flex items-center ${fboOfflineMode ? 'bg-amber-600 text-white hover:bg-amber-700' : 'bg-amber-100 text-amber-800 hover:bg-amber-200'}`}>
                           <Database className="h-4 w-4 mr-2" /> {fboOfflineMode ? 'Оффлайн включен' : 'Оффлайн режим'}
+                          {offlineFboUnsyncedStats.sessions > 0 && (
+                            <span className={`ml-2 inline-flex min-w-[1.5rem] justify-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${fboOfflineMode ? 'bg-white/20 text-white' : 'bg-white text-amber-700'}`}>
+                              {offlineFboUnsyncedStats.sessions}
+                            </span>
+                          )}
+                        </button>
+                        <button onClick={() => setShowOfflineFboHistory(true)} className="relative flex-1 md:flex-none justify-center px-4 py-2 bg-slate-100 text-slate-800 rounded-lg hover:bg-slate-200 flex items-center">
+                          <History className="h-4 w-4 mr-2" /> История оффлайн
+                          {offlineFboUnsyncedStats.sessions > 0 && (
+                            <span className="ml-2 inline-flex min-w-[1.5rem] justify-center rounded-full bg-amber-500 px-2 py-0.5 text-[11px] font-semibold text-white">
+                              {offlineFboUnsyncedStats.sessions}
+                            </span>
+                          )}
                         </button>
                         {fboOfflineMode && (
                           <>
@@ -12284,52 +12399,144 @@ export default function Dashboard() {
                   </div>
 
                   <div className="flex-1 overflow-y-auto p-4 relative">
+                    {fboOfflineMode && (
+                      <div className="mb-6 overflow-hidden rounded-[28px] border border-slate-200 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 text-white shadow-xl">
+                        <div className="p-5 md:p-6">
+                          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                            <div>
+                              <div className="text-[11px] uppercase tracking-[0.25em] text-slate-400">Offline FBO</div>
+                              <h3 className="mt-2 text-2xl font-semibold">Локальная оффлайн-сессия на устройстве</h3>
+                              <p className="mt-2 max-w-2xl text-sm text-slate-300">
+                                Сканы хранятся в IndexedDB, дубли ЧЗ внутри текущей сессии блокируются сразу, а в БД данные уходят только после проверки.
+                              </p>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              <div className="inline-flex items-center rounded-full border border-white/10 bg-white/10 px-3 py-1 text-xs font-medium text-white/90">IndexedDB</div>
+                              <div className="inline-flex items-center rounded-full border border-amber-400/30 bg-amber-400/15 px-3 py-1 text-xs font-medium text-amber-200">Несинхронизировано: {offlineFboUnsyncedStats.sessions} сесс. / {offlineFboUnsyncedStats.items} сканов</div>
+                            </div>
+                          </div>
+
+                          <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                            <div className="rounded-2xl border border-white/10 bg-white/10 p-4 backdrop-blur">
+                              <div className="text-xs text-slate-300">Коробки в текущей сессии</div>
+                              <div className="mt-2 text-3xl font-semibold">{offlineFboSession?.boxes?.length || 0}</div>
+                            </div>
+                            <div className="rounded-2xl border border-white/10 bg-white/10 p-4 backdrop-blur">
+                              <div className="text-xs text-slate-300">Сканы ЧЗ</div>
+                              <div className="mt-2 text-3xl font-semibold">{offlineFboSession?.items?.length || 0}</div>
+                            </div>
+                            <div className="rounded-2xl border border-white/10 bg-white/10 p-4 backdrop-blur">
+                              <div className="text-xs text-slate-300">Последнее обновление</div>
+                              <div className="mt-2 text-sm font-medium text-white">{offlineFboSession?.updated_at ? new Date(offlineFboSession.updated_at).toLocaleString() : 'Нет данных'}</div>
+                            </div>
+                            <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-4 backdrop-blur">
+                              <div className="text-xs text-emerald-200">Защита от дублей</div>
+                              <div className="mt-2 text-sm font-medium text-white">Одинаковые ЧЗ в текущей оффлайн-сессии не добавляются повторно</div>
+                            </div>
+                          </div>
+
+                          <div className="mt-5 grid gap-4 xl:grid-cols-2">
+                            <div className="rounded-2xl border border-white/10 bg-white/10 p-4 backdrop-blur">
+                              <div className="flex items-center justify-between gap-3">
+                                <div>
+                                  <div className="text-sm font-semibold text-white">Коробки оффлайн-сессии</div>
+                                  <div className="text-xs text-slate-300">Быстрый просмотр последних коробок</div>
+                                </div>
+                                <Box className="h-5 w-5 text-slate-300" />
+                              </div>
+                              <div className="mt-3 space-y-2">
+                                {(offlineFboSession?.boxes || []).length === 0 ? (
+                                  <div className="rounded-xl border border-dashed border-white/10 px-3 py-4 text-sm text-slate-400">Пока нет локальных коробок</div>
+                                ) : (
+                                  (offlineFboSession?.boxes || []).slice(0, 6).map((box) => {
+                                    const count = (offlineFboSession?.items || []).filter((item) => item.box_id === box.id).length;
+                                    return (
+                                      <div key={`offline-box-preview-${box.id}`} className="flex items-center justify-between rounded-xl border border-white/10 bg-black/10 px-3 py-3">
+                                        <div>
+                                          <div className="font-medium text-white">Коробка {box.name}</div>
+                                          <div className="text-xs text-slate-400">{new Date(box.created_at).toLocaleString()}</div>
+                                        </div>
+                                        <div className="rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-slate-200">{count} сканов</div>
+                                      </div>
+                                    );
+                                  })
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="rounded-2xl border border-white/10 bg-white/10 p-4 backdrop-blur">
+                              <div className="flex items-center justify-between gap-3">
+                                <div>
+                                  <div className="text-sm font-semibold text-white">Последние оффлайн-сканы</div>
+                                  <div className="text-xs text-slate-300">Что уже накоплено в текущей сессии</div>
+                                </div>
+                                <ShieldCheck className="h-5 w-5 text-slate-300" />
+                              </div>
+                              <div className="mt-3 space-y-2">
+                                {(offlineFboSession?.items || []).length === 0 ? (
+                                  <div className="rounded-xl border border-dashed border-white/10 px-3 py-4 text-sm text-slate-400">Сканов ещё нет</div>
+                                ) : (
+                                  (offlineFboSession?.items || []).slice(0, 6).map((item) => {
+                                    const boxName = (offlineFboSession?.boxes || []).find((box) => box.id === item.box_id)?.name || 'Без коробки';
+                                    return (
+                                      <div key={`offline-item-preview-${item.id}`} className="rounded-xl border border-white/10 bg-black/10 px-3 py-3">
+                                        <div className="flex items-start justify-between gap-3">
+                                          <div>
+                                            <div className="font-medium text-white">{item.product?.name || 'Товар без названия'}</div>
+                                            <div className="mt-1 text-xs text-slate-400">Коробка {boxName}</div>
+                                          </div>
+                                          <div className="rounded-full bg-white/10 px-2.5 py-1 text-[11px] font-medium text-slate-200">{new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+                                        </div>
+                                        <div className="mt-2 break-all font-mono text-[11px] text-amber-200">{item.honest_sign_code}</div>
+                                      </div>
+                                    );
+                                  })
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
                     {fboOfflineMode && offlineFboValidation && (
-                      <div className={`mb-4 rounded-xl border p-4 ${offlineFboValidation.ok ? 'bg-emerald-50 border-emerald-200' : 'bg-rose-50 border-rose-200'}`}>
-                        <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+                      <div className={`mb-4 rounded-2xl border p-5 shadow-sm ${offlineFboValidation.ok ? 'border-emerald-200 bg-emerald-50' : 'border-rose-200 bg-rose-50'}`}>
+                        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                           <div>
-                            <div className={`font-semibold ${offlineFboValidation.ok ? 'text-emerald-800' : 'text-rose-800'}`}>{offlineFboValidation.ok ? 'Проверка пройдена' : 'Проверка нашла проблемы'}</div>
-                            <div className="text-sm text-gray-600">{offlineFboValidation.message}</div>
+                            <div className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${offlineFboValidation.ok ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
+                              {offlineFboValidation.ok ? 'Проверка пройдена' : 'Есть проблемы перед синхронизацией'}
+                            </div>
+                            <div className="mt-3 text-sm text-gray-700">{offlineFboValidation.message}</div>
                           </div>
                           <div className="text-xs text-gray-500">{new Date(offlineFboValidation.checkedAt).toLocaleString()}</div>
                         </div>
-                        <div className="mt-3 grid grid-cols-2 md:grid-cols-5 gap-2 text-sm">
-                          <div className="bg-white/70 rounded-lg px-3 py-2"><div className="text-gray-500">Коробки</div><div className="font-semibold">{offlineFboValidation.boxesCount}</div></div>
-                          <div className="bg-white/70 rounded-lg px-3 py-2"><div className="text-gray-500">Сканы</div><div className="font-semibold">{offlineFboValidation.itemsCount}</div></div>
-                          <div className="bg-white/70 rounded-lg px-3 py-2"><div className="text-gray-500">Локальные дубли</div><div className="font-semibold">{offlineFboValidation.duplicateLocal.length}</div></div>
-                          <div className="bg-white/70 rounded-lg px-3 py-2"><div className="text-gray-500">Конфликты с БД</div><div className="font-semibold">{offlineFboValidation.duplicateDb.length}</div></div>
-                          <div className="bg-white/70 rounded-lg px-3 py-2"><div className="text-gray-500">Потерянные товары</div><div className="font-semibold">{offlineFboValidation.missingProducts.length}</div></div>
+                        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+                          <div className="rounded-xl bg-white px-4 py-3"><div className="text-xs text-gray-500">Коробки</div><div className="mt-1 text-xl font-semibold text-gray-900">{offlineFboValidation.boxesCount}</div></div>
+                          <div className="rounded-xl bg-white px-4 py-3"><div className="text-xs text-gray-500">Сканы</div><div className="mt-1 text-xl font-semibold text-gray-900">{offlineFboValidation.itemsCount}</div></div>
+                          <div className="rounded-xl bg-white px-4 py-3"><div className="text-xs text-gray-500">Локальные дубли</div><div className="mt-1 text-xl font-semibold text-gray-900">{offlineFboValidation.duplicateLocal.length}</div></div>
+                          <div className="rounded-xl bg-white px-4 py-3"><div className="text-xs text-gray-500">Конфликты с БД</div><div className="mt-1 text-xl font-semibold text-gray-900">{offlineFboValidation.duplicateDb.length}</div></div>
+                          <div className="rounded-xl bg-white px-4 py-3"><div className="text-xs text-gray-500">Потерянные товары</div><div className="mt-1 text-xl font-semibold text-gray-900">{offlineFboValidation.missingProducts.length}</div></div>
                         </div>
-                        {!!offlineFboValidation.duplicateLocal.length && (
-                          <div className="mt-3">
-                            <div className="text-sm font-medium text-rose-800 mb-1">Локальные дубли ЧЗ</div>
-                            <div className="space-y-1 text-sm text-rose-700">
-                              {offlineFboValidation.duplicateLocal.slice(0, 10).map((row) => (
-                                <div key={`local-${row.code}`}>• {row.code} , коробки: {row.boxNames.join(', ')}</div>
-                              ))}
-                            </div>
+                        <div className="mt-4 grid gap-3 xl:grid-cols-3">
+                          <div className="rounded-xl bg-white px-4 py-4">
+                            <div className="text-sm font-semibold text-gray-900 mb-2">Локальные дубли ЧЗ</div>
+                            {offlineFboValidation.duplicateLocal.length ? offlineFboValidation.duplicateLocal.slice(0, 10).map((row) => (
+                              <div key={`local-${row.code}`} className="mb-2 rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-sm text-rose-700">{row.code}<div className="mt-1 text-xs text-rose-600">Коробки: {row.boxNames.join(', ')}</div></div>
+                            )) : <div className="text-sm text-gray-400">Нет локальных дублей</div>}
                           </div>
-                        )}
-                        {!!offlineFboValidation.duplicateDb.length && (
-                          <div className="mt-3">
-                            <div className="text-sm font-medium text-rose-800 mb-1">Конфликты с БД</div>
-                            <div className="space-y-1 text-sm text-rose-700">
-                              {offlineFboValidation.duplicateDb.slice(0, 10).map((row, index) => (
-                                <div key={`db-${row.code}-${index}`}>• {row.code} , поставка {row.supplyName} , коробка {row.boxName}</div>
-                              ))}
-                            </div>
+                          <div className="rounded-xl bg-white px-4 py-4">
+                            <div className="text-sm font-semibold text-gray-900 mb-2">Конфликты с БД</div>
+                            {offlineFboValidation.duplicateDb.length ? offlineFboValidation.duplicateDb.slice(0, 10).map((row, index) => (
+                              <div key={`db-${row.code}-${index}`} className="mb-2 rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-sm text-rose-700">{row.code}<div className="mt-1 text-xs text-rose-600">Поставка {row.supplyName} , коробка {row.boxName}</div></div>
+                            )) : <div className="text-sm text-gray-400">Конфликтов с базой нет</div>}
                           </div>
-                        )}
-                        {!!offlineFboValidation.missingProducts.length && (
-                          <div className="mt-3">
-                            <div className="text-sm font-medium text-rose-800 mb-1">Товары, которых нет в базе</div>
-                            <div className="space-y-1 text-sm text-rose-700">
-                              {offlineFboValidation.missingProducts.slice(0, 10).map((row, index) => (
-                                <div key={`missing-${row.label}-${index}`}>• {row.label} , коробка {row.boxName}</div>
-                              ))}
-                            </div>
+                          <div className="rounded-xl bg-white px-4 py-4">
+                            <div className="text-sm font-semibold text-gray-900 mb-2">Товары вне базы</div>
+                            {offlineFboValidation.missingProducts.length ? offlineFboValidation.missingProducts.slice(0, 10).map((row, index) => (
+                              <div key={`missing-${row.label}-${index}`} className="mb-2 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-sm text-amber-700">{row.label}<div className="mt-1 text-xs text-amber-600">Коробка {row.boxName}</div></div>
+                            )) : <div className="text-sm text-gray-400">Все товары найдены в базе</div>}
                           </div>
-                        )}
+                        </div>
                       </div>
                     )}
                     <h3 className="font-medium text-gray-900 mb-3">Коробки</h3>
@@ -12367,6 +12574,79 @@ export default function Dashboard() {
                             </div>
                           </div>
                         ))
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {showOfflineFboHistory && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setShowOfflineFboHistory(false)}>
+                  <div className="w-full max-w-5xl max-h-[85vh] overflow-hidden rounded-[28px] bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
+                    <div className="border-b border-gray-100 bg-gradient-to-r from-slate-950 via-slate-900 to-slate-800 px-6 py-5 text-white">
+                      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                        <div>
+                          <div className="text-[11px] uppercase tracking-[0.25em] text-slate-400">Offline history</div>
+                          <h3 className="mt-2 text-2xl font-semibold">История оффлайн-сессий</h3>
+                          <p className="mt-2 text-sm text-slate-300">Все несинхронизированные данные, которые сейчас лежат на устройстве.</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-white/90">Сессий: {offlineFboUnsyncedStats.sessions}</div>
+                          <div className="rounded-full bg-amber-400/20 px-3 py-1 text-xs font-medium text-amber-200">Сканов: {offlineFboUnsyncedStats.items}</div>
+                          <button onClick={() => setShowOfflineFboHistory(false)} className="rounded-full bg-white/10 p-2 text-white/80 hover:bg-white/20 hover:text-white">
+                            <X className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="max-h-[calc(85vh-96px)] overflow-y-auto p-6 bg-slate-50">
+                      {offlineFboHistoryLoading ? (
+                        <div className="rounded-2xl border border-slate-200 bg-white px-4 py-10 text-center text-sm text-slate-500">Загружаю оффлайн-сессии...</div>
+                      ) : offlineFboHistorySessions.length === 0 ? (
+                        <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-10 text-center text-sm text-slate-500">На устройстве пока нет оффлайн-сессий</div>
+                      ) : (
+                        <div className="grid gap-4 lg:grid-cols-2">
+                          {offlineFboHistorySessions.map((session) => (
+                            <div key={`offline-history-${session.supply_id}`} className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+                              <div className="bg-gradient-to-r from-slate-950 via-slate-900 to-slate-800 px-5 py-4 text-white">
+                                <div className="flex items-start justify-between gap-3">
+                                  <div>
+                                    <div className="text-lg font-semibold">{session.supply_name || session.supply_id}</div>
+                                    <div className="mt-1 text-xs text-slate-300">Обновлено: {session.updated_at ? new Date(session.updated_at).toLocaleString() : 'нет данных'}</div>
+                                  </div>
+                                  <div className="rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-white/90">{session.items?.length || 0} сканов</div>
+                                </div>
+                              </div>
+                              <div className="p-5">
+                                <div className="grid grid-cols-3 gap-3">
+                                  <div className="rounded-2xl bg-slate-50 px-3 py-3"><div className="text-[11px] text-slate-500">Коробки</div><div className="mt-1 text-lg font-semibold text-slate-900">{session.boxes?.length || 0}</div></div>
+                                  <div className="rounded-2xl bg-slate-50 px-3 py-3"><div className="text-[11px] text-slate-500">Сканы</div><div className="mt-1 text-lg font-semibold text-slate-900">{session.items?.length || 0}</div></div>
+                                  <div className="rounded-2xl bg-slate-50 px-3 py-3"><div className="text-[11px] text-slate-500">Статус</div><div className="mt-1 text-sm font-semibold text-amber-600">Не синхронизировано</div></div>
+                                </div>
+                                <div className="mt-4 space-y-2">
+                                  {(session.items || []).slice(0, 3).map((item) => {
+                                    const boxName = (session.boxes || []).find((box) => box.id === item.box_id)?.name || 'Без коробки';
+                                    return (
+                                      <div key={`offline-history-item-${item.id}`} className="rounded-2xl border border-slate-100 bg-slate-50 px-3 py-3">
+                                        <div className="text-sm font-medium text-slate-900">{item.product?.name || 'Товар без названия'}</div>
+                                        <div className="mt-1 text-xs text-slate-500">Коробка {boxName}</div>
+                                        <div className="mt-2 break-all font-mono text-[11px] text-slate-600">{item.honest_sign_code}</div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                                <div className="mt-5 flex flex-wrap gap-2">
+                                  <button onClick={() => handleOpenOfflineHistorySession(session)} className="inline-flex items-center rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800">
+                                    <ArrowLeft className="mr-2 h-4 w-4 rotate-180" /> Открыть сессию
+                                  </button>
+                                  <button onClick={() => handleDeleteOfflineHistorySession(session)} className="inline-flex items-center rounded-xl bg-rose-50 px-4 py-2 text-sm font-medium text-rose-700 hover:bg-rose-100">
+                                    <Trash2 className="mr-2 h-4 w-4" /> Удалить с устройства
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
                       )}
                     </div>
                   </div>
