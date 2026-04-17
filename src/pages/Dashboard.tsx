@@ -2928,7 +2928,7 @@ export default function Dashboard() {
   const [showSupplyProductsModal, setShowSupplyProductsModal] = useState(false);
   const [supplyProductsLoading, setSupplyProductsLoading] = useState(false);
   const [supplyProductsPhotoLoading, setSupplyProductsPhotoLoading] = useState(false);
-  const [supplyProductsRows, setSupplyProductsRows] = useState<Array<{ key: string; nmId?: string; image?: string; article: string; title: string; sizesText: string; totalQty: number }>>([]);
+  const [supplyProductsRows, setSupplyProductsRows] = useState<Array<{ key: string; nmId?: string; image?: string; article: string; title: string; sizesText: string; sizeBarcodeLines: string[]; totalQty: number }>>([]);
   const [supplyStats, setSupplyStats] = useState({ boxes: 0, items: 0 });
   const [apiBoxCount, setApiBoxCount] = useState('1');
   const [loadingApiBoxes, setLoadingApiBoxes] = useState(false);
@@ -4004,7 +4004,7 @@ export default function Dashboard() {
         if (row?.nmID || row?.nmId) wbByNm.set(String(row.nmID || row.nmId), row);
       });
 
-      const grouped = new Map<string, { image?: string; article: string; title: string; sizes: Record<string, number>; totalQty: number }>();
+      const grouped = new Map<string, { image?: string; article: string; title: string; sizes: Record<string, number>; sizeBarcodes: Record<string, Set<string>>; totalQty: number }>();
       (items || []).forEach((item: any) => {
         const p = item?.product || {};
         const qty = 1;
@@ -4018,9 +4018,11 @@ export default function Dashboard() {
         const image = /^https?:\/\//i.test(rawImage) ? rawImage : '';
         const size = String(p?.size || wb?.size || 'Без размера');
         const key = String(wb?.nmID || wb?.nmId || p?.wb_sku || p?.barcode || `${title}-${article}`);
-        if (!grouped.has(key)) grouped.set(key, { image, article, title, sizes: {}, totalQty: 0 });
+        if (!grouped.has(key)) grouped.set(key, { image, article, title, sizes: {}, sizeBarcodes: {}, totalQty: 0 });
         const row = grouped.get(key)!;
         row.sizes[size] = (row.sizes[size] || 0) + qty;
+        if (!row.sizeBarcodes[size]) row.sizeBarcodes[size] = new Set<string>();
+        if (barcode) row.sizeBarcodes[size].add(barcode);
         row.totalQty += qty;
       });
 
@@ -4031,6 +4033,11 @@ export default function Dashboard() {
         article: row.article,
         title: row.title,
         sizesText: Object.entries(row.sizes).map(([size, qty]) => `${size}: ${qty}`).join(', '),
+        sizeBarcodeLines: Object.entries(row.sizes).map(([size, qty]) => {
+          const barcodes = Array.from(row.sizeBarcodes[size] || []).filter(Boolean);
+          const barcodeText = barcodes.length ? barcodes.join(', ') : 'без ШК';
+          return `${size}: ${qty} , ШК: ${barcodeText}`;
+        }),
         totalQty: row.totalQty,
       }));
 
@@ -12764,7 +12771,14 @@ export default function Dashboard() {
                                 <div className="font-semibold text-gray-900">{row.article}</div>
                                 <div className="text-sm text-gray-700 break-words">{row.title}</div>
                                 <div className="text-sm text-gray-500 mt-1">{row.sizesText}</div>
-                                <div className="text-sm font-medium text-sky-700 mt-1">Всего: {row.totalQty}</div>
+                                <div className="mt-2 space-y-1">
+                                  {row.sizeBarcodeLines.map((line, index) => (
+                                    <div key={`${row.key}-size-barcode-${index}`} className="text-xs text-gray-600 break-all bg-gray-50 border border-gray-100 rounded-lg px-2 py-1.5">
+                                      {line}
+                                    </div>
+                                  ))}
+                                </div>
+                                <div className="text-sm font-medium text-sky-700 mt-2">Всего: {row.totalQty}</div>
                               </div>
                             </div>
                           ))}
