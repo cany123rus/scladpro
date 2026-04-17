@@ -12441,7 +12441,7 @@ export default function Dashboard() {
                               onClick={() => {
                                 const supplierName = suppliers.find(s => String(s.id) === String(currentSupply?.supplier_id || ''))?.name || '';
                                 setNameSequencePrintForm(prev => ({
-                                  name: prev.name || supplierName,
+                                  name: supplierName || '',
                                   quantity: prev.quantity || '1',
                                 }));
                                 setShowNameSequencePrintModal(true);
