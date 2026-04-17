@@ -12316,24 +12316,6 @@ export default function Dashboard() {
                             </span>
                           )}
                         </button>
-                        {fboOfflineMode && (
-                          <>
-                            <button
-                              onClick={validateOfflineFboSession}
-                              disabled={offlineFboValidationLoading || offlineFboUploadLoading}
-                              className="flex-1 md:flex-none justify-center px-4 py-2 bg-sky-100 text-sky-800 rounded-lg hover:bg-sky-200 disabled:opacity-50 flex items-center"
-                            >
-                              <CheckCircle2 className="h-4 w-4 mr-2" /> {offlineFboValidationLoading ? 'Проверка...' : 'Проверка'}
-                            </button>
-                            <button
-                              onClick={uploadOfflineFboSessionToDb}
-                              disabled={offlineFboUploadLoading || offlineFboValidationLoading}
-                              className="flex-1 md:flex-none justify-center px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50 flex items-center"
-                            >
-                              <Upload className="h-4 w-4 mr-2" /> {offlineFboUploadLoading ? 'Загрузка...' : 'Загрузить в БД'}
-                            </button>
-                          </>
-                        )}
                         <button onClick={() => setSupplySyncOpen(true)} className="flex-1 md:flex-none justify-center px-4 py-2 bg-amber-100 text-amber-800 rounded-lg hover:bg-amber-200 flex items-center">
                           <RefreshCw className="h-4 w-4 mr-2" /> Синхронизировать
                         </button>
@@ -12388,6 +12370,29 @@ export default function Dashboard() {
                               <div className="inline-flex items-center rounded-full border border-white/10 bg-white/10 px-3 py-1 text-xs font-medium text-white/90">IndexedDB</div>
                               <div className="inline-flex items-center rounded-full border border-amber-400/30 bg-amber-400/15 px-3 py-1 text-xs font-medium text-amber-200">Несинхронизировано: {offlineFboUnsyncedStats.sessions} сесс. / {offlineFboUnsyncedStats.items} сканов</div>
                             </div>
+                          </div>
+
+                          <div className="mt-5 flex flex-wrap gap-3">
+                            <button
+                              onClick={validateOfflineFboSession}
+                              disabled={offlineFboValidationLoading || offlineFboUploadLoading}
+                              className="inline-flex items-center justify-center rounded-2xl bg-sky-400 px-4 py-3 text-sm font-semibold text-slate-950 hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              <CheckCircle2 className="mr-2 h-4 w-4" /> {offlineFboValidationLoading ? 'Проверка...' : 'Проверка'}
+                            </button>
+                            <button
+                              onClick={uploadOfflineFboSessionToDb}
+                              disabled={offlineFboUploadLoading || offlineFboValidationLoading}
+                              className="inline-flex items-center justify-center rounded-2xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-white hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              <Upload className="mr-2 h-4 w-4" /> {offlineFboUploadLoading ? 'Загрузка...' : 'Загрузить в БД'}
+                            </button>
+                            <button
+                              onClick={() => setShowOfflineFboHistory(true)}
+                              className="inline-flex items-center justify-center rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm font-semibold text-white hover:bg-white/15"
+                            >
+                              <History className="mr-2 h-4 w-4" /> История оффлайн
+                            </button>
                           </div>
 
                           <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
