@@ -3568,7 +3568,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (currentBox) fetchBoxItems(currentBox.id);
-  }, [currentBox, playScanTone]);
+  }, [currentBox]);
 
   const ensureWbSkuIndex = async (supplierId: string) => {
     if (wbSkuIndexRef.current[supplierId]) return wbSkuIndexRef.current[supplierId];
@@ -3727,7 +3727,7 @@ export default function Dashboard() {
     setSupplyStep('HONEST_SIGN');
   };
 
-  const playScanTone = useCallback((kind: 'success' | 'error' = 'success') => {
+  const playScanTone = (kind: 'success' | 'error' = 'success') => {
     try {
       const Ctx = (window as any).AudioContext || (window as any).webkitAudioContext;
       if (!Ctx) return;
@@ -3746,7 +3746,7 @@ export default function Dashboard() {
       osc.start();
       osc.stop(ctx.currentTime + 0.11);
     } catch {}
-  }, []);
+  };
 
   const flushPendingScans = useCallback(async () => {
     if (pendingScansRef.current.length === 0) return;
