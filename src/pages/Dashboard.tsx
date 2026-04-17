@@ -3150,11 +3150,12 @@ export default function Dashboard() {
   };
 
   const fetchSupplyStats = async (supplyId: string) => {
-    // Optimized: Fetch boxes and their item counts in one query
+    // Optimized: Fetch active boxes and their item counts in one query
     const { data: boxes } = await supabase
         .from('boxes')
         .select('id, supply_items(count)')
-        .eq('supply_id', supplyId);
+        .eq('supply_id', supplyId)
+        .is('deleted_at', null);
 
     const boxesCount = boxes?.length || 0;
     const itemsCount = boxes?.reduce((acc: number, box: any) => {
@@ -3418,9 +3419,10 @@ export default function Dashboard() {
     if (!currentSupply?.id) {
       return;
     }
-    const { data: existingBoxes } = await supabase.from('boxes').select('name').eq('supply_id', currentSupply.id);
-    const nums = (existingBoxes || []).map((b: any) => parseInt(String(b?.name || '').trim(), 10)).filter((n: number) => Number.isFinite(n));
-    const nextNumber = (nums.length ? Math.max(...nums) : 0) + 1;
+    const { data: existingBoxes } = await supabase.from('boxes').select('name').eq('supply_id', currentSupply.id).is('deleted_at', null);
+    const used = new Set((existingBoxes || []).map((b: any) => parseInt(String(b?.name || '').trim(), 10)).filter((n: number) => Number.isFinite(n) && n > 0));
+    let nextNumber = 1;
+    while (used.has(nextNumber)) nextNumber += 1;
     const nextName = String(nextNumber);
     const { data: newBox, error } = await supabase.from('boxes').insert([{ name: nextName, supply_id: currentSupply.id }]).select().single();
     if (error) {
