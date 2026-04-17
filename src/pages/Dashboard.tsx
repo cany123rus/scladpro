@@ -83,6 +83,17 @@ interface OfflineFboSession {
   updated_at: string;
 }
 
+interface OfflineFboValidationSummary {
+  checkedAt: string;
+  boxesCount: number;
+  itemsCount: number;
+  duplicateLocal: Array<{ code: string; boxNames: string[] }>;
+  duplicateDb: Array<{ code: string; boxName: string; supplyName: string }>;
+  missingProducts: Array<{ label: string; boxName: string }>;
+  ok: boolean;
+  message: string;
+}
+
 
 type AccessRule = 'inherit' | 'allow' | 'deny';
 type ButtonAccessConfig = {
@@ -2932,6 +2943,8 @@ export default function Dashboard() {
   const [supplySyncLoading, setSupplySyncLoading] = useState(false);
   const [fboOfflineMode, setFboOfflineMode] = useState(false);
   const [offlineFboSession, setOfflineFboSession] = useState<OfflineFboSession | null>(null);
+  const [offlineFboValidation, setOfflineFboValidation] = useState<OfflineFboValidationSummary | null>(null);
+  const [offlineFboValidationLoading, setOfflineFboValidationLoading] = useState(false);
 
 
   const getOfflineFboStorageKey = (supplyId: string) => `fbo_offline_session_v1_${supplyId}`;
@@ -2996,6 +3009,133 @@ export default function Dashboard() {
     return next;
   };
 
+  const validateOfflineFboSession = async () => {
+    if (!currentSupply) return;
+
+    const session = offlineFboSession && offlineFboSession.supply_id === currentSupply.id
+      ? offlineFboSession
+      : readOfflineFboSession(currentSupply);
+
+    if (!session || !(session.boxes || []).length) {
+      const summary: OfflineFboValidationSummary = {
+        checkedAt: new Date().toISOString(),
+        boxesCount: 0,
+        itemsCount: 0,
+        duplicateLocal: [],
+        duplicateDb: [],
+        missingProducts: [],
+        ok: false,
+        message: 'Нет оффлайн-коробок для проверки',
+      };
+      setOfflineFboValidation(summary);
+      showToast(summary.message, 'error');
+      return;
+    }
+
+    if (!(session.items || []).length) {
+      const summary: OfflineFboValidationSummary = {
+        checkedAt: new Date().toISOString(),
+        boxesCount: session.boxes.length,
+        itemsCount: 0,
+        duplicateLocal: [],
+        duplicateDb: [],
+        missingProducts: [],
+        ok: false,
+        message: 'В оффлайн-сессии нет отсканированных товаров',
+      };
+      setOfflineFboValidation(summary);
+      showToast(summary.message, 'error');
+      return;
+    }
+
+    setOfflineFboValidationLoading(true);
+    try {
+      const boxNameById = new Map((session.boxes || []).map((box) => [String(box.id), String(box.name || 'Без коробки')]));
+      const items = (session.items || []).filter((item) => String(item?.honest_sign_code || '').trim());
+      const groupedByCode = new Map<string, SupplyItem[]>();
+      items.forEach((item) => {
+        const code = String(item.honest_sign_code || '').trim();
+        if (!groupedByCode.has(code)) groupedByCode.set(code, []);
+        groupedByCode.get(code)!.push(item);
+      });
+
+      const duplicateLocal = Array.from(groupedByCode.entries())
+        .filter(([, rows]) => rows.length > 1)
+        .map(([code, rows]) => ({
+          code,
+          boxNames: Array.from(new Set(rows.map((row) => boxNameById.get(String(row.box_id)) || 'Без коробки'))),
+        }));
+
+      const { data: supplierProducts, error: productsError } = await supabase
+        .from('products')
+        .select('id, barcode, name')
+        .eq('supplier_id', currentSupply.supplier_id)
+        .is('deleted_at', null)
+        .limit(10000);
+      if (productsError) throw productsError;
+
+      const productIdSet = new Set((supplierProducts || []).map((row: any) => String(row.id)));
+      const productBarcodeSet = new Set((supplierProducts || []).map((row: any) => String(row.barcode || '').trim()).filter(Boolean));
+      const missingProducts = (session.items || []).filter((item) => {
+        const productId = String(item?.product_id || '');
+        const barcode = String(item?.product?.barcode || '').trim();
+        return !productIdSet.has(productId) && (!barcode || !productBarcodeSet.has(barcode));
+      }).map((item) => ({
+        label: String(item?.product?.name || item?.product_id || 'Неизвестный товар'),
+        boxName: boxNameById.get(String(item.box_id)) || 'Без коробки',
+      }));
+
+      const codes = Array.from(new Set(items.map((item) => String(item.honest_sign_code || '').trim()).filter(Boolean)));
+      let duplicateDb: Array<{ code: string; boxName: string; supplyName: string }> = [];
+      if (codes.length) {
+        const { data: dbItems, error: dbError } = await supabase
+          .from('supply_items')
+          .select('honest_sign_code, box:boxes(name, deleted_at, supply:supplies(name))')
+          .in('honest_sign_code', codes)
+          .is('deleted_at', null)
+          .limit(10000);
+        if (dbError) throw dbError;
+
+        duplicateDb = (dbItems || []).map((row: any) => ({
+          code: String(row?.honest_sign_code || ''),
+          boxName: String(row?.box?.name || 'Неизвестная коробка'),
+          supplyName: String(row?.box?.supply?.name || 'Неизвестная поставка'),
+        })).filter((row) => row.code);
+      }
+
+      const ok = !duplicateLocal.length && !duplicateDb.length && !missingProducts.length;
+      const summary: OfflineFboValidationSummary = {
+        checkedAt: new Date().toISOString(),
+        boxesCount: session.boxes.length,
+        itemsCount: session.items.length,
+        duplicateLocal,
+        duplicateDb,
+        missingProducts,
+        ok,
+        message: ok
+          ? 'Проверка пройдена, конфликтов не найдено'
+          : `Найдены проблемы: локальные дубли ${duplicateLocal.length}, конфликты с БД ${duplicateDb.length}, отсутствующие товары ${missingProducts.length}`,
+      };
+      setOfflineFboValidation(summary);
+      showToast(summary.message, ok ? 'success' : 'error');
+    } catch (e: any) {
+      console.error('validateOfflineFboSession error', e);
+      setOfflineFboValidation({
+        checkedAt: new Date().toISOString(),
+        boxesCount: session.boxes.length,
+        itemsCount: session.items.length,
+        duplicateLocal: [],
+        duplicateDb: [],
+        missingProducts: [],
+        ok: false,
+        message: 'Ошибка проверки оффлайн-сессии: ' + (e?.message || 'неизвестно'),
+      });
+      showToast('Ошибка проверки оффлайн-сессии: ' + (e?.message || 'неизвестно'), 'error');
+    } finally {
+      setOfflineFboValidationLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (!currentSupply?.id || !fboOfflineMode) return;
     const session = readOfflineFboSession(currentSupply);
@@ -3010,6 +3150,10 @@ export default function Dashboard() {
     fetchSupplyStats(currentSupply.id);
     if (currentBox?.id) fetchBoxItems(currentBox.id);
   }, [currentSupply?.id, fboOfflineMode]);
+
+  useEffect(() => {
+    setOfflineFboValidation(null);
+  }, [currentSupply?.id, fboOfflineMode, offlineFboSession?.updated_at]);
 
   useEffect(() => {
     if (!fboBoxesSupplierId && selectedSupplierId) {
@@ -11919,14 +12063,11 @@ export default function Dashboard() {
                         </button>
                         {fboOfflineMode && (
                           <button
-                            onClick={() => {
-                              const session = currentSupply ? (offlineFboSession && offlineFboSession.supply_id === currentSupply.id ? offlineFboSession : readOfflineFboSession(currentSupply)) : null;
-                              if (!session) return showToast('Нет активной оффлайн-сессии', 'error');
-                              showToast(`Оффлайн проверка: коробок ${session.boxes.length}, сканов ${session.items.length}`, 'info');
-                            }}
-                            className="flex-1 md:flex-none justify-center px-4 py-2 bg-sky-100 text-sky-800 rounded-lg hover:bg-sky-200 flex items-center"
+                            onClick={validateOfflineFboSession}
+                            disabled={offlineFboValidationLoading}
+                            className="flex-1 md:flex-none justify-center px-4 py-2 bg-sky-100 text-sky-800 rounded-lg hover:bg-sky-200 disabled:opacity-50 flex items-center"
                           >
-                            <CheckCircle2 className="h-4 w-4 mr-2" /> Проверка
+                            <CheckCircle2 className="h-4 w-4 mr-2" /> {offlineFboValidationLoading ? 'Проверка...' : 'Проверка'}
                           </button>
                         )}
                         <button onClick={() => setSupplySyncOpen(true)} className="flex-1 md:flex-none justify-center px-4 py-2 bg-amber-100 text-amber-800 rounded-lg hover:bg-amber-200 flex items-center">
@@ -11968,6 +12109,54 @@ export default function Dashboard() {
                   </div>
 
                   <div className="flex-1 overflow-y-auto p-4 relative">
+                    {fboOfflineMode && offlineFboValidation && (
+                      <div className={`mb-4 rounded-xl border p-4 ${offlineFboValidation.ok ? 'bg-emerald-50 border-emerald-200' : 'bg-rose-50 border-rose-200'}`}>
+                        <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+                          <div>
+                            <div className={`font-semibold ${offlineFboValidation.ok ? 'text-emerald-800' : 'text-rose-800'}`}>{offlineFboValidation.ok ? 'Проверка пройдена' : 'Проверка нашла проблемы'}</div>
+                            <div className="text-sm text-gray-600">{offlineFboValidation.message}</div>
+                          </div>
+                          <div className="text-xs text-gray-500">{new Date(offlineFboValidation.checkedAt).toLocaleString()}</div>
+                        </div>
+                        <div className="mt-3 grid grid-cols-2 md:grid-cols-5 gap-2 text-sm">
+                          <div className="bg-white/70 rounded-lg px-3 py-2"><div className="text-gray-500">Коробки</div><div className="font-semibold">{offlineFboValidation.boxesCount}</div></div>
+                          <div className="bg-white/70 rounded-lg px-3 py-2"><div className="text-gray-500">Сканы</div><div className="font-semibold">{offlineFboValidation.itemsCount}</div></div>
+                          <div className="bg-white/70 rounded-lg px-3 py-2"><div className="text-gray-500">Локальные дубли</div><div className="font-semibold">{offlineFboValidation.duplicateLocal.length}</div></div>
+                          <div className="bg-white/70 rounded-lg px-3 py-2"><div className="text-gray-500">Конфликты с БД</div><div className="font-semibold">{offlineFboValidation.duplicateDb.length}</div></div>
+                          <div className="bg-white/70 rounded-lg px-3 py-2"><div className="text-gray-500">Потерянные товары</div><div className="font-semibold">{offlineFboValidation.missingProducts.length}</div></div>
+                        </div>
+                        {!!offlineFboValidation.duplicateLocal.length && (
+                          <div className="mt-3">
+                            <div className="text-sm font-medium text-rose-800 mb-1">Локальные дубли ЧЗ</div>
+                            <div className="space-y-1 text-sm text-rose-700">
+                              {offlineFboValidation.duplicateLocal.slice(0, 10).map((row) => (
+                                <div key={`local-${row.code}`}>• {row.code} , коробки: {row.boxNames.join(', ')}</div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {!!offlineFboValidation.duplicateDb.length && (
+                          <div className="mt-3">
+                            <div className="text-sm font-medium text-rose-800 mb-1">Конфликты с БД</div>
+                            <div className="space-y-1 text-sm text-rose-700">
+                              {offlineFboValidation.duplicateDb.slice(0, 10).map((row, index) => (
+                                <div key={`db-${row.code}-${index}`}>• {row.code} , поставка {row.supplyName} , коробка {row.boxName}</div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {!!offlineFboValidation.missingProducts.length && (
+                          <div className="mt-3">
+                            <div className="text-sm font-medium text-rose-800 mb-1">Товары, которых нет в базе</div>
+                            <div className="space-y-1 text-sm text-rose-700">
+                              {offlineFboValidation.missingProducts.slice(0, 10).map((row, index) => (
+                                <div key={`missing-${row.label}-${index}`}>• {row.label} , коробка {row.boxName}</div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                     <h3 className="font-medium text-gray-900 mb-3">Коробки</h3>
                     <div className="space-y-3">
                       {boxesList.length === 0 ? (
