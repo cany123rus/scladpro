@@ -12296,43 +12296,45 @@ export default function Dashboard() {
                           </div>
                         </div>
                       </div>
-                      <div className="flex flex-wrap gap-2">
-                        <button onClick={() => setShowGenerateBoxQR(true)} className="flex-1 md:flex-none justify-center px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 flex items-center">
-                          <QrCode className="h-4 w-4 mr-2" /> <span className="whitespace-nowrap">QR генерация коробки</span>
-                        </button>
-                        <button onClick={() => setFboOfflineMode((prev) => !prev)} className={`relative flex-1 md:flex-none justify-center px-4 py-2 rounded-lg flex items-center ${fboOfflineMode ? 'bg-amber-600 text-white hover:bg-amber-700' : 'bg-amber-100 text-amber-800 hover:bg-amber-200'}`}>
-                          <Database className="h-4 w-4 mr-2" /> {fboOfflineMode ? 'Оффлайн включен' : 'Оффлайн режим'}
-                          {offlineFboUnsyncedStats.sessions > 0 && (
-                            <span className={`ml-2 inline-flex min-w-[1.5rem] justify-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${fboOfflineMode ? 'bg-white/20 text-white' : 'bg-white text-amber-700'}`}>
-                              {offlineFboUnsyncedStats.sessions}
-                            </span>
-                          )}
-                        </button>
-                        <button onClick={() => setShowOfflineFboHistory(true)} className="relative flex-1 md:flex-none justify-center px-4 py-2 bg-slate-100 text-slate-800 rounded-lg hover:bg-slate-200 flex items-center">
-                          <History className="h-4 w-4 mr-2" /> История оффлайн
-                          {offlineFboUnsyncedStats.sessions > 0 && (
-                            <span className="ml-2 inline-flex min-w-[1.5rem] justify-center rounded-full bg-amber-500 px-2 py-0.5 text-[11px] font-semibold text-white">
-                              {offlineFboUnsyncedStats.sessions}
-                            </span>
-                          )}
-                        </button>
-                        <button onClick={() => setSupplySyncOpen(true)} className="flex-1 md:flex-none justify-center px-4 py-2 bg-amber-100 text-amber-800 rounded-lg hover:bg-amber-200 flex items-center">
-                          <RefreshCw className="h-4 w-4 mr-2" /> Синхронизировать
-                        </button>
-                        <button onClick={openSupplyProductsModal} className="flex-1 md:flex-none justify-center px-4 py-2 bg-sky-100 text-sky-800 rounded-lg hover:bg-sky-200 flex items-center">
-                          <Package className="h-4 w-4 mr-2" /> Товар
-                        </button>
-                        <button onClick={handleDownloadExcel} className="flex-1 md:flex-none justify-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center">
-                          <FileSpreadsheet className="h-4 w-4 mr-2" /> Excel
-                        </button>
-                        <button onClick={handleToggleSupplyLock} className={`flex-1 md:flex-none justify-center px-4 py-2 rounded-lg flex items-center ${currentSupply.status === 'closed' ? 'bg-gray-600 text-white hover:bg-gray-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`} title={currentSupply.status === 'closed' ? "Разблокировать" : "Заблокировать"}>
-                          {currentSupply.status === 'closed' ? <Lock className="h-4 w-4" /> : <LockOpen className="h-4 w-4" />}
-                        </button>
-                        {currentSupply.status !== 'closed' && (
-                          <button onClick={handleCloseSupply} className="flex-1 md:flex-none justify-center px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 flex items-center">
-                            <CheckCircle2 className="h-4 w-4 mr-2" /> <span className="whitespace-nowrap">Закрыть поставку</span>
-                          </button>
-                        )}
+                      <div className="flex flex-col gap-3 lg:items-end">
+                        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-2 shadow-sm">
+                          <div className="flex flex-wrap gap-2">
+                            <button onClick={openSupplyProductsModal} className="inline-flex items-center justify-center rounded-xl bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm hover:bg-sky-50 hover:text-sky-700">
+                              <Package className="h-4 w-4 mr-2" /> Товар
+                            </button>
+                            <button onClick={handleDownloadExcel} className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-emerald-700">
+                              <FileSpreadsheet className="h-4 w-4 mr-2" /> Excel
+                            </button>
+                            <button onClick={() => setSupplySyncOpen(true)} className="inline-flex items-center justify-center rounded-xl bg-white px-4 py-2.5 text-sm font-medium text-amber-700 shadow-sm hover:bg-amber-50">
+                              <RefreshCw className="h-4 w-4 mr-2" /> Синхронизировать
+                            </button>
+                            <button onClick={handleToggleSupplyLock} className={`inline-flex items-center justify-center rounded-xl px-4 py-2.5 text-sm font-medium shadow-sm ${currentSupply.status === 'closed' ? 'bg-slate-700 text-white hover:bg-slate-800' : 'bg-white text-slate-700 hover:bg-slate-100'}`} title={currentSupply.status === 'closed' ? "Разблокировать" : "Заблокировать"}>
+                              {currentSupply.status === 'closed' ? <Lock className="h-4 w-4 mr-2" /> : <LockOpen className="h-4 w-4 mr-2" />}
+                              {currentSupply.status === 'closed' ? 'Разблокировать' : 'Заблокировать'}
+                            </button>
+                            {currentSupply.status !== 'closed' && (
+                              <button onClick={handleCloseSupply} className="inline-flex items-center justify-center rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-rose-700">
+                                <CheckCircle2 className="h-4 w-4 mr-2" /> <span className="whitespace-nowrap">Закрыть поставку</span>
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
+                          <div className="flex flex-wrap gap-2">
+                            <button onClick={() => setShowGenerateBoxQR(true)} className="inline-flex items-center justify-center rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-slate-800">
+                              <QrCode className="h-4 w-4 mr-2" /> <span className="whitespace-nowrap">QR генерация коробки</span>
+                            </button>
+                            <button onClick={() => setFboOfflineMode((prev) => !prev)} className={`relative inline-flex items-center justify-center rounded-xl px-4 py-2.5 text-sm font-medium shadow-sm ${fboOfflineMode ? 'bg-amber-600 text-white hover:bg-amber-700' : 'bg-amber-50 text-amber-800 hover:bg-amber-100'}`}>
+                              <Database className="h-4 w-4 mr-2" /> {fboOfflineMode ? 'Оффлайн включен' : 'Оффлайн режим'}
+                              {offlineFboUnsyncedStats.sessions > 0 && (
+                                <span className={`ml-2 inline-flex min-w-[1.5rem] justify-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${fboOfflineMode ? 'bg-white/20 text-white' : 'bg-white text-amber-700'}`}>
+                                  {offlineFboUnsyncedStats.sessions}
+                                </span>
+                              )}
+                            </button>
+                          </div>
+                        </div>
                       </div>
                     </div>
 
