@@ -6558,6 +6558,7 @@ export default function Dashboard() {
     if (!barterDbReady) return;
     const t = setTimeout(async () => {
       try {
+        if (!(barterRows || []).length) return;
         const payload = { rows: barterRows || [], barterGlobalExtra, adGlobalExtra };
         await supabase.from('app_settings').upsert([{ key: 'barters_external_ads_v1', value: JSON.stringify(payload) }], { onConflict: 'key' });
       } catch {}
