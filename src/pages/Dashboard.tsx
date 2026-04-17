@@ -411,6 +411,7 @@ export default function Dashboard() {
   const isScanningRef = useRef(false);
   const pendingScansRef = useRef<Array<{ boxId: string; productId: string; code: string }>>([]);
   const flushScansTimeoutRef = useRef<number | null>(null);
+  const scanAudioCtxRef = useRef<any>(null);
   const wbSkuIndexRef = useRef<Record<string, Map<string, { card: any; size: any }>>>({});
   const supplierProductsIndexRef = useRef<Record<string, Map<string, Product>>>({});
   const [orders, setOrders] = useState<Order[]>([]);
@@ -3567,7 +3568,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (currentBox) fetchBoxItems(currentBox.id);
-  }, [currentBox]);
+  }, [currentBox, playScanTone]);
 
   const ensureWbSkuIndex = async (supplierId: string) => {
     if (wbSkuIndexRef.current[supplierId]) return wbSkuIndexRef.current[supplierId];
@@ -3726,6 +3727,27 @@ export default function Dashboard() {
     setSupplyStep('HONEST_SIGN');
   };
 
+  const playScanTone = useCallback((kind: 'success' | 'error' = 'success') => {
+    try {
+      const Ctx = (window as any).AudioContext || (window as any).webkitAudioContext;
+      if (!Ctx) return;
+      if (!scanAudioCtxRef.current) scanAudioCtxRef.current = new Ctx();
+      const ctx = scanAudioCtxRef.current;
+      if (ctx.state === 'suspended') ctx.resume?.();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = kind === 'error' ? 'square' : 'sine';
+      osc.frequency.value = kind === 'error' ? 220 : 880;
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(kind === 'error' ? 0.15 : 0.12, ctx.currentTime + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.10);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.11);
+    } catch {}
+  }, []);
+
   const flushPendingScans = useCallback(async () => {
     if (pendingScansRef.current.length === 0) return;
     const batch = [...pendingScansRef.current];
@@ -3736,6 +3758,7 @@ export default function Dashboard() {
     );
 
     if (error) {
+      playScanTone('error');
       showToast('Ошибка пакетного сохранения: ' + error.message, 'error');
       return;
     }
@@ -3778,23 +3801,27 @@ export default function Dashboard() {
         // Validation: Prevent scanning item barcodes (EAN-8, EAN-13, UPC-12)
         // Honest Sign codes are usually much longer (DataMatrix)
         if ((code.length === 8 || code.length === 12 || code.length === 13) && /^\d+$/.test(code)) {
+          playScanTone('error');
           showToast('Это штрихкод товара, а не Честный Знак!', 'error');
           return;
         }
 
         const pendingDuplicate = pendingScansRef.current.some((x) => x.code === code);
         if (pendingDuplicate) {
+          playScanTone('error');
           showToast('Этот Честный Знак уже добавлен в очередь!', 'error');
           return;
         }
 
         const { data: existing } = await supabase.from('supply_items').select('id').eq('honest_sign_code', code).maybeSingle();
         if (existing) {
+          playScanTone('error');
           showToast('Этот Честный Знак уже отсканирован!', 'error');
           return;
         }
 
         pendingScansRef.current.push({ boxId: currentBox.id, productId: scannedItem.id, code });
+        playScanTone('success');
         setBoxItems((prev) => ([{ id: `pending-${Date.now()}-${Math.random()}`, box_id: currentBox.id, product_id: scannedItem.id, honest_sign_code: code, created_at: new Date().toISOString(), deleted_at: null, product: scannedItem } as any, ...(prev || [])]));
         setSupplyStats((prev) => ({ ...prev, items: Number(prev.items || 0) + 1 }));
 
