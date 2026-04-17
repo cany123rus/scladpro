@@ -3416,7 +3416,6 @@ export default function Dashboard() {
 
   const createNextBoxInCurrentSupply = async () => {
     if (!currentSupply?.id) {
-      showToast('Сначала откройте поставку', 'error');
       return;
     }
     const { data: existingBoxes } = await supabase.from('boxes').select('name').eq('supply_id', currentSupply.id);
