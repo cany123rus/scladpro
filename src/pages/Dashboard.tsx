@@ -24,11 +24,186 @@ import { BarcodeFormat, DecodeHintType } from '@zxing/library';
 import { downloadJsonRowsAsExcel, ensureExcelFileSize, ensureExcelRowLimit, ensureRequiredColumns, readFirstSheetAsJson } from '../utils/safeExcel';
 import ExcelJS from 'exceljs/dist/exceljs.min.js';
 import { mergeWarehouseUpdates, removeWarehouseShelfItem, upsertWarehouseShelfItem } from '../utils/warehouseActions';
+import { DASHBOARD_TAB_IDS, isDashboardTabId } from '../constants/dashboardTabs';
 
 
 const getSafeId = () => (globalThis?.crypto && typeof globalThis.crypto.randomUUID === 'function'
   ? globalThis.crypto.randomUUID()
   : `id_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`);
+
+const BARTER_RATING_OPTIONS = ['', 'Удовлетворительно', 'Средне', 'Хорошо', 'Отлично'] as const;
+
+const getBarterRatingClassName = (value: string) => {
+  const base = 'oc-select transition-colors';
+  if (value === 'Удовлетворительно') return `${base} border-rose-300 bg-rose-50 text-rose-700`;
+  if (value === 'Средне') return `${base} border-amber-300 bg-amber-50 text-amber-700`;
+  if (value === 'Хорошо') return `${base} border-sky-300 bg-sky-50 text-sky-700`;
+  if (value === 'Отлично') return `${base} border-emerald-300 bg-emerald-50 text-emerald-700`;
+  return `${base} border-slate-200 bg-white text-slate-700`;
+};
+
+const RATING_SCORE_MAP: Record<string, number> = {
+  'Удовлетворительно': 1,
+  'Средне': 2,
+  'Хорошо': 3,
+  'Отлично': 4,
+};
+
+const EXTERNAL_ADS_STATUS_LABELS: Record<string, string> = {
+  new: 'Новый',
+  contacted: 'Написали',
+  in_progress: 'В работе',
+  barter_published: 'Вышел бартер',
+  ad_published: 'Вышла реклама',
+  waiting_stats: 'Ждём статистику',
+  completed: 'Завершено',
+  waiting: 'Ждём ответ',
+  agreed: 'Договорились',
+  rejected: 'Отказ',
+};
+
+const EXTERNAL_ADS_STATUS_CLASSES: Record<string, string> = {
+  new: 'bg-slate-100 text-slate-700',
+  contacted: 'bg-blue-100 text-blue-700',
+  in_progress: 'bg-indigo-100 text-indigo-700',
+  barter_published: 'bg-cyan-100 text-cyan-700',
+  ad_published: 'bg-violet-100 text-violet-700',
+  waiting_stats: 'bg-amber-100 text-amber-700',
+  completed: 'bg-emerald-100 text-emerald-700',
+  waiting: 'bg-amber-100 text-amber-700',
+  agreed: 'bg-emerald-100 text-emerald-700',
+  rejected: 'bg-rose-100 text-rose-700',
+};
+
+const getExternalAdsStatusLabel = (status: string) => EXTERNAL_ADS_STATUS_LABELS[String(status || '').trim()] || 'Новый';
+const getExternalAdsStatusClassName = (status: string) => EXTERNAL_ADS_STATUS_CLASSES[String(status || '').trim()] || 'bg-slate-100 text-slate-700';
+
+const normalizeExternalAdsStatus = (status: string) => {
+  const value = String(status || '').trim();
+  if (!value) return 'new';
+  if (value === 'agreed') return 'completed';
+  if (value === 'waiting') return 'contacted';
+  return value;
+};
+
+const getRatingLabelByScore = (score: number) => {
+  if (score >= 3.5) return 'Отлично';
+  if (score >= 2.5) return 'Хорошо';
+  if (score >= 1.5) return 'Средне';
+  return 'Удовлетворительно';
+};
+
+const getExternalAdsSummary = (history: ExternalAdsHistoryItem[]) => {
+  const safeHistory = Array.isArray(history) ? history : [];
+  const barterCount = safeHistory.filter((item) => item?.kind === 'barter').length;
+  const adCount = safeHistory.filter((item) => item?.kind === 'ad').length;
+  const totalIntegrations = safeHistory.length;
+  const rated = safeHistory.filter((item) => Number.isFinite(RATING_SCORE_MAP[String(item?.rating || '')]));
+  const averageScore = rated.length
+    ? rated.reduce((sum, item) => sum + Number(RATING_SCORE_MAP[String(item?.rating || '')] || 0), 0) / rated.length
+    : 0;
+  const totalCost = safeHistory.reduce((sum, item) => {
+    const value = parseFloat(String(item?.price || '0').replace(/\s+/g, '').replace(',', '.')) || 0;
+    return sum + value;
+  }, 0);
+  const ratingCounts = safeHistory.reduce((acc, item) => {
+    const rating = String(item?.rating || '').trim();
+    if (!rating) return acc;
+    acc[rating] = (acc[rating] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+  const supplierStats = Object.values(safeHistory.reduce((acc, item) => {
+    const key = String(item?.supplier_id || item?.supplier_name || 'unknown');
+    if (!acc[key]) {
+      acc[key] = { supplierId: String(item?.supplier_id || ''), supplierName: String(item?.supplier_name || 'Поставщик'), count: 0, totalCost: 0 };
+    }
+    acc[key].count += 1;
+    acc[key].totalCost += parseFloat(String(item?.price || '0').replace(/\s+/g, '').replace(',', '.')) || 0;
+    return acc;
+  }, {} as Record<string, { supplierId: string; supplierName: string; count: number; totalCost: number }>)).sort((a, b) => b.count - a.count || b.totalCost - a.totalCost);
+  const ratedSorted = [...rated].sort((a, b) => (RATING_SCORE_MAP[String(b?.rating || '')] || 0) - (RATING_SCORE_MAP[String(a?.rating || '')] || 0));
+  const bestResult = ratedSorted[0] || null;
+  const worstResult = ratedSorted[ratedSorted.length - 1] || null;
+
+  return {
+    barterCount,
+    adCount,
+    totalIntegrations,
+    averageScore,
+    averageLabel: averageScore > 0 ? getRatingLabelByScore(averageScore) : '',
+    totalCost,
+    ratingCounts,
+    supplierStats,
+    bestResult,
+    worstResult,
+  };
+};
+
+const normalizeExternalUrl = (rawUrl: string) => {
+  try {
+    const prepared = String(rawUrl || '').trim();
+    if (!prepared) return '';
+    const url = new URL(/^https?:\/\//i.test(prepared) ? prepared : `https://${prepared}`);
+    url.hash = '';
+    url.search = '';
+    const normalizedPath = url.pathname.replace(/\/+$/, '');
+    return `${url.protocol}//${url.hostname.toLowerCase()}${normalizedPath}`;
+  } catch {
+    return String(rawUrl || '').trim();
+  }
+};
+
+const parseExternalBloggerLink = (rawUrl: string) => {
+  try {
+    const prepared = String(rawUrl || '').trim();
+    if (!prepared) return null;
+    const url = new URL(/^https?:\/\//i.test(prepared) ? prepared : `https://${prepared}`);
+    const host = url.hostname.toLowerCase().replace(/^www\./, '');
+    const segments = url.pathname.split('/').map((part) => String(part || '').trim()).filter(Boolean);
+    const first = segments[0] || '';
+    const second = segments[1] || '';
+
+    let platform = '';
+    let nickname = '';
+
+    if (host.includes('instagram.com')) {
+      platform = 'Instagram';
+      nickname = first;
+      if (['reel', 'reels', 'p', 'stories', 'tv', 'explore'].includes(first.toLowerCase())) nickname = second;
+    } else if (host.includes('tiktok.com')) {
+      platform = 'TikTok';
+      nickname = first.startsWith('@') ? first.slice(1) : first;
+    } else if (host === 't.me' || host.endsWith('.t.me') || host.includes('telegram.me')) {
+      platform = 'Telegram';
+      nickname = first;
+    } else if (host.includes('youtube.com') || host === 'youtu.be') {
+      platform = 'YouTube';
+      nickname = first.startsWith('@') ? first.slice(1) : (first || second);
+    } else if (host.includes('vk.com') || host.includes('vkontakte.ru')) {
+      platform = 'VK';
+      nickname = first;
+    } else if (host.includes('ok.ru')) {
+      platform = 'OK';
+      nickname = first || second;
+    } else {
+      platform = host.replace(/^www\./, '');
+      nickname = first || host;
+    }
+
+    nickname = String(nickname || '').replace(/^@+/, '').trim();
+    if (!nickname) return null;
+
+    return {
+      platform,
+      nickname,
+      url: String(rawUrl || '').trim(),
+      normalizedUrl: normalizeExternalUrl(rawUrl),
+    };
+  } catch {
+    return null;
+  }
+};
+
 interface Supplier {
   id: string;
   name: string;
@@ -81,6 +256,7 @@ interface OfflineFboSession {
   boxes: SupplyBox[];
   items: SupplyItem[];
   updated_at: string;
+  base_box_number: number;
 }
 
 interface OfflineFboValidationSummary {
@@ -94,6 +270,40 @@ interface OfflineFboValidationSummary {
   message: string;
 }
 
+type ExternalAdsSocialLink = {
+  url: string;
+  followers: string;
+  platform?: string;
+};
+
+type ExternalAdsHistoryItem = {
+  id: string;
+  kind: 'barter' | 'ad';
+  supplier_id: string;
+  supplier_name: string;
+  product_id: string;
+  product_name: string;
+  month: string;
+  url: string;
+  normalizedUrl: string;
+  platform: string;
+  date: string;
+  price: string;
+  views: string;
+  rating: string;
+  createdAt: string;
+};
+
+type ExternalAdsBaseEntry = {
+  id: string;
+  nickname: string;
+  socialLinks: ExternalAdsSocialLink[];
+  history: ExternalAdsHistoryItem[];
+  overallRating: string;
+  comment: string;
+  status: string;
+  createdAt: string;
+};
 
 type AccessRule = 'inherit' | 'allow' | 'deny';
 type ButtonAccessConfig = {
@@ -136,20 +346,6 @@ const ASSEMBLY_BUTTONS = [
 ] as const;
 
 const normalizeRoleKey = (role?: string | null) => String(role || '').trim().toLowerCase();
-interface Order {
-  id: string;
-  product_name: string;
-  quantity: number;
-  unit_cost: number;
-  supplier_name: string;
-  country: string;
-  delivery_cost: number;
-  photo_url?: string;
-  status: string;
-  created_at: string;
-  completed_at?: string;
-  paid_amount?: number;
-}
 
 const ruToEn: Record<string, string> = {
   'й': 'q', 'ц': 'w', 'у': 'e', 'к': 'r', 'е': 't', 'н': 'y', 'г': 'u', 'ш': 'i', 'щ': 'o', 'з': 'p', 'х': '[', 'ъ': ']',
@@ -272,13 +468,18 @@ const DatamatrixCode = ({ code }: { code: string }) => {
   );
 };
 
-export default function Dashboard() {
+type DashboardProps = {
+  forcedTab?: string;
+};
+
+export default function Dashboard({ forcedTab }: DashboardProps) {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState(() => {
+    if (isDashboardTabId(forcedTab)) return forcedTab;
     try {
-      const saved = localStorage.getItem('dashboard_active_tab_v1');
-      return saved || 'tasks';
+      const saved = String(localStorage.getItem('dashboard_active_tab_v1') || '').trim();
+      return isDashboardTabId(saved) ? saved : 'tasks';
     } catch {
       return 'tasks';
     }
@@ -300,10 +501,18 @@ export default function Dashboard() {
   const warehouseFileInputRef = useRef<HTMLInputElement | null>(null);
   const [, startTransition] = useTransition();
   const switchTab = useCallback((tabId: string) => {
+    if (!isDashboardTabId(tabId)) return;
     startTransition(() => {
       setActiveTab(tabId);
+      navigate(`/${tabId}`);
     });
-  }, []);
+  }, [navigate]);
+
+  useEffect(() => {
+    if (forcedTab && forcedTab !== activeTab) {
+      setActiveTab(forcedTab);
+    }
+  }, [forcedTab, activeTab]);
 
   useEffect(() => {
     try {
@@ -384,10 +593,13 @@ export default function Dashboard() {
             formData.append('text', text);
             formData.append('parse_mode', 'Markdown');
 
-            await fetch(`https://api.telegram.org/bot8385895864:AAHv0kB7dC13k3TB12R94kKB1HC_Pygc2cU/sendMessage`, {
-              method: 'POST',
-              body: formData
-            });
+            const token = String((telegramBotTokenFile || telegramBotToken || '').trim());
+            if (token) {
+              await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+                method: 'POST',
+                body: formData
+              });
+            }
           } catch (e) {
             console.error('Auto-logout telegram notify failed', e);
           }
@@ -415,238 +627,20 @@ export default function Dashboard() {
   const [loadingSuppliers, setLoadingSuppliers] = useState(true);
 
   // Orders State
-  const [showNewOrderModal, setShowNewOrderModal] = useState(false);
-  const [newOrder, setNewOrder] = useState({
-    product_name: '',
-    quantity: '',
-    unit_cost: '',
-    supplier_name: '',
-    country: '',
-    delivery_cost: '',
-    paid_amount: '',
-    photo: null as File | null
-  });
-  const orderFileInputRef = useRef<HTMLInputElement>(null);
   const isScanningRef = useRef(false);
   const pendingScansRef = useRef<Array<{ boxId: string; productId: string; code: string }>>([]);
   const flushScansTimeoutRef = useRef<number | null>(null);
   const scanAudioCtxRef = useRef<any>(null);
   const wbSkuIndexRef = useRef<Record<string, Map<string, { card: any; size: any }>>>({});
   const supplierProductsIndexRef = useRef<Record<string, Map<string, Product>>>({});
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [loadingOrders, setLoadingOrders] = useState(false);
-  const [editingOrder, setEditingOrder] = useState<Order | null>(null);
-  const [orderSupplierFilter, setOrderSupplierFilter] = useState('');
-  const ordersMode: 'local' = 'local';
-  const [wbOrders, setWbOrders] = useState<any[]>([]);
-  const [wbOrdersLoading, setWbOrdersLoading] = useState(false);
-
-  const fetchWbOrders = async () => {
-    if (!orderSupplierFilter) {
-        setWbOrders([]);
-        return;
-    }
-
-    const supplier = suppliers.find(s => s.name === orderSupplierFilter);
-    if (!supplier || !supplier.wb_api_token) {
-        showToast('У выбранного поставщика нет токена API', 'error');
-        return;
-    }
-
-    setWbOrdersLoading(true);
-    try {
-        const response = await fetch('https://marketplace-api.wildberries.ru/api/v3/orders?limit=1000&next=0&dateFrom=0', {
-            headers: {
-                'Authorization': supplier.wb_api_token.trim(),
-                'Content-Type': 'application/json'
-            }
-        });
-
-        if (!response.ok) throw new Error(`API Error: ${response.status}`);
-
-        const data = await response.json();
-        setWbOrders(data.orders || []);
-    } catch (e: any) {
-        console.error('Error fetching WB orders:', e);
-        showToast('Ошибка загрузки заказов WB: ' + e.message, 'error');
-    } finally {
-        setWbOrdersLoading(false);
-    }
-  };
-
-
-  const uploadOrderPhoto = async (file: File) => {
-    const fileExt = file.name.split('.').pop();
-    const fileName = `${Math.random()}.${fileExt}`;
-    const filePath = `${fileName}`;
-
-    const { error: uploadError } = await supabase.storage
-      .from('orders')
-      .upload(filePath, file);
-
-    if (uploadError) {
-      console.error('Upload error details:', uploadError);
-      throw uploadError;
-    }
-
-    const { data } = supabase.storage.from('orders').getPublicUrl(filePath);
-    return data.publicUrl;
-  };
-
-  const fetchOrders = async () => {
-    setLoadingOrders(true);
-    const { data, error } = await supabase
-      .from('orders')
-      .select('*')
-      .order('created_at', { ascending: true });
-
-    if (error) {
-      console.error('Error fetching orders:', error);
-      showToast('Ошибка загрузки заказов', 'error');
-    } else {
-      setOrders(data || []);
-    }
-    setLoadingOrders(false);
-  };
-
-  useEffect(() => {
-    if (activeTab === 'orders') fetchOrders();
-  }, [activeTab]);
+  const offlineFboSessionWriteTimeoutRef = useRef<number | null>(null);
+  const offlineFboStatsRefreshTimeoutRef = useRef<number | null>(null);
+  const offlineFboIndexesWarmupRef = useRef<Record<string, Promise<void>>>({});
 
   useEffect(() => {
     if (!activeTab) return;
     logUiAction('Навигация', 'Переход в раздел', String(activeTab));
   }, [activeTab]);
-
-  const handleCreateOrder = async () => {
-    if (!newOrder.product_name) {
-      showToast('Введите название товара', 'error');
-      return;
-    }
-
-    let photoUrl = '';
-    if (newOrder.photo) {
-        try {
-            photoUrl = await uploadOrderPhoto(newOrder.photo);
-        } catch (e) {
-            console.error('Error uploading photo:', e);
-            showToast('Ошибка загрузки фото', 'error');
-            return;
-        }
-    }
-
-    const { error } = await supabase.from('orders').insert([{
-      product_name: newOrder.product_name,
-      quantity: Number(newOrder.quantity) || 0,
-      unit_cost: Number(newOrder.unit_cost) || 0,
-      supplier_name: newOrder.supplier_name,
-      country: newOrder.country,
-      delivery_cost: Number(newOrder.delivery_cost) || 0,
-      paid_amount: Number(newOrder.paid_amount) || 0,
-      photo_url: photoUrl,
-      status: 'new'
-    }]);
-
-    if (error) {
-      console.error('Error creating order:', error);
-      showToast('Ошибка создания заказа', 'error');
-    } else {
-      await logAction('Создание заказа', `Создан заказ: ${newOrder.product_name}`);
-      showToast('Заказ создан', 'success');
-      setShowNewOrderModal(false);
-      fetchOrders();
-      setNewOrder({
-        product_name: '',
-        quantity: '',
-        unit_cost: '',
-        supplier_name: '',
-        country: '',
-        delivery_cost: '',
-        paid_amount: '',
-        photo: null
-      });
-    }
-  };
-
-  const handleUpdateOrder = async () => {
-    if (!editingOrder) return;
-
-    let photoUrl = editingOrder.photo_url;
-    if (newOrder.photo) {
-        try {
-            photoUrl = await uploadOrderPhoto(newOrder.photo);
-        } catch (e) {
-            console.error('Error uploading photo:', e);
-            showToast('Ошибка загрузки фото', 'error');
-            return;
-        }
-    }
-
-    const { error } = await supabase.from('orders').update({
-      product_name: newOrder.product_name,
-      quantity: Number(newOrder.quantity) || 0,
-      unit_cost: Number(newOrder.unit_cost) || 0,
-      supplier_name: newOrder.supplier_name,
-      country: newOrder.country,
-      delivery_cost: Number(newOrder.delivery_cost) || 0,
-      paid_amount: Number(newOrder.paid_amount) || 0,
-      photo_url: photoUrl
-    }).eq('id', editingOrder.id);
-
-    if (error) {
-      console.error('Error updating order:', error);
-      showToast('Ошибка обновления заказа', 'error');
-    } else {
-      await logAction('Обновление заказа', `Обновлен заказ: ${newOrder.product_name}`);
-      showToast('Заказ обновлен', 'success');
-      setShowNewOrderModal(false);
-      setEditingOrder(null);
-      fetchOrders();
-      setNewOrder({
-        product_name: '',
-        quantity: '',
-        unit_cost: '',
-        supplier_name: '',
-        country: '',
-        delivery_cost: '',
-        paid_amount: '',
-        photo: null
-      });
-    }
-  };
-
-  const handleDeleteOrder = async (order: Order) => {
-    if (!window.confirm('Вы уверены, что хотите удалить этот заказ?')) return;
-
-    const { error } = await supabase.from('orders').delete().eq('id', order.id);
-
-    if (error) {
-      showToast('Ошибка удаления заказа', 'error');
-    } else {
-      await logAction('Удаление заказа', `Удален заказ: ${order.product_name}`);
-      showToast('Заказ удален', 'success');
-      fetchOrders();
-    }
-  };
-
-  const handleToggleOrderStatus = async (order: Order, checked: boolean) => {
-    const newStatus = checked ? 'completed' : 'in_progress';
-    const completedAt = checked ? new Date().toISOString() : null;
-
-    // Optimistic update
-    setOrders(orders.map(o => o.id === order.id ? { ...o, status: newStatus, completed_at: completedAt || undefined } : o));
-
-    const updates: any = { status: newStatus, completed_at: completedAt };
-
-    const { error } = await supabase.from('orders').update(updates).eq('id', order.id);
-
-    if (error) {
-        showToast('Ошибка обновления статуса', 'error');
-        fetchOrders();
-    } else {
-        await logAction('Изменение статуса заказа', `Статус заказа ${order.product_name} изменен на ${newStatus === 'completed' ? 'Выполнен' : 'В работе'}`);
-    }
-  };
 
   const [supplierForm, setSupplierForm] = useState({ name: '', telegram_chat_id: '', wb_api_token: '' });
   const [submittingSupplier, setSubmittingSupplier] = useState(false);
@@ -684,6 +678,7 @@ export default function Dashboard() {
   const [loadingHonestSign, setLoadingHonestSign] = useState(false);
   const [honestSignTab, setHonestSignTab] = useState<'codes' | 'print' | 'base' | 'printed' | 'scanned'>('codes');
   const [honestSignBaseCategory, setHonestSignBaseCategory] = useState('');
+  const [honestSignBaseGender, setHonestSignBaseGender] = useState<'male' | 'female' | ''>('');
   const [honestSignUploadHistory, setHonestSignUploadHistory] = useState<any[]>([]);
   const [honestSignPrintedHistory, setHonestSignPrintedHistory] = useState<any[]>([]);
   const [honestSignScannedHistory, setHonestSignScannedHistory] = useState<any[]>([]);
@@ -704,6 +699,20 @@ export default function Dashboard() {
     }
 
     return raw;
+  };
+
+  const normalizeHSGender = (value: string) => {
+    const raw = String(value || '').trim().toLowerCase();
+    if (raw === 'male' || raw === 'муж' || raw === 'мужской') return 'male';
+    if (raw === 'female' || raw === 'жен' || raw === 'женский') return 'female';
+    return '';
+  };
+
+  const getHSGenderLabel = (value: string) => {
+    const normalized = normalizeHSGender(value);
+    if (normalized === 'male') return 'Муж';
+    if (normalized === 'female') return 'Жен';
+    return '-';
   };
 
   const fetchSupplierCategories = async (supplierId: string) => {
@@ -839,7 +848,7 @@ export default function Dashboard() {
 
     const { data: codes } = await supabase
         .from('unified_honest_sign_codes')
-        .select('file_name, created_at, category')
+        .select('file_name, created_at, category, gender')
         .eq('supplier_id', honestSignSupplierId)
         .neq('file_name', 'Напечатанные QR')
         .neq('file_name', 'Отсканировано')
@@ -858,7 +867,8 @@ export default function Dashboard() {
             history.push({
                 file_name: code.file_name,
                 created_at: code.created_at,
-                category: normalizeHSCategory(code.category)
+                category: normalizeHSCategory(code.category),
+                gender: normalizeHSGender(code.gender)
             });
         }
     }
@@ -871,7 +881,7 @@ export default function Dashboard() {
 
     const { data: codes } = await supabase
         .from('unified_honest_sign_codes')
-        .select('file_name, created_at, category')
+        .select('file_name, created_at, category, gender')
         .eq('supplier_id', honestSignSupplierId)
         .eq('file_name', 'Напечатанные QR')
         .order('created_at', { ascending: false })
@@ -889,7 +899,8 @@ export default function Dashboard() {
             history.push({
                 file_name: code.file_name,
                 created_at: code.created_at,
-                category: normalizeHSCategory(code.category)
+                category: normalizeHSCategory(code.category),
+                gender: normalizeHSGender(code.gender)
             });
         }
     }
@@ -900,52 +911,70 @@ export default function Dashboard() {
   const fetchHonestSignScannedHistory = async () => {
     if (!honestSignSupplierId) return;
 
-    const { data: codes } = await supabase
+    const pageSize = 1000;
+    const allCodes: any[] = [];
+    let from = 0;
+
+    while (true) {
+      const { data, error } = await supabase
         .from('unified_honest_sign_codes')
-        .select('file_name, created_at, category')
+        .select('file_name, created_at, category, gender')
         .eq('supplier_id', honestSignSupplierId)
         .eq('file_name', 'Отсканировано')
         .order('created_at', { ascending: false })
-        .limit(200);
+        .range(from, from + pageSize - 1);
 
-    if (!codes) return;
+      if (error) {
+        console.error('Error loading scanned HS history:', error);
+        setHonestSignScannedHistory([]);
+        return;
+      }
 
-    const history: any[] = [];
-    const seen = new Set();
-
-    for (const code of codes) {
-        const key = `${code.file_name}-${new Date(code.created_at).setSeconds(0,0)}`;
-        if (!seen.has(key)) {
-            seen.add(key);
-            history.push({
-                file_name: code.file_name,
-                created_at: code.created_at,
-                category: normalizeHSCategory(code.category)
-            });
-        }
+      const chunk = data || [];
+      allCodes.push(...chunk);
+      if (chunk.length < pageSize) break;
+      from += pageSize;
     }
 
-    setHonestSignScannedHistory(history);
+    setHonestSignScannedHistory(
+      allCodes.map((code) => ({
+        file_name: code.file_name,
+        created_at: code.created_at,
+        category: normalizeHSCategory(code.category),
+        gender: normalizeHSGender(code.gender)
+      }))
+    );
   };
 
   const fetchHonestSignCategoryStats = async () => {
     if (!honestSignSupplierId) return;
 
-    const { data: rows, error } = await supabase
-      .from('unified_honest_sign_codes')
-      .select('category,file_name,status')
-      .eq('supplier_id', honestSignSupplierId)
-      .limit(50000);
+    const pageSize = 1000;
+    const allRows: any[] = [];
+    let from = 0;
 
-    if (error || !rows) {
-      console.error('Error loading HS category stats:', error);
-      setHonestSignCategoryStats([]);
-      return;
+    while (true) {
+      const { data, error } = await supabase
+        .from('unified_honest_sign_codes')
+        .select('category,file_name,status')
+        .eq('supplier_id', honestSignSupplierId)
+        .range(from, from + pageSize - 1);
+
+      if (error) {
+        console.error('Error loading HS category stats:', error);
+        setHonestSignCategoryStats([]);
+        return;
+      }
+
+      const chunk = data || [];
+      allRows.push(...chunk);
+      if (chunk.length < pageSize) break;
+      from += pageSize;
     }
 
     const map = new Map<string, { total: number; inBase: number; printed: number; scanned: number }>();
 
-    for (const row of rows as any[]) {
+    for (const row of allRows as any[]) {
       const category = normalizeHSCategory(String(row?.category || 'Без категории'));
       if (!map.has(category)) map.set(category, { total: 0, inBase: 0, printed: 0, scanned: 0 });
 
@@ -1250,6 +1279,7 @@ export default function Dashboard() {
   const [cwWorkRates, setCwWorkRates] = useState<any[]>([]);
   const [cwWorkRateSnapshots, setCwWorkRateSnapshots] = useState<Record<string, number>>({});
   const [cwWorkRateHistory, setCwWorkRateHistory] = useState<Record<string, Array<{ changed_at: string; price: number; old_price?: number | null; new_price?: number | null; name?: string }>>>({});
+  const [cwWorkRateEmployeePrices, setCwWorkRateEmployeePrices] = useState<Record<string, { useSharedPrice?: boolean; employeePrices?: Record<string, string | number> }>>({});
   const [cwPackagingRates, setCwPackagingRates] = useState<any[]>([]);
   const [cwForm, setCwForm] = useState({ quantity: '', work_rate_id: '', packaging: '', packaging_used: 'no', supplier_id: '' });
   const [cwFormItems, setCwFormItems] = useState<Array<{ supplier_id: string; work_rate_id: string; quantity: string; time_hours: string; time_minutes: string; packaging_used: '' | 'yes' | 'no'; packaging: string }>>([{ supplier_id: '', work_rate_id: '', quantity: '', time_hours: '', time_minutes: '', packaging_used: '', packaging: '' }]);
@@ -1288,11 +1318,92 @@ export default function Dashboard() {
     return out;
   };
   const getCwTimeRatePrice = () => Number(getCwTimeRate()?.price ?? CW_TIME_RATE_PRICE);
+  const getCwRateEmployeeConfig = (rateId: string) => {
+    const raw = cwWorkRateEmployeePrices[String(rateId)] as any;
+    const rate = cwWorkRates.find((r: any) => String(r.id) === String(rateId));
+    return {
+      useSharedPrice: rate?.use_shared_price !== false,
+      employeePrices: raw?.employeePrices && typeof raw.employeePrices === 'object' ? raw.employeePrices : {},
+    };
+  };
+  const loadCwWorkRateEmployeePrices = async (ratesInput?: any[]) => {
+    const rates = Array.isArray(ratesInput) ? ratesInput : cwWorkRates;
+    const { data, error } = await supabase.from('employee_work_rates').select('work_rate_id, employee_id, price');
+    if (error) throw error;
+
+    const next: Record<string, { useSharedPrice?: boolean; employeePrices?: Record<string, string | number> }> = {};
+    (rates || []).forEach((rate: any) => {
+      next[String(rate.id)] = {
+        useSharedPrice: rate?.use_shared_price !== false,
+        employeePrices: {},
+      };
+    });
+
+    (data || []).forEach((row: any) => {
+      const rateKey = String(row?.work_rate_id || '');
+      const employeeKey = String(row?.employee_id || '');
+      if (!rateKey || !employeeKey) return;
+      if (!next[rateKey]) next[rateKey] = { useSharedPrice: true, employeePrices: {} };
+      next[rateKey].employeePrices = {
+        ...(next[rateKey].employeePrices || {}),
+        [employeeKey]: String(row?.price ?? ''),
+      };
+    });
+
+    setCwWorkRateEmployeePrices(next);
+  };
+  const saveCwRateEmployeeConfig = async (rateId: string, config: { useSharedPrice?: boolean; employeePrices?: Record<string, string | number> }) => {
+    const rateKey = String(rateId);
+    const normalizedConfig = {
+      useSharedPrice: config.useSharedPrice !== false,
+      employeePrices: { ...(config.employeePrices || {}) },
+    };
+    const nextState = {
+      ...(cwWorkRateEmployeePrices || {}),
+      [rateKey]: normalizedConfig,
+    };
+    setCwWorkRateEmployeePrices(nextState);
+
+    const { error: updateRateError } = await supabase.from('work_rates').update({ use_shared_price: normalizedConfig.useSharedPrice }).eq('id', rateId);
+    if (updateRateError) throw updateRateError;
+
+    const { error: deleteError } = await supabase.from('employee_work_rates').delete().eq('work_rate_id', rateId);
+    if (deleteError) throw deleteError;
+
+    const rows = Object.entries(normalizedConfig.employeePrices || {})
+      .map(([employeeId, price]) => ({
+        work_rate_id: rateId,
+        employee_id: String(employeeId || '').trim(),
+        price: String(price ?? '').trim(),
+      }))
+      .filter((row) => row.employee_id && row.price !== '' && Number.isFinite(Number(row.price)))
+      .map((row) => ({
+        work_rate_id: row.work_rate_id,
+        employee_id: row.employee_id,
+        price: Number(row.price),
+      }));
+
+    if (rows.length) {
+      const { error: insertError } = await supabase.from('employee_work_rates').upsert(rows, { onConflict: 'work_rate_id,employee_id' });
+      if (insertError) throw insertError;
+    }
+
+    setCwWorkRates((prev) => prev.map((rate: any) => String(rate.id) === rateKey ? { ...rate, use_shared_price: normalizedConfig.useSharedPrice } : rate));
+  };
+  const getEffectiveWorkRatePrice = (rateId: string, employeeId?: string | null) => {
+    const rate = cwWorkRates.find((r: any) => String(r.id) === String(rateId));
+    const basePrice = Number(rate?.price || 0);
+    const config = getCwRateEmployeeConfig(String(rateId));
+    if (config.useSharedPrice) return basePrice;
+    const employeePriceRaw = config.employeePrices[String(employeeId || '')];
+    if (employeePriceRaw === '' || employeePriceRaw === null || employeePriceRaw === undefined) return basePrice;
+    const employeePrice = Number(employeePriceRaw);
+    return Number.isFinite(employeePrice) ? employeePrice : basePrice;
+  };
   const getWorkLogSnapshotPrice = (log: any) => {
     const snapshot = Number(cwWorkRateSnapshots[String(log?.id || '')] || 0);
     if (snapshot > 0) return snapshot;
-    const rate = cwWorkRates.find((r: any) => String(r.id) === String(log?.work_rate_id));
-    return Number(rate?.price || 0);
+    return getEffectiveWorkRatePrice(String(log?.work_rate_id || ''), String(log?.employee_id || ''));
   };
   const loadCwWorkRateMeta = async () => {
     try {
@@ -1819,11 +1930,18 @@ export default function Dashboard() {
   const [tempDebtLogs, setTempDebtLogs] = useState<any[]>([]);
   const [debtPaymentRows, setDebtPaymentRows] = useState<Array<{ id: string; requisiteId: string; amount: string }>>([]);
   const [cwWarehouseMoneyForm, setCwWarehouseMoneyForm] = useState({ amount: '', comment: '' });
+  const [cwWarehouseMoneyEdit, setCwWarehouseMoneyEdit] = useState<null | { id: string; amount: string; comment: string; mode: 'add' | 'writeoff' }>(null);
+  const [cwWarehouseMoneyFilter, setCwWarehouseMoneyFilter] = useState<'all' | 'add' | 'writeoff'>('all');
   const [cwSupplierDebtCollapsed, setCwSupplierDebtCollapsed] = useState(false);
   const [cwWarehouseMoneyCollapsed, setCwWarehouseMoneyCollapsed] = useState(false);
   const [cwBoxesFormsCollapsed, setCwBoxesFormsCollapsed] = useState(false);
   const [cwWarehouseMoneyHistory, setCwWarehouseMoneyHistory] = useState<Array<{ id: string; amount: number; comment: string; created_at: string; type?: 'manual' | 'salary'; employee_id?: string; employee_name?: string; period_start?: string; period_end?: string }>>([]);
   const cwWarehouseMoneyBalance = useMemo(() => cwWarehouseMoneyHistory.reduce((sum, row) => sum + Number(row.amount || 0), 0), [cwWarehouseMoneyHistory]);
+  const filteredCwWarehouseMoneyHistory = useMemo(() => {
+    if (cwWarehouseMoneyFilter === 'add') return cwWarehouseMoneyHistory.filter((row) => Number(row.amount || 0) > 0);
+    if (cwWarehouseMoneyFilter === 'writeoff') return cwWarehouseMoneyHistory.filter((row) => Number(row.amount || 0) < 0);
+    return cwWarehouseMoneyHistory;
+  }, [cwWarehouseMoneyHistory, cwWarehouseMoneyFilter]);
   const [cwSalaryIssueForm, setCwSalaryIssueForm] = useState({ employee_id: '', period_key: '' });
   const [cwSalaryIssuePreview, setCwSalaryIssuePreview] = useState<{ amount: number; logsCount: number; periodLabel: string; periodStart: string; periodEnd: string } | null>(null);
   const [cwSalaryIssueLoading, setCwSalaryIssueLoading] = useState(false);
@@ -2072,7 +2190,11 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (activeTab === 'completed') {
-      supabase.from('work_rates').select('*').is('deleted_at', null).then(({ data }) => setCwWorkRates(data || []));
+      (async () => {
+        const { data: rates } = await supabase.from('work_rates').select('*').is('deleted_at', null);
+        setCwWorkRates(rates || []);
+        await loadCwWorkRateEmployeePrices(rates || []);
+      })();
       supabase.from('packaging_rates').select('*').is('deleted_at', null).then(({ data }) => setCwPackagingRates(data || []));
       supabase.from('suppliers').select('*').is('deleted_at', null).then(({ data }) => setSuppliers(data || []));
       loadCwWorkRateMeta();
@@ -2142,6 +2264,140 @@ export default function Dashboard() {
     }
 
     setCwWarehouseMoneyHistory(Array.isArray(data) ? data : []);
+  };
+
+  const handleStartEditWarehouseMoney = (row: { id: string; amount: number; comment?: string; type?: 'manual' | 'salary' }) => {
+    if (row.type && row.type !== 'manual') {
+      showToast('Редактирование доступно только для ручных операций', 'error');
+      return;
+    }
+
+    setCwWarehouseMoneyEdit({
+      id: String(row.id),
+      amount: String(Math.abs(Number(row.amount || 0))),
+      comment: String(row.comment || ''),
+      mode: Number(row.amount || 0) >= 0 ? 'add' : 'writeoff',
+    });
+  };
+
+  const handleCancelEditWarehouseMoney = () => {
+    setCwWarehouseMoneyEdit(null);
+  };
+
+  const removeWarehouseMoneyRecord = async (rowId: string) => {
+    let deleteError: any = null;
+
+    const hardDelete = await supabase
+      .from('warehouse_money_log')
+      .delete()
+      .eq('id', rowId);
+
+    deleteError = hardDelete.error;
+
+    if (deleteError) {
+      const softDelete = await supabase
+        .from('warehouse_money_log')
+        .update({ deleted_at: new Date().toISOString() })
+        .eq('id', rowId);
+      deleteError = softDelete.error;
+    }
+
+    if (deleteError) {
+      return { ok: false as const, error: deleteError };
+    }
+
+    setCwWarehouseMoneyHistory((prev) => prev.filter((item) => String(item.id) !== String(rowId)));
+    if (cwWarehouseMoneyEdit?.id === String(rowId)) {
+      setCwWarehouseMoneyEdit(null);
+    }
+
+    return { ok: true as const };
+  };
+
+  const handleSaveWarehouseMoneyEdit = async () => {
+    if (!cwWarehouseMoneyEdit) return;
+
+    const currentRow = cwWarehouseMoneyHistory.find((row) => String(row.id) === String(cwWarehouseMoneyEdit.id));
+    if (!currentRow) {
+      showToast('Запись не найдена', 'error');
+      setCwWarehouseMoneyEdit(null);
+      return;
+    }
+
+    const amount = Math.abs(Number(cwWarehouseMoneyEdit.amount || 0));
+    if (!Number.isFinite(amount) || amount === 0) {
+      showToast('Введите сумму', 'error');
+      return;
+    }
+
+    const nextComment = cwWarehouseMoneyEdit.comment.trim();
+    const nextAmount = cwWarehouseMoneyEdit.mode === 'add' ? amount : -amount;
+    const currentMode = Number(currentRow.amount || 0) >= 0 ? 'add' : 'writeoff';
+    const modeChanged = currentMode !== cwWarehouseMoneyEdit.mode;
+
+    if (modeChanged) {
+      const { error: insertError } = await supabase.from('warehouse_money_log').insert([{
+        amount: nextAmount,
+        comment: nextComment,
+        type: 'manual',
+      }]);
+
+      if (insertError) {
+        showToast('Ошибка сохранения операции: ' + (insertError.message || 'неизвестно'), 'error');
+        return;
+      }
+
+      const removeResult = await removeWarehouseMoneyRecord(cwWarehouseMoneyEdit.id);
+      if (!removeResult.ok) {
+        showToast('Новая запись создана, но старая не удалилась: ' + (removeResult.error?.message || 'неизвестно'), 'error');
+        return;
+      }
+
+      setCwWarehouseMoneyEdit(null);
+      await fetchCwWarehouseMoneyHistory();
+      showToast('Операция обновлена', 'success');
+      return;
+    }
+
+    const { error: updateError } = await supabase
+      .from('warehouse_money_log')
+      .update({ amount: nextAmount, comment: nextComment })
+      .eq('id', cwWarehouseMoneyEdit.id);
+
+    if (updateError) {
+      showToast('Ошибка редактирования операции: ' + (updateError.message || 'неизвестно'), 'error');
+      return;
+    }
+
+    setCwWarehouseMoneyEdit(null);
+    await fetchCwWarehouseMoneyHistory();
+    showToast('Операция обновлена', 'success');
+  };
+
+  const handleDeleteWarehouseMoney = (row: { id: string; type?: 'manual' | 'salary' }) => {
+    if (row.type && row.type !== 'manual') {
+      showToast('Удаление доступно только для ручных операций', 'error');
+      return;
+    }
+
+    openConfirmModal(
+      'Удалить операцию?',
+      'Запись будет удалена из истории денег на складе. Продолжить?',
+      async () => {
+        try {
+          const removeResult = await removeWarehouseMoneyRecord(row.id);
+          if (!removeResult.ok) {
+            showToast('Ошибка удаления операции: ' + (removeResult.error?.message || 'неизвестно'), 'error');
+            return;
+          }
+
+          showToast('Операция удалена', 'success');
+          await fetchCwWarehouseMoneyHistory();
+        } finally {
+          setConfirmModal(prev => ({ ...prev, isOpen: false }));
+        }
+      }
+    );
   };
 
   useEffect(() => {
@@ -2241,7 +2497,7 @@ export default function Dashboard() {
     try {
       const { data, error } = await supabase
         .from('work_logs')
-        .select('id, quantity, work_rate_id, work_rates(price)')
+        .select('id, employee_id, quantity, work_rate_id, work_rates(price)')
         .eq('employee_id', employeeId)
         .gte('date', period.start)
         .lte('date', period.end)
@@ -2251,7 +2507,7 @@ export default function Dashboard() {
 
       const amount = (data || []).reduce((sum: number, row: any) => {
         const qty = Number(row?.quantity || 0);
-        const price = Number(cwWorkRateSnapshots[String(row?.id || '')] || (row as any)?.work_rates?.price || 0);
+        const price = Number(getWorkLogSnapshotPrice(row) || 0);
         return sum + qty * price;
       }, 0);
 
@@ -2273,10 +2529,44 @@ export default function Dashboard() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   // Database Tab State
-  const [databaseLogs, setDatabaseLogs] = useState<{version: string, date: string, details: string}[]>([
-    { version: '1.0.2', date: new Date().toLocaleDateString(), details: 'Added activity logs' },
-    { version: '1.0.1', date: new Date(Date.now() - 86400000).toLocaleDateString(), details: 'Initial release' }
-  ]);
+  const DATABASE_BACKUP_TABLES = [
+    'app_settings',
+    'activity_logs',
+    'analytics_shared_reports',
+    'analytics_upload_history',
+    'analytics_upload_reports_raw',
+    'analytics_wb_api_reports',
+    'box_inventory_log',
+    'boxes',
+    'employee_requisites',
+    'employees',
+    'orders',
+    'packaging_purchase_log',
+    'packaging_rates',
+    'palleting_log',
+    'print_files',
+    'products',
+    'profiles',
+    'receptions',
+    'supplier_warehouse_costs',
+    'suppliers',
+    'supplies',
+    'supply_items',
+    'tasks',
+    'temporary_workers_logs',
+    'unified_honest_sign_codes',
+    'warehouse_money_log',
+    'wb_products_cache',
+    'work_logs',
+    'work_rates',
+  ] as const;
+  const [databaseLogs, setDatabaseLogs] = useState<Array<{ version: string; date: string; details: string; created_at?: string; status?: string; source?: string; file_name?: string }>>([]);
+  const [databaseLogsLoading, setDatabaseLogsLoading] = useState(false);
+  const [databaseBackupLoading, setDatabaseBackupLoading] = useState(false);
+  const [databaseDownloadLoading, setDatabaseDownloadLoading] = useState(false);
+  const [databaseBackupScheduleLabel, setDatabaseBackupScheduleLabel] = useState('Ежедневно в 09:00 (Europe/Moscow)');
+  const databaseRestoreInputRef = useRef<HTMLInputElement>(null);
+  const databaseHistoryRef = useRef<HTMLDivElement>(null);
 
   // Telegram State Updates
   const [selectedBotForManual, setSelectedBotForManual] = useState('main'); // main, reception, file
@@ -2424,31 +2714,72 @@ export default function Dashboard() {
 
     openConfirmModal(
         'Восстановление базы',
-        'ВНИМАНИЕ! Это действие перезапишет текущие данные. Вы уверены, что хотите продолжить?',
+        'ВНИМАНИЕ! Это действие загрузит данные из резервной копии и обновит текущие записи. Продолжить?',
         async () => {
             try {
                 const text = await file.text();
-                const data = JSON.parse(text);
+                const payload = JSON.parse(text);
+                const backupData = payload?.data && typeof payload.data === 'object' ? payload.data : payload;
 
-                // Restore order matters for foreign keys
-                const tables = ['suppliers', 'products', 'supplies', 'boxes', 'supply_items', 'employees', 'receptions', 'work_rates', 'work_logs'];
+                const restoreOrder = [
+                  'app_settings',
+                  'profiles',
+                  'suppliers',
+                  'employees',
+                  'employee_requisites',
+                  'products',
+                  'wb_products_cache',
+                  'work_rates',
+                  'packaging_rates',
+                  'supplier_warehouse_costs',
+                  'supplies',
+                  'boxes',
+                  'supply_items',
+                  'receptions',
+                  'orders',
+                  'tasks',
+                  'activity_logs',
+                  'analytics_upload_history',
+                  'analytics_upload_reports_raw',
+                  'analytics_shared_reports',
+                  'analytics_wb_api_reports',
+                  'box_inventory_log',
+                  'packaging_purchase_log',
+                  'palleting_log',
+                  'print_files',
+                  'temporary_workers_logs',
+                  'unified_honest_sign_codes',
+                  'warehouse_money_log',
+                  'work_logs',
+                ];
 
-                for (const table of tables) {
-                    if (data[table] && Array.isArray(data[table]) && data[table].length > 0) {
-                        // Chunk upserts to avoid payload limits
-                        const chunkSize = 100;
-                        for (let i = 0; i < data[table].length; i += chunkSize) {
-                            const chunk = data[table].slice(i, i + chunkSize);
-                            const { error } = await supabase.from(table).upsert(chunk);
-                            if (error) {
-                                console.error(`Error restoring ${table}:`, error);
-                                throw error;
-                            }
-                        }
+                const chunkSizeByTable: Record<string, number> = {
+                  activity_logs: 200,
+                  analytics_upload_reports_raw: 3,
+                  app_settings: 50,
+                  wb_products_cache: 200,
+                  work_logs: 200,
+                };
+
+                let restoredTables = 0;
+                for (const table of restoreOrder) {
+                  const rows = backupData?.[table];
+                  if (!Array.isArray(rows) || rows.length === 0) continue;
+
+                  const chunkSize = chunkSizeByTable[table] || 100;
+                  for (let i = 0; i < rows.length; i += chunkSize) {
+                    const chunk = rows.slice(i, i + chunkSize);
+                    const { error } = await runDatabaseBackupQuery(() => supabase.from(table).upsert(chunk), 4);
+                    if (error) {
+                      console.error(`Error restoring ${table}:`, error);
+                      throw error;
                     }
+                  }
+                  restoredTables += 1;
                 }
 
-                showToast('База данных успешно восстановлена', 'success');
+                showToast(`База данных успешно восстановлена. Таблиц обновлено: ${restoredTables}`, 'success');
+                await loadDatabaseBackupMeta();
                 setTimeout(() => window.location.reload(), 1500);
             } catch (err: any) {
                 console.error('Restore failed', err);
@@ -2457,32 +2788,13 @@ export default function Dashboard() {
             setConfirmModal(prev => ({ ...prev, isOpen: false }));
         }
     );
-    // Reset input
     e.target.value = '';
   };
 
   useEffect(() => {
-    const fetchDatabaseLogs = async () => {
-      const { data } = await supabase
-        .from('app_settings')
-        .select('value')
-        .eq('key', 'database_backup_logs')
-        .maybeSingle();
-
-      if (data?.value) {
-        try {
-          const logs = typeof data.value === 'string' ? JSON.parse(data.value) : data.value;
-          if (Array.isArray(logs)) {
-            setDatabaseLogs(logs);
-          }
-        } catch (e) {
-          console.error('Error parsing database logs:', e);
-        }
-      }
-    };
-
-    fetchDatabaseLogs();
-  }, []);
+    if (activeTab !== 'database') return;
+    loadDatabaseBackupMeta();
+  }, [activeTab]);
 
   useEffect(() => {
     // Автобэкап из браузера отключён, чтобы исключить дубли при нескольких вкладках/устройствах.
@@ -2490,60 +2802,144 @@ export default function Dashboard() {
     return;
   }, [backupBotToken, backupChatId]);
 
-  const fetchHonestSignCodes = async (supplierId: string) => {
-    setLoadingHonestSign(true);
-    const { data: supplies } = await supabase.from('supplies').select('*').eq('supplier_id', supplierId).order('created_at', { ascending: false });
+  const fetchSupplyItemsWithHonestSign = async (boxIds: string[], selectClause = 'box_id') => {
+    if (!boxIds.length) return [] as any[];
 
-    if (!supplies || supplies.length === 0) {
-      setHonestSignCodes([]);
-      setLoadingHonestSign(false);
-      return;
+    const pageSize = 1000;
+    const chunkSize = 200;
+    const allItems: any[] = [];
+
+    for (let i = 0; i < boxIds.length; i += chunkSize) {
+      const boxIdsChunk = boxIds.slice(i, i + chunkSize);
+      let from = 0;
+
+      while (true) {
+        const { data, error } = await supabase
+          .from('supply_items')
+          .select(selectClause)
+          .in('box_id', boxIdsChunk)
+          .is('deleted_at', null)
+          .not('honest_sign_code', 'is', null)
+          .neq('honest_sign_code', '')
+          .range(from, from + pageSize - 1);
+
+        if (error) throw error;
+
+        const chunk = data || [];
+        allItems.push(...chunk);
+        if (chunk.length < pageSize) break;
+        from += pageSize;
+      }
     }
 
-    // Optimized: Fetch all boxes and items in bulk instead of N+1
-    const supplyIds = supplies.map(s => s.id);
+    return allItems;
+  };
 
-    // 1. Fetch all boxes for these supplies
-    const { data: allBoxes } = await supabase
+  const fetchHonestSignCodes = async (supplierId: string) => {
+    setLoadingHonestSign(true);
+
+    try {
+      const { data: supplies, error: suppliesError } = await supabase
+        .from('supplies')
+        .select('*')
+        .eq('supplier_id', supplierId)
+        .is('deleted_at', null)
+        .order('created_at', { ascending: false });
+
+      if (suppliesError) throw suppliesError;
+
+      if (!supplies || supplies.length === 0) {
+        setHonestSignCodes([]);
+        return;
+      }
+
+      const supplyIds = supplies.map((s) => s.id);
+      const { data: allBoxes, error: boxesError } = await supabase
         .from('boxes')
         .select('id, supply_id')
-        .in('supply_id', supplyIds);
+        .in('supply_id', supplyIds)
+        .is('deleted_at', null);
 
-    const boxesBySupply = (allBoxes || []).reduce((acc: any, box: any) => {
+      if (boxesError) throw boxesError;
+
+      const boxesBySupply = (allBoxes || []).reduce((acc: any, box: any) => {
         if (!acc[box.supply_id]) acc[box.supply_id] = [];
         acc[box.supply_id].push(box.id);
         return acc;
-    }, {});
+      }, {});
 
-    const allBoxIds = (allBoxes || []).map((b: any) => b.id);
+      const allBoxIds = (allBoxes || []).map((b: any) => b.id);
+      const countItems = await fetchSupplyItemsWithHonestSign(allBoxIds, 'box_id');
 
-    // 2. Fetch counts of honest sign codes for these boxes
-    let boxCounts: any = {};
-    if (allBoxIds.length > 0) {
-        // We need to fetch items that HAVE honest_sign_code
-        // Since we can't easily group by box_id with a filter in a single count query without raw SQL,
-        // we'll fetch the box_ids of the items and count them in JS.
-        // To avoid fetching millions of rows, we select only box_id.
-        const { data: items } = await supabase
-            .from('supply_items')
-            .select('box_id')
-            .in('box_id', allBoxIds)
-            .not('honest_sign_code', 'is', null)
-            .neq('honest_sign_code', '');
+      const boxCounts: Record<string, number> = {};
+      countItems.forEach((item: any) => {
+        const boxId = String(item?.box_id || '');
+        if (!boxId) return;
+        boxCounts[boxId] = (boxCounts[boxId] || 0) + 1;
+      });
 
-        (items || []).forEach((item: any) => {
-            boxCounts[item.box_id] = (boxCounts[item.box_id] || 0) + 1;
-        });
-    }
-
-    const suppliesWithCounts = supplies.map(s => {
+      const suppliesWithCounts = supplies.map((s) => {
         const sBoxIds = boxesBySupply[s.id] || [];
         const count = sBoxIds.reduce((acc: number, boxId: string) => acc + (boxCounts[boxId] || 0), 0);
-        return { ...s, code_count: count };
-    });
+        return { ...s, code_count: count, gender_label: '-' };
+      });
 
-    setHonestSignCodes(suppliesWithCounts.filter(s => s.code_count > 0));
-    setLoadingHonestSign(false);
+      try {
+        const itemsWithCodes = await fetchSupplyItemsWithHonestSign(allBoxIds, 'box_id, honest_sign_code');
+        const uniqueCodes = Array.from(new Set(itemsWithCodes.map((item: any) => String(item?.honest_sign_code || '').trim()).filter(Boolean)));
+        const codeGenderMap = new Map<string, string>();
+        const hsChunkSize = 1000;
+
+        for (let i = 0; i < uniqueCodes.length; i += hsChunkSize) {
+          const chunk = uniqueCodes.slice(i, i + hsChunkSize);
+          const { data: genderRows, error: genderError } = await supabase
+            .from('unified_honest_sign_codes')
+            .select('code, gender')
+            .eq('supplier_id', supplierId)
+            .in('code', chunk);
+
+          if (genderError) throw genderError;
+          (genderRows || []).forEach((row: any) => {
+            const code = String(row?.code || '').trim();
+            if (!code) return;
+            codeGenderMap.set(code, normalizeHSGender(row?.gender));
+          });
+        }
+
+        const boxGenderSets: Record<string, Set<string>> = {};
+        itemsWithCodes.forEach((item: any) => {
+          const boxId = String(item?.box_id || '');
+          const code = String(item?.honest_sign_code || '').trim();
+          const gender = normalizeHSGender(codeGenderMap.get(code) || '');
+          if (!boxId || !gender) return;
+          if (!boxGenderSets[boxId]) boxGenderSets[boxId] = new Set<string>();
+          boxGenderSets[boxId].add(gender);
+        });
+
+        suppliesWithCounts.forEach((s: any) => {
+          const sBoxIds = boxesBySupply[s.id] || [];
+          const genderSet = new Set<string>();
+          sBoxIds.forEach((boxId: string) => {
+            (boxGenderSets[boxId] || new Set<string>()).forEach((gender) => genderSet.add(gender));
+          });
+          s.gender_label = genderSet.size === 1
+            ? getHSGenderLabel(Array.from(genderSet)[0])
+            : genderSet.size > 1
+              ? 'Смешанный'
+              : '-';
+        });
+      } catch (genderLoadError) {
+        console.warn('Optional Honest Sign gender enrichment skipped:', genderLoadError);
+      }
+
+      setHonestSignCodes(suppliesWithCounts.filter((s) => s.code_count > 0));
+    } catch (error) {
+      console.error('Error loading Honest Sign codes:', error);
+      setHonestSignCodes([]);
+      showToast('Ошибка загрузки базы ЧЗ', 'error');
+    } finally {
+      setLoadingHonestSign(false);
+    }
   };
 
   const handleReturnCodes = async () => {
@@ -2618,11 +3014,17 @@ export default function Dashboard() {
       return;
     }
 
+    const normalizedGender = normalizeHSGender(honestSignBaseGender);
+    if (!normalizedGender) {
+      showToast('Выберите пол: мужской или женский', 'error');
+      return;
+    }
+
     try {
       setLoadingHonestSign(true);
 
       const uniqueCodes = Array.from(new Set(codes.map(c => String(c).trim()).filter(Boolean)));
-      const checkChunkSize = 1000;
+      const checkChunkSize = 80;
       const duplicates: string[] = [];
 
       for (let i = 0; i < uniqueCodes.length; i += checkChunkSize) {
@@ -2647,12 +3049,13 @@ export default function Dashboard() {
       const dataToInsert = codesToInsert.map(code => ({
         supplier_id: honestSignSupplierId,
         category: normalizeHSCategory(honestSignBaseCategory),
+        gender: normalizedGender,
         code,
         file_name: fileName,
         status: 'new'
       }));
 
-      const chunkSize = 1000;
+      const chunkSize = 250;
       for (let i = 0; i < dataToInsert.length; i += chunkSize) {
         const chunk = dataToInsert.slice(i, i + chunkSize);
         const { error } = await supabase.from('unified_honest_sign_codes').insert(chunk);
@@ -2666,6 +3069,7 @@ export default function Dashboard() {
       }
 
       setHonestSignBaseCategory('');
+      setHonestSignBaseGender('');
       fetchHonestSignUploadHistory();
       fetchHonestSignCategoryStats();
     } catch (error: any) {
@@ -2682,7 +3086,9 @@ export default function Dashboard() {
       throw new Error(fileSizeError);
     }
 
-    if (file.name.endsWith('.csv') || file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
+    const lowerName = String(file.name || '').toLowerCase();
+
+    if (lowerName.endsWith('.xlsx') || lowerName.endsWith('.xls')) {
       const data = await file.arrayBuffer();
       const jsonData = await readFirstSheetAsJson<any[]>(data, { header: 1 });
       const rowLimitError = ensureExcelRowLimit(jsonData.length);
@@ -2708,6 +3114,9 @@ export default function Dashboard() {
     try {
       const codes = await parseCodesFromFile(file);
       await importHonestSignCodes(codes, file.name);
+    } catch (error: any) {
+      console.error('Honest Sign file upload error:', error);
+      showToast(`Ошибка чтения файла: ${error?.message || 'неизвестно'}`, 'error');
     } finally {
       if (e.target) e.target.value = '';
     }
@@ -2780,38 +3189,30 @@ export default function Dashboard() {
     if (!honestSignCodes.length) return;
 
     try {
-      // honestSignCodes contains supplies with code_count > 0
-      // We need to fetch the actual items for these supplies
-      const supplyIds = honestSignCodes.map(s => s.id);
-
-      // 1. Get all boxes for these supplies
-      const { data: boxes } = await supabase
+      const supplyIds = honestSignCodes.map((s) => s.id);
+      const { data: boxes, error: boxesError } = await supabase
         .from('boxes')
         .select('id, supply_id, supply:supplies(name)')
-        .in('supply_id', supplyIds);
+        .in('supply_id', supplyIds)
+        .is('deleted_at', null);
+
+      if (boxesError) throw boxesError;
 
       if (!boxes || boxes.length === 0) {
         showToast('Коробки не найдены', 'error');
         return;
       }
 
-      const boxIds = boxes.map(b => b.id);
-      const boxSupplyMap = new Map(boxes.map(b => [b.id, (b.supply as any)?.name]));
-
-      // 2. Get all items with honest_sign_code in these boxes
-      const { data: items } = await supabase
-        .from('supply_items')
-        .select('*, product:products(barcode)')
-        .in('box_id', boxIds)
-        .not('honest_sign_code', 'is', null)
-        .neq('honest_sign_code', '');
+      const boxIds = boxes.map((b) => b.id);
+      const boxSupplyMap = new Map(boxes.map((b) => [b.id, (b.supply as any)?.name]));
+      const items = await fetchSupplyItemsWithHonestSign(boxIds, 'id, box_id, honest_sign_code, product:products(barcode)');
 
       if (!items || items.length === 0) {
         showToast('Коды не найдены', 'error');
         return;
       }
 
-      const rows = items.map(item => ({
+      const rows = items.map((item) => ({
         'Баркод товара': (item.product as any)?.barcode || '',
         'Честный знак': item.honest_sign_code,
         'Номер поставки': boxSupplyMap.get(item.box_id) || 'Unknown'
@@ -2883,8 +3284,26 @@ export default function Dashboard() {
   };
 
   useEffect(() => {
-    const onIssue = () => setSupabaseConnectionIssue('Проблема соединения с Supabase. Данные могут не загружаться.');
-    const onOk = () => setSupabaseConnectionIssue(null);
+    const clearIssueTimer = () => {
+      if (supabaseIssueHideTimerRef.current) {
+        window.clearTimeout(supabaseIssueHideTimerRef.current);
+        supabaseIssueHideTimerRef.current = null;
+      }
+    };
+
+    const onIssue = () => {
+      setSupabaseConnectionIssue('Проблема соединения с Supabase. Данные могут не загружаться.');
+      clearIssueTimer();
+      supabaseIssueHideTimerRef.current = window.setTimeout(() => {
+        setSupabaseConnectionIssue((prev) => prev === 'Проблема соединения с Supabase. Данные могут не загружаться.' ? null : prev);
+        supabaseIssueHideTimerRef.current = null;
+      }, 6000);
+    };
+
+    const onOk = () => {
+      clearIssueTimer();
+      setSupabaseConnectionIssue(null);
+    };
 
     window.addEventListener('supabase:connection-issue', onIssue as EventListener);
     window.addEventListener('supabase:connection-ok', onOk as EventListener);
@@ -2892,6 +3311,7 @@ export default function Dashboard() {
     window.addEventListener('offline', onIssue as EventListener);
 
     return () => {
+      clearIssueTimer();
       window.removeEventListener('supabase:connection-issue', onIssue as EventListener);
       window.removeEventListener('supabase:connection-ok', onOk as EventListener);
       window.removeEventListener('online', onOk as EventListener);
@@ -2917,6 +3337,7 @@ export default function Dashboard() {
   const [boxInput, setBoxInput] = useState('');
   const itemInputRef = useRef<HTMLInputElement>(null);
   const honestSignInputRef = useRef<HTMLInputElement>(null);
+  const supabaseIssueHideTimerRef = useRef<number | null>(null);
   const [modalScanInput, setModalScanInput] = useState('');
   const [showNewBoxQR, setShowNewBoxQR] = useState(false);
   const [showGenerateBoxQR, setShowGenerateBoxQR] = useState(false);
@@ -2967,6 +3388,7 @@ export default function Dashboard() {
     boxes: [],
     items: [],
     updated_at: new Date().toISOString(),
+    base_box_number: 0,
   });
 
   const normalizeOfflineFboSession = (supply: Supply, parsed: any): OfflineFboSession => ({
@@ -2978,7 +3400,13 @@ export default function Dashboard() {
     boxes: Array.isArray(parsed?.boxes) ? parsed.boxes : [],
     items: Array.isArray(parsed?.items) ? parsed.items : [],
     updated_at: String(parsed?.updated_at || new Date().toISOString()),
+    base_box_number: Number.isFinite(Number(parsed?.base_box_number)) ? Math.max(0, Number(parsed?.base_box_number)) : 0,
   });
+
+  const getMaxNumericBoxName = (rows: Array<{ name?: string | null }> = []) => rows.reduce((max, row) => {
+    const value = parseInt(String(row?.name || '').trim(), 10);
+    return Number.isFinite(value) && value > max ? value : max;
+  }, 0);
 
   const openOfflineFboDb = (): Promise<IDBDatabase> => new Promise((resolve, reject) => {
     if (typeof indexedDB === 'undefined') {
@@ -3034,6 +3462,15 @@ export default function Dashboard() {
     return fallback;
   };
 
+  const scheduleOfflineFboStatsRefresh = () => {
+    if (offlineFboStatsRefreshTimeoutRef.current) {
+      window.clearTimeout(offlineFboStatsRefreshTimeoutRef.current);
+    }
+    offlineFboStatsRefreshTimeoutRef.current = window.setTimeout(() => {
+      refreshOfflineFboDeviceStats().catch(() => undefined);
+    }, 400);
+  };
+
   const writeOfflineFboSessionToDevice = async (session: OfflineFboSession) => {
     try {
       const db = await openOfflineFboDb();
@@ -3049,7 +3486,7 @@ export default function Dashboard() {
       });
       db.close();
       localStorage.removeItem(getOfflineFboStorageKey(session.supply_id));
-      refreshOfflineFboDeviceStats().catch(() => undefined);
+      scheduleOfflineFboStatsRefresh();
     } catch (e) {
       console.error('writeOfflineFboSessionToDevice error', e);
     }
@@ -3067,7 +3504,7 @@ export default function Dashboard() {
         request.onerror = () => reject(request.error || new Error('Не удалось удалить оффлайн-сессию'));
       });
       db.close();
-      refreshOfflineFboDeviceStats().catch(() => undefined);
+      scheduleOfflineFboStatsRefresh();
     } catch (e) {
       console.error('clearOfflineFboSessionFromDevice error', e);
     }
@@ -3147,9 +3584,9 @@ export default function Dashboard() {
   const applyOfflineFboSessionToUi = useCallback((session: OfflineFboSession, activeBoxId?: string | null) => {
     setBoxesList(session.boxes || []);
     setSupplyStats({ boxes: (session.boxes || []).length, items: (session.items || []).length });
-    const boxId = activeBoxId || currentBox?.id || '';
+    const boxId = activeBoxId || '';
     setBoxItems(boxId ? (session.items || []).filter((item) => item.box_id === boxId) : []);
-  }, [currentBox?.id]);
+  }, []);
 
   const updateOfflineFboSession = (mutate: (session: OfflineFboSession) => OfflineFboSession, activeBoxId?: string | null) => {
     if (!currentSupply) return null;
@@ -3163,7 +3600,12 @@ export default function Dashboard() {
       updated_at: new Date().toISOString(),
     });
     offlineFboSessionRef.current = next;
-    writeOfflineFboSessionToDevice(next).catch(() => undefined);
+    if (offlineFboSessionWriteTimeoutRef.current) {
+      window.clearTimeout(offlineFboSessionWriteTimeoutRef.current);
+    }
+    offlineFboSessionWriteTimeoutRef.current = window.setTimeout(() => {
+      writeOfflineFboSessionToDevice(next).catch(() => undefined);
+    }, 120);
     setOfflineFboSession(next);
     applyOfflineFboSessionToUi(next, activeBoxId);
     return next;
@@ -3226,20 +3668,21 @@ export default function Dashboard() {
           boxNames: Array.from(new Set(rows.map((row) => boxNameById.get(String(row.box_id)) || 'Без коробки'))),
         }));
 
-      const { data: supplierProducts, error: productsError } = await supabase
-        .from('products')
-        .select('id, barcode, name')
-        .eq('supplier_id', currentSupply.supplier_id)
-        .is('deleted_at', null)
-        .limit(10000);
-      if (productsError) throw productsError;
-
-      const productIdSet = new Set((supplierProducts || []).map((row: any) => String(row.id)));
-      const productBarcodeSet = new Set((supplierProducts || []).map((row: any) => String(row.barcode || '').trim()).filter(Boolean));
+      delete supplierProductsIndexRef.current[currentSupply.supplier_id];
+      const supplierProductsIndex = await ensureSupplierProductsIndex(currentSupply.supplier_id);
+      const supplierProducts = Array.from(supplierProductsIndex.values());
+      const productIdSet = new Set(supplierProducts.map((row: any) => String(row?.id || '')).filter(Boolean));
+      const productBarcodeSet = new Set(supplierProducts.map((row: any) => String(row?.barcode || '').trim()).filter(Boolean));
+      const productWbSkuSet = new Set(supplierProducts.map((row: any) => String(row?.wb_sku || '').trim()).filter(Boolean));
       const missingProducts = (session.items || []).filter((item) => {
-        const productId = String(item?.product_id || '');
+        const productId = String(item?.product_id || '').trim();
         const barcode = String(item?.product?.barcode || '').trim();
-        return !productIdSet.has(productId) && (!barcode || !productBarcodeSet.has(barcode));
+        const wbSku = String(item?.product?.wb_sku || '').trim();
+        const hasPayloadForAutoCreate = Boolean(barcode && String(item?.product?.name || '').trim());
+        return !productIdSet.has(productId)
+          && (!barcode || !productBarcodeSet.has(barcode))
+          && (!wbSku || !productWbSkuSet.has(wbSku))
+          && !hasPayloadForAutoCreate;
       }).map((item) => ({
         label: String(item?.product?.name || item?.product_id || 'Неизвестный товар'),
         boxName: boxNameById.get(String(item.box_id)) || 'Без коробки',
@@ -3326,28 +3769,115 @@ export default function Dashboard() {
         .is('deleted_at', null);
       if (existingBoxesError) throw existingBoxesError;
 
-      const boxMap = new Map<string, string>((existingBoxes || []).map((box: any) => [String(box.name), String(box.id)]));
-      const missingNames = (session.boxes || [])
-        .map((box) => String(box.name || '').trim())
-        .filter((name) => name && !boxMap.has(name));
+      const usedBoxNames = new Set((existingBoxes || []).map((box: any) => String(box?.name || '').trim()).filter(Boolean));
+      let nextBoxNumber = Math.max(
+        getMaxNumericBoxName((existingBoxes || []) as Array<{ name?: string | null }>),
+        Number(session.base_box_number || 0)
+      ) + 1;
 
-      if (missingNames.length) {
+      const orderedOfflineBoxes = [...(session.boxes || [])].sort((a, b) => {
+        const aNum = parseInt(String(a?.name || '').trim(), 10);
+        const bNum = parseInt(String(b?.name || '').trim(), 10);
+        const aIsNum = Number.isFinite(aNum) && aNum > 0;
+        const bIsNum = Number.isFinite(bNum) && bNum > 0;
+        if (aIsNum && bIsNum) return aNum - bNum;
+        return String(a?.created_at || '').localeCompare(String(b?.created_at || ''));
+      });
+
+      const offlineBoxMappings = orderedOfflineBoxes.map((box) => {
+        const rawName = String(box?.name || '').trim();
+        const parsed = parseInt(rawName, 10);
+        const isNumeric = Number.isFinite(parsed) && parsed > 0 && String(parsed) === rawName;
+        let finalName = rawName || String(nextBoxNumber++);
+
+        if (!finalName || isNumeric || usedBoxNames.has(finalName)) {
+          while (usedBoxNames.has(String(nextBoxNumber))) nextBoxNumber += 1;
+          finalName = String(nextBoxNumber);
+          nextBoxNumber += 1;
+        }
+
+        usedBoxNames.add(finalName);
+        return {
+          offlineBoxId: String(box.id),
+          name: finalName,
+        };
+      });
+
+      const boxInsertPayload = offlineBoxMappings.map((box) => ({ name: box.name, supply_id: currentSupply.id }));
+      const insertedBoxesByName = new Map<string, string>();
+      if (boxInsertPayload.length) {
         const { data: insertedBoxes, error: insertBoxesError } = await supabase
           .from('boxes')
-          .insert(missingNames.map((name) => ({ name, supply_id: currentSupply.id })))
+          .insert(boxInsertPayload)
           .select('id, name');
         if (insertBoxesError) throw insertBoxesError;
         (insertedBoxes || []).forEach((box: any) => {
-          boxMap.set(String(box.name), String(box.id));
+          insertedBoxesByName.set(String(box.name), String(box.id));
+        });
+      }
+
+      const offlineBoxIdToDbBoxId = new Map<string, string>();
+      offlineBoxMappings.forEach((box) => {
+        const dbBoxId = insertedBoxesByName.get(box.name);
+        if (dbBoxId) offlineBoxIdToDbBoxId.set(box.offlineBoxId, dbBoxId);
+      });
+
+      const productBarcodeMap = new Map<string, string>();
+      const offlineBarcodes = Array.from(new Set((session.items || [])
+        .map((item) => String(item?.product?.barcode || '').trim())
+        .filter(Boolean)));
+
+      for (let i = 0; i < offlineBarcodes.length; i += 500) {
+        const chunk = offlineBarcodes.slice(i, i + 500);
+        const { data: existingProducts, error: existingProductsError } = await supabase
+          .from('products')
+          .select('id, barcode')
+          .eq('supplier_id', currentSupply.supplier_id)
+          .in('barcode', chunk)
+          .is('deleted_at', null);
+        if (existingProductsError) throw existingProductsError;
+        (existingProducts || []).forEach((row: any) => {
+          if (row?.barcode && row?.id) productBarcodeMap.set(String(row.barcode), String(row.id));
+        });
+      }
+
+      const missingProductsToInsert = new Map<string, Product>();
+      (session.items || []).forEach((item) => {
+        const barcode = String(item?.product?.barcode || '').trim();
+        if (!barcode || productBarcodeMap.has(barcode)) return;
+        if (item?.product) missingProductsToInsert.set(barcode, item.product as Product);
+      });
+
+      const missingProductsPayload = Array.from(missingProductsToInsert.values()).map((product) => ({
+        supplier_id: currentSupply.supplier_id,
+        name: String(product?.name || 'Товар'),
+        wb_sku: String(product?.wb_sku || ''),
+        barcode: String(product?.barcode || '').trim(),
+        size: String(product?.size || ''),
+        color: String(product?.color || ''),
+      })).filter((row) => row.barcode);
+
+      for (let i = 0; i < missingProductsPayload.length; i += 200) {
+        const chunk = missingProductsPayload.slice(i, i + 200);
+        if (!chunk.length) continue;
+        const { data: insertedProducts, error: insertedProductsError } = await supabase
+          .from('products')
+          .insert(chunk)
+          .select('id, barcode');
+        if (insertedProductsError) throw insertedProductsError;
+        (insertedProducts || []).forEach((row: any) => {
+          if (row?.barcode && row?.id) productBarcodeMap.set(String(row.barcode), String(row.id));
         });
       }
 
       const payload = (session.items || []).map((item) => {
-        const sourceBox = (session.boxes || []).find((box) => box.id === item.box_id);
-        const dbBoxId = boxMap.get(String(sourceBox?.name || ''));
-        return dbBoxId ? {
+        const dbBoxId = offlineBoxIdToDbBoxId.get(String(item.box_id));
+        const barcode = String(item?.product?.barcode || '').trim();
+        const rawProductId = String(item?.product_id || '').trim();
+        const resolvedProductId = (barcode && productBarcodeMap.get(barcode)) || (!rawProductId.startsWith('offline-product-') ? rawProductId : '');
+        return dbBoxId && resolvedProductId ? {
           box_id: dbBoxId,
-          product_id: item.product_id,
+          product_id: resolvedProductId,
           honest_sign_code: item.honest_sign_code,
         } : null;
       }).filter(Boolean) as Array<{ box_id: string; product_id: string; honest_sign_code: string }>;
@@ -3396,14 +3926,38 @@ export default function Dashboard() {
     (async () => {
       const session = await readOfflineFboSessionFromDevice(currentSupply);
       if (cancelled) return;
-      offlineFboSessionRef.current = session;
-      setOfflineFboSession(session);
-      applyOfflineFboSessionToUi(session, currentBox?.id || null);
+
+      let nextSession = session;
+      try {
+        const { data: onlineBoxes } = await supabase
+          .from('boxes')
+          .select('name')
+          .eq('supply_id', currentSupply.id)
+          .is('deleted_at', null);
+        const onlineMaxBoxNumber = getMaxNumericBoxName((onlineBoxes || []) as Array<{ name?: string | null }>);
+        if (onlineMaxBoxNumber > Number(session?.base_box_number || 0)) {
+          nextSession = {
+            ...session,
+            base_box_number: onlineMaxBoxNumber,
+            updated_at: new Date().toISOString(),
+          };
+          writeOfflineFboSessionToDevice(nextSession).catch(() => undefined);
+        }
+      } catch (e) {
+        console.error('offline FBO base box sync error', e);
+      }
+
+      offlineFboSessionRef.current = nextSession;
+      setOfflineFboSession(nextSession);
+      applyOfflineFboSessionToUi(nextSession, null);
+      preloadOfflineFboIndexes(currentSupply.supplier_id).catch((e) => {
+        console.error('offline FBO index warmup error', e);
+      });
     })();
     return () => {
       cancelled = true;
     };
-  }, [currentSupply?.id, fboOfflineMode, currentBox?.id, applyOfflineFboSessionToUi]);
+  }, [currentSupply?.id, currentSupply?.supplier_id, fboOfflineMode, applyOfflineFboSessionToUi]);
 
   useEffect(() => {
     if (!currentSupply?.id || fboOfflineMode) return;
@@ -3938,10 +4492,12 @@ export default function Dashboard() {
     }
 
     if (fboOfflineMode) {
-      const existingBoxes = offlineFboSession?.boxes || [];
-      const used = new Set((existingBoxes || []).map((b: any) => parseInt(String(b?.name || '').trim(), 10)).filter((n: number) => Number.isFinite(n) && n > 0));
-      let nextNumber = 1;
-      while (used.has(nextNumber)) nextNumber += 1;
+      const session = offlineFboSessionRef.current && offlineFboSessionRef.current.supply_id === currentSupply.id
+        ? offlineFboSessionRef.current
+        : buildEmptyOfflineFboSession(currentSupply);
+      const existingBoxes = session?.boxes || [];
+      const sessionMaxNumber = getMaxNumericBoxName(existingBoxes as Array<{ name?: string | null }>);
+      const nextNumber = Math.max(Number(session?.base_box_number || 0), sessionMaxNumber) + 1;
       const nextName = String(nextNumber);
       const newBox: SupplyBox = {
         id: `offline-box-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -3980,24 +4536,100 @@ export default function Dashboard() {
     showToast(`Создана коробка №${nextName}`, 'success');
   };
 
+  const finishCurrentBoxAndReturn = async () => {
+    if (fboOfflineMode && offlineFboSessionRef.current) {
+      if (offlineFboSessionWriteTimeoutRef.current) {
+        window.clearTimeout(offlineFboSessionWriteTimeoutRef.current);
+        offlineFboSessionWriteTimeoutRef.current = null;
+      }
+      await writeOfflineFboSessionToDevice(offlineFboSessionRef.current);
+    }
+    setSupplyStep('SUPPLY');
+    setCurrentBox(null);
+    setScannedItem(null);
+    if (itemInputRef.current) itemInputRef.current.value = '';
+    if (honestSignInputRef.current) honestSignInputRef.current.value = '';
+    showToast('Коробка завершена, можно выбрать или создать следующую', 'success');
+  };
+
+  const handleDeleteSupplyItem = async (itemId: string) => {
+    if (!itemId) return;
+    if (!window.confirm('Удалить этот скан из коробки?')) return;
+
+    try {
+      if (fboOfflineMode && currentSupply) {
+        updateOfflineFboSession((session) => ({
+          ...session,
+          items: (session.items || []).filter((item) => item.id !== itemId),
+        }), currentBox?.id || null);
+        showToast('Скан удалён из оффлайн-сессии', 'success');
+        return;
+      }
+
+      const { error } = await softDeleteWithActor('supply_items', itemId);
+      if (error) throw error;
+
+      if (currentBox?.id) {
+        await fetchBoxItems(currentBox.id);
+      }
+      if (currentSupply?.id) {
+        await fetchSupplyStats(currentSupply.id);
+        await fetchBoxesList(currentSupply.id);
+      }
+
+      showToast('Скан удалён', 'success');
+    } catch (e: any) {
+      showToast('Ошибка удаления скана: ' + (e?.message || 'неизвестно'), 'error');
+    }
+  };
+
   const openSupplyProductsModal = async () => {
     if (!currentSupply?.id) return;
     try {
       setSupplyProductsLoading(true);
       setShowSupplyProductsModal(true);
 
-      const { data: boxes } = await supabase.from('boxes').select('id,name').eq('supply_id', currentSupply.id);
-      const boxIds = (boxes || []).map((b: any) => b.id).filter(Boolean);
+      const pageSize = 1000;
+      const allBoxes: any[] = [];
+      let boxesFrom = 0;
+      while (true) {
+        const { data: boxesChunk, error: boxesError } = await supabase
+          .from('boxes')
+          .select('id,name,deleted_at')
+          .eq('supply_id', currentSupply.id)
+          .is('deleted_at', null)
+          .range(boxesFrom, boxesFrom + pageSize - 1);
+        if (boxesError) throw boxesError;
+        const chunk = boxesChunk || [];
+        allBoxes.push(...chunk);
+        if (chunk.length < pageSize) break;
+        boxesFrom += pageSize;
+      }
+
+      const boxIds = allBoxes.map((b: any) => b.id).filter(Boolean);
       if (!boxIds.length) {
         setSupplyProductsRows([]);
         return;
       }
 
-      const { data: items } = await supabase
-        .from('supply_items')
-        .select('id, box_id, product_id, honest_sign_code, created_at, deleted_at, product:products(id,name,wb_sku,barcode,size,color)')
-        .in('box_id', boxIds)
-        .is('deleted_at', null);
+      const allItems: any[] = [];
+      for (let i = 0; i < boxIds.length; i += 200) {
+        const boxIdsChunk = boxIds.slice(i, i + 200);
+        let itemsFrom = 0;
+        while (true) {
+          const { data: itemsChunk, error: itemsError } = await supabase
+            .from('supply_items')
+            .select('id, box_id, product_id, honest_sign_code, created_at, deleted_at, product:products(id,name,wb_sku,barcode,size,color)')
+            .in('box_id', boxIdsChunk)
+            .is('deleted_at', null)
+            .range(itemsFrom, itemsFrom + pageSize - 1);
+          if (itemsError) throw itemsError;
+          const chunk = itemsChunk || [];
+          allItems.push(...chunk);
+          if (chunk.length < pageSize) break;
+          itemsFrom += pageSize;
+        }
+      }
 
       const { data: wbCacheRows, error: wbCacheError } = await supabase
         .from('wb_products_cache')
@@ -4025,7 +4657,7 @@ export default function Dashboard() {
       });
 
       const grouped = new Map<string, { image?: string; article: string; title: string; sizes: Record<string, number>; sizeBarcodes: Record<string, Set<string>>; totalQty: number }>();
-      (items || []).forEach((item: any) => {
+      allItems.forEach((item: any) => {
         const p = item?.product || {};
         const qty = 1;
         const barcode = String(p?.barcode || '').trim();
@@ -4206,6 +4838,20 @@ export default function Dashboard() {
     return index;
   };
 
+  const preloadOfflineFboIndexes = useCallback(async (supplierId: string) => {
+    if (!supplierId) return;
+    if (wbSkuIndexRef.current[supplierId] && supplierProductsIndexRef.current[supplierId]) return;
+    if (!offlineFboIndexesWarmupRef.current[supplierId]) {
+      offlineFboIndexesWarmupRef.current[supplierId] = Promise.all([
+        ensureWbSkuIndex(supplierId),
+        ensureSupplierProductsIndex(supplierId),
+      ]).then(() => undefined).finally(() => {
+        delete offlineFboIndexesWarmupRef.current[supplierId];
+      });
+    }
+    await offlineFboIndexesWarmupRef.current[supplierId];
+  }, []);
+
   const handleItemScan = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentSupply) return;
@@ -4220,8 +4866,7 @@ export default function Dashboard() {
     }
 
     if (input.trim() === 'ACTION:NEW_BOX' || input.trim() === 'NEW_BOX' || input.includes('NEW_BOX') || input.includes('ACTION;NEW_BOX')) {
-      setSupplyStep('SUPPLY');
-      setCurrentBox(null);
+      finishCurrentBoxAndReturn();
       return;
     }
 
@@ -4236,11 +4881,15 @@ export default function Dashboard() {
     let matchedSize: any = null;
 
     try {
+      if (fboOfflineMode) {
+        await preloadOfflineFboIndexes(currentSupply.supplier_id);
+      }
+
       let skuIndex = await ensureWbSkuIndex(currentSupply.supplier_id);
       let hit = skuIndex.get(String(input).trim());
 
-      // One forced re-index attempt (in case cache was refreshed in another tab/device)
-      if (!hit) {
+      // One forced re-index attempt only for online mode
+      if (!hit && !fboOfflineMode) {
         delete wbSkuIndexRef.current[currentSupply.supplier_id];
         skuIndex = await ensureWbSkuIndex(currentSupply.supplier_id);
         hit = skuIndex.get(String(input).trim());
@@ -4264,22 +4913,36 @@ export default function Dashboard() {
           );
           const colorValue = colorChar ? (Array.isArray(colorChar.value) ? colorChar.value.join(', ') : colorChar.value) : '';
 
-          const { data: newProd, error: insertError } = await supabase
-            .from('products')
-            .insert({
-              name: matchedCard.title,
-              wb_sku: String(matchedCard.nmID || ''),
-              barcode: input,
-              size: matchedSize.techSize,
-              color: colorValue,
+          if (fboOfflineMode) {
+            product = {
+              id: `offline-product-${currentSupply.supplier_id}-${String(input).trim()}`,
               supplier_id: currentSupply.supplier_id,
-            })
-            .select()
-            .single();
+              name: String(matchedCard.title || 'Товар'),
+              wb_sku: String(matchedCard.nmID || ''),
+              barcode: String(input).trim(),
+              size: String(matchedSize.techSize || ''),
+              color: String(colorValue || ''),
+              created_at: new Date().toISOString(),
+            } as Product;
+            productsIndex.set(String(input), product);
+          } else {
+            const { data: newProd, error: insertError } = await supabase
+              .from('products')
+              .insert({
+                name: matchedCard.title,
+                wb_sku: String(matchedCard.nmID || ''),
+                barcode: input,
+                size: matchedSize.techSize,
+                color: colorValue,
+                supplier_id: currentSupply.supplier_id,
+              })
+              .select()
+              .single();
 
-          if (!insertError && newProd) {
-            product = newProd;
-            productsIndex.set(String(input), newProd as Product);
+            if (!insertError && newProd) {
+              product = newProd;
+              productsIndex.set(String(input), newProd as Product);
+            }
           }
         }
       }
@@ -4317,6 +4980,87 @@ export default function Dashboard() {
     } catch {}
   };
 
+  const syncScannedCodesToUnifiedBase = useCallback(async (codes: string[], supplierId?: string) => {
+    const normalizedSupplierId = String(supplierId || '').trim();
+    const uniqueCodes = Array.from(new Set((codes || []).map((code) => String(code || '').trim()).filter(Boolean)));
+    if (!normalizedSupplierId || uniqueCodes.length === 0) return;
+
+    const nowIso = new Date().toISOString();
+    const { data: existing, error: existingError } = await supabase
+      .from('unified_honest_sign_codes')
+      .select('id, code, supplier_id, category')
+      .in('code', uniqueCodes);
+
+    if (existingError) throw existingError;
+
+    const existingByCode = new Map<string, any>();
+    (existing || []).forEach((row: any) => {
+      const code = String(row?.code || '').trim();
+      if (code) existingByCode.set(code, row);
+    });
+
+    const idsToUpdate: string[] = [];
+    const toInsert: Array<{ supplier_id: string; category: string; code: string; file_name: string; status: string; created_at: string }> = [];
+
+    uniqueCodes.forEach((code) => {
+      const row = existingByCode.get(code);
+      if (!row) {
+        toInsert.push({
+          supplier_id: normalizedSupplierId,
+          category: normalizeHSCategory('Без категории'),
+          code,
+          file_name: 'Отсканировано',
+          status: 'scanned',
+          created_at: nowIso,
+        });
+        return;
+      }
+
+      const rowSupplierId = String(row?.supplier_id || '').trim();
+      if (!rowSupplierId || rowSupplierId === normalizedSupplierId) {
+        if (row?.id) idsToUpdate.push(String(row.id));
+      }
+    });
+
+    if (idsToUpdate.length > 0) {
+      const { error } = await supabase
+        .from('unified_honest_sign_codes')
+        .update({
+          supplier_id: normalizedSupplierId,
+          file_name: 'Отсканировано',
+          status: 'scanned',
+          created_at: nowIso,
+        })
+        .in('id', idsToUpdate);
+      if (error) throw error;
+    }
+
+    if (toInsert.length > 0) {
+      const { error } = await supabase
+        .from('unified_honest_sign_codes')
+        .insert(toInsert);
+      if (error) throw error;
+    }
+  }, [normalizeHSCategory]);
+
+  const isCodeAlreadyScannedForSupplier = useCallback(async (code: string, supplierId?: string) => {
+    const normalizedCode = String(code || '').trim();
+    const normalizedSupplierId = String(supplierId || '').trim();
+    if (!normalizedCode || !normalizedSupplierId) return false;
+
+    const { data, error } = await supabase
+      .from('unified_honest_sign_codes')
+      .select('id')
+      .eq('supplier_id', normalizedSupplierId)
+      .eq('code', normalizedCode)
+      .or('file_name.eq.Отсканировано,status.eq.scanned')
+      .limit(1)
+      .maybeSingle();
+
+    if (error) throw error;
+    return Boolean(data?.id);
+  }, []);
+
   const flushPendingScans = useCallback(async () => {
     if (pendingScansRef.current.length === 0) return;
     const batch = [...pendingScansRef.current];
@@ -4332,15 +5076,15 @@ export default function Dashboard() {
       return;
     }
 
-    const codes = batch.map((x) => x.code);
-    await supabase
-      .from('unified_honest_sign_codes')
-      .update({ file_name: 'Отсканировано', created_at: new Date().toISOString() })
-      .in('code', codes)
-      .eq('file_name', 'Напечатанные QR');
+    try {
+      await syncScannedCodesToUnifiedBase(batch.map((x) => x.code), currentSupply?.supplier_id);
+    } catch (e: any) {
+      console.error('Failed to sync FBO scanned codes to unified base', e);
+      showToast('ЧЗ сохранён в поставку, но не удалось обновить базу ЧЗ', 'error');
+    }
 
     if (currentBox) fetchBoxItems(currentBox.id);
-  }, [currentBox]);
+  }, [currentBox, currentSupply?.supplier_id, syncScannedCodesToUnifiedBase]);
 
   const handleHonestSignScan = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -4361,9 +5105,7 @@ export default function Dashboard() {
         }
 
         if (code.trim() === 'ACTION:NEW_BOX' || code.trim() === 'NEW_BOX' || code.includes('NEW_BOX') || code.includes('ACTION;NEW_BOX')) {
-          setSupplyStep('SUPPLY');
-          setCurrentBox(null);
-          setScannedItem(null);
+          finishCurrentBoxAndReturn();
           return;
         }
 
@@ -4406,6 +5148,13 @@ export default function Dashboard() {
           return;
         }
 
+        const existsInSupplierScannedBase = await isCodeAlreadyScannedForSupplier(code, currentSupply?.supplier_id);
+        if (existsInSupplierScannedBase) {
+          playScanTone('error');
+          showToast('Этот Честный Знак уже есть в базе отсканированных ЧЗ этого поставщика!', 'error');
+          return;
+        }
+
         const { data: existing } = await supabase.from('supply_items').select('id').eq('honest_sign_code', code).maybeSingle();
         if (existing) {
           playScanTone('error');
@@ -4440,6 +5189,12 @@ export default function Dashboard() {
     return () => {
       if (flushScansTimeoutRef.current) {
         window.clearTimeout(flushScansTimeoutRef.current);
+      }
+      if (offlineFboSessionWriteTimeoutRef.current) {
+        window.clearTimeout(offlineFboSessionWriteTimeoutRef.current);
+      }
+      if (offlineFboStatsRefreshTimeoutRef.current) {
+        window.clearTimeout(offlineFboStatsRefreshTimeoutRef.current);
       }
       flushPendingScans().catch(() => undefined);
     };
@@ -6154,17 +6909,28 @@ export default function Dashboard() {
   const [instagramSaving, setInstagramSaving] = useState(false);
   const [instagramLoadingChats, setInstagramLoadingChats] = useState(false);
   const [instagramChats, setInstagramChats] = useState<any[]>([]);
+  const getCurrentBarterMonth = () => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  };
+  const currentBarterMonth = getCurrentBarterMonth();
+  const currentBarterYear = Number(currentBarterMonth.split('-')[0]) || new Date().getFullYear();
   const [barterModalOpen, setBarterModalOpen] = useState(false);
   const [barterSupplierId, setBarterSupplierId] = useState('');
   const [barterTopSupplierId, setBarterTopSupplierId] = useState('');
   const [barterProductSearch, setBarterProductSearch] = useState('');
   const [barterCheckedProductIds, setBarterCheckedProductIds] = useState<string[]>([]);
+  const [barterCreateMergedCard, setBarterCreateMergedCard] = useState(false);
+  const [barterMergeMode, setBarterMergeMode] = useState(false);
+  const [barterMergeSelectedIds, setBarterMergeSelectedIds] = useState<string[]>([]);
+  const [barterExplicitlyRemovedIds, setBarterExplicitlyRemovedIds] = useState<string[]>([]);
+  const barterCardsTableAvailableRef = useRef<boolean | null>(null);
   const [barterCatalogProducts, setBarterCatalogProducts] = useState<any[]>([]);
   const [barterCatalogLoading, setBarterCatalogLoading] = useState(false);
-  const [barterMonth, setBarterMonth] = useState<string>('2026-03');
+  const [barterMonth, setBarterMonth] = useState<string>(currentBarterMonth);
   const [barterSection, setBarterSection] = useState<'barters_main' | 'external_ads_base'>('barters_main');
   const [barterMonthPickerOpen, setBarterMonthPickerOpen] = useState(false);
-  const [barterMonthYear, setBarterMonthYear] = useState<number>(2026);
+  const [barterMonthYear, setBarterMonthYear] = useState<number>(currentBarterYear);
   const [barterRows, setBarterRows] = useState<Array<{
     id: string;
     month: string;
@@ -6173,14 +6939,22 @@ export default function Dashboard() {
     product_id: string;
     product_name: string;
     product_photo?: string;
+    product_photos?: string[];
+    product_group_key?: string;
+    product_group_name?: string;
+    product_ids?: string[];
+    product_variant_labels?: string[];
+    product_variants_count?: number;
     barter_links: string[];
     barter_dates: string[];
     barter_prices: string[];
     barter_views: string[];
+    barter_ratings: string[];
     ad_links: string[];
     ad_dates: string[];
     ad_prices: string[];
     ad_views: string[];
+    ad_ratings: string[];
   }>>([]);
   const [barterSaving, setBarterSaving] = useState(false);
   const [barterGlobalExtra, setBarterGlobalExtra] = useState(0);
@@ -6188,11 +6962,19 @@ export default function Dashboard() {
   const [barterDbReady, setBarterDbReady] = useState(false);
   const [barterMonthCollapsed, setBarterMonthCollapsed] = useState(false);
   const [barterCollapsedCards, setBarterCollapsedCards] = useState<Record<string, boolean>>({});
-  const [barterPreviewImage, setBarterPreviewImage] = useState<string | null>(null);
+  const [barterCardSaveState, setBarterCardSaveState] = useState<Record<string, 'saving' | 'saved' | 'error'>>({});
+  const [barterPreviewGallery, setBarterPreviewGallery] = useState<{ images: string[]; index: number; closing?: boolean; closeMode?: 'fade' | 'down' } | null>(null);
+  const barterPreviewTouchStartRef = useRef<{ x: number; y: number } | null>(null);
+  const barterAutosaveTimeoutRef = useRef<number | null>(null);
   const [barterPhotoMap, setBarterPhotoMap] = useState<Record<string, string>>({});
   const [barterPhotoLoading, setBarterPhotoLoading] = useState(false);
-  const [barterDuplicateModal, setBarterDuplicateModal] = useState<{ open: boolean; targetMonth: string }>({ open: false, targetMonth: new Date().toISOString().slice(0, 7) });
-  const [externalAdsBase, setExternalAdsBase] = useState<Array<{ id: string; nickname: string; socialLinks: Array<{ url: string; followers: string }>; comment: string; status: string; createdAt: string }>>([]);
+  const [barterDuplicateModal, setBarterDuplicateModal] = useState<{ open: boolean; targetMonth: string }>({ open: false, targetMonth: currentBarterMonth });
+  const [barterMoneyForm, setBarterMoneyForm] = useState({ amount: '', comment: '' });
+  const [barterMoneyHistory, setBarterMoneyHistory] = useState<Array<{ id: string; supplier_id: string; amount: number; comment: string; created_at: string }>>([]);
+  const [barterMoneyLoading, setBarterMoneyLoading] = useState(false);
+  const [barterMoneySaving, setBarterMoneySaving] = useState(false);
+  const [barterMoneyFilter, setBarterMoneyFilter] = useState<'all' | 'add' | 'writeoff'>('all');
+  const [externalAdsBase, setExternalAdsBase] = useState<ExternalAdsBaseEntry[]>([]);
   const [externalAdsBaseModalOpen, setExternalAdsBaseModalOpen] = useState(false);
   const [externalAdsBaseSaving, setExternalAdsBaseSaving] = useState(false);
   const [externalAdsBaseSearch, setExternalAdsBaseSearch] = useState('');
@@ -6200,10 +6982,14 @@ export default function Dashboard() {
   const [assemblyAccessEmployeeSearch, setAssemblyAccessEmployeeSearch] = useState('');
   const [collapsedAssemblyGroups, setCollapsedAssemblyGroups] = useState<Record<string, boolean>>({});
   const [externalAdsBaseSort, setExternalAdsBaseSort] = useState<'date_desc' | 'date_asc' | 'nickname_asc' | 'followers_desc'>('date_desc');
+  const [externalAdsBasePlatformFilter, setExternalAdsBasePlatformFilter] = useState<string>('all');
+  const [externalAdsBaseSupplierFilter, setExternalAdsBaseSupplierFilter] = useState<string>('all');
+  const [externalAdsHistoryFilters, setExternalAdsHistoryFilters] = useState<Record<string, { kind: 'all' | 'barter' | 'ad'; supplierId: string }>>({});
   const [externalAdsBaseEditingId, setExternalAdsBaseEditingId] = useState<string | null>(null);
-  const [externalAdsBaseForm, setExternalAdsBaseForm] = useState<{ nickname: string; socialLinks: Array<{ url: string; followers: string }>; comment: string; status: string }>({
+  const [externalAdsBaseForm, setExternalAdsBaseForm] = useState<{ nickname: string; socialLinks: ExternalAdsSocialLink[]; overallRating: string; comment: string; status: string }>({
     nickname: '',
-    socialLinks: [{ url: '', followers: '' }],
+    socialLinks: [{ url: '', followers: '', platform: '' }],
+    overallRating: '',
     comment: '',
     status: 'new',
   });
@@ -6508,10 +7294,13 @@ export default function Dashboard() {
         formData.append('parse_mode', 'Markdown');
 
         try {
-          await fetch(`https://api.telegram.org/bot8385895864:AAHv0kB7dC13k3TB12R94kKB1HC_Pygc2cU/sendMessage`, {
-            method: 'POST',
-            body: formData
-          });
+          const token = String((telegramBotTokenFile || telegramBotToken || '').trim());
+          if (token) {
+            await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+              method: 'POST',
+              body: formData
+            });
+          }
         } catch (e) { console.error('Telegram send failed', e); }
 
         if (employee) {
@@ -6670,6 +7459,194 @@ export default function Dashboard() {
     }
   }, [activeTab]);
 
+  const barterSelectedSupplierId = useMemo(() => String(barterTopSupplierId || barterSupplierId || '').trim(), [barterTopSupplierId, barterSupplierId]);
+  const barterSelectedSupplier = useMemo(() => suppliers.find((s: any) => String(s.id) === String(barterSelectedSupplierId)) || null, [suppliers, barterSelectedSupplierId]);
+  const barterMoneyBalance = useMemo(() => barterMoneyHistory.reduce((sum, row) => sum + Number(row.amount || 0), 0), [barterMoneyHistory]);
+  const filteredBarterMoneyHistory = useMemo(() => {
+    if (barterMoneyFilter === 'add') return barterMoneyHistory.filter((row) => Number(row.amount || 0) > 0);
+    if (barterMoneyFilter === 'writeoff') return barterMoneyHistory.filter((row) => Number(row.amount || 0) < 0);
+    return barterMoneyHistory;
+  }, [barterMoneyHistory, barterMoneyFilter]);
+
+  const normalizeBarterPhotoUrl = (value: any) => {
+    const src = String(value || '').trim();
+    if (!src) return '';
+    if (src.startsWith('//')) return `https:${src}`;
+    return src;
+  };
+  const normalizeBarterGroupText = (value: any) => String(value || '').toLowerCase().replace(/[^0-9a-zа-яё]+/gi, ' ').replace(/\s+/g, ' ').trim();
+  const getBarterProductGroupName = (item: any) => String(item?.product_group_name || item?.name || item?.title || item?.product_name || item?.supplierArticle || item?.supplier_article || item?.wb_sku || item?.vendorCode || item?.vendor_code || item?.barcode || item?.id || 'Товар').trim();
+  const getBarterProductGroupKey = (item: any) => normalizeBarterGroupText(
+    item?.product_group_key
+    || item?.supplierArticle
+    || item?.supplier_article
+    || item?.name
+    || item?.title
+    || item?.product_name
+    || item?.wb_sku
+    || item?.vendorCode
+    || item?.vendor_code
+    || item?.barcode
+    || item?.id
+  );
+  const getBarterVariantLabel = (item: any) => String(item?.variantLabel || item?.vendorCode || item?.vendor_code || item?.supplierArticle || item?.supplier_article || item?.wb_sku || item?.product_id || item?.id || '').trim();
+  const normalizeBarterStringArray = (value: any, size: number) => Array.from({ length: Math.max(size, Array.isArray(value) ? value.length : 0) }, (_, i) => String(Array.isArray(value) ? (value[i] || '') : ''));
+  const mergeBarterSlotFields = (rows: any[], prefix: 'barter' | 'ad', baseSize: number) => {
+    const filledEntries: Array<{ link: string; date: string; price: string; views: string; rating: string }> = [];
+    rows.forEach((row: any) => {
+      const links = normalizeBarterStringArray(row?.[`${prefix}_links`], baseSize);
+      const dates = normalizeBarterStringArray(row?.[`${prefix}_dates`], links.length);
+      const prices = normalizeBarterStringArray(row?.[`${prefix}_prices`], links.length);
+      const views = normalizeBarterStringArray(row?.[`${prefix}_views`], links.length);
+      const ratings = normalizeBarterStringArray(row?.[`${prefix}_ratings`], links.length);
+      for (let i = 0; i < links.length; i += 1) {
+        const entry = {
+          link: String(links[i] || ''),
+          date: String(dates[i] || ''),
+          price: String(prices[i] || ''),
+          views: String(views[i] || ''),
+          rating: String(ratings[i] || ''),
+        };
+        if (entry.link || entry.date || entry.price || entry.views || entry.rating) filledEntries.push(entry);
+      }
+    });
+
+    const totalSize = Math.max(baseSize, filledEntries.length);
+    return {
+      [`${prefix}_links`]: Array.from({ length: totalSize }, (_, i) => String(filledEntries[i]?.link || '')),
+      [`${prefix}_dates`]: Array.from({ length: totalSize }, (_, i) => String(filledEntries[i]?.date || '')),
+      [`${prefix}_prices`]: Array.from({ length: totalSize }, (_, i) => String(filledEntries[i]?.price || '')),
+      [`${prefix}_views`]: Array.from({ length: totalSize }, (_, i) => String(filledEntries[i]?.views || '')),
+      [`${prefix}_ratings`]: Array.from({ length: totalSize }, (_, i) => String(filledEntries[i]?.rating || '')),
+    };
+  };
+  const normalizeBarterRow = (r: any) => ({
+    ...r,
+    month: r?.month || currentBarterMonth,
+    product_group_key: getBarterProductGroupKey(r),
+    product_group_name: getBarterProductGroupName(r),
+    product_ids: Array.isArray(r?.product_ids) && r.product_ids.length ? r.product_ids.map((id: any) => String(id || '')).filter(Boolean) : [String(r?.product_id || '')].filter(Boolean),
+    product_photos: Array.isArray(r?.product_photos) && r.product_photos.length ? r.product_photos.map((photo: any) => normalizeBarterPhotoUrl(photo)).filter(Boolean) : (normalizeBarterPhotoUrl(r?.product_photo || '') ? [normalizeBarterPhotoUrl(r?.product_photo || '')] : []),
+    product_variant_labels: Array.isArray(r?.product_variant_labels) && r.product_variant_labels.length ? r.product_variant_labels.map((label: any) => String(label || '')).filter(Boolean) : (getBarterVariantLabel(r) ? [getBarterVariantLabel(r)] : []),
+    barter_links: Array.isArray(r?.barter_links) ? (r.barter_links.length ? r.barter_links.map((v: any) => String(v || '')) : ['', '', '', '', '']) : ['', '', '', '', ''],
+    barter_dates: Array.isArray(r?.barter_dates) ? (r.barter_dates.length ? r.barter_dates.map((v: any) => String(v || '')) : Array((Array.isArray(r?.barter_links) ? r.barter_links.length : 5)).fill('')) : Array((Array.isArray(r?.barter_links) ? r.barter_links.length : 5)).fill(''),
+    barter_prices: Array.isArray(r?.barter_prices) ? (r.barter_prices.length ? r.barter_prices.map((v: any) => String(v || '')) : Array((Array.isArray(r?.barter_links) ? r.barter_links.length : 5)).fill('')) : Array((Array.isArray(r?.barter_links) ? r.barter_links.length : 5)).fill(''),
+    barter_views: Array.isArray(r?.barter_views) ? (r.barter_views.length ? r.barter_views.map((v: any) => String(v || '')) : Array((Array.isArray(r?.barter_links) ? r.barter_links.length : 5)).fill('')) : Array((Array.isArray(r?.barter_links) ? r.barter_links.length : 5)).fill(''),
+    barter_ratings: Array.isArray(r?.barter_ratings) ? Array.from({ length: (Array.isArray(r?.barter_links) ? r.barter_links.length : 5) }, (_, i) => String(r.barter_ratings?.[i] || '')) : Array((Array.isArray(r?.barter_links) ? r.barter_links.length : 5)).fill(''),
+    ad_links: Array.isArray(r?.ad_links) ? (r.ad_links.length ? r.ad_links.map((v: any) => String(v || '')) : ['', '']) : ['', ''],
+    ad_dates: Array.isArray(r?.ad_dates) ? (r.ad_dates.length ? r.ad_dates.map((v: any) => String(v || '')) : Array((Array.isArray(r?.ad_links) ? r.ad_links.length : 2)).fill('')) : Array((Array.isArray(r?.ad_links) ? r.ad_links.length : 2)).fill(''),
+    ad_prices: Array.isArray(r?.ad_prices) ? (r.ad_prices.length ? r.ad_prices.map((v: any) => String(v || '')) : Array((Array.isArray(r?.ad_links) ? r.ad_links.length : 2)).fill('')) : Array((Array.isArray(r?.ad_links) ? r.ad_links.length : 2)).fill(''),
+    ad_views: Array.isArray(r?.ad_views) ? (r.ad_views.length ? r.ad_views.map((v: any) => String(v || '')) : Array((Array.isArray(r?.ad_links) ? r.ad_links.length : 2)).fill('')) : Array((Array.isArray(r?.ad_links) ? r.ad_links.length : 2)).fill(''),
+    ad_ratings: Array.isArray(r?.ad_ratings) ? Array.from({ length: (Array.isArray(r?.ad_links) ? r.ad_links.length : 2) }, (_, i) => String(r.ad_ratings?.[i] || '')) : Array((Array.isArray(r?.ad_links) ? r.ad_links.length : 2)).fill(''),
+    product_variants_count: Math.max(Number(r?.product_variants_count || 0), Array.isArray(r?.product_ids) ? r.product_ids.length : 0, Array.isArray(r?.product_variant_labels) ? r.product_variant_labels.length : 0, 1),
+  });
+  const getBarterRowPersistKey = (row: any) => String(row?.id || `${row?.supplier_id || ''}:${row?.product_id || ''}:${row?.month || ''}:${row?.product_name || ''}`);
+  const getBarterRowPlanCount = (row: any, kind: 'barter' | 'ad') => {
+    const base = kind === 'barter' ? 5 : 2;
+    const links = row?.[kind === 'barter' ? 'barter_links' : 'ad_links'];
+    return Math.max(base, Array.isArray(links) ? links.length : 0);
+  };
+  const getBarterExtraStateFromRows = (rows: any[]) => {
+    const safeRows = rows || [];
+    return {
+      barterExtra: Math.max(0, ...safeRows.map((row: any) => getBarterRowPlanCount(row, 'barter') - 5)),
+      adExtra: Math.max(0, ...safeRows.map((row: any) => getBarterRowPlanCount(row, 'ad') - 2)),
+    };
+  };
+  const detectBarterCardsTable = async () => {
+    if (typeof barterCardsTableAvailableRef.current === 'boolean') return barterCardsTableAvailableRef.current;
+    const { error } = await supabase.from('barter_cards').select('id', { head: true, count: 'exact' }).limit(1);
+    const available = !error || !String(error?.message || '').toLowerCase().includes("could not find the table 'public.barter_cards'");
+    barterCardsTableAvailableRef.current = available;
+    return available;
+  };
+  const mapDbBarterCardToRow = (row: any) => normalizeBarterRow({
+    ...row,
+    product_photos: Array.isArray(row?.product_photos) ? row.product_photos : [],
+    product_ids: Array.isArray(row?.product_ids) ? row.product_ids : [],
+    product_variant_labels: Array.isArray(row?.product_variant_labels) ? row.product_variant_labels : [],
+  });
+  const mapBarterRowToDbCard = (row: any) => {
+    const normalized = normalizeBarterRow(row);
+    return {
+      id: String(normalized?.id || getSafeId()),
+      month: String(normalized?.month || currentBarterMonth),
+      supplier_id: String(normalized?.supplier_id || ''),
+      supplier_name: String(normalized?.supplier_name || 'Поставщик'),
+      product_id: String(normalized?.product_id || ''),
+      product_name: String(normalized?.product_name || ''),
+      product_photo: String(normalized?.product_photo || ''),
+      product_photos: Array.isArray(normalized?.product_photos) ? normalized.product_photos : [],
+      product_group_key: String(normalized?.product_group_key || ''),
+      product_group_name: String(normalized?.product_group_name || ''),
+      product_ids: Array.isArray(normalized?.product_ids) ? normalized.product_ids : [],
+      product_variant_labels: Array.isArray(normalized?.product_variant_labels) ? normalized.product_variant_labels : [],
+      product_variants_count: Number(normalized?.product_variants_count || 1),
+      barter_links: Array.isArray(normalized?.barter_links) ? normalized.barter_links : [],
+      barter_dates: Array.isArray(normalized?.barter_dates) ? normalized.barter_dates : [],
+      barter_prices: Array.isArray(normalized?.barter_prices) ? normalized.barter_prices : [],
+      barter_views: Array.isArray(normalized?.barter_views) ? normalized.barter_views : [],
+      barter_ratings: Array.isArray(normalized?.barter_ratings) ? normalized.barter_ratings : [],
+      ad_links: Array.isArray(normalized?.ad_links) ? normalized.ad_links : [],
+      ad_dates: Array.isArray(normalized?.ad_dates) ? normalized.ad_dates : [],
+      ad_prices: Array.isArray(normalized?.ad_prices) ? normalized.ad_prices : [],
+      ad_views: Array.isArray(normalized?.ad_views) ? normalized.ad_views : [],
+      ad_ratings: Array.isArray(normalized?.ad_ratings) ? normalized.ad_ratings : [],
+    };
+  };
+  const fetchBarterRowsFromTable = async () => {
+    const { data, error } = await supabase
+      .from('barter_cards')
+      .select('*')
+      .order('month', { ascending: true })
+      .limit(10000);
+    if (error) throw error;
+    return (data || []).map((row: any) => mapDbBarterCardToRow(row));
+  };
+  const mergeBarterRowsIntoSingle = (rows: any[], options?: { barterExtra?: number; adExtra?: number }) => {
+    const sourceRows = (rows || []).filter(Boolean);
+    if (!sourceRows.length) return null;
+    const base = sourceRows[0] || {};
+    const baseBarterSize = 5 + Number(options?.barterExtra ?? barterGlobalExtra ?? 0);
+    const baseAdSize = 2 + Number(options?.adExtra ?? adGlobalExtra ?? 0);
+    const productIds = Array.from(new Set(sourceRows.flatMap((row: any) => {
+      if (Array.isArray(row?.product_ids) && row.product_ids.length) return row.product_ids.map((id: any) => String(id || '')).filter(Boolean);
+      return [String(row?.product_id || '')].filter(Boolean);
+    })));
+    const variantLabels = Array.from(new Set(sourceRows.flatMap((row: any) => {
+      if (Array.isArray(row?.product_variant_labels) && row.product_variant_labels.length) return row.product_variant_labels.map((label: any) => String(label || '')).filter(Boolean);
+      const fallback = getBarterVariantLabel(row);
+      return fallback ? [fallback] : [];
+    })));
+    const productPhotos = Array.from(new Set(sourceRows.flatMap((row: any) => {
+      const photos = Array.isArray(row?.product_photos) && row.product_photos.length
+        ? row.product_photos
+        : [row?.product_photo];
+      return photos.map((photo: any) => normalizeBarterPhotoUrl(photo)).filter(Boolean);
+    })));
+    const productPhoto = productPhotos[0] || sourceRows.map((row: any) => normalizeBarterPhotoUrl(row?.product_photo || '')).find(Boolean) || '';
+    const uniqueNames = Array.from(new Set(sourceRows.map((row: any) => String(row?.product_name || getBarterProductGroupName(row) || '').trim()).filter(Boolean)));
+    const displayName = uniqueNames[0] || getBarterProductGroupName(base);
+    return {
+      ...base,
+      id: getSafeId(),
+      month: String(base?.month || currentBarterMonth),
+      supplier_id: String(base?.supplier_id || ''),
+      supplier_name: String(base?.supplier_name || 'Поставщик'),
+      product_id: String(productIds[0] || base?.product_id || ''),
+      product_name: displayName,
+      product_group_key: getBarterProductGroupKey(base),
+      product_group_name: displayName,
+      product_photo: productPhoto,
+      product_photos: productPhotos,
+      product_ids: productIds,
+      product_variant_labels: variantLabels,
+      product_variants_count: Math.max(sourceRows.length, productIds.length, variantLabels.length, 1),
+      ...mergeBarterSlotFields(sourceRows, 'barter', baseBarterSize),
+      ...mergeBarterSlotFields(sourceRows, 'ad', baseAdSize),
+    };
+  };
+
   // Cross-device/live sync: refresh relevant views when DB changes anywhere
   useEffect(() => {
     let refreshTimer: any = null;
@@ -6683,7 +7660,7 @@ export default function Dashboard() {
         if (activeTab === 'products') fetchProducts(selectedSupplierId || '');
         if (activeTab === 'supplies') fetchSuppliesList();
         if (activeTab === 'reception') fetchReceptions(receptionSupplierId);
-        if (activeTab === 'orders') fetchOrders();
+        if (activeTab === 'barters' && barterSelectedSupplierId) fetchBarterMoneyHistory(barterSelectedSupplierId);
         if (activeTab === 'reports') fetchReportsData();
         if (activeTab === 'trash') fetchTrashItems();
 
@@ -6709,7 +7686,8 @@ export default function Dashboard() {
       'work_logs',
       'work_rates',
       'temporary_workers_logs',
-      'app_settings'
+      'app_settings',
+      'supplier_marketing_money_log'
     ];
 
     const channel = supabase.channel('cross_device_live_sync');
@@ -6722,7 +7700,7 @@ export default function Dashboard() {
       if (refreshTimer) clearTimeout(refreshTimer);
       supabase.removeChannel(channel);
     };
-  }, [activeTab, selectedSupplierId, receptionSupplierId, currentSupply?.id, currentBox?.id]);
+  }, [activeTab, selectedSupplierId, receptionSupplierId, currentSupply?.id, currentBox?.id, barterSelectedSupplierId]);
 
   // Global Scan Listener for NEW_BOX
   useEffect(() => {
@@ -7039,10 +8017,34 @@ export default function Dashboard() {
             id: String(r?.id || `ext-ads-${idx}-${Date.now()}`),
             nickname: String(r?.nickname || ''),
             socialLinks: Array.isArray(r?.socialLinks) && r.socialLinks.length
-              ? r.socialLinks.map((s: any) => ({ url: String(s?.url || ''), followers: String(s?.followers || '') }))
-              : [{ url: '', followers: '' }],
+              ? r.socialLinks.map((s: any) => ({
+                  url: String(s?.url || ''),
+                  followers: String(s?.followers || ''),
+                  platform: String(s?.platform || parseExternalBloggerLink(String(s?.url || ''))?.platform || ''),
+                }))
+              : [{ url: '', followers: '', platform: '' }],
+            history: Array.isArray(r?.history)
+              ? r.history.map((h: any, historyIdx: number) => ({
+                  id: String(h?.id || `ext-ads-history-${idx}-${historyIdx}`),
+                  kind: String(h?.kind || 'barter') === 'ad' ? 'ad' : 'barter',
+                  supplier_id: String(h?.supplier_id || ''),
+                  supplier_name: String(h?.supplier_name || ''),
+                  product_id: String(h?.product_id || ''),
+                  product_name: String(h?.product_name || ''),
+                  month: String(h?.month || ''),
+                  url: String(h?.url || ''),
+                  normalizedUrl: String(h?.normalizedUrl || normalizeExternalUrl(String(h?.url || ''))),
+                  platform: String(h?.platform || parseExternalBloggerLink(String(h?.url || ''))?.platform || ''),
+                  date: String(h?.date || ''),
+                  price: String(h?.price || ''),
+                  views: String(h?.views || ''),
+                  rating: String(h?.rating || ''),
+                  createdAt: String(h?.createdAt || r?.createdAt || new Date().toISOString()),
+                }))
+              : [],
+            overallRating: String(r?.overallRating || ''),
             comment: String(r?.comment || ''),
-            status: String(r?.status || 'new'),
+            status: normalizeExternalAdsStatus(String(r?.status || 'new')),
             createdAt: String(r?.createdAt || new Date().toISOString()),
           })));
         }
@@ -7051,13 +8053,46 @@ export default function Dashboard() {
     loadExternalAdsBase();
   }, []);
 
-  const saveExternalAdsBase = async (rows: Array<{ id: string; nickname: string; socialLinks: Array<{ url: string; followers: string }>; comment: string; status: string; createdAt: string }>) => {
+  const saveExternalAdsBase = async (rows: ExternalAdsBaseEntry[]) => {
     try {
       setExternalAdsBaseSaving(true);
-      const payload = { rows };
+      const normalizedRows = (rows || []).map((row) => ({
+        ...row,
+        nickname: String(row?.nickname || '').trim(),
+        socialLinks: (row?.socialLinks || [])
+          .map((social) => ({
+            url: String(social?.url || '').trim(),
+            followers: String(social?.followers || '').trim(),
+            platform: String(social?.platform || parseExternalBloggerLink(String(social?.url || ''))?.platform || ''),
+          }))
+          .filter((social) => social.url || social.followers),
+        history: (row?.history || [])
+          .map((history) => ({
+            ...history,
+            id: String(history?.id || getSafeId()),
+            kind: String(history?.kind || 'barter') === 'ad' ? 'ad' : 'barter',
+            supplier_id: String(history?.supplier_id || ''),
+            supplier_name: String(history?.supplier_name || ''),
+            product_id: String(history?.product_id || ''),
+            product_name: String(history?.product_name || ''),
+            month: String(history?.month || ''),
+            url: String(history?.url || '').trim(),
+            normalizedUrl: String(history?.normalizedUrl || normalizeExternalUrl(String(history?.url || ''))),
+            platform: String(history?.platform || parseExternalBloggerLink(String(history?.url || ''))?.platform || ''),
+            date: String(history?.date || ''),
+            price: String(history?.price || ''),
+            views: String(history?.views || ''),
+            rating: String(history?.rating || ''),
+            createdAt: String(history?.createdAt || row?.createdAt || new Date().toISOString()),
+          }))
+          .sort((a, b) => String(b.date || b.createdAt || '').localeCompare(String(a.date || a.createdAt || ''))),
+        overallRating: String(row?.overallRating || '').trim(),
+        status: normalizeExternalAdsStatus(String(row?.status || 'new')),
+      }));
+      const payload = { rows: normalizedRows };
       const { error } = await supabase.from('app_settings').upsert([{ key: 'external_ads_base_v1', value: JSON.stringify(payload) }], { onConflict: 'key' });
       if (error) throw error;
-      setExternalAdsBase(rows);
+      setExternalAdsBase(normalizedRows);
       return true;
     } catch (e: any) {
       showToast('Ошибка сохранения базы внешней рекламы: ' + (e?.message || 'неизвестно'), 'error');
@@ -7069,9 +8104,27 @@ export default function Dashboard() {
 
   const filteredExternalAdsBase = useMemo(() => {
     const q = externalAdsBaseSearch.trim().toLowerCase();
-    let rows = !q ? [...(externalAdsBase || [])] : (externalAdsBase || []).filter((item) => {
-      const socialHay = (item.socialLinks || []).map((s) => `${s.url || ''} ${s.followers || ''}`).join(' ');
-      const hay = `${item.nickname || ''} ${item.comment || ''} ${item.status || ''} ${socialHay}`.toLowerCase();
+    const platformFilter = String(externalAdsBasePlatformFilter || 'all');
+    const supplierFilter = String(externalAdsBaseSupplierFilter || 'all');
+    let rows = (externalAdsBase || []).filter((item) => {
+      if (supplierFilter !== 'all') {
+        const hasSupplierMatch = (item.history || []).some((history) => String(history?.supplier_id || '') === supplierFilter);
+        if (!hasSupplierMatch) return false;
+      }
+      if (platformFilter === 'all') return true;
+      const socialPlatforms = (item.socialLinks || []).map((s) => String(s.platform || '').trim());
+      const historyPlatforms = (item.history || []).map((h) => String(h.platform || '').trim());
+      const allPlatforms = [...socialPlatforms, ...historyPlatforms].filter(Boolean);
+      if (platformFilter === 'other') {
+        return allPlatforms.some((platform) => !['Instagram', 'TikTok', 'Telegram', 'YouTube', 'VK', 'OK'].includes(platform));
+      }
+      return allPlatforms.includes(platformFilter);
+    });
+
+    rows = !q ? rows : rows.filter((item) => {
+      const socialHay = (item.socialLinks || []).map((s) => `${s.url || ''} ${s.followers || ''} ${s.platform || ''}`).join(' ');
+      const historyHay = (item.history || []).map((h) => `${h.supplier_name || ''} ${h.product_name || ''} ${h.url || ''} ${h.rating || ''} ${h.platform || ''}`).join(' ');
+      const hay = `${item.nickname || ''} ${item.comment || ''} ${item.status || ''} ${item.overallRating || ''} ${socialHay} ${historyHay}`.toLowerCase();
       return hay.includes(q);
     });
 
@@ -7085,7 +8138,196 @@ export default function Dashboard() {
     });
 
     return rows;
-  }, [externalAdsBase, externalAdsBaseSearch, externalAdsBaseSort]);
+  }, [externalAdsBase, externalAdsBasePlatformFilter, externalAdsBaseSearch, externalAdsBaseSort, externalAdsBaseSupplierFilter]);
+
+  const externalAdsBaseSupplierOptions = useMemo(() => {
+    const options = new Map<string, string>();
+    (suppliers || []).forEach((supplier: any) => {
+      const id = String(supplier?.id || '').trim();
+      if (!id) return;
+      options.set(id, String(supplier?.name || 'Поставщик'));
+    });
+    (externalAdsBase || []).forEach((item) => {
+      (item.history || []).forEach((history) => {
+        const id = String(history?.supplier_id || '').trim();
+        if (!id) return;
+        if (!options.has(id)) options.set(id, String(history?.supplier_name || 'Поставщик'));
+      });
+    });
+    return Array.from(options.entries())
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'ru'));
+  }, [externalAdsBase, suppliers]);
+
+  const externalAdsBaseHasActiveFilters = useMemo(() => {
+    return Boolean(externalAdsBaseSearch.trim()) || String(externalAdsBasePlatformFilter || 'all') !== 'all' || String(externalAdsBaseSupplierFilter || 'all') !== 'all';
+  }, [externalAdsBasePlatformFilter, externalAdsBaseSearch, externalAdsBaseSupplierFilter]);
+
+  const syncExternalAdsBaseFromBarterRows = async (sourceRowsInput: any[], options?: { showToast?: boolean; skipEmptyChecks?: boolean; successMessage?: string; emptyMessage?: string }) => {
+    const sourceRows = Array.isArray(sourceRowsInput) ? sourceRowsInput : [];
+    if (!sourceRows.length) {
+      if (!options?.skipEmptyChecks) showToast(options?.emptyMessage || 'Нет данных для синхронизации', 'error');
+      return { ok: false, created: 0, updated: 0, alreadyAdded: [] as string[] };
+    }
+
+    const nicknameMap = new Map<string, {
+      nickname: string;
+      links: Array<{ url: string; normalizedUrl: string; platform: string }>;
+      history: ExternalAdsHistoryItem[];
+    }>();
+
+    const appendEntry = (row: any, kind: 'barter' | 'ad', index: number, linkValue: string, dateValue: string, priceValue: string, viewsValue: string, ratingValue: string) => {
+      const parsed = parseExternalBloggerLink(linkValue);
+      if (!parsed) return;
+      const key = String(parsed.nickname || '').trim().toLowerCase();
+      if (!key) return;
+      const current = nicknameMap.get(key) || { nickname: parsed.nickname, links: [], history: [] };
+      if (!current.links.some((link) => link.normalizedUrl === parsed.normalizedUrl)) {
+        current.links.push({ url: parsed.url, normalizedUrl: parsed.normalizedUrl, platform: parsed.platform });
+      }
+      current.history.push({
+        id: `${kind}:${String(row?.id || getSafeId())}:${index}`,
+        kind,
+        supplier_id: String(row?.supplier_id || ''),
+        supplier_name: String(row?.supplier_name || ''),
+        product_id: String(row?.product_id || ''),
+        product_name: String(row?.product_name || ''),
+        month: String(row?.month || barterMonth || ''),
+        url: parsed.url,
+        normalizedUrl: parsed.normalizedUrl,
+        platform: parsed.platform,
+        date: String(dateValue || ''),
+        price: String(priceValue || ''),
+        views: String(viewsValue || ''),
+        rating: String(ratingValue || ''),
+        createdAt: new Date().toISOString(),
+      });
+      nicknameMap.set(key, current);
+    };
+
+    sourceRows.forEach((row: any) => {
+      (row?.barter_links || []).forEach((link: string, index: number) => appendEntry(row, 'barter', index, link, row?.barter_dates?.[index], row?.barter_prices?.[index], row?.barter_views?.[index], row?.barter_ratings?.[index]));
+      (row?.ad_links || []).forEach((link: string, index: number) => appendEntry(row, 'ad', index, link, row?.ad_dates?.[index], row?.ad_prices?.[index], row?.ad_views?.[index], row?.ad_ratings?.[index]));
+    });
+
+    if (!nicknameMap.size) {
+      if (!options?.skipEmptyChecks) showToast(options?.emptyMessage || 'Нет заполненных ссылок в бартере или рекламе', 'error');
+      return { ok: false, created: 0, updated: 0, alreadyAdded: [] as string[] };
+    }
+
+    const existingRows: ExternalAdsBaseEntry[] = [...(externalAdsBase || [])];
+    let created = 0;
+    let updated = 0;
+    const alreadyAddedNames: string[] = [];
+
+    nicknameMap.forEach((entry) => {
+      const matchIndex = existingRows.findIndex((item) => {
+        const sameNickname = String(item?.nickname || '').trim().toLowerCase() === String(entry.nickname || '').trim().toLowerCase();
+        const sameUrl = (item?.socialLinks || []).some((social) => {
+          const normalized = normalizeExternalUrl(String(social?.url || ''));
+          return entry.links.some((link) => link.normalizedUrl === normalized);
+        });
+        return sameNickname || sameUrl;
+      });
+
+      if (matchIndex >= 0) {
+        const current = existingRows[matchIndex];
+        const currentLinks = Array.isArray(current?.socialLinks) ? [...current.socialLinks] : [];
+        const currentHistory = Array.isArray(current?.history) ? [...current.history] : [];
+        let changed = false;
+
+        entry.links.forEach((link) => {
+          const currentLinkIndex = currentLinks.findIndex((social) => normalizeExternalUrl(String(social?.url || '')) === link.normalizedUrl);
+          if (currentLinkIndex >= 0) {
+            const nextPlatform = String(currentLinks[currentLinkIndex]?.platform || link.platform || '');
+            if (String(currentLinks[currentLinkIndex]?.platform || '') !== nextPlatform) {
+              currentLinks[currentLinkIndex] = { ...currentLinks[currentLinkIndex], platform: nextPlatform };
+              changed = true;
+            }
+            return;
+          }
+          currentLinks.push({ url: link.url, followers: '', platform: link.platform });
+          changed = true;
+        });
+
+        entry.history.forEach((historyItem) => {
+          const historyIndex = currentHistory.findIndex((item) => String(item.id) === String(historyItem.id));
+          if (historyIndex >= 0) {
+            const prevSerialized = JSON.stringify(currentHistory[historyIndex]);
+            const nextSerialized = JSON.stringify({ ...currentHistory[historyIndex], ...historyItem });
+            if (prevSerialized !== nextSerialized) {
+              currentHistory[historyIndex] = { ...currentHistory[historyIndex], ...historyItem };
+              changed = true;
+            }
+          } else {
+            currentHistory.unshift(historyItem);
+            changed = true;
+          }
+        });
+
+        if (changed) {
+          existingRows[matchIndex] = {
+            ...current,
+            socialLinks: currentLinks,
+            history: currentHistory.sort((a, b) => String(b.date || b.createdAt || '').localeCompare(String(a.date || a.createdAt || ''))),
+            comment: String(current?.comment || '').trim() ? current.comment : 'Автодобавлено из бартеров/рекламы',
+          };
+          updated += 1;
+        } else {
+          alreadyAddedNames.push(entry.nickname);
+        }
+        return;
+      }
+
+      existingRows.unshift({
+        id: `ext-ads-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        nickname: entry.nickname,
+        socialLinks: entry.links.map((link) => ({ url: link.url, followers: '', platform: link.platform })),
+        history: [...entry.history].sort((a, b) => String(b.date || b.createdAt || '').localeCompare(String(a.date || a.createdAt || ''))),
+        overallRating: '',
+        comment: 'Автодобавлено из бартеров/рекламы',
+        status: 'new',
+        createdAt: new Date().toISOString(),
+      });
+      created += 1;
+    });
+
+    const uniqueAlreadyAdded = Array.from(new Set(alreadyAddedNames.map((name) => String(name || '').trim()).filter(Boolean)));
+    if (!created && !updated) {
+      if (options?.showToast) {
+        const shortList = uniqueAlreadyAdded.slice(0, 6).join(', ');
+        showToast(uniqueAlreadyAdded.length ? `Уже были в базе: ${shortList}${uniqueAlreadyAdded.length > 6 ? ` и ещё ${uniqueAlreadyAdded.length - 6}` : ''}` : 'Все блогеры из ссылок уже есть в базе', 'info');
+      }
+      return { ok: true, created, updated, alreadyAdded: uniqueAlreadyAdded };
+    }
+
+    const ok = await saveExternalAdsBase(existingRows);
+    if (!ok) return { ok: false, created, updated, alreadyAdded: uniqueAlreadyAdded };
+
+    if (options?.showToast) {
+      const duplicateSuffix = uniqueAlreadyAdded.length
+        ? `. Уже были: ${uniqueAlreadyAdded.slice(0, 5).join(', ')}${uniqueAlreadyAdded.length > 5 ? ` и ещё ${uniqueAlreadyAdded.length - 5}` : ''}`
+        : '';
+      showToast(options?.successMessage || `База обновлена: добавлено ${created}, обновлено ${updated}${duplicateSuffix}`, 'success');
+    }
+
+    return { ok: true, created, updated, alreadyAdded: uniqueAlreadyAdded };
+  };
+
+  const importBloggersFromBarterLinks = async () => {
+    if (!barterTopSupplierId) {
+      showToast('Сначала выберите поставщика', 'error');
+      return;
+    }
+
+    const sourceRows = (monthRows || []).filter((row: any) => String(row?.supplier_id || '') === String(barterTopSupplierId));
+    if (!sourceRows.length) {
+      showToast('Нет карточек для выбранного поставщика и месяца', 'error');
+      return;
+    }
+
+    await syncExternalAdsBaseFromBarterRows(sourceRows, { showToast: true });
+  };
 
   const groupedAssemblyButtons = useMemo(() => {
     const q = String(assemblyAccessSearch || '').trim().toLowerCase();
@@ -7117,44 +8359,283 @@ export default function Dashboard() {
   useEffect(() => {
     const loadBarters = async () => {
       try {
-        const { data } = await supabase.from('app_settings').select('value').eq('key', 'barters_external_ads_v1').maybeSingle();
-        if (data?.value) {
-          const parsed = typeof data.value === 'string' ? JSON.parse(data.value) : data.value;
-          const rowsPayload = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.rows) ? parsed.rows : null);
-          if (rowsPayload) {
-            setBarterGlobalExtra(Number(parsed?.barterGlobalExtra || 0));
-            setAdGlobalExtra(Number(parsed?.adGlobalExtra || 0));
-            const normalized = rowsPayload.map((r: any) => ({
-              ...r,
-              month: r?.month || '2026-03',
-              barter_links: Array.isArray(r?.barter_links) ? (r.barter_links.length ? r.barter_links : ['', '', '', '', '']) : ['', '', '', '', ''],
-              barter_dates: Array.isArray(r?.barter_dates) ? (r.barter_dates.length ? r.barter_dates : Array((Array.isArray(r?.barter_links) ? r.barter_links.length : 5)).fill('')) : Array((Array.isArray(r?.barter_links) ? r.barter_links.length : 5)).fill(''),
-              barter_prices: Array.isArray(r?.barter_prices) ? (r.barter_prices.length ? r.barter_prices : Array((Array.isArray(r?.barter_links) ? r.barter_links.length : 5)).fill('')) : Array((Array.isArray(r?.barter_links) ? r.barter_links.length : 5)).fill(''),
-              barter_views: Array.isArray(r?.barter_views) ? (r.barter_views.length ? r.barter_views : Array((Array.isArray(r?.barter_links) ? r.barter_links.length : 5)).fill('')) : Array((Array.isArray(r?.barter_links) ? r.barter_links.length : 5)).fill(''),
-              ad_links: Array.isArray(r?.ad_links) ? (r.ad_links.length ? r.ad_links : ['', '']) : ['', ''],
-              ad_dates: Array.isArray(r?.ad_dates) ? (r.ad_dates.length ? r.ad_dates : Array((Array.isArray(r?.ad_links) ? r.ad_links.length : 2)).fill('')) : Array((Array.isArray(r?.ad_links) ? r.ad_links.length : 2)).fill(''),
-              ad_prices: Array.isArray(r?.ad_prices) ? (r.ad_prices.length ? r.ad_prices : Array((Array.isArray(r?.ad_links) ? r.ad_links.length : 2)).fill('')) : Array((Array.isArray(r?.ad_links) ? r.ad_links.length : 2)).fill(''),
-              ad_views: Array.isArray(r?.ad_views) ? (r.ad_views.length ? r.ad_views : Array((Array.isArray(r?.ad_links) ? r.ad_links.length : 2)).fill('')) : Array((Array.isArray(r?.ad_links) ? r.ad_links.length : 2)).fill(''),
-            }));
-            setBarterRows(normalized);
-            setBarterDbReady(true);
-            return;
-          }
+        const hasTableStorage = await detectBarterCardsTable();
+        if (!hasTableStorage) {
+          console.error('barter_cards table is not available');
+          setBarterRows([]);
+          setBarterDbReady(true);
+          return;
         }
 
-      } catch {}
+        const tableRows = await fetchBarterRowsFromTable();
+        const nextExtra = getBarterExtraStateFromRows(tableRows);
+        setBarterGlobalExtra(nextExtra.barterExtra);
+        setAdGlobalExtra(nextExtra.adExtra);
+        setBarterRows(tableRows);
+      } catch (e) {
+        console.error('loadBarters error:', e);
+      }
       setBarterDbReady(true);
     };
     loadBarters();
   }, []);
 
+  const loadBarterMoneyHistoryFromSettings = async (supplierId: string) => {
+    const { data, error } = await supabase
+      .from('app_settings')
+      .select('value')
+      .eq('key', 'supplier_marketing_money_log_v1')
+      .maybeSingle();
+
+    if (error) throw error;
+
+    let parsed: Record<string, any[]> = {};
+    try {
+      parsed = data?.value ? JSON.parse(String(data.value)) : {};
+    } catch {
+      parsed = {};
+    }
+
+    const supplierRows = Array.isArray(parsed?.[supplierId]) ? parsed[supplierId] : [];
+    const normalized = supplierRows.map((row: any) => ({
+      id: String(row?.id || getSafeId()),
+      supplier_id: String(row?.supplier_id || supplierId),
+      amount: Number(row?.amount || 0),
+      comment: String(row?.comment || ''),
+      created_at: String(row?.created_at || ''),
+    })).sort((a: any, b: any) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+
+    setBarterMoneyHistory(normalized);
+    return { parsed, normalized };
+  };
+
+  const saveBarterMoneyHistoryToSettings = async (supplierId: string, rows: Array<{ id: string; supplier_id: string; amount: number; comment: string; created_at: string }>) => {
+    const { data, error } = await supabase
+      .from('app_settings')
+      .select('value')
+      .eq('key', 'supplier_marketing_money_log_v1')
+      .maybeSingle();
+
+    if (error) throw error;
+
+    let parsed: Record<string, any[]> = {};
+    try {
+      parsed = data?.value ? JSON.parse(String(data.value)) : {};
+    } catch {
+      parsed = {};
+    }
+
+    const normalized = rows
+      .map((row) => ({
+        id: String(row.id || getSafeId()),
+        supplier_id: String(row.supplier_id || supplierId),
+        amount: Number(row.amount || 0),
+        comment: String(row.comment || ''),
+        created_at: String(row.created_at || new Date().toISOString()),
+      }))
+      .filter((row) => Number.isFinite(Number(row.amount || 0)) && Number(row.amount || 0) !== 0)
+      .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+
+    const nextPayload = { ...parsed, [supplierId]: normalized };
+    const { error: upsertError } = await supabase
+      .from('app_settings')
+      .upsert([{ key: 'supplier_marketing_money_log_v1', value: JSON.stringify(nextPayload) }], { onConflict: 'key' });
+
+    if (upsertError) throw upsertError;
+
+    setBarterMoneyHistory(normalized);
+  };
+
+  const fetchBarterMoneyHistory = async (supplierId?: string) => {
+    const targetSupplierId = String(supplierId || barterSelectedSupplierId || '').trim();
+    if (!targetSupplierId) {
+      setBarterMoneyHistory([]);
+      return;
+    }
+
+    setBarterMoneyLoading(true);
+    const { data, error } = await supabase
+      .from('supplier_marketing_money_log')
+      .select('id, supplier_id, amount, comment, created_at')
+      .eq('supplier_id', targetSupplierId)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      if (/relation .* does not exist|schema cache/i.test(String(error.message || ''))) {
+        try {
+          await loadBarterMoneyHistoryFromSettings(targetSupplierId);
+        } catch (settingsError: any) {
+          showToast('Ошибка загрузки баланса поставщика: ' + (settingsError?.message || 'неизвестно'), 'error');
+          setBarterMoneyHistory([]);
+        }
+      } else {
+        console.error('fetchBarterMoneyHistory error:', error);
+        showToast('Ошибка загрузки баланса поставщика: ' + (error.message || 'неизвестно'), 'error');
+        setBarterMoneyHistory([]);
+      }
+      setBarterMoneyLoading(false);
+      return;
+    }
+
+    setBarterMoneyHistory(Array.isArray(data) ? data.map((row: any) => ({
+      id: String(row.id),
+      supplier_id: String(row.supplier_id || targetSupplierId),
+      amount: Number(row.amount || 0),
+      comment: String(row.comment || ''),
+      created_at: String(row.created_at || ''),
+    })) : []);
+    setBarterMoneyLoading(false);
+  };
+
+  const handleAddBarterMoneyOperation = async (mode: 'add' | 'writeoff') => {
+    if (!barterSelectedSupplierId) {
+      showToast('Сначала выберите поставщика', 'error');
+      return;
+    }
+
+    const amount = Math.abs(Number(barterMoneyForm.amount || 0));
+    if (!Number.isFinite(amount) || amount === 0) {
+      showToast('Введите сумму', 'error');
+      return;
+    }
+
+    if (mode === 'writeoff' && barterMoneyBalance < amount) {
+      showToast('Недостаточно денег на балансе поставщика', 'error');
+      return;
+    }
+
+    try {
+      setBarterMoneySaving(true);
+      const payload = {
+        supplier_id: barterSelectedSupplierId,
+        amount: mode === 'add' ? amount : -amount,
+        comment: barterMoneyForm.comment.trim(),
+      };
+
+      const { error } = await supabase.from('supplier_marketing_money_log').insert([payload]);
+
+      if (error) {
+        if (/relation .* does not exist|schema cache/i.test(String(error.message || ''))) {
+          const nextRow = {
+            id: getSafeId(),
+            supplier_id: barterSelectedSupplierId,
+            amount: Number(payload.amount || 0),
+            comment: String(payload.comment || ''),
+            created_at: new Date().toISOString(),
+          };
+          await saveBarterMoneyHistoryToSettings(barterSelectedSupplierId, [nextRow, ...(barterMoneyHistory || [])]);
+        } else {
+          throw error;
+        }
+      } else {
+        await fetchBarterMoneyHistory(barterSelectedSupplierId);
+      }
+
+      setBarterMoneyForm({ amount: '', comment: '' });
+      showToast(mode === 'add' ? 'Баланс пополнен' : 'Списание сохранено', 'success');
+    } catch (e: any) {
+      showToast('Ошибка сохранения операции: ' + (e?.message || 'неизвестно'), 'error');
+    } finally {
+      setBarterMoneySaving(false);
+    }
+  };
+
+  const handleDeleteBarterMoneyOperation = (row: { id: string }) => {
+    openConfirmModal(
+      'Удалить операцию?',
+      'Запись будет удалена из баланса поставщика. Продолжить?',
+      async () => {
+        try {
+          const { error } = await supabase.from('supplier_marketing_money_log').delete().eq('id', row.id);
+          if (error) {
+            if (/relation .* does not exist|schema cache/i.test(String(error.message || ''))) {
+              await saveBarterMoneyHistoryToSettings(
+                barterSelectedSupplierId,
+                (barterMoneyHistory || []).filter((item) => String(item.id) !== String(row.id))
+              );
+            } else {
+              showToast('Ошибка удаления операции: ' + (error.message || 'неизвестно'), 'error');
+              return;
+            }
+          } else {
+            await fetchBarterMoneyHistory(barterSelectedSupplierId);
+          }
+
+          showToast('Операция удалена', 'success');
+        } finally {
+          setConfirmModal(prev => ({ ...prev, isOpen: false }));
+        }
+      }
+    );
+  };
+
+  useEffect(() => {
+    if (activeTab !== 'barters' || barterSection !== 'barters_main') return;
+    if (!barterSelectedSupplierId) {
+      setBarterMoneyHistory([]);
+      return;
+    }
+
+    fetchBarterMoneyHistory(barterSelectedSupplierId);
+  }, [activeTab, barterSection, barterSelectedSupplierId]);
+
+  const persistBarterRowsForSupplier = async (rowsInput: any[], currentSupplierId: string, options?: { removedIds?: string[]; successMessage?: string; refreshFromDb?: boolean }) => {
+    const normalizedSupplierId = String(currentSupplierId || '').trim();
+    if (!normalizedSupplierId) throw new Error('Сначала выберите поставщика');
+
+    const localRows = (rowsInput || []).map((row: any) => normalizeBarterRow(row));
+    const hasTableStorage = await detectBarterCardsTable();
+    if (!hasTableStorage) throw new Error('Таблица barter_cards недоступна');
+
+    const supplierRows = localRows.filter((row: any) => String(row?.supplier_id || '') === normalizedSupplierId);
+    const removedIds = (options?.removedIds || []).map((id) => String(id || '')).filter(Boolean);
+    const shouldRefreshFromDb = options?.refreshFromDb !== false;
+
+    if (removedIds.length) {
+      const { error: deleteError } = await supabase
+        .from('barter_cards')
+        .delete()
+        .eq('supplier_id', normalizedSupplierId)
+        .in('id', removedIds);
+      if (deleteError) throw deleteError;
+    }
+
+    if (supplierRows.length) {
+      const { error: upsertError } = await supabase
+        .from('barter_cards')
+        .upsert(supplierRows.map((row: any) => mapBarterRowToDbCard(row)), { onConflict: 'id' });
+      if (upsertError) throw upsertError;
+    }
+
+    if (shouldRefreshFromDb) {
+      const refreshedRows = await fetchBarterRowsFromTable();
+      const nextExtra = getBarterExtraStateFromRows(refreshedRows);
+      setBarterGlobalExtra(nextExtra.barterExtra);
+      setAdGlobalExtra(nextExtra.adExtra);
+      setBarterRows(refreshedRows as any);
+      setBarterExplicitlyRemovedIds([]);
+      await syncExternalAdsBaseFromBarterRows(refreshedRows || [], { showToast: false, skipEmptyChecks: true });
+      if (options?.successMessage) showToast(options.successMessage, 'success');
+      return refreshedRows;
+    }
+
+    await syncExternalAdsBaseFromBarterRows(localRows || [], { showToast: false, skipEmptyChecks: true });
+    if (options?.successMessage) showToast(options.successMessage, 'success');
+    return localRows;
+  };
+
   const saveBartersToDb = async () => {
+    const currentSupplierId = String(barterTopSupplierId || barterSupplierId || '').trim();
+    if (!currentSupplierId) {
+      showToast('Сначала выберите поставщика', 'error');
+      return;
+    }
     try {
       setBarterSaving(true);
-      const payload = { rows: barterRows || [], barterGlobalExtra, adGlobalExtra };
-      const { error } = await supabase.from('app_settings').upsert([{ key: 'barters_external_ads_v1', value: JSON.stringify(payload) }], { onConflict: 'key' });
-      if (error) throw error;
-      showToast('Сохранено', 'success');
+      await persistBarterRowsForSupplier(barterRows || [], currentSupplierId, {
+        removedIds: barterExplicitlyRemovedIds,
+        successMessage: 'Сохранено в отдельные записи БД',
+      });
     } catch (e: any) {
       showToast('Ошибка сохранения: ' + (e?.message || 'неизвестно'), 'error');
     } finally {
@@ -7253,14 +8734,19 @@ export default function Dashboard() {
           const p = r?.product_json || {};
           const nm = String(p?.nmID || p?.nmId || p?.nm_id || '');
           const vendorCode = String(p?.vendorCode || p?.article || '');
+          const title = String(p?.title || p?.name || '');
+          const supplierArticle = String(p?.supplierArticle || '');
           return {
             id: String(r?.nm_id || `${barterSupplierId}-${nm || vendorCode || idx}`),
             supplier_id: String(barterSupplierId),
-            name: String(p?.title || p?.name || ''),
-            title: String(p?.title || p?.name || ''),
+            name: title,
+            title,
             nmID: nm,
             vendorCode,
-            supplierArticle: String(p?.supplierArticle || ''),
+            supplierArticle,
+            groupKey: getBarterProductGroupKey({ title, supplierArticle, vendorCode, id: r?.nm_id || nm || vendorCode || idx }),
+            groupName: title || vendorCode || supplierArticle || String(r?.nm_id || ''),
+            variantLabel: vendorCode || supplierArticle || nm,
             wb_sku: String(p?.vendorCode || ''),
             photos: Array.isArray(p?.photos) ? p.photos : [],
             photoUrl: String(p?.photos?.[0]?.big || p?.photos?.[0]?.tm || ''),
@@ -7353,11 +8839,15 @@ export default function Dashboard() {
       let updated = 0;
       setBarterRows((prev) => (prev || []).map((r: any) => {
         if (String(r?.month || '') !== String(barterMonth)) return r;
-        const key = `${String(r?.supplier_id || '')}__${String(r?.product_id || '')}`;
-        const src = photoByKey[key] || '';
-        if (src && src !== r.product_photo) {
+        const productIds = Array.isArray(r?.product_ids) && r.product_ids.length ? r.product_ids.map((id: any) => String(id || '')).filter(Boolean) : [String(r?.product_id || '')].filter(Boolean);
+        const nextPhotos = Array.from(new Set(productIds.map((id: string) => photoByKey[`${String(r?.supplier_id || '')}__${id}`] || '').filter(Boolean)));
+        const fallback = normalizeBarterPhotoUrl(r?.product_photo || '');
+        if (fallback && !nextPhotos.length) nextPhotos.push(fallback);
+        const prevPhotos = Array.isArray(r?.product_photos) ? r.product_photos.map((photo: any) => normalizeBarterPhotoUrl(photo)).filter(Boolean) : (fallback ? [fallback] : []);
+        const nextPrimary = nextPhotos[0] || fallback;
+        if (nextPrimary !== fallback || nextPhotos.join('|') !== prevPhotos.join('|')) {
           updated += 1;
-          return { ...r, product_photo: src };
+          return { ...r, product_photo: nextPrimary, product_photos: nextPhotos };
         }
         return r;
       }));
@@ -7377,24 +8867,106 @@ export default function Dashboard() {
   }, [barterMonth]);
 
   const monthRows = useMemo(() => {
+    if (!barterTopSupplierId) return [];
     return (barterRows || []).filter((r: any) => {
       if (String(r?.month || '') !== String(barterMonth)) return false;
-      if (barterTopSupplierId && String(r?.supplier_id || '') !== String(barterTopSupplierId)) return false;
+      if (String(r?.supplier_id || '') !== String(barterTopSupplierId)) return false;
       return true;
     });
   }, [barterRows, barterMonth, barterTopSupplierId]);
 
   useEffect(() => {
+    setBarterMergeSelectedIds((prev) => prev.filter((id) => (monthRows || []).some((row: any) => String(row?.id || '') === String(id))));
+  }, [monthRows]);
+
+  useEffect(() => {
     if (!barterTopSupplierId) return;
-    const months = Array.from(new Set((barterRows || [])
-      .filter((r: any) => String(r?.supplier_id || '') === String(barterTopSupplierId))
-      .map((r: any) => String(r?.month || ''))
-      .filter(Boolean)))
-      .sort();
-    if (months.length && !months.includes(barterMonth)) {
-      setBarterMonth(months[months.length - 1]);
+    setBarterMonth(currentBarterMonth);
+    setBarterMonthYear(currentBarterYear);
+    setBarterDuplicateModal((prev) => ({ ...prev, targetMonth: currentBarterMonth }));
+    setBarterMergeMode(false);
+    setBarterMergeSelectedIds([]);
+    setBarterExplicitlyRemovedIds([]);
+  }, [barterTopSupplierId]);
+
+  const mergeSelectedBarterCards = async () => {
+    const selectedSet = new Set((barterMergeSelectedIds || []).map((id) => String(id)));
+    const selectedRows = (monthRows || []).filter((row: any) => selectedSet.has(String(row?.id || '')));
+    if (selectedRows.length < 2) {
+      showToast('Выбери минимум 2 карточки для объединения', 'error');
+      return;
     }
-  }, [barterTopSupplierId, barterRows, barterMonth]);
+    const mergedRow = mergeBarterRowsIntoSingle(selectedRows);
+    if (!mergedRow) {
+      showToast('Не удалось объединить карточки', 'error');
+      return;
+    }
+
+    const currentSupplierId = String(selectedRows[0]?.supplier_id || barterTopSupplierId || barterSupplierId || '').trim();
+    if (!currentSupplierId) {
+      showToast('Сначала выберите поставщика', 'error');
+      return;
+    }
+
+    const prevRows = barterRows || [];
+    const prevRemovedIds = barterExplicitlyRemovedIds || [];
+    const firstIndex = prevRows.findIndex((row: any) => selectedSet.has(String(row?.id || '')));
+    const nextRows = prevRows.filter((row: any) => !selectedSet.has(String(row?.id || '')));
+    nextRows.splice(firstIndex >= 0 ? firstIndex : nextRows.length, 0, mergedRow as any);
+    const nextRemovedIds = Array.from(new Set([...(prevRemovedIds || []), ...Array.from(selectedSet)]));
+
+    setBarterRows(nextRows as any);
+    setBarterExplicitlyRemovedIds(nextRemovedIds);
+    setBarterMergeMode(false);
+    setBarterMergeSelectedIds([]);
+
+    try {
+      setBarterSaving(true);
+      await persistBarterRowsForSupplier(nextRows, currentSupplierId, {
+        removedIds: nextRemovedIds,
+        successMessage: 'Карточка создана',
+      });
+    } catch (e: any) {
+      setBarterRows(prevRows as any);
+      setBarterExplicitlyRemovedIds(prevRemovedIds);
+      setBarterMergeMode(true);
+      setBarterMergeSelectedIds(Array.from(selectedSet));
+      showToast('Не удалось автосохранить объединение: ' + (e?.message || 'неизвестно'), 'error');
+    } finally {
+      setBarterSaving(false);
+    }
+  };
+
+  const deleteBarterRow = async (row: any) => {
+    const currentSupplierId = String(row?.supplier_id || barterTopSupplierId || barterSupplierId || '').trim();
+    if (!currentSupplierId) {
+      showToast('Сначала выберите поставщика', 'error');
+      return;
+    }
+
+    const prevRows = barterRows || [];
+    const prevRemovedIds = barterExplicitlyRemovedIds || [];
+    const rowPersistKey = getBarterRowPersistKey(row);
+    const nextRows = prevRows.filter((x: any) => String(x?.id || '') !== String(row?.id || ''));
+    const nextRemovedIds = Array.from(new Set([...(prevRemovedIds || []), rowPersistKey]));
+
+    setBarterRows(nextRows as any);
+    setBarterExplicitlyRemovedIds(nextRemovedIds);
+
+    try {
+      setBarterSaving(true);
+      await persistBarterRowsForSupplier(nextRows, currentSupplierId, {
+        removedIds: nextRemovedIds,
+        successMessage: 'Карточка удалена',
+      });
+    } catch (e: any) {
+      setBarterRows(prevRows as any);
+      setBarterExplicitlyRemovedIds(prevRemovedIds);
+      showToast('Не удалось автосохранить удаление: ' + (e?.message || 'неизвестно'), 'error');
+    } finally {
+      setBarterSaving(false);
+    }
+  };
 
   const monthStats = useMemo(() => {
     const rows = monthRows || [];
@@ -7402,47 +8974,176 @@ export default function Dashboard() {
     const adDone = rows.reduce((s: number, r: any) => s + (r?.ad_links || []).filter((x: string) => String(x || '').trim()).length, 0);
     const barterCost = rows.reduce((sum: number, r: any) => sum + (r?.barter_prices || []).reduce((acc: number, v: string) => acc + (parseFloat(String(v || '0')) || 0), 0), 0);
     const adCost = rows.reduce((sum: number, r: any) => sum + (r?.ad_prices || []).reduce((acc: number, v: string) => acc + (parseFloat(String(v || '0')) || 0), 0), 0);
-    const barterTotal = rows.length * (5 + barterGlobalExtra);
-    const adTotal = rows.length * (2 + adGlobalExtra);
+    const barterTotal = rows.reduce((sum: number, r: any) => sum + getBarterRowPlanCount(r, 'barter'), 0);
+    const adTotal = rows.reduce((sum: number, r: any) => sum + getBarterRowPlanCount(r, 'ad'), 0);
     const planDone = barterDone + adDone;
     const planTotal = barterTotal + adTotal;
     const planPercent = planTotal > 0 ? Math.round((planDone / planTotal) * 100) : 0;
     return { cards: rows.length, barterDone, barterTotal, adDone, adTotal, barterCost, adCost, planDone, planTotal, planPercent };
-  }, [monthRows, barterGlobalExtra, adGlobalExtra]);
+  }, [monthRows]);
 
-  const addSelectedBarterProducts = () => {
+  const closeBarterAddModal = (options?: { resetSelection?: boolean }) => {
+    setBarterModalOpen(false);
+    setBarterCreateMergedCard(false);
+    if (options?.resetSelection) {
+      setBarterCheckedProductIds([]);
+      setBarterProductSearch('');
+    }
+  };
+
+  const openBarterPreviewGallery = (images: string[], startIndex = 0) => {
+    const safeImages = (images || []).map((src) => String(src || '').trim()).filter(Boolean);
+    if (!safeImages.length) return;
+    const normalizedIndex = Math.max(0, Math.min(startIndex, safeImages.length - 1));
+    setBarterPreviewGallery({ images: safeImages, index: normalizedIndex, closing: false, closeMode: 'fade' });
+  };
+
+  const closeBarterPreviewGallery = (mode: 'fade' | 'down' = 'fade') => {
+    setBarterPreviewGallery((prev) => {
+      if (!prev || prev.closing) return prev;
+      return { ...prev, closing: true, closeMode: mode };
+    });
+    window.setTimeout(() => {
+      setBarterPreviewGallery((prev) => prev?.closing ? null : prev);
+    }, 180);
+  };
+
+  const showPreviousBarterPreviewImage = () => {
+    setBarterPreviewGallery((prev) => prev ? ({ ...prev, index: prev.index > 0 ? prev.index - 1 : prev.images.length - 1, closing: false }) : prev);
+  };
+
+  const showNextBarterPreviewImage = () => {
+    setBarterPreviewGallery((prev) => prev ? ({ ...prev, index: prev.index < prev.images.length - 1 ? prev.index + 1 : 0, closing: false }) : prev);
+  };
+
+  const scheduleBarterRowsAutosave = (rowsInput: any[], supplierIdInput?: string, changedRowIds?: string[]) => {
+    const targetSupplierId = String(supplierIdInput || barterTopSupplierId || barterSupplierId || '').trim();
+    if (!targetSupplierId) return;
+    const safeChangedIds = Array.from(new Set((changedRowIds || []).map((id) => String(id || '')).filter(Boolean)));
+    if (safeChangedIds.length) {
+      setBarterCardSaveState((prev) => ({
+        ...(prev || {}),
+        ...Object.fromEntries(safeChangedIds.map((id) => [id, 'saving']))
+      }));
+    }
+    if (barterAutosaveTimeoutRef.current) window.clearTimeout(barterAutosaveTimeoutRef.current);
+    barterAutosaveTimeoutRef.current = window.setTimeout(async () => {
+      try {
+        setBarterSaving(true);
+        await persistBarterRowsForSupplier(rowsInput, targetSupplierId, { refreshFromDb: false });
+        if (safeChangedIds.length) {
+          setBarterCardSaveState((prev) => ({
+            ...(prev || {}),
+            ...Object.fromEntries(safeChangedIds.map((id) => [id, 'saved']))
+          }));
+          window.setTimeout(() => {
+            setBarterCardSaveState((prev) => {
+              const next = { ...(prev || {}) };
+              safeChangedIds.forEach((id) => {
+                if (next[id] === 'saved') delete next[id];
+              });
+              return next;
+            });
+          }, 2200);
+        }
+      } catch (e: any) {
+        if (safeChangedIds.length) {
+          setBarterCardSaveState((prev) => ({
+            ...(prev || {}),
+            ...Object.fromEntries(safeChangedIds.map((id) => [id, 'error']))
+          }));
+        }
+        showToast('Не удалось автосохранить правки: ' + (e?.message || 'неизвестно'), 'error');
+      } finally {
+        setBarterSaving(false);
+        barterAutosaveTimeoutRef.current = null;
+      }
+    }, 700);
+  };
+
+  const applyBarterRowsEdit = (nextRows: any[], supplierIdInput?: string, changedRowIds?: string[]) => {
+    setBarterRows(nextRows as any);
+    scheduleBarterRowsAutosave(nextRows, supplierIdInput, changedRowIds);
+  };
+
+  const addSelectedBarterProducts = async () => {
+    const currentSupplierId = String(barterSupplierId || barterTopSupplierId || '').trim();
     const selectedMap = new Map((barterCatalogProducts || []).map((p: any) => [String(p.id), p]));
-    const supplier = suppliers.find((s: any) => String(s.id) === String(barterSupplierId));
+    const supplier = suppliers.find((s: any) => String(s.id) === String(currentSupplierId));
     const newRows = barterCheckedProductIds
       .map((pid) => selectedMap.get(String(pid)))
       .filter(Boolean)
       .map((p: any) => ({
         id: getSafeId(),
         month: barterMonth,
-        supplier_id: String(p.supplier_id || barterSupplierId || ''),
-        supplier_name: String(suppliers.find((s: any) => String(s.id) === String(p.supplier_id || barterSupplierId))?.name || supplier?.name || 'Поставщик'),
+        supplier_id: String(p.supplier_id || currentSupplierId || ''),
+        supplier_name: String(suppliers.find((s: any) => String(s.id) === String(p.supplier_id || currentSupplierId))?.name || supplier?.name || 'Поставщик'),
         product_id: String(p.id),
         product_name: String(p.name || p.title || p.wb_sku || p.barcode || p.id),
+        product_group_key: String(p.groupKey || getBarterProductGroupKey(p)),
+        product_group_name: String(p.groupName || getBarterProductGroupName(p)),
+        product_ids: [String(p.id)],
+        product_photos: [String(p?.photoUrl || p?.photos?.[0]?.big || p?.photos?.[0]?.tm || '')].map((photo) => normalizeBarterPhotoUrl(photo)).filter(Boolean),
+        product_variant_labels: getBarterVariantLabel(p) ? [getBarterVariantLabel(p)] : [],
+        product_variants_count: 1,
         product_photo: String(p?.photoUrl || p?.photos?.[0]?.big || p?.photos?.[0]?.tm || ''),
         barter_links: Array(5 + barterGlobalExtra).fill(''),
         barter_dates: Array(5 + barterGlobalExtra).fill(''),
         barter_prices: Array(5 + barterGlobalExtra).fill(''),
         barter_views: Array(5 + barterGlobalExtra).fill(''),
+        barter_ratings: Array(5 + barterGlobalExtra).fill(''),
         ad_links: Array(2 + adGlobalExtra).fill(''),
         ad_dates: Array(2 + adGlobalExtra).fill(''),
         ad_prices: Array(2 + adGlobalExtra).fill(''),
         ad_views: Array(2 + adGlobalExtra).fill(''),
+        ad_ratings: Array(2 + adGlobalExtra).fill(''),
       }));
 
-    setBarterRows((prev) => {
-      const exists = new Set((prev || []).map((r) => `${r.supplier_id}__${r.product_id}__${r.month}`));
-      const append = newRows.filter((r) => !exists.has(`${r.supplier_id}__${r.product_id}__${r.month}`));
-      return [...(prev || []), ...append];
-    });
+    const prevRows = barterRows || [];
+    const append = newRows.filter((r) => !prevRows.some((x: any) => {
+      if (String(x?.month || '') !== String(r.month)) return false;
+      if (String(x?.supplier_id || '') !== String(r.supplier_id)) return false;
+      const ids = Array.isArray(x?.product_ids) && x.product_ids.length
+        ? x.product_ids.map((id: any) => String(id || '')).filter(Boolean)
+        : [String(x?.product_id || '')].filter(Boolean);
+      return ids.includes(String(r.product_id || ''));
+    }));
 
-    setBarterCheckedProductIds([]);
-    setBarterProductSearch('');
-    setBarterModalOpen(false);
+    let mergedCreated = false;
+    let nextRows = [...prevRows];
+    if (barterCreateMergedCard && append.length >= 2) {
+      const mergedRow = mergeBarterRowsIntoSingle(append, { barterExtra: 0, adExtra: 0 });
+      if (mergedRow) {
+        mergedCreated = true;
+        nextRows = [...prevRows, mergedRow as any];
+      } else {
+        nextRows = [...prevRows, ...append];
+      }
+    } else {
+      nextRows = [...prevRows, ...append];
+    }
+
+    setBarterRows(nextRows as any);
+    closeBarterAddModal({ resetSelection: true });
+
+    if (newRows.length > 0 && append.length === 0) {
+      showToast('Все выбранные товары уже есть в карточках этого месяца', 'info');
+      return;
+    }
+
+    if (!append.length) return;
+
+    try {
+      setBarterSaving(true);
+      await persistBarterRowsForSupplier(nextRows, currentSupplierId, {
+        successMessage: 'Карточка создана',
+      });
+    } catch (e: any) {
+      setBarterRows(nextRows as any);
+      showToast('Карточки добавлены локально, но автосохранение не удалось: ' + (e?.message || 'неизвестно'), 'error');
+    } finally {
+      setBarterSaving(false);
+    }
   };
 
   const filteredActivityLogs = useMemo(() => {
@@ -7560,10 +9261,13 @@ export default function Dashboard() {
             : `Ваш постоянный QR код для входа (без срока действия).`);
           formData.append('document', pdfBlob, 'QR_для_входа.pdf');
 
-          await fetch(`https://api.telegram.org/bot8525065676:AAF-cjwf1EvT56-TkALsbN1D0JAYR3Gqozo/sendDocument`, {
-            method: 'POST',
-            body: formData
-          });
+          const token = String((telegramBotTokenFile || telegramBotToken || '').trim());
+          if (token) {
+            await fetch(`https://api.telegram.org/bot${token}/sendDocument`, {
+              method: 'POST',
+              body: formData
+            });
+          }
       }
   };
 
@@ -7751,45 +9455,233 @@ export default function Dashboard() {
     return <File className="h-6 w-6 text-gray-400" />;
   };
 
+  const waitForDatabaseBackupRetry = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  const runDatabaseBackupQuery = async <T,>(factory: () => Promise<T>, attempts = 4): Promise<T> => {
+    let lastError: any = null;
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      try {
+        return await factory();
+      } catch (error: any) {
+        lastError = error;
+        const message = String(error?.message || error || '');
+        const isTransient = /fetch failed|statement timeout|web server is down|error code 521|timeout/i.test(message.toLowerCase());
+        if (!isTransient || attempt === attempts) throw error;
+        await waitForDatabaseBackupRetry(attempt * 1500);
+      }
+    }
+    throw lastError;
+  };
+
+  const parseDatabaseLogsValue = (value: any) => {
+    if (!value) return [] as Array<{ version: string; date: string; details: string; created_at?: string; status?: string; source?: string; file_name?: string }>;
+    try {
+      const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const loadDatabaseBackupMeta = async (showSuccessToast = false) => {
+    setDatabaseLogsLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('app_settings')
+        .select('key, value')
+        .in('key', ['database_backup_logs', 'database_backup_schedule'])
+        .limit(20);
+
+      if (error) throw error;
+
+      const logsSetting = (data || []).find((row: any) => row.key === 'database_backup_logs');
+      const scheduleSetting = (data || []).find((row: any) => row.key === 'database_backup_schedule');
+      const parsedLogs = parseDatabaseLogsValue(logsSetting?.value);
+      setDatabaseLogs(parsedLogs);
+
+      if (scheduleSetting?.value) {
+        const value = typeof scheduleSetting.value === 'string' ? scheduleSetting.value : JSON.stringify(scheduleSetting.value);
+        setDatabaseBackupScheduleLabel(value || 'Ежедневно в 09:00 (Europe/Moscow)');
+      } else {
+        setDatabaseBackupScheduleLabel('Ежедневно в 09:00 (Europe/Moscow)');
+      }
+
+      if (showSuccessToast) showToast('История обновлена', 'success');
+    } catch (e) {
+      console.error('Failed to load database backup meta', e);
+      showToast('Ошибка обновления истории', 'error');
+    } finally {
+      setDatabaseLogsLoading(false);
+    }
+  };
+
   const refreshDatabaseLogs = async () => {
-    const { data } = await supabase.from('app_settings').select('*').eq('key', 'database_backup_logs').maybeSingle();
-    if (data) {
-        try {
-            const parsed = typeof data.value === 'string' ? JSON.parse(data.value) : data.value;
-            if (Array.isArray(parsed)) {
-                setDatabaseLogs(parsed);
-                showToast('История обновлена', 'success');
-            }
-        } catch (e) {
-            console.error('Failed to parse database logs', e);
-            showToast('Ошибка обновления истории', 'error');
+    await loadDatabaseBackupMeta(true);
+  };
+
+  const fetchAllRowsForDatabaseBackup = async (table: string) => {
+    const pageSizeByTable: Record<string, number> = {
+      activity_logs: 200,
+      analytics_upload_reports_raw: 3,
+      products: 200,
+      receptions: 100,
+      unified_honest_sign_codes: 200,
+      wb_products_cache: 200,
+      work_logs: 200,
+    };
+    const pageSize = pageSizeByTable[table] || 500;
+    const rows: any[] = [];
+
+    if (table === 'app_settings' || table === 'wb_products_cache') {
+      let from = 0;
+      while (true) {
+        const to = from + pageSize - 1;
+        const { data, error } = await runDatabaseBackupQuery(() => supabase.from(table).select('*').range(from, to));
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+        rows.push(...data);
+        if (data.length < pageSize) break;
+        from += pageSize;
+      }
+      return rows;
+    }
+
+    let lastId: string | null = null;
+    while (true) {
+      let query = supabase.from(table).select('*').order('id', { ascending: true }).limit(pageSize);
+      if (lastId) query = query.gt('id', lastId);
+      const { data, error } = await runDatabaseBackupQuery(() => query);
+      if (error) {
+        if (String(error.message || '').includes('does not exist')) {
+          let from = rows.length;
+          while (true) {
+            const to = from + pageSize - 1;
+            const fallback = await runDatabaseBackupQuery(() => supabase.from(table).select('*').range(from, to));
+            if (fallback.error) throw fallback.error;
+            if (!fallback.data || fallback.data.length === 0) break;
+            rows.push(...fallback.data);
+            if (fallback.data.length < pageSize) break;
+            from += pageSize;
+          }
+          break;
         }
-    } else {
-        // If no logs found, maybe fetch all settings to be sure?
-        // Or just do nothing
+        throw error;
+      }
+      if (!data || data.length === 0) break;
+      rows.push(...data);
+      if (data.length < pageSize) break;
+      lastId = String(data[data.length - 1]?.id || '');
+      if (!lastId) break;
+    }
+
+    return rows;
+  };
+
+  const buildDatabaseBackupFileName = (prefix = 'database_backup_full') => {
+    const now = new Date();
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
+    const hh = String(now.getHours()).padStart(2, '0');
+    const mi = String(now.getMinutes()).padStart(2, '0');
+    const ss = String(now.getSeconds()).padStart(2, '0');
+    return `${prefix}_${yyyy}-${mm}-${dd}_${hh}-${mi}-${ss}.json`;
+  };
+
+  const downloadDatabaseBackupBlob = (payload: any, fileName: string) => {
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = fileName;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const appendDatabaseBackupLog = async (entry: { version: string; date: string; details: string; created_at?: string; status?: string; source?: string; file_name?: string }) => {
+    const { data, error } = await supabase
+      .from('app_settings')
+      .select('value')
+      .eq('key', 'database_backup_logs')
+      .maybeSingle();
+
+    if (error) throw error;
+
+    const currentLogs = parseDatabaseLogsValue(data?.value);
+    const updatedLogs = [entry, ...currentLogs].slice(0, 200);
+
+    const { error: upsertError } = await supabase.from('app_settings').upsert({
+      key: 'database_backup_logs',
+      value: JSON.stringify(updatedLogs),
+    });
+
+    if (upsertError) throw upsertError;
+    setDatabaseLogs(updatedLogs);
+  };
+
+  const createFullDatabaseBackupSnapshot = async () => {
+    const startedAt = new Date();
+    const dbData: Record<string, any[]> = {};
+    const summary: Array<{ table: string; rows: number; status: string }> = [];
+
+    for (const table of DATABASE_BACKUP_TABLES) {
+      try {
+        const rows = await fetchAllRowsForDatabaseBackup(table);
+        dbData[table] = rows;
+        summary.push({ table, rows: rows.length, status: 'ok' });
+      } catch (e: any) {
+        dbData[table] = [];
+        summary.push({ table, rows: 0, status: `error: ${e?.message || 'unknown'}` });
+      }
+    }
+
+    const totalRows = summary.reduce((acc, row) => acc + Number(row.rows || 0), 0);
+    return {
+      generated_at: startedAt.toISOString(),
+      source: 'dashboard_manual',
+      summary,
+      total_tables: DATABASE_BACKUP_TABLES.length,
+      total_rows: totalRows,
+      data: dbData,
+    };
+  };
+
+  const handleCreateDatabaseBackup = async () => {
+    setDatabaseBackupLoading(true);
+    try {
+      const payload = await createFullDatabaseBackupSnapshot();
+      const fileName = buildDatabaseBackupFileName('database_backup_manual');
+      downloadDatabaseBackupBlob(payload, fileName);
+
+      await appendDatabaseBackupLog({
+        version: `Backup ${new Date().toLocaleString('ru-RU')}`,
+        date: new Date().toLocaleDateString('ru-RU'),
+        details: `Ручной полный бэкап БД. Таблиц: ${payload.total_tables}, строк: ${payload.total_rows}, файл: ${fileName}`,
+        created_at: new Date().toISOString(),
+        status: 'success',
+        source: 'dashboard_manual',
+        file_name: fileName,
+      });
+
+      showToast(`Полный бэкап создан, таблиц: ${payload.total_tables}, строк: ${payload.total_rows}`, 'success');
+    } catch (e: any) {
+      showToast('Ошибка создания бэкапа: ' + (e?.message || 'неизвестно'), 'error');
+    } finally {
+      setDatabaseBackupLoading(false);
     }
   };
 
   const handleDownloadDatabase = async () => {
-    const tables = ['suppliers', 'products', 'supplies', 'boxes', 'supply_items', 'employees'];
-    const dbData: any = {};
-
+    setDatabaseDownloadLoading(true);
     try {
-      for (const table of tables) {
-        const { data } = await supabase.from(table).select('*');
-        dbData[table] = data || [];
-      }
-
-      const blob = new Blob([JSON.stringify(dbData, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `database_backup_${new Date().toISOString().split('T')[0]}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-      showToast('База данных успешно скачана', 'success');
+      const payload = await createFullDatabaseBackupSnapshot();
+      const fileName = buildDatabaseBackupFileName('database_export');
+      downloadDatabaseBackupBlob(payload, fileName);
+      showToast(`База данных скачана, таблиц: ${payload.total_tables}, строк: ${payload.total_rows}`, 'success');
     } catch (e: any) {
-      showToast('Ошибка скачивания базы: ' + e.message, 'error');
+      showToast('Ошибка скачивания базы: ' + (e?.message || 'неизвестно'), 'error');
+    } finally {
+      setDatabaseDownloadLoading(false);
     }
   };
 
@@ -10512,13 +12404,16 @@ export default function Dashboard() {
 
   useEffect(() => {
     // Lazy-load data by active tab to reduce startup memory/load spikes.
-    if (activeTab === 'orders') fetchOrders();
     if (activeTab === 'reports') fetchReportsData();
     if (activeTab === 'employees' || activeTab === 'warehouse') fetchEmployees();
     if (activeTab === 'trash') fetchTrashItems();
     if (activeTab === 'reception') fetchReceptions();
     if (activeTab === 'completed') {
-      supabase.from('work_rates').select('*').is('deleted_at', null).then(({ data }) => setCwWorkRates(data || []));
+      (async () => {
+        const { data: rates } = await supabase.from('work_rates').select('*').is('deleted_at', null);
+        setCwWorkRates(rates || []);
+        await loadCwWorkRateEmployeePrices(rates || []);
+      })();
       supabase.from('packaging_rates').select('*').is('deleted_at', null).then(({ data }) => setCwPackagingRates(data || []));
     }
   }, [activeTab]);
@@ -10711,7 +12606,6 @@ export default function Dashboard() {
       fetchSuppliesList();
       fetchReceptions();
       fetchEmployees();
-      fetchOrders();
     }
   };
 
@@ -11893,8 +13787,7 @@ export default function Dashboard() {
         const dateKey = String(log.date || '').split('T')[0];
         if (!dateKey) return;
 
-        const rate = cwWorkRates.find(r => String(r.id) === String(log.work_rate_id));
-        const price = Number(rate?.price || 0);
+        const price = Number(getWorkLogSnapshotPrice(log) || 0);
         const quantity = Number(log.quantity || 0);
         const sum = Math.round(quantity * price);
 
@@ -12522,7 +14415,7 @@ export default function Dashboard() {
                             </button>
                           </div>
 
-                          <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                          <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
                             <div className="rounded-2xl border border-white/10 bg-white/10 p-4 backdrop-blur">
                               <div className="text-xs text-slate-300">Коробки в текущей сессии</div>
                               <div className="mt-2 text-3xl font-semibold">{offlineFboSession?.boxes?.length || 0}</div>
@@ -12530,6 +14423,10 @@ export default function Dashboard() {
                             <div className="rounded-2xl border border-white/10 bg-white/10 p-4 backdrop-blur">
                               <div className="text-xs text-slate-300">Сканы ЧЗ</div>
                               <div className="mt-2 text-3xl font-semibold">{offlineFboSession?.items?.length || 0}</div>
+                            </div>
+                            <div className="rounded-2xl border border-white/10 bg-white/10 p-4 backdrop-blur">
+                              <div className="text-xs text-slate-300">Старт коробок</div>
+                              <div className="mt-2 text-sm font-medium text-white">после {offlineFboSession?.base_box_number || 0}</div>
                             </div>
                             <div className="rounded-2xl border border-white/10 bg-white/10 p-4 backdrop-blur">
                               <div className="text-xs text-slate-300">Последнее обновление</div>
@@ -12724,9 +14621,10 @@ export default function Dashboard() {
                                 </div>
                               </div>
                               <div className="p-5">
-                                <div className="grid grid-cols-3 gap-3">
+                                <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
                                   <div className="rounded-2xl bg-slate-50 px-3 py-3"><div className="text-[11px] text-slate-500">Коробки</div><div className="mt-1 text-lg font-semibold text-slate-900">{session.boxes?.length || 0}</div></div>
                                   <div className="rounded-2xl bg-slate-50 px-3 py-3"><div className="text-[11px] text-slate-500">Сканы</div><div className="mt-1 text-lg font-semibold text-slate-900">{session.items?.length || 0}</div></div>
+                                  <div className="rounded-2xl bg-slate-50 px-3 py-3"><div className="text-[11px] text-slate-500">Старт коробок</div><div className="mt-1 text-sm font-semibold text-slate-900">после {session.base_box_number || 0}</div></div>
                                   <div className="rounded-2xl bg-slate-50 px-3 py-3"><div className="text-[11px] text-slate-500">Статус</div><div className="mt-1 text-sm font-semibold text-amber-600">Не синхронизировано</div></div>
                                 </div>
                                 <div className="mt-4 space-y-2">
@@ -12763,12 +14661,38 @@ export default function Dashboard() {
                 <div className="max-w-2xl mx-auto">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4">
                     <div className="flex items-center">
-                      <button onClick={() => setSupplyStep('SUPPLY')} className="mr-4 text-gray-400 hover:text-gray-600"><ArrowLeft className="h-6 w-6" /></button>
+                      <button onClick={() => { finishCurrentBoxAndReturn().catch(() => undefined); }} className="mr-4 text-gray-400 hover:text-gray-600"><ArrowLeft className="h-6 w-6" /></button>
                       <div>
                         <h1 className="text-xl font-bold text-gray-900">Коробка {currentBox.name}</h1>
                         <p className="text-gray-500 text-sm">Сканируйте товары для добавления</p>
                         {fboOfflineMode && <div className="mt-2 inline-flex items-center px-2 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-medium">Оффлайн • локально на устройстве через IndexedDB</div>}
                       </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button onClick={finishCurrentBoxAndReturn} className="inline-flex items-center rounded-xl bg-white px-4 py-2 text-sm font-medium text-slate-700 border border-slate-200 hover:bg-slate-50">
+                        <Undo2 className="mr-2 h-4 w-4" /> Завершить коробку
+                      </button>
+                      <button onClick={() => createNextBoxInCurrentSupply()} className="inline-flex items-center rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700">
+                        <Plus className="mr-2 h-4 w-4" /> Следующая коробка
+                      </button>
+                      <button onClick={() => setShowNewBoxQR(true)} className="inline-flex items-center rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800">
+                        <QrCode className="mr-2 h-4 w-4" /> QR новая коробка
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="mb-4 grid gap-3 sm:grid-cols-3">
+                    <div className="rounded-xl border border-gray-200 bg-white px-4 py-3">
+                      <div className="text-xs text-gray-500">Текущая коробка</div>
+                      <div className="mt-1 text-lg font-semibold text-gray-900">{currentBox.name}</div>
+                    </div>
+                    <div className="rounded-xl border border-gray-200 bg-white px-4 py-3">
+                      <div className="text-xs text-gray-500">Сканов в коробке</div>
+                      <div className="mt-1 text-lg font-semibold text-gray-900">{boxItems.length}</div>
+                    </div>
+                    <div className="rounded-xl border border-gray-200 bg-white px-4 py-3">
+                      <div className="text-xs text-gray-500">Режим</div>
+                      <div className="mt-1 text-sm font-semibold text-gray-900">{fboOfflineMode ? 'Оффлайн, можно работать без сети' : 'Онлайн, запись идёт в базу'}</div>
                     </div>
                   </div>
 
@@ -12807,11 +14731,18 @@ export default function Dashboard() {
                     ) : (
                       <div className="divide-y divide-gray-100">
                         {boxItems.map(item => (
-                          <div key={item.id} className="p-3 flex justify-between items-center">
-                            <div>
+                          <div key={item.id} className="p-3 flex items-center justify-between gap-3">
+                            <div className="min-w-0 flex-1">
                               <div className="font-medium text-gray-900">{item.product?.name || 'Unknown'}</div>
-                              <div className="text-xs text-gray-500">{item.honest_sign_code}</div>
+                              <div className="text-xs text-gray-500 break-all">{item.honest_sign_code}</div>
                             </div>
+                            <button
+                              onClick={() => handleDeleteSupplyItem(String(item.id || ''))}
+                              className="rounded-lg p-2 text-gray-400 hover:bg-red-50 hover:text-red-600"
+                              title="Удалить скан"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
                           </div>
                         ))}
                       </div>
@@ -12830,6 +14761,14 @@ export default function Dashboard() {
                         <p className="text-gray-500 text-sm">Сканируйте товары для добавления</p>
                         {fboOfflineMode && <div className="mt-2 inline-flex items-center px-2 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-medium">Оффлайн • сканы хранятся на устройстве, запись в БД по кнопке</div>}
                       </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button onClick={finishCurrentBoxAndReturn} className="inline-flex items-center rounded-xl bg-white px-4 py-2 text-sm font-medium text-slate-700 border border-slate-200 hover:bg-slate-50">
+                        <Undo2 className="mr-2 h-4 w-4" /> Завершить коробку
+                      </button>
+                      <button onClick={() => createNextBoxInCurrentSupply()} className="inline-flex items-center rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700">
+                        <Plus className="mr-2 h-4 w-4" /> Следующая коробка
+                      </button>
                     </div>
                   </div>
 
@@ -13041,9 +14980,8 @@ export default function Dashboard() {
                       e.preventDefault();
                       if (modalScanInput.trim() === 'ACTION:NEW_BOX' || modalScanInput.includes('NEW_BOX')) {
                         setShowNewBoxQR(false);
-                        setSupplyStep('SUPPLY');
-                        setCurrentBox(null);
                         setModalScanInput('');
+                        finishCurrentBoxAndReturn();
                       }
                     }}>
                       <input
@@ -13122,244 +15060,9 @@ export default function Dashboard() {
 
           {/* ORDERS TAB */}
           {activeTab === 'orders' && (
-            <div className="bg-white border border-gray-200 rounded-xl shadow-sm flex flex-col h-[calc(100vh-6rem)] overflow-hidden">
-              <div className="p-4 border-b border-gray-200 bg-white z-10 flex flex-col gap-4 oc-filterbar">
-                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                <div>
-                  <h1 className="text-2xl font-bold text-gray-900">Заказ товара</h1>
-                  <p className="text-gray-500 mt-1">Управление заказами поставщикам</p>
-                </div>
-                <div className="flex gap-2 w-full md:w-auto">
-                    <div className="flex bg-gray-100 p-1 rounded-lg mr-2">
-                        <div className="px-3 py-1 rounded-md text-sm font-medium bg-white shadow text-gray-900">
-                            Локальные
-                        </div>
-                    </div>
-                    <select
-                      value={orderSupplierFilter}
-                      onChange={(e) => setOrderSupplierFilter(e.target.value)}
-                      className="p-2 bg-white border border-gray-200 rounded-lg outline-none shadow-sm flex-1 md:w-64"
-                    >
-                      <option value="">Все поставщики</option>
-                      {suppliers.map(s => (
-                        <option key={s.id} value={s.name}>{s.name}</option>
-                      ))}
-                    </select>
-                    <button
-                      onClick={() => {
-                        if (orderSupplierFilter) {
-                          setNewOrder(prev => ({ ...prev, supplier_name: orderSupplierFilter }));
-                        }
-                        setShowNewOrderModal(true);
-                      }}
-                      className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center justify-center whitespace-nowrap"
-                    >
-                      <Plus className="h-5 w-5 mr-2" />
-                      Новый заказ
-                    </button>
-                </div>
-              </div>
-              </div>
-              <div className="flex-1 overflow-y-auto p-4 relative">
-
-              {ordersMode === 'wb' ? (
-                <div className="oc-card">
-                    {wbOrdersLoading ? (
-                        <div className="p-8 text-center text-gray-500">Загрузка заказов WB...</div>
-                    ) : wbOrders.length === 0 ? (
-                        <div className="p-8 text-center text-gray-500">
-                            {orderSupplierFilter ? 'Нет заказов WB для выбранного поставщика' : 'Выберите поставщика для загрузки заказов WB'}
-                        </div>
-                    ) : (
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-left">
-                                <thead>
-                                    <tr className="bg-gray-50 border-b border-gray-100">
-                                        <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">ID</th>
-                                        <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Дата</th>
-                                        <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Склад</th>
-                                        <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Статус</th>
-                                        <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Цена</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-100">
-                                    {wbOrders.map((order: any) => (
-                                        <tr key={order.id} className="hover:bg-gray-50">
-                                            <td className="px-6 py-4 text-gray-900">{order.id}</td>
-                                            <td className="px-6 py-4 text-gray-600">{new Date(order.createdAt).toLocaleString()}</td>
-                                            <td className="px-6 py-4 text-gray-600">{order.warehouseId}</td>
-                                            <td className="px-6 py-4 text-gray-600">
-                                                <span className="px-2 py-1 text-xs font-medium rounded-full bg-blue-100 text-blue-800">
-                                                    Новый
-                                                </span>
-                                            </td>
-                                            <td className="px-6 py-4 text-gray-600">{order.price / 100} ₽</td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                    )}
-                </div>
-              ) : (
-              <>
-              {/* Stats Infographic */}
-              {(() => {
-                const filteredOrders = orderSupplierFilter
-                  ? orders.filter(o => o.supplier_name === orderSupplierFilter)
-                  : orders;
-
-                const totalCost = filteredOrders.reduce((sum, o) => sum + (o.quantity * o.unit_cost), 0);
-                const totalPaid = filteredOrders.reduce((sum, o) => sum + (o.paid_amount || 0), 0);
-                const balance = totalPaid - totalCost;
-
-                return (
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                    <div className="bg-white/95 backdrop-blur p-6 rounded-2xl shadow-lg border border-slate-200">
-                      <div className="text-sm text-gray-500 mb-1">Общая стоимость заказов</div>
-                      <div className="text-2xl font-bold text-gray-900">{totalCost.toLocaleString('ru-RU')} ₽</div>
-                    </div>
-                    <div className="bg-white/95 backdrop-blur p-6 rounded-2xl shadow-lg border border-slate-200">
-                      <div className="text-sm text-gray-500 mb-1">Оплачено</div>
-                      <div className="text-2xl font-bold text-green-600">{totalPaid.toLocaleString('ru-RU')} ₽</div>
-                    </div>
-                    <div className="bg-white/95 backdrop-blur p-6 rounded-2xl shadow-lg border border-slate-200">
-                      <div className="text-sm text-gray-500 mb-1">Баланс (Долг)</div>
-                      <div className={`text-2xl font-bold ${balance < 0 ? 'text-red-600' : 'text-green-600'}`}>
-                        {balance.toLocaleString('ru-RU')} ₽
-                      </div>
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {(() => {
-                const filteredOrders = orderSupplierFilter
-                  ? orders.filter(o => o.supplier_name === orderSupplierFilter)
-                  : orders;
-
-                if (filteredOrders.length === 0) {
-                    return (
-                        <div className="oc-card p-8 text-center">
-                          <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                            <ShoppingCart className="h-8 w-8 text-gray-400" />
-                          </div>
-                          <h3 className="text-lg font-medium text-gray-900 mb-2">Список заказов пуст</h3>
-                          <p className="text-gray-500 mb-6">
-                            {orderSupplierFilter ? 'Нет заказов от выбранного поставщика' : 'Создайте первый заказ, чтобы начать отслеживание'}
-                          </p>
-                          <button
-                            onClick={() => {
-                              if (orderSupplierFilter) {
-                                setNewOrder(prev => ({ ...prev, supplier_name: orderSupplierFilter }));
-                              }
-                              setShowNewOrderModal(true);
-                            }}
-                            className="text-indigo-600 font-medium hover:text-indigo-800"
-                          >
-                            Создать заказ
-                          </button>
-                        </div>
-                    );
-                }
-
-                return (
-                    <div className="oc-card">
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-left">
-                          <thead>
-                            <tr className="bg-gray-50 border-b border-gray-100">
-                              <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Товар</th>
-                              <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Кол-во</th>
-                              <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Цена/ед</th>
-                              <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Поставщик</th>
-                              <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Страна</th>
-                              <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Доставка</th>
-                              <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Оплачено</th>
-                              <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Статус</th>
-                              <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Дата</th>
-                              <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Дата вып.</th>
-                              <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase text-right">Действия</th>
-                              <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase w-10"></th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-gray-100">
-                            {filteredOrders.map((order) => (
-                              <tr key={order.id} className="hover:bg-gray-50">
-                                <td className="px-6 py-4 font-medium text-gray-900">{order.product_name}</td>
-                                <td className="px-6 py-4 text-gray-600">{order.quantity}</td>
-                                <td className="px-6 py-4 text-gray-600 whitespace-nowrap">{order.unit_cost} ₽</td>
-                                <td className="px-6 py-4 text-gray-600">{order.supplier_name || '-'}</td>
-                                <td className="px-6 py-4 text-gray-600">{order.country || '-'}</td>
-                                <td className="px-6 py-4 text-gray-600 whitespace-nowrap">{order.delivery_cost} ₽</td>
-                                <td className="px-6 py-4 text-gray-600 whitespace-nowrap">{order.paid_amount || 0} ₽</td>
-                                <td className="px-6 py-4">
-                                  <span className={`px-2 py-1 text-xs font-medium rounded-full ${
-                                    order.status === 'completed' ? 'bg-green-100 text-green-800' :
-                                    order.status === 'in_progress' ? 'bg-blue-100 text-blue-800' :
-                                    'bg-gray-100 text-gray-800'
-                                  }`}>
-                                    {order.status === 'completed' ? 'Выполнен' :
-                                     order.status === 'in_progress' ? 'В работе' :
-                                     order.status === 'new' ? 'В работе' : order.status}
-                                  </span>
-                                </td>
-                                <td className="px-6 py-4 text-gray-600 text-sm">
-                                  {new Date(order.created_at).toLocaleDateString()}
-                                </td>
-                                <td className="px-6 py-4 text-gray-600 text-sm">
-                                  {order.completed_at ? new Date(order.completed_at).toLocaleDateString() : '-'}
-                                </td>
-                                <td className="px-6 py-4 text-right">
-                                    <button
-                                        onClick={() => {
-                                            setEditingOrder(order);
-                                            setNewOrder({
-                                                product_name: order.product_name,
-                                                quantity: String(order.quantity),
-                                                unit_cost: String(order.unit_cost),
-                                                supplier_name: order.supplier_name || '',
-                                                country: order.country || '',
-                                                delivery_cost: String(order.delivery_cost),
-                                                paid_amount: String(order.paid_amount || ''),
-                                                photo: null
-                                            });
-                                            setShowNewOrderModal(true);
-                                        }}
-                                        className="p-1.5 text-blue-500 hover:bg-blue-50 rounded-lg transition-colors"
-                                        title="Редактировать"
-                                    >
-                                        <Pencil className="h-4 w-4" />
-                                    </button>
-                                    <button
-                                        onClick={() => handleDeleteOrder(order)}
-                                        className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                                        title="Удалить"
-                                    >
-                                        <Trash2 className="h-4 w-4" />
-                                    </button>
-                                </td>
-                                <td className="px-6 py-4">
-                                    <input
-                                      type="checkbox"
-                                      checked={order.status === 'completed'}
-                                      onChange={(e) => handleToggleOrderStatus(order, e.target.checked)}
-                                      className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded cursor-pointer"
-                                      title="Отметить как выполненный"
-                                    />
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                );
-              })()}
-              </>
-              )}
-              </div>
-            </div>
+            <React.Suspense fallback={<div className="p-4 text-sm text-gray-500">Загрузка раздела заказа товара...</div>}>
+              <WBSupplyManager suppliers={suppliers} embeddedTab="supply_order" initialTab="supply_order" />
+            </React.Suspense>
           )}
 
           {activeTab === 'reception' && (
@@ -13895,144 +15598,6 @@ export default function Dashboard() {
             </div>
           )}
 
-          {/* New Order Modal */}
-          {showNewOrderModal && (
-            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto">
-              <div className="bg-white rounded-xl p-6 w-full max-w-lg my-8">
-                <div className="flex justify-between items-center mb-6">
-                  <h2 className="text-xl font-bold">{editingOrder ? 'Редактировать заказ' : 'Новый заказ'}</h2>
-                  <button onClick={() => { setShowNewOrderModal(false); setEditingOrder(null); }} className="text-gray-400 hover:text-gray-600">
-                    <X className="h-6 w-6" />
-                  </button>
-                </div>
-
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Товар</label>
-                    <input
-                      type="text"
-                      value={newOrder.product_name}
-                      onChange={(e) => setNewOrder({...newOrder, product_name: e.target.value})}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                      placeholder="Название товара"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Количество</label>
-                      <input
-                        type="number"
-                        value={newOrder.quantity}
-                        onChange={(e) => setNewOrder({...newOrder, quantity: e.target.value})}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                        placeholder="0"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Стоимость за ед.</label>
-                      <input
-                        type="number"
-                        value={newOrder.unit_cost}
-                        onChange={(e) => setNewOrder({...newOrder, unit_cost: e.target.value})}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                        placeholder="0.00"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Фото товара</label>
-                    <div className="flex items-center space-x-4">
-                      <button
-                        onClick={() => orderFileInputRef.current?.click()}
-                        className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 flex items-center text-sm font-medium text-gray-700"
-                      >
-                        <Camera className="h-4 w-4 mr-2" />
-                        {newOrder.photo ? 'Изменить фото' : 'Добавить фото'}
-                      </button>
-                      {newOrder.photo ? (
-                        <span className="text-sm text-gray-600 truncate max-w-[200px]">{newOrder.photo.name}</span>
-                      ) : editingOrder?.photo_url ? (
-                        <a href={editingOrder.photo_url} target="_blank" rel="noopener noreferrer" className="text-sm text-indigo-600 hover:underline">Посмотреть текущее</a>
-                      ) : null}
-                      <input
-                        ref={orderFileInputRef}
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={(e) => {
-                          if (e.target.files && e.target.files[0]) {
-                            setNewOrder({...newOrder, photo: e.target.files[0]});
-                          }
-                        }}
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Поставщик (у кого заказан)</label>
-                    <input
-                      type="text"
-                      value={newOrder.supplier_name}
-                      onChange={(e) => setNewOrder({...newOrder, supplier_name: e.target.value})}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                      placeholder="Имя поставщика"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Страна заказа</label>
-                      <input
-                        type="text"
-                        value={newOrder.country}
-                        onChange={(e) => setNewOrder({...newOrder, country: e.target.value})}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                        placeholder="Например: Китай"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Стоимость доставки</label>
-                      <input
-                        type="number"
-                        value={newOrder.delivery_cost}
-                        onChange={(e) => setNewOrder({...newOrder, delivery_cost: e.target.value})}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                        placeholder="0.00"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Оплачено поставщику</label>
-                      <input
-                        type="number"
-                        value={newOrder.paid_amount}
-                        onChange={(e) => setNewOrder({...newOrder, paid_amount: e.target.value})}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                        placeholder="0.00"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="pt-4 flex space-x-3">
-                    <button
-                      onClick={() => { setShowNewOrderModal(false); setEditingOrder(null); }}
-                      className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-medium"
-                    >
-                      Отмена
-                    </button>
-                    <button
-                      onClick={editingOrder ? handleUpdateOrder : handleCreateOrder}
-                      className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium"
-                    >
-                      {editingOrder ? 'Сохранить' : 'Создать заказ'}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
           {/* WAREHOUSE TAB */}
           {activeTab === 'warehouse' && (
             <React.Suspense fallback={<div className="p-4 text-sm text-gray-500">Загрузка склада...</div>}>
@@ -14301,146 +15866,206 @@ export default function Dashboard() {
                   <div className="text-base font-bold text-slate-900">Бартеры / Внешняя реклама</div>
                   <div className="text-xs text-slate-500 mt-1">Основной подраздел для товаров, бартерных размещений, внешней рекламы и месячной аналитики.</div>
                 </div>
-                <div className="mt-3 flex flex-wrap items-center gap-2">
-                  <select value={barterTopSupplierId} onChange={(e) => setBarterTopSupplierId(e.target.value)} className="oc-select min-w-[240px]">
-                    <option value="">Сначала выберите поставщика</option>
-                    {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                  </select>
-                  <div className="relative">
-                    <button
-                      type="button"
-                      onClick={() => setBarterMonthPickerOpen((v) => !v)}
-                      className="oc-input w-[180px] text-left flex items-center justify-between"
-                    >
-                      <span>{monthNamesRu[Math.max(0, Math.min(11, Number((barterMonth.split('-')[1] || '1')) - 1))]} {barterMonthYear}</span>
-                      <ChevronDown className="h-4 w-4 text-slate-500" />
-                    </button>
-                    {barterMonthPickerOpen && (
-                      <div className="absolute z-40 mt-2 w-[260px] rounded-2xl border border-slate-200 bg-white shadow-xl p-3">
-                        <div className="flex items-center justify-between mb-2">
-                          <button type="button" onClick={() => setBarterMonthYear((y) => y - 1)} className="p-1 rounded hover:bg-slate-100"><ChevronLeft className="h-4 w-4" /></button>
-                          <div className="text-sm font-semibold text-slate-800">{barterMonthYear}</div>
-                          <button type="button" onClick={() => setBarterMonthYear((y) => y + 1)} className="p-1 rounded hover:bg-slate-100"><ChevronRight className="h-4 w-4" /></button>
+                <div className="mt-3 space-y-3">
+                  <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_220px] gap-2">
+                    <select value={barterTopSupplierId} onChange={(e) => {
+                      setBarterTopSupplierId(e.target.value);
+                      setBarterMonthPickerOpen(false);
+                    }} className="oc-select w-full min-w-0">
+                      <option value="">Сначала выберите поставщика</option>
+                      {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </select>
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!barterTopSupplierId) return;
+                          setBarterMonthPickerOpen((v) => !v);
+                        }}
+                        disabled={!barterTopSupplierId}
+                        className="oc-input w-full text-left flex items-center justify-between disabled:opacity-60 disabled:cursor-not-allowed"
+                      >
+                        <span className="truncate">{monthNamesRu[Math.max(0, Math.min(11, Number((barterMonth.split('-')[1] || '1')) - 1))]} {barterMonthYear}</span>
+                        <ChevronDown className="h-4 w-4 text-slate-500 shrink-0" />
+                      </button>
+                      {barterMonthPickerOpen && (
+                        <div className="absolute left-0 right-0 md:left-auto md:right-0 z-40 mt-2 w-full md:w-[280px] rounded-2xl border border-slate-200 bg-white shadow-xl p-3">
+                          <div className="flex items-center justify-between mb-2">
+                            <button type="button" onClick={() => setBarterMonthYear((y) => y - 1)} className="p-1 rounded hover:bg-slate-100"><ChevronLeft className="h-4 w-4" /></button>
+                            <div className="text-sm font-semibold text-slate-800">{barterMonthYear}</div>
+                            <button type="button" onClick={() => setBarterMonthYear((y) => y + 1)} className="p-1 rounded hover:bg-slate-100"><ChevronRight className="h-4 w-4" /></button>
+                          </div>
+                          <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5">
+                            {monthNamesRu.map((m, idx) => {
+                              const mm = String(idx + 1).padStart(2, '0');
+                              const value = `${barterMonthYear}-${mm}`;
+                              const active = value === barterMonth;
+                              return (
+                                <button
+                                  key={`m-${m}-${idx}`}
+                                  type="button"
+                                  onClick={() => { setBarterMonth(value); setBarterMonthPickerOpen(false); }}
+                                  className={`px-2 py-2 rounded-lg text-xs font-medium transition ${active ? 'bg-indigo-600 text-white' : 'bg-slate-50 text-slate-700 hover:bg-slate-100'}`}
+                                >
+                                  {m}
+                                </button>
+                              );
+                            })}
+                          </div>
                         </div>
-                        <div className="grid grid-cols-4 gap-1">
-                          {monthNamesRu.map((m, idx) => {
-                            const mm = String(idx + 1).padStart(2, '0');
-                            const value = `${barterMonthYear}-${mm}`;
-                            const active = value === barterMonth;
-                            return (
-                              <button
-                                key={`m-${m}-${idx}`}
-                                type="button"
-                                onClick={() => { setBarterMonth(value); setBarterMonthPickerOpen(false); }}
-                                className={`px-2 py-1.5 rounded-lg text-xs font-medium transition ${active ? 'bg-indigo-600 text-white' : 'bg-slate-50 text-slate-700 hover:bg-slate-100'}`}
-                              >
-                                {m}
-                              </button>
-                            );
-                          })}
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2">
+                    <button onClick={() => { setBarterSupplierId(barterTopSupplierId || barterSupplierId); setBarterCreateMergedCard(false); setBarterModalOpen(true); }} className="btn-primary w-full justify-center" disabled={!barterTopSupplierId}><Plus className="h-4 w-4 mr-2" />Добавить товар</button>
+                    <button
+                      onClick={() => {
+                        if (!barterMergeMode) {
+                          setBarterMergeMode(true);
+                          setBarterMergeSelectedIds([]);
+                          return;
+                        }
+                        mergeSelectedBarterCards();
+                      }}
+                      disabled={!barterTopSupplierId || (!(monthRows || []).length) || (barterMergeMode && barterMergeSelectedIds.length < 2)}
+                      className="btn-ghost w-full justify-center disabled:opacity-60"
+                    >
+                      {barterMergeMode ? `Объединить выбранные (${barterMergeSelectedIds.length})` : 'Объединить карточки'}
+                    </button>
+                    <button
+                      onClick={() => setBarterDuplicateModal({ open: true, targetMonth: barterMonth })}
+                      className="btn-ghost w-full justify-center disabled:opacity-60"
+                      disabled={!barterTopSupplierId || !(monthRows || []).length}
+                    >
+                      Дублировать карточки
+                    </button>
+                  </div>
+                  <div className="text-xs text-slate-500">Все изменения в этом разделе сохраняются автоматически.{barterSaving ? ' Идёт сохранение...' : ''}</div>
+
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Дополнительные действия</div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2">
+                      {barterMergeMode && (
+                        <button
+                          onClick={() => {
+                            setBarterMergeMode(false);
+                            setBarterMergeSelectedIds([]);
+                          }}
+                          className="btn-ghost w-full justify-center"
+                        >
+                          Отмена объединения
+                        </button>
+                      )}
+                      <button onClick={refreshBarterPhotosInCards} disabled={!barterTopSupplierId || !(monthRows || []).length || barterPhotoLoading} className="btn-ghost w-full justify-center disabled:opacity-60">{barterPhotoLoading ? 'Обновляю фото...' : 'Обновить фото (карточки)'}</button>
+                      <button
+                        onClick={() => {
+                          const allCollapsed = (monthRows || []).every((r: any) => !!barterCollapsedCards[r.id]);
+                          const next: Record<string, boolean> = { ...(barterCollapsedCards || {}) };
+                          (monthRows || []).forEach((r: any) => { next[r.id] = !allCollapsed; });
+                          setBarterCollapsedCards(next);
+                        }}
+                        className="btn-ghost w-full justify-center"
+                      >
+                        {((monthRows || []).every((r: any) => !!barterCollapsedCards[r.id])) ? 'Развернуть все карточки' : 'Свернуть все карточки'}
+                      </button>
+                      <button onClick={importBloggersFromBarterLinks} disabled={!barterTopSupplierId || externalAdsBaseSaving} className="btn-ghost w-full justify-center disabled:opacity-60">{externalAdsBaseSaving ? 'Добавляю в БД...' : 'Добавить поставщиков в БД'}</button>
+                    </div>
+
+                    {currentEmployee?.role === 'admin' && (
+                      <div className="mt-3 rounded-xl border border-slate-200 bg-white p-3">
+                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Массовые действия</div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2">
+                          <button
+                            onClick={() => {
+                              setBarterGlobalExtra((v) => v + 1);
+                              const nextRows = (barterRows || []).map((r: any) => {
+                                if (barterTopSupplierId && String(r?.supplier_id || '') !== String(barterTopSupplierId)) return r;
+                                return {
+                                  ...r,
+                                  barter_links: [...(r?.barter_links || []), ''],
+                                  barter_dates: [...(r?.barter_dates || []), ''],
+                                  barter_prices: [...(r?.barter_prices || []), ''],
+                                  barter_views: [...(r?.barter_views || []), ''],
+                                  barter_ratings: [...(r?.barter_ratings || []), ''],
+                                };
+                              });
+                              const changedIds = nextRows.filter((r: any) => String(r?.supplier_id || '') === String(barterTopSupplierId)).map((r: any) => String(r?.id || '')).filter(Boolean);
+                              applyBarterRowsEdit(nextRows, barterTopSupplierId, changedIds);
+                            }}
+                            className="btn-ghost w-full justify-center disabled:opacity-60"
+                            disabled={!barterTopSupplierId}
+                          >+ Бартер всем</button>
+                          <button
+                            onClick={() => {
+                              setBarterGlobalExtra((v) => Math.max(0, v - 1));
+                              const nextRows = (barterRows || []).map((r: any) => {
+                                if (barterTopSupplierId && String(r?.supplier_id || '') !== String(barterTopSupplierId)) return r;
+                                const base = 5;
+                                const currentExtra = Math.max(0, (r?.barter_links?.length || base) - base);
+                                if (currentExtra <= 0) return r;
+                                return {
+                                  ...r,
+                                  barter_links: (r?.barter_links || []).slice(0, -1),
+                                  barter_dates: (r?.barter_dates || []).slice(0, -1),
+                                  barter_prices: (r?.barter_prices || []).slice(0, -1),
+                                  barter_views: (r?.barter_views || []).slice(0, -1),
+                                  barter_ratings: (r?.barter_ratings || []).slice(0, -1),
+                                };
+                              });
+                              const changedIds = nextRows.filter((r: any) => String(r?.supplier_id || '') === String(barterTopSupplierId)).map((r: any) => String(r?.id || '')).filter(Boolean);
+                              applyBarterRowsEdit(nextRows, barterTopSupplierId, changedIds);
+                            }}
+                            className="btn-ghost w-full justify-center disabled:opacity-60"
+                            disabled={!barterTopSupplierId}
+                          >- Бартер всем</button>
+                          <button
+                            onClick={() => {
+                              setAdGlobalExtra((v) => v + 1);
+                              const nextRows = (barterRows || []).map((r: any) => {
+                                if (barterTopSupplierId && String(r?.supplier_id || '') !== String(barterTopSupplierId)) return r;
+                                return {
+                                  ...r,
+                                  ad_links: [...(r?.ad_links || []), ''],
+                                  ad_dates: [...(r?.ad_dates || []), ''],
+                                  ad_prices: [...(r?.ad_prices || []), ''],
+                                  ad_views: [...(r?.ad_views || []), ''],
+                                  ad_ratings: [...(r?.ad_ratings || []), ''],
+                                };
+                              });
+                              const changedIds = nextRows.filter((r: any) => String(r?.supplier_id || '') === String(barterTopSupplierId)).map((r: any) => String(r?.id || '')).filter(Boolean);
+                              applyBarterRowsEdit(nextRows, barterTopSupplierId, changedIds);
+                            }}
+                            className="btn-ghost w-full justify-center disabled:opacity-60"
+                            disabled={!barterTopSupplierId}
+                          >+ Реклама всем</button>
+                          <button
+                            onClick={() => {
+                              setAdGlobalExtra((v) => Math.max(0, v - 1));
+                              const nextRows = (barterRows || []).map((r: any) => {
+                                if (barterTopSupplierId && String(r?.supplier_id || '') !== String(barterTopSupplierId)) return r;
+                                const base = 2;
+                                const currentExtra = Math.max(0, (r?.ad_links?.length || base) - base);
+                                if (currentExtra <= 0) return r;
+                                return {
+                                  ...r,
+                                  ad_links: (r?.ad_links || []).slice(0, -1),
+                                  ad_dates: (r?.ad_dates || []).slice(0, -1),
+                                  ad_prices: (r?.ad_prices || []).slice(0, -1),
+                                  ad_views: (r?.ad_views || []).slice(0, -1),
+                                  ad_ratings: (r?.ad_ratings || []).slice(0, -1),
+                                };
+                              });
+                              const changedIds = nextRows.filter((r: any) => String(r?.supplier_id || '') === String(barterTopSupplierId)).map((r: any) => String(r?.id || '')).filter(Boolean);
+                              applyBarterRowsEdit(nextRows, barterTopSupplierId, changedIds);
+                            }}
+                            className="btn-ghost w-full justify-center disabled:opacity-60"
+                            disabled={!barterTopSupplierId}
+                          >- Реклама всем</button>
                         </div>
                       </div>
                     )}
                   </div>
-                  <button onClick={() => { setBarterSupplierId(barterTopSupplierId || barterSupplierId); setBarterModalOpen(true); }} className="btn-primary" disabled={!barterTopSupplierId}><Plus className="h-4 w-4 mr-2" />Добавить товар</button>
-                  <button onClick={saveBartersToDb} disabled={barterSaving} className="btn-success">{barterSaving ? 'Сохранение...' : 'Сохранить'}</button>
-                  <button onClick={refreshBarterPhotosInCards} disabled={barterPhotoLoading} className="btn-ghost disabled:opacity-60">{barterPhotoLoading ? 'Обновляю фото...' : 'Обновить фото (карточки)'}</button>
-                  {currentEmployee?.role === 'admin' && (
-                    <>
-                      <button
-                        onClick={() => {
-                          setBarterGlobalExtra((v) => v + 1);
-                          setBarterRows((prev) => (prev || []).map((r: any) => {
-                            if (barterTopSupplierId && String(r?.supplier_id || '') !== String(barterTopSupplierId)) return r;
-                            return {
-                              ...r,
-                              barter_links: [...(r?.barter_links || []), ''],
-                              barter_dates: [...(r?.barter_dates || []), ''],
-                              barter_prices: [...(r?.barter_prices || []), ''],
-                              barter_views: [...(r?.barter_views || []), ''],
-                            };
-                          }));
-                        }}
-                        className="btn-ghost disabled:opacity-60"
-                        disabled={!barterTopSupplierId}
-                      >+ Бартер всем</button>
-                      <button
-                        onClick={() => {
-                          setBarterGlobalExtra((v) => Math.max(0, v - 1));
-                          setBarterRows((prev) => (prev || []).map((r: any) => {
-                            if (barterTopSupplierId && String(r?.supplier_id || '') !== String(barterTopSupplierId)) return r;
-                            const base = 5;
-                            const currentExtra = Math.max(0, (r?.barter_links?.length || base) - base);
-                            if (currentExtra <= 0) return r;
-                            return {
-                              ...r,
-                              barter_links: (r?.barter_links || []).slice(0, -1),
-                              barter_dates: (r?.barter_dates || []).slice(0, -1),
-                              barter_prices: (r?.barter_prices || []).slice(0, -1),
-                              barter_views: (r?.barter_views || []).slice(0, -1),
-                            };
-                          }));
-                        }}
-                        className="btn-ghost disabled:opacity-60"
-                        disabled={!barterTopSupplierId}
-                      >- Бартер всем</button>
-                      <button
-                        onClick={() => {
-                          setAdGlobalExtra((v) => v + 1);
-                          setBarterRows((prev) => (prev || []).map((r: any) => {
-                            if (barterTopSupplierId && String(r?.supplier_id || '') !== String(barterTopSupplierId)) return r;
-                            return {
-                              ...r,
-                              ad_links: [...(r?.ad_links || []), ''],
-                              ad_dates: [...(r?.ad_dates || []), ''],
-                              ad_prices: [...(r?.ad_prices || []), ''],
-                              ad_views: [...(r?.ad_views || []), ''],
-                            };
-                          }));
-                        }}
-                        className="btn-ghost disabled:opacity-60"
-                        disabled={!barterTopSupplierId}
-                      >+ Реклама всем</button>
-                      <button
-                        onClick={() => {
-                          setAdGlobalExtra((v) => Math.max(0, v - 1));
-                          setBarterRows((prev) => (prev || []).map((r: any) => {
-                            if (barterTopSupplierId && String(r?.supplier_id || '') !== String(barterTopSupplierId)) return r;
-                            const base = 2;
-                            const currentExtra = Math.max(0, (r?.ad_links?.length || base) - base);
-                            if (currentExtra <= 0) return r;
-                            return {
-                              ...r,
-                              ad_links: (r?.ad_links || []).slice(0, -1),
-                              ad_dates: (r?.ad_dates || []).slice(0, -1),
-                              ad_prices: (r?.ad_prices || []).slice(0, -1),
-                              ad_views: (r?.ad_views || []).slice(0, -1),
-                            };
-                          }));
-                        }}
-                        className="btn-ghost disabled:opacity-60"
-                        disabled={!barterTopSupplierId}
-                      >- Реклама всем</button>
-                    </>
-                  )}
-                  <button
-                    onClick={() => setBarterDuplicateModal({ open: true, targetMonth: barterMonth })}
-                    className="btn-ghost disabled:opacity-60"
-                    disabled={!barterTopSupplierId || !(monthRows || []).length}
-                  >
-                    Дублировать карточки
-                  </button>
-                  <button
-                    onClick={() => {
-                      const allCollapsed = (monthRows || []).every((r: any) => !!barterCollapsedCards[r.id]);
-                      const next: Record<string, boolean> = { ...(barterCollapsedCards || {}) };
-                      (monthRows || []).forEach((r: any) => { next[r.id] = !allCollapsed; });
-                      setBarterCollapsedCards(next);
-                    }}
-                    className="btn-ghost"
-                  >
-                    {((monthRows || []).every((r: any) => !!barterCollapsedCards[r.id])) ? 'Развернуть все карточки' : 'Свернуть все карточки'}
-                  </button>
                 </div></>}
                 {barterSection === 'external_ads_base' && <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
                   <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-3">
@@ -14449,11 +16074,11 @@ export default function Dashboard() {
                       <div className="text-xs text-slate-500 mt-1">Отдельный подраздел для блогеров, ссылок на соцсети, подписчиков и комментариев</div>
                     </div>
                     <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-                      <div className="text-sm text-slate-600">Всего записей: <span className="font-semibold text-slate-900">{externalAdsBase.length}</span></div>
+                      <div className="text-sm text-slate-600">Всего записей: <span className="font-semibold text-slate-900">{externalAdsBaseHasActiveFilters ? `${filteredExternalAdsBase.length} из ${externalAdsBase.length}` : externalAdsBase.length}</span></div>
                       <button
                         onClick={() => {
                           setExternalAdsBaseEditingId(null);
-                          setExternalAdsBaseForm({ nickname: '', socialLinks: [{ url: '', followers: '' }], comment: '', status: 'new' });
+                          setExternalAdsBaseForm({ nickname: '', socialLinks: [{ url: '', followers: '', platform: '' }], overallRating: '', comment: '', status: 'new' });
                           setExternalAdsBaseModalOpen(true);
                         }}
                         className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700"
@@ -14462,13 +16087,29 @@ export default function Dashboard() {
                       </button>
                     </div>
                   </div>
-                  <div className="mb-3 grid grid-cols-1 md:grid-cols-[1fr_220px] gap-2">
+                  <div className="mb-3 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-[minmax(0,1.3fr)_220px_220px_220px] gap-2">
                     <input
                       value={externalAdsBaseSearch}
                       onChange={(e) => setExternalAdsBaseSearch(e.target.value)}
                       placeholder="Поиск по нику, ссылке, подписчикам, статусу или комментарию"
                       className="oc-input"
                     />
+                    <select value={externalAdsBaseSupplierFilter} onChange={(e) => setExternalAdsBaseSupplierFilter(e.target.value)} className="oc-select">
+                      <option value="all">Все поставщики</option>
+                      {externalAdsBaseSupplierOptions.map((supplier) => (
+                        <option key={`external-ads-supplier-filter-${supplier.id}`} value={supplier.id}>{supplier.name}</option>
+                      ))}
+                    </select>
+                    <select value={externalAdsBasePlatformFilter} onChange={(e) => setExternalAdsBasePlatformFilter(e.target.value)} className="oc-select">
+                      <option value="all">Все сети</option>
+                      <option value="Instagram">Instagram</option>
+                      <option value="TikTok">TikTok</option>
+                      <option value="Telegram">Telegram</option>
+                      <option value="YouTube">YouTube</option>
+                      <option value="VK">VK</option>
+                      <option value="OK">OK</option>
+                      <option value="other">Другие сети</option>
+                    </select>
                     <select value={externalAdsBaseSort} onChange={(e) => setExternalAdsBaseSort(e.target.value as any)} className="oc-select">
                       <option value="date_desc">Сначала новые</option>
                       <option value="date_asc">Сначала старые</option>
@@ -14477,10 +16118,20 @@ export default function Dashboard() {
                     </select>
                   </div>
                   {filteredExternalAdsBase.length === 0 ? (
-                    <div className="text-sm text-slate-500">{externalAdsBase.length === 0 ? 'Пока пусто. Нажми «Создать запись», чтобы добавить первую запись.' : 'Поиск ничего не нашёл.'}</div>
+                    <div className="text-sm text-slate-500">{externalAdsBase.length === 0 ? 'Пока пусто. Нажми «Создать запись», чтобы добавить первую запись.' : externalAdsBaseHasActiveFilters ? 'Фильтр ничего не нашёл.' : 'Поиск ничего не нашёл.'}</div>
                   ) : (
                     <div className="space-y-3">
-                      {filteredExternalAdsBase.map((item) => (
+                      {filteredExternalAdsBase.map((item) => {
+                        const summary = getExternalAdsSummary(item.history || []);
+                        const historyFilters = externalAdsHistoryFilters[String(item.id)] || { kind: 'all' as const, supplierId: '' };
+                        const historySupplierOptions = Array.from(new Map((item.history || [])
+                          .filter((history) => String(history?.supplier_id || '').trim())
+                          .map((history) => [String(history.supplier_id), String(history.supplier_name || 'Поставщик')]))).map(([id, name]) => ({ id, name }));
+                        const filteredHistory = [...(item.history || [])]
+                          .filter((history) => historyFilters.kind === 'all' ? true : history.kind === historyFilters.kind)
+                          .filter((history) => historyFilters.supplierId ? String(history.supplier_id || '') === String(historyFilters.supplierId) : true)
+                          .sort((a, b) => String(b.date || b.createdAt || '').localeCompare(String(a.date || a.createdAt || '')));
+                        return (
                         <div key={`ext-ads-base-${item.id}`} className="rounded-xl border border-slate-200 bg-white p-3">
                           <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
                             <div className="min-w-0">
@@ -14494,7 +16145,8 @@ export default function Dashboard() {
                                   setExternalAdsBaseEditingId(String(item.id));
                                   setExternalAdsBaseForm({
                                     nickname: String(item.nickname || ''),
-                                    socialLinks: Array.isArray(item.socialLinks) && item.socialLinks.length ? item.socialLinks.map((s) => ({ url: String(s.url || ''), followers: String(s.followers || '') })) : [{ url: '', followers: '' }],
+                                    socialLinks: Array.isArray(item.socialLinks) && item.socialLinks.length ? item.socialLinks.map((s) => ({ url: String(s.url || ''), followers: String(s.followers || ''), platform: String(s.platform || '') })) : [{ url: '', followers: '', platform: '' }],
+                                    overallRating: String(item.overallRating || ''),
                                     comment: String(item.comment || ''),
                                     status: String(item.status || 'new'),
                                   });
@@ -14518,52 +16170,349 @@ export default function Dashboard() {
                             </div>
                           </div>
                           <div className="mt-3 flex flex-wrap items-center gap-2">
-                            <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${item.status === 'agreed' ? 'bg-emerald-100 text-emerald-700' : item.status === 'waiting' ? 'bg-amber-100 text-amber-700' : item.status === 'contacted' ? 'bg-blue-100 text-blue-700' : item.status === 'rejected' ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-700'}`}>
-                              {item.status === 'agreed' ? 'Договорились' : item.status === 'waiting' ? 'Ждём ответ' : item.status === 'contacted' ? 'Написали' : item.status === 'rejected' ? 'Отказ' : 'Новый'}
+                            <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${getExternalAdsStatusClassName(item.status)}`}>
+                              {getExternalAdsStatusLabel(item.status)}
                             </span>
+                            {item.overallRating ? (
+                              <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${getBarterRatingClassName(item.overallRating).replace('oc-select ', '')}`}>
+                                Рейтинг блогера: {item.overallRating}
+                              </span>
+                            ) : (
+                              <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-600">
+                                Рейтинг блогера не задан
+                              </span>
+                            )}
                           </div>
-                          <div className="mt-3 space-y-2">
-                            {(item.socialLinks || []).map((social, idx) => (
-                              <div key={`ext-ads-social-${item.id}-${idx}`} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                                <div className="flex items-start justify-between gap-3">
-                                  <div className="min-w-0">
-                                    <div className="text-xs text-slate-500">Соцсеть {idx + 1}</div>
-                                    <div className="text-sm text-slate-800 break-all">{social.url || '-'}</div>
-                                    <div className="text-xs text-slate-600 mt-1">Подписчики: <span className="font-medium text-slate-900">{social.followers || '-'}</span></div>
+                          <div className="mt-3 grid grid-cols-2 xl:grid-cols-4 gap-2">
+                            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                              <div className="text-[11px] uppercase tracking-wide text-slate-500">Всего бартеров</div>
+                              <div className="mt-1 text-lg font-bold text-slate-900">{summary.barterCount}</div>
+                            </div>
+                            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                              <div className="text-[11px] uppercase tracking-wide text-slate-500">Всего реклам</div>
+                              <div className="mt-1 text-lg font-bold text-slate-900">{summary.adCount}</div>
+                            </div>
+                            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                              <div className="text-[11px] uppercase tracking-wide text-slate-500">Средняя оценка</div>
+                              <div className="mt-1 text-sm font-bold text-slate-900">
+                                {summary.averageScore > 0 ? `${summary.averageLabel} (${summary.averageScore.toFixed(1)})` : 'Нет оценок'}
+                              </div>
+                            </div>
+                            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                              <div className="text-[11px] uppercase tracking-wide text-slate-500">Общая сумма</div>
+                              <div className="mt-1 text-lg font-bold text-slate-900">{summary.totalCost.toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 2 })} ₽</div>
+                            </div>
+                          </div>
+                          <div className="mt-3 grid grid-cols-1 xl:grid-cols-[1.4fr_1fr_1fr] gap-3">
+                            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Аналитика по поставщикам</div>
+                              <div className="mt-2 text-sm text-slate-700">Всего интеграций: <span className="font-semibold text-slate-900">{summary.totalIntegrations}</span></div>
+                              <div className="mt-2 space-y-2">
+                                {summary.supplierStats.length === 0 ? (
+                                  <div className="text-sm text-slate-500">Пока нет истории по поставщикам</div>
+                                ) : summary.supplierStats.map((supplier) => (
+                                  <div key={`supplier-analytics-${item.id}-${supplier.supplierId || supplier.supplierName}`} className="flex items-center justify-between gap-3 text-sm">
+                                    <div className="min-w-0">
+                                      <div className="font-medium text-slate-900 truncate">{supplier.supplierName || 'Поставщик'}</div>
+                                      <div className="text-xs text-slate-500">Интеграций: {supplier.count}</div>
+                                    </div>
+                                    <div className="text-right font-semibold text-slate-900 whitespace-nowrap">{supplier.totalCost.toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 2 })} ₽</div>
                                   </div>
-                                  <div className="flex items-center gap-2 shrink-0">
-                                    {String(social.url || '').trim() ? (
-                                      <>
-                                        <a href={String(social.url)} target="_blank" rel="noopener noreferrer" className="px-2 py-1 text-xs rounded border border-slate-300 text-slate-700 hover:bg-white">Открыть</a>
-                                        <button
-                                          type="button"
-                                          onClick={async () => {
-                                            try {
-                                              await navigator.clipboard.writeText(String(social.url || ''));
-                                              showToast('Ссылка скопирована', 'success');
-                                            } catch {
-                                              showToast('Не удалось скопировать ссылку', 'error');
-                                            }
-                                          }}
-                                          className="px-2 py-1 text-xs rounded border border-slate-300 text-slate-700 hover:bg-white"
-                                        >
-                                          Копировать
-                                        </button>
-                                      </>
-                                    ) : null}
+                                ))}
+                              </div>
+                            </div>
+                            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Распределение оценок</div>
+                              <div className="mt-2 space-y-2">
+                                {Object.keys(summary.ratingCounts).length === 0 ? (
+                                  <div className="text-sm text-slate-500">Оценок пока нет</div>
+                                ) : BARTER_RATING_OPTIONS.filter((rating) => rating).map((rating) => (
+                                  <div key={`rating-breakdown-${item.id}-${rating}`} className="flex items-center justify-between gap-3 text-sm">
+                                    <span className="text-slate-700">{rating}</span>
+                                    <span className="font-semibold text-slate-900">{summary.ratingCounts[rating] || 0}</span>
                                   </div>
+                                ))}
+                              </div>
+                            </div>
+                            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Лучший / худший результат</div>
+                              <div className="mt-2 space-y-3 text-sm">
+                                <div>
+                                  <div className="text-xs text-slate-500">Лучший</div>
+                                  {summary.bestResult ? (
+                                    <div>
+                                      <div className="font-medium text-slate-900 break-words">{summary.bestResult.product_name || 'Товар без названия'}</div>
+                                      <div className="text-slate-600">{summary.bestResult.rating} • {summary.bestResult.supplier_name || '-'}</div>
+                                    </div>
+                                  ) : <div className="text-slate-500">Нет данных</div>}
+                                </div>
+                                <div>
+                                  <div className="text-xs text-slate-500">Худший</div>
+                                  {summary.worstResult ? (
+                                    <div>
+                                      <div className="font-medium text-slate-900 break-words">{summary.worstResult.product_name || 'Товар без названия'}</div>
+                                      <div className="text-slate-600">{summary.worstResult.rating} • {summary.worstResult.supplier_name || '-'}</div>
+                                    </div>
+                                  ) : <div className="text-slate-500">Нет данных</div>}
                                 </div>
                               </div>
-                            ))}
+                            </div>
                           </div>
+                          <div className="mt-3 space-y-2">
+                            {(item.socialLinks || []).map((social, idx) => {
+                              const platformLabel = String(social.platform || parseExternalBloggerLink(String(social.url || ''))?.platform || `Соцсеть ${idx + 1}`);
+                              return (
+                                <div key={`ext-ads-social-${item.id}-${idx}`} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                                  <div className="flex items-start justify-between gap-3">
+                                    <div className="min-w-0">
+                                      <div className="text-xs text-slate-500">{platformLabel}</div>
+                                      <div className="text-sm text-slate-800 break-all">{social.url || '-'}</div>
+                                      <div className="text-xs text-slate-600 mt-1">Подписчики: <span className="font-medium text-slate-900">{social.followers || '-'}</span></div>
+                                    </div>
+                                    <div className="flex items-center gap-2 shrink-0">
+                                      {String(social.url || '').trim() ? (
+                                        <>
+                                          <a href={String(social.url)} target="_blank" rel="noopener noreferrer" className="px-2 py-1 text-xs rounded border border-slate-300 text-slate-700 hover:bg-white">Открыть</a>
+                                          <button
+                                            type="button"
+                                            onClick={async () => {
+                                              try {
+                                                await navigator.clipboard.writeText(String(social.url || ''));
+                                                showToast('Ссылка скопирована', 'success');
+                                              } catch {
+                                                showToast('Не удалось скопировать ссылку', 'error');
+                                              }
+                                            }}
+                                            className="px-2 py-1 text-xs rounded border border-slate-300 text-slate-700 hover:bg-white"
+                                          >
+                                            Копировать
+                                          </button>
+                                        </>
+                                      ) : null}
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                          {(item.history || []).length > 0 && (
+                            <div className="mt-3 rounded-xl border border-indigo-200 bg-indigo-50/60 p-3">
+                              <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+                                <div className="text-sm font-semibold text-slate-900">История бартеров / рекламы</div>
+                                <div className="grid grid-cols-1 sm:grid-cols-[160px_220px] gap-2">
+                                  <select
+                                    value={historyFilters.kind}
+                                    onChange={(e) => setExternalAdsHistoryFilters((prev) => ({
+                                      ...prev,
+                                      [String(item.id)]: {
+                                        kind: e.target.value as 'all' | 'barter' | 'ad',
+                                        supplierId: prev[String(item.id)]?.supplierId || '',
+                                      },
+                                    }))}
+                                    className="oc-select"
+                                  >
+                                    <option value="all">Все активности</option>
+                                    <option value="barter">Только бартеры</option>
+                                    <option value="ad">Только реклама</option>
+                                  </select>
+                                  <select
+                                    value={historyFilters.supplierId}
+                                    onChange={(e) => setExternalAdsHistoryFilters((prev) => ({
+                                      ...prev,
+                                      [String(item.id)]: {
+                                        kind: prev[String(item.id)]?.kind || 'all',
+                                        supplierId: e.target.value,
+                                      },
+                                    }))}
+                                    className="oc-select"
+                                  >
+                                    <option value="">Все поставщики</option>
+                                    {historySupplierOptions.map((supplier) => (
+                                      <option key={`history-supplier-${item.id}-${supplier.id}`} value={supplier.id}>{supplier.name}</option>
+                                    ))}
+                                  </select>
+                                </div>
+                              </div>
+                              <div className="mt-2 space-y-2 max-h-72 overflow-y-auto pr-1">
+                                {filteredHistory.length === 0 ? (
+                                  <div className="rounded-lg border border-dashed border-indigo-200 bg-white/80 px-3 py-4 text-sm text-slate-500">
+                                    По текущим фильтрам история не найдена.
+                                  </div>
+                                ) : filteredHistory.map((history, idx) => (
+                                    <div key={`ext-ads-history-${item.id}-${history.id || idx}`} className="rounded-lg border border-indigo-100 bg-white px-3 py-2">
+                                      <div className="flex flex-wrap items-center gap-2 mb-1">
+                                        <span className={`px-2 py-0.5 rounded-full text-[11px] font-medium ${history.kind === 'ad' ? 'bg-violet-100 text-violet-700' : 'bg-blue-100 text-blue-700'}`}>
+                                          {history.kind === 'ad' ? 'Реклама' : 'Бартер'}
+                                        </span>
+                                        {history.rating ? (
+                                          <span className="px-2 py-0.5 rounded-full text-[11px] font-medium bg-slate-100 text-slate-700">Оценка: {history.rating}</span>
+                                        ) : null}
+                                        {history.platform ? (
+                                          <span className="px-2 py-0.5 rounded-full text-[11px] font-medium bg-indigo-100 text-indigo-700">{history.platform}</span>
+                                        ) : null}
+                                      </div>
+                                      <div className="text-sm font-medium text-slate-900 break-words">{history.product_name || 'Товар без названия'}</div>
+                                      <div className="mt-1 text-xs text-slate-600 break-words">
+                                        Поставщик: <span className="font-medium text-slate-900">{history.supplier_name || '-'}</span>
+                                        {' • '}Месяц: <span className="font-medium text-slate-900">{history.month || '-'}</span>
+                                        {' • '}Дата: <span className="font-medium text-slate-900">{history.date || '-'}</span>
+                                      </div>
+                                      <div className="mt-1 text-xs text-slate-600 break-words">
+                                        Цена: <span className="font-medium text-slate-900">{history.price || '-'}</span>
+                                        {' • '}Просмотры: <span className="font-medium text-slate-900">{history.views || '-'}</span>
+                                      </div>
+                                      {history.url ? (
+                                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                                          <a href={String(history.url)} target="_blank" rel="noopener noreferrer" className="px-2 py-1 text-xs rounded border border-slate-300 text-slate-700 hover:bg-white">Открыть ссылку</a>
+                                          <button
+                                            type="button"
+                                            onClick={async () => {
+                                              try {
+                                                await navigator.clipboard.writeText(String(history.url || ''));
+                                                showToast('Ссылка скопирована', 'success');
+                                              } catch {
+                                                showToast('Не удалось скопировать ссылку', 'error');
+                                              }
+                                            }}
+                                            className="px-2 py-1 text-xs rounded border border-slate-300 text-slate-700 hover:bg-white"
+                                          >
+                                            Копировать
+                                          </button>
+                                        </div>
+                                      ) : null}
+                                    </div>
+                                  ))}
+                              </div>
+                            </div>
+                          )}
                           <div className="mt-3 text-sm text-slate-700 whitespace-pre-wrap break-words">{item.comment || 'Комментарий не указан'}</div>
                         </div>
-                      ))}
+                      );})}
                     </div>
                   )}
                 </div>}
 
-                {barterSection === 'barters_main' && <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-3">
+                {barterSection === 'barters_main' && (
+                  <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4">
+                    <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+                      <div>
+                        <div className="text-base font-bold text-slate-900">Баланс поставщика</div>
+                        <div className="text-xs text-slate-500 mt-1">Отдельный денежный баланс для бартеров и внешней рекламы по каждому поставщику.</div>
+                      </div>
+                      <div className="rounded-xl bg-white px-4 py-3 border border-emerald-100 min-w-[220px]">
+                        <div className="text-xs uppercase tracking-wide text-emerald-700">Текущий баланс</div>
+                        <div className="mt-2 text-2xl font-extrabold text-emerald-700">
+                          {barterSelectedSupplierId
+                            ? `${barterMoneyBalance.toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 2 })} ₽`
+                            : '0 ₽'}
+                        </div>
+                        <div className="mt-1 text-xs text-slate-500 truncate">
+                          {barterSelectedSupplierId ? (barterSelectedSupplier?.name || 'Поставщик') : 'Выберите поставщика выше'}
+                        </div>
+                      </div>
+                    </div>
+
+                    {!barterSelectedSupplierId ? (
+                      <div className="mt-4 rounded-xl border border-dashed border-slate-300 bg-white/80 p-4 text-sm text-slate-500">
+                        Сначала выберите поставщика сверху, после этого здесь появится его личный баланс, пополнения и списания.
+                      </div>
+                    ) : (
+                      <>
+                        <div className="mt-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-[180px_minmax(0,1fr)_160px_160px] gap-2">
+                          <input
+                            type="number"
+                            step="0.01"
+                            placeholder="Сумма"
+                            value={barterMoneyForm.amount}
+                            onChange={(e) => setBarterMoneyForm(prev => ({ ...prev, amount: e.target.value }))}
+                            className="oc-select"
+                          />
+                          <input
+                            type="text"
+                            placeholder="Комментарий (необязательно)"
+                            value={barterMoneyForm.comment}
+                            onChange={(e) => setBarterMoneyForm(prev => ({ ...prev, comment: e.target.value }))}
+                            className="oc-select"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleAddBarterMoneyOperation('add')}
+                            disabled={barterMoneySaving}
+                            className="w-full py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-60"
+                          >
+                            Пополнить
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleAddBarterMoneyOperation('writeoff')}
+                            disabled={barterMoneySaving}
+                            className="w-full py-2 bg-rose-600 text-white rounded-lg hover:bg-rose-700 disabled:opacity-60"
+                          >
+                            Списать
+                          </button>
+                        </div>
+
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setBarterMoneyFilter('all')}
+                            className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${barterMoneyFilter === 'all' ? 'bg-slate-900 text-white' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                          >
+                            Все
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setBarterMoneyFilter('add')}
+                            className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${barterMoneyFilter === 'add' ? 'bg-emerald-600 text-white' : 'bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-50'}`}
+                          >
+                            Пополнения
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setBarterMoneyFilter('writeoff')}
+                            className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${barterMoneyFilter === 'writeoff' ? 'bg-rose-600 text-white' : 'bg-white border border-rose-200 text-rose-700 hover:bg-rose-50'}`}
+                          >
+                            Списания
+                          </button>
+                        </div>
+
+                        <div className="mt-3 max-h-56 overflow-y-auto border rounded-lg bg-white">
+                          {barterMoneyLoading ? (
+                            <div className="p-3 text-sm text-gray-500">Загрузка операций...</div>
+                          ) : filteredBarterMoneyHistory.length === 0 ? (
+                            <div className="p-3 text-sm text-gray-500">Пока нет операций по этому поставщику.</div>
+                          ) : (
+                            <div className="divide-y">
+                              {filteredBarterMoneyHistory.map((row) => (
+                                <div key={`barter-money-${row.id}`} className="p-3 text-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <div className="font-medium text-gray-900 break-words">{row.comment || 'Без комментария'}</div>
+                                    <div className="text-xs text-gray-500 mt-1">{row.created_at ? new Date(row.created_at).toLocaleString('ru-RU') : '-'}</div>
+                                  </div>
+                                  <div className="flex items-center justify-between sm:justify-end gap-2 shrink-0">
+                                    <div className={`font-bold ${Number(row.amount) >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                                      {Number(row.amount) >= 0 ? '+' : ''}{Number(row.amount || 0).toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 2 })} ₽
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteBarterMoneyOperation(row)}
+                                      className="inline-flex items-center justify-center rounded-lg border border-red-200 p-2 text-red-600 hover:bg-red-50"
+                                      title="Удалить"
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {barterSection === 'barters_main' && !!barterTopSupplierId && <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-3">
                   <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-4 shadow-sm">
                     <div className="text-xs uppercase tracking-wide text-slate-500">Карточки</div>
                     <div className="mt-2 text-3xl font-bold text-slate-900 leading-none">{monthStats.cards}</div>
@@ -14607,10 +16556,18 @@ export default function Dashboard() {
                           if (!barterTopSupplierId || !barterDuplicateModal.targetMonth) return;
                           const sourceRows = (monthRows || []).filter((r: any) => String(r?.supplier_id || '') === String(barterTopSupplierId));
                           const filteredExisting = (barterRows || []).filter((r: any) => !(String(r?.supplier_id || '') === String(barterTopSupplierId) && String(r?.month || '') === String(barterDuplicateModal.targetMonth)));
-                          const duplicated = sourceRows.map((r: any) => ({ ...r, id: `${r.id}-dup-${barterDuplicateModal.targetMonth}-${Date.now()}-${Math.random().toString(36).slice(2,7)}`, month: barterDuplicateModal.targetMonth }));
-                          const next = [...filteredExisting, ...duplicated];
-                          setBarterRows(next as any);
-                          await supabase.from('app_settings').upsert([{ key: 'barters_v1', value: JSON.stringify(next) }], { onConflict: 'key' });
+                          const duplicated = sourceRows.map((r: any) => normalizeBarterRow({ ...r, id: `${r.id}-dup-${barterDuplicateModal.targetMonth}-${Date.now()}-${Math.random().toString(36).slice(2,7)}`, month: barterDuplicateModal.targetMonth }));
+                          const hasTableStorage = await detectBarterCardsTable();
+                          if (!hasTableStorage) throw new Error('Таблица barter_cards недоступна');
+                          if (duplicated.length) {
+                            const { error: insertError } = await supabase.from('barter_cards').upsert(duplicated.map((row: any) => mapBarterRowToDbCard(row)), { onConflict: 'id' });
+                            if (insertError) throw insertError;
+                          }
+                          const refreshedRows = await fetchBarterRowsFromTable();
+                          const nextExtra = getBarterExtraStateFromRows(refreshedRows);
+                          setBarterGlobalExtra(nextExtra.barterExtra);
+                          setAdGlobalExtra(nextExtra.adExtra);
+                          setBarterRows(refreshedRows as any);
                           setBarterMonth(barterDuplicateModal.targetMonth);
                           setBarterDuplicateModal({ open: false, targetMonth: barterDuplicateModal.targetMonth });
                           showToast('Карточки продублированы', 'success');
@@ -14655,7 +16612,7 @@ export default function Dashboard() {
                           <label className="block text-sm font-medium text-slate-700">Соцсети блогера</label>
                           <button
                             type="button"
-                            onClick={() => setExternalAdsBaseForm((prev) => ({ ...prev, socialLinks: [...(prev.socialLinks || []), { url: '', followers: '' }] }))}
+                            onClick={() => setExternalAdsBaseForm((prev) => ({ ...prev, socialLinks: [...(prev.socialLinks || []), { url: '', followers: '', platform: '' }] }))}
                             className="inline-flex items-center gap-1 px-3 py-1.5 text-xs rounded-lg border border-indigo-300 text-indigo-700 hover:bg-indigo-50"
                           >
                             <Plus className="h-3.5 w-3.5" /> Добавить соцсеть
@@ -14693,19 +16650,37 @@ export default function Dashboard() {
                         </div>
                       </div>
 
-                      <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">Статус</label>
-                        <select
-                          value={externalAdsBaseForm.status}
-                          onChange={(e) => setExternalAdsBaseForm((prev) => ({ ...prev, status: e.target.value }))}
-                          className="oc-select"
-                        >
-                          <option value="new">Новый</option>
-                          <option value="contacted">Написали</option>
-                          <option value="waiting">Ждём ответ</option>
-                          <option value="agreed">Договорились</option>
-                          <option value="rejected">Отказ</option>
-                        </select>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-slate-700 mb-1">Статус</label>
+                          <select
+                            value={externalAdsBaseForm.status}
+                            onChange={(e) => setExternalAdsBaseForm((prev) => ({ ...prev, status: e.target.value }))}
+                            className="oc-select"
+                          >
+                            <option value="new">Новый</option>
+                            <option value="contacted">Написали</option>
+                            <option value="in_progress">В работе</option>
+                            <option value="barter_published">Вышел бартер</option>
+                            <option value="ad_published">Вышла реклама</option>
+                            <option value="waiting_stats">Ждём статистику</option>
+                            <option value="completed">Завершено</option>
+                            <option value="rejected">Отказ</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-slate-700 mb-1">Общий рейтинг блогера</label>
+                          <select
+                            value={externalAdsBaseForm.overallRating}
+                            onChange={(e) => setExternalAdsBaseForm((prev) => ({ ...prev, overallRating: e.target.value }))}
+                            className={getBarterRatingClassName(externalAdsBaseForm.overallRating)}
+                          >
+                            <option value="">Не задан</option>
+                            {BARTER_RATING_OPTIONS.filter((option) => option).map((option) => (
+                              <option key={`overall-rating-${option}`} value={option}>{option}</option>
+                            ))}
+                          </select>
+                        </div>
                       </div>
 
                       <div>
@@ -14724,9 +16699,16 @@ export default function Dashboard() {
                       <button
                         onClick={async () => {
                           const nickname = String(externalAdsBaseForm.nickname || '').trim();
-                          const socialLinks = (externalAdsBaseForm.socialLinks || []).map((x) => ({ url: String(x.url || '').trim(), followers: String(x.followers || '').trim() })).filter((x) => x.url || x.followers);
+                          const socialLinks = (externalAdsBaseForm.socialLinks || [])
+                            .map((x) => ({
+                              url: String(x.url || '').trim(),
+                              followers: String(x.followers || '').trim(),
+                              platform: String(x.platform || parseExternalBloggerLink(String(x.url || ''))?.platform || ''),
+                            }))
+                            .filter((x) => x.url || x.followers);
                           const comment = String(externalAdsBaseForm.comment || '').trim();
-                          const status = String(externalAdsBaseForm.status || 'new').trim() || 'new';
+                          const status = normalizeExternalAdsStatus(String(externalAdsBaseForm.status || 'new').trim() || 'new');
+                          const overallRating = String(externalAdsBaseForm.overallRating || '').trim();
                           if (!nickname) {
                             showToast('Введите ник блогера', 'error');
                             return;
@@ -14736,13 +16718,13 @@ export default function Dashboard() {
                             return;
                           }
                           const next = externalAdsBaseEditingId
-                            ? (externalAdsBase || []).map((item) => String(item.id) === String(externalAdsBaseEditingId) ? { ...item, nickname, socialLinks, comment, status } : item)
-                            : [{ id: `ext-ads-${Date.now()}`, nickname, socialLinks, comment, status, createdAt: new Date().toISOString() }, ...(externalAdsBase || [])];
+                            ? (externalAdsBase || []).map((item) => String(item.id) === String(externalAdsBaseEditingId) ? { ...item, nickname, socialLinks, overallRating, comment, status } : item)
+                            : [{ id: `ext-ads-${Date.now()}`, nickname, socialLinks, history: [], overallRating, comment, status, createdAt: new Date().toISOString() }, ...(externalAdsBase || [])];
                           const ok = await saveExternalAdsBase(next as any);
                           if (!ok) return;
                           setExternalAdsBaseModalOpen(false);
                           setExternalAdsBaseEditingId(null);
-                          setExternalAdsBaseForm({ nickname: '', socialLinks: [{ url: '', followers: '' }], comment: '', status: 'new' });
+                          setExternalAdsBaseForm({ nickname: '', socialLinks: [{ url: '', followers: '', platform: '' }], overallRating: '', comment: '', status: 'new' });
                           showToast(externalAdsBaseEditingId ? 'Запись обновлена' : 'Запись добавлена в Базу Внешней рекламы', 'success');
                         }}
                         disabled={externalAdsBaseSaving}
@@ -14765,59 +16747,114 @@ export default function Dashboard() {
                   <div className="text-sm text-slate-500">По выбранному поставщику за этот месяц данных нет.</div>
                 ) : (
                   <div className="space-y-4">
+                    {barterMergeMode && (
+                      <div className="rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm text-indigo-700">
+                        Отметь чекбоксами нужные карточки, потом нажми «Объединить выбранные».
+                      </div>
+                    )}
                     {monthRows.map((row, idx) => {
                       const cardCollapsed = !!barterCollapsedCards[row.id];
                       const rowBarterDone = (row.barter_links || []).filter((x) => String(x || '').trim()).length;
                       const rowAdsDone = (row.ad_links || []).filter((x) => String(x || '').trim()).length;
                       const rowCost = [...(row.barter_prices || []), ...(row.ad_prices || [])].reduce((s, v) => s + (parseFloat(String(v || '0')) || 0), 0);
+                      const rowPhotoList = Array.from(new Set([
+                        ...(Array.isArray(row?.product_photos) ? row.product_photos : []),
+                        ...(Array.isArray(row?.product_ids) ? row.product_ids.map((id: any) => barterPhotoMap[String(id)] || '') : []),
+                        row?.product_photo || barterPhotoMap[String(row?.product_id || '')] || '',
+                      ].map((photo: any) => normalizeBarterPhotoUrl(photo)).filter(Boolean)));
                       return (
-                        <div key={row.id} className="border rounded-xl p-3">
-                          <div className="flex items-start justify-between gap-3 mb-2">
+                        <div key={row.id} className={`border rounded-2xl p-3 sm:p-4 bg-white ${barterMergeMode && barterMergeSelectedIds.includes(String(row.id)) ? 'border-indigo-400 ring-2 ring-indigo-100' : ''}`}>
+                          <div className="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-3 mb-2">
                             <div className="flex items-start gap-3 min-w-0">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const src = row.product_photo || barterPhotoMap[row.product_id] || '';
-                                  if (src) setBarterPreviewImage(src);
-                                }}
-                                className="w-[168px] h-[168px] rounded-lg overflow-hidden bg-slate-100 shrink-0 flex items-center justify-center hover:opacity-90 transition-opacity"
-                                title="Открыть фото"
-                              >
-                                {(row.product_photo || barterPhotoMap[row.product_id]) ? (
-                                  <img src={row.product_photo || barterPhotoMap[row.product_id]} alt={row.product_name} className="w-full h-full object-cover" />
-                                ) : (
-                                  <Package className="h-7 w-7 text-slate-400" />
-                                )}
-                              </button>
-                              <div className="min-w-0">
+                              {barterMergeMode && (
+                                <label className="mt-1 flex items-center justify-center shrink-0">
+                                  <input
+                                    type="checkbox"
+                                    checked={barterMergeSelectedIds.includes(String(row.id))}
+                                    onChange={(e) => {
+                                      const checked = e.target.checked;
+                                      setBarterMergeSelectedIds((prev) => checked ? Array.from(new Set([...(prev || []), String(row.id)])) : (prev || []).filter((id) => String(id) !== String(row.id)));
+                                    }}
+                                    className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                                  />
+                                </label>
+                              )}
+                              <div className="w-28 sm:w-[168px] shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const images = rowPhotoList.length
+                                      ? rowPhotoList
+                                      : [row.product_photo || barterPhotoMap[row.product_id] || ''].filter(Boolean);
+                                    openBarterPreviewGallery(images, 0);
+                                  }}
+                                  className="w-28 h-28 sm:w-[168px] sm:h-[168px] rounded-xl overflow-hidden bg-slate-100 shrink-0 flex items-center justify-center hover:opacity-90 transition-opacity"
+                                  title="Открыть фото"
+                                >
+                                  {rowPhotoList[0] ? (
+                                    <img src={rowPhotoList[0]} alt={row.product_name} className="w-full h-full object-cover" />
+                                  ) : (
+                                    <Package className="h-7 w-7 text-slate-400" />
+                                  )}
+                                </button>
+                                {rowPhotoList.length > 1 ? (
+                                  <div className="grid grid-cols-4 gap-1 mt-2">
+                                    {rowPhotoList.map((src, photoIdx) => (
+                                      <button
+                                        key={`${row.id}-photo-${photoIdx}`}
+                                        type="button"
+                                        onClick={() => openBarterPreviewGallery(rowPhotoList, photoIdx)}
+                                        className="aspect-square rounded-md overflow-hidden border border-slate-200 bg-slate-50 hover:opacity-90"
+                                        title={`Открыть фото ${photoIdx + 1}`}
+                                      >
+                                        <img src={src} alt={`${row.product_name} ${photoIdx + 1}`} className="w-full h-full object-cover" />
+                                      </button>
+                                    ))}
+                                  </div>
+                                ) : null}
+                              </div>
+                              <div className="min-w-0 flex-1">
                                 <a
                                   href={`https://www.wildberries.ru/catalog/${encodeURIComponent(String(row.product_id || ''))}/detail.aspx`}
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  className="text-sm font-semibold text-indigo-700 hover:text-indigo-900 hover:underline truncate inline-block"
+                                  className="text-sm sm:text-base font-semibold text-indigo-700 hover:text-indigo-900 hover:underline break-words inline-block"
                                   title="Открыть товар на Wildberries"
                                 >
                                   {row.product_name}
                                 </a>
                                 <div className="text-xs text-slate-500">Поставщик: {row.supplier_name}</div>
-                                <div className="text-xs text-slate-600 mt-1">Инфографика: Бартеры {rowBarterDone}/5 • Реклама {rowAdsDone}/2 • Затраты {rowCost.toFixed(2)} ₽</div>
+                                {Number(row?.product_variants_count || 1) > 1 ? (
+                                  <div className="text-xs text-slate-500 mt-0.5">Объединено вариантов: {row.product_variants_count}</div>
+                                ) : null}
+                                <div className="text-xs text-slate-600 mt-1">Инфографика: Бартеры {rowBarterDone}/{getBarterRowPlanCount(row, 'barter')} • Реклама {rowAdsDone}/{getBarterRowPlanCount(row, 'ad')} • Затраты {rowCost.toFixed(2)} ₽</div>
+                                {barterCardSaveState[String(row.id)] === 'saving' ? <div className="mt-1 inline-flex items-center gap-1 text-xs text-amber-600"><Clock className="h-3.5 w-3.5" />Сохраняется...</div> : null}
+                                {barterCardSaveState[String(row.id)] === 'saved' ? <div className="mt-1 inline-flex items-center gap-1 text-xs text-emerald-600"><CheckCircle2 className="h-3.5 w-3.5" />Сохранено</div> : null}
+                                {barterCardSaveState[String(row.id)] === 'error' ? <div className="mt-1 inline-flex items-center gap-1 text-xs text-rose-600"><AlertCircle className="h-3.5 w-3.5" />Ошибка сохранения</div> : null}
                               </div>
                             </div>
-                            <div className="flex items-center gap-2">
-                              <button onClick={() => setBarterRows((prev) => prev.map((x: any) => x.id === row.id ? { ...x, barter_links: [...(x.barter_links || []), ''], barter_dates: [...(x.barter_dates || []), ''], barter_prices: [...(x.barter_prices || []), ''], barter_views: [...(x.barter_views || []), ''] } : x))} className="p-1.5 rounded-md text-blue-700 hover:bg-blue-50" title="Добавить бартер в карточку">
+                            <div className="grid grid-cols-2 sm:grid-cols-3 xl:flex xl:flex-wrap gap-2 xl:shrink-0">
+                              <button onClick={() => {
+                                const nextRows = (barterRows || []).map((x: any) => x.id === row.id ? { ...x, barter_links: [...(x.barter_links || []), ''], barter_dates: [...(x.barter_dates || []), ''], barter_prices: [...(x.barter_prices || []), ''], barter_views: [...(x.barter_views || []), ''], barter_ratings: [...(x.barter_ratings || []), ''] } : x);
+                                applyBarterRowsEdit(nextRows, row.supplier_id, [String(row.id)]);
+                              }} className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-blue-200 px-3 py-2 text-xs font-medium text-blue-700 hover:bg-blue-50" title="Добавить бартер в карточку">
                                 <Plus className="h-4 w-4" />
+                                <span>Бартер</span>
                               </button>
-                              <button onClick={() => setBarterRows((prev) => prev.map((x: any) => x.id === row.id ? { ...x, ad_links: [...(x.ad_links || []), ''], ad_dates: [...(x.ad_dates || []), ''], ad_prices: [...(x.ad_prices || []), ''], ad_views: [...(x.ad_views || []), ''] } : x))} className="p-1.5 rounded-md text-violet-700 hover:bg-violet-50" title="Добавить рекламу в карточку">
+                              <button onClick={() => {
+                                const nextRows = (barterRows || []).map((x: any) => x.id === row.id ? { ...x, ad_links: [...(x.ad_links || []), ''], ad_dates: [...(x.ad_dates || []), ''], ad_prices: [...(x.ad_prices || []), ''], ad_views: [...(x.ad_views || []), ''], ad_ratings: [...(x.ad_ratings || []), ''] } : x);
+                                applyBarterRowsEdit(nextRows, row.supplier_id, [String(row.id)]);
+                              }} className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-violet-200 px-3 py-2 text-xs font-medium text-violet-700 hover:bg-violet-50" title="Добавить рекламу в карточку">
                                 <Plus className="h-4 w-4" />
+                                <span>Реклама</span>
                               </button>
-                              <button onClick={saveBartersToDb} className="p-1.5 rounded-md text-emerald-700 hover:bg-emerald-50" title="Сохранить">
-                                <Save className="h-4 w-4" />
-                              </button>
-                              <button onClick={() => setBarterCollapsedCards((prev) => ({ ...(prev || {}), [row.id]: !prev[row.id] }))} className="p-1.5 rounded-md text-slate-600 hover:bg-slate-100" title={cardCollapsed ? 'Развернуть' : 'Свернуть'}>
+                              <button onClick={() => setBarterCollapsedCards((prev) => ({ ...(prev || {}), [row.id]: !prev[row.id] }))} className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100" title={cardCollapsed ? 'Развернуть' : 'Свернуть'}>
                                 {cardCollapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+                                <span>{cardCollapsed ? 'Развернуть' : 'Свернуть'}</span>
                               </button>
-                              <button onClick={() => setBarterRows((prev) => prev.filter((x) => x.id !== row.id))} className="p-1.5 rounded-md text-rose-600 hover:bg-rose-50" title="Удалить">
+                              <button onClick={() => deleteBarterRow(row)} className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-rose-200 px-3 py-2 text-xs font-medium text-rose-600 hover:bg-rose-50" title="Удалить">
                                 <Trash2 className="h-4 w-4" />
+                                <span>Удалить</span>
                               </button>
                             </div>
                           </div>
@@ -14826,51 +16863,80 @@ export default function Dashboard() {
                             <>
                               <div className="space-y-2 mb-3">
                                 {(row.barter_links || []).map((_: any, i: number) => (
-                                  <div key={`barter-${row.id}-${i}`} className="grid grid-cols-1 md:grid-cols-[84px_1fr_150px_120px_120px_36px] gap-2 items-center">
+                                  <div key={`barter-${row.id}-${i}`} className="grid grid-cols-1 md:grid-cols-[84px_1fr_150px_120px_120px_170px_36px] gap-2 items-center rounded-xl border border-slate-200 bg-slate-50/70 p-2.5 md:border-0 md:bg-transparent md:p-0">
                                     <span className="text-xs text-slate-500">Бартер {i + 1}</span>
-                                    <div className="flex items-center gap-2">
+                                    <div className="flex flex-col sm:flex-row sm:items-center gap-2">
                                       <input
                                         value={row.barter_links[i] || ''}
-                                        onChange={(e) => setBarterRows((prev) => prev.map((x) => x.id === row.id ? { ...x, barter_links: x.barter_links.map((v, vi) => vi === i ? e.target.value : v) } : x))}
+                                        onChange={(e) => {
+                                          const nextRows = (barterRows || []).map((x) => x.id === row.id ? { ...x, barter_links: x.barter_links.map((v, vi) => vi === i ? e.target.value : v) } : x);
+                                          applyBarterRowsEdit(nextRows, row.supplier_id, [String(row.id)]);
+                                        }}
                                         placeholder="https://..."
                                         className="oc-input"
                                       />
                                       {String(row.barter_links[i] || '').trim() ? (
-                                        <a href={String(row.barter_links[i])} target="_blank" rel="noopener noreferrer" className="text-xs text-indigo-600 hover:text-indigo-800 whitespace-nowrap">Открыть</a>
+                                        <a href={String(row.barter_links[i])} target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center rounded-lg border border-indigo-200 px-3 py-2 text-xs font-medium text-indigo-600 hover:bg-indigo-50 whitespace-nowrap">Открыть</a>
                                       ) : null}
                                     </div>
                                     <input
                                       type="date"
                                       value={row.barter_dates?.[i] || ''}
-                                      onChange={(e) => setBarterRows((prev) => prev.map((x) => x.id === row.id ? { ...x, barter_dates: (x.barter_dates || ['', '', '', '', '']).map((v, vi) => vi === i ? e.target.value : v) } : x))}
+                                      onChange={(e) => {
+                                        const nextRows = (barterRows || []).map((x) => x.id === row.id ? { ...x, barter_dates: (x.barter_dates || ['', '', '', '', '']).map((v, vi) => vi === i ? e.target.value : v) } : x);
+                                        applyBarterRowsEdit(nextRows, row.supplier_id, [String(row.id)]);
+                                      }}
                                       className="oc-input"
                                     />
                                     <input
                                       type="number"
                                       value={row.barter_prices?.[i] || ''}
-                                      onChange={(e) => setBarterRows((prev) => prev.map((x) => x.id === row.id ? { ...x, barter_prices: (x.barter_prices || []).map((v, vi) => vi === i ? e.target.value : v) } : x))}
+                                      onChange={(e) => {
+                                        const nextRows = (barterRows || []).map((x) => x.id === row.id ? { ...x, barter_prices: (x.barter_prices || []).map((v, vi) => vi === i ? e.target.value : v) } : x);
+                                        applyBarterRowsEdit(nextRows, row.supplier_id, [String(row.id)]);
+                                      }}
                                       placeholder="Цена"
                                       className="oc-input"
                                     />
                                     <input
                                       type="number"
                                       value={row.barter_views?.[i] || ''}
-                                      onChange={(e) => setBarterRows((prev) => prev.map((x) => x.id === row.id ? { ...x, barter_views: (x.barter_views || []).map((v, vi) => vi === i ? e.target.value : v) } : x))}
+                                      onChange={(e) => {
+                                        const nextRows = (barterRows || []).map((x) => x.id === row.id ? { ...x, barter_views: (x.barter_views || []).map((v, vi) => vi === i ? e.target.value : v) } : x);
+                                        applyBarterRowsEdit(nextRows, row.supplier_id, [String(row.id)]);
+                                      }}
                                       placeholder="Просмотры"
                                       className="oc-input"
                                     />
-                                    {i >= (5 + barterGlobalExtra) ? (
+                                    <select
+                                      value={row.barter_ratings?.[i] || ''}
+                                      onChange={(e) => {
+                                        const nextRows = (barterRows || []).map((x) => x.id === row.id ? { ...x, barter_ratings: (x.barter_ratings || []).map((v, vi) => vi === i ? e.target.value : v) } : x);
+                                        applyBarterRowsEdit(nextRows, row.supplier_id, [String(row.id)]);
+                                      }}
+                                      className={getBarterRatingClassName(row.barter_ratings?.[i] || '')}
+                                    >
+                                      <option value="">Оценка</option>
+                                      {BARTER_RATING_OPTIONS.filter(Boolean).map((option) => (
+                                        <option key={`barter-rating-${row.id}-${i}-${option}`} value={option}>{option}</option>
+                                      ))}
+                                    </select>
+                                    {i >= 5 ? (
                                       <button
                                         type="button"
                                         title="Удалить строку бартера"
-                                        onClick={() => setBarterRows((prev) => prev.map((x: any) => {
-                                          if (x.id !== row.id) return x;
-                                          const bl = [...(x.barter_links || [])]; bl.splice(i, 1);
-                                          const bd = [...(x.barter_dates || [])]; bd.splice(i, 1);
-                                          const bp = [...(x.barter_prices || [])]; bp.splice(i, 1);
-                                          const bv = [...(x.barter_views || [])]; bv.splice(i, 1);
-                                          return { ...x, barter_links: bl, barter_dates: bd, barter_prices: bp, barter_views: bv };
-                                        }))}
+                                        onClick={() => {
+                                          const nextRows = (barterRows || []).map((x: any) => {
+                                            if (x.id !== row.id) return x;
+                                            const bl = [...(x.barter_links || [])]; bl.splice(i, 1);
+                                            const bd = [...(x.barter_dates || [])]; bd.splice(i, 1);
+                                            const bp = [...(x.barter_prices || [])]; bp.splice(i, 1);
+                                            const bv = [...(x.barter_views || [])]; bv.splice(i, 1);
+                                            const br = [...(x.barter_ratings || [])]; br.splice(i, 1);
+                                            return { ...x, barter_links: bl, barter_dates: bd, barter_prices: bp, barter_views: bv, barter_ratings: br };
+                                          });
+                                          applyBarterRowsEdit(nextRows, row.supplier_id, [String(row.id)]);
+                                        }}
                                         className="p-1.5 rounded-md text-rose-600 hover:bg-rose-50"
                                       >
                                         <Trash2 className="h-4 w-4" />
@@ -14882,51 +16948,80 @@ export default function Dashboard() {
 
                               <div className="space-y-2 mb-1">
                                 {(row.ad_links || []).map((_: any, i: number) => (
-                                  <div key={`ad-${row.id}-${i}`} className="grid grid-cols-1 md:grid-cols-[84px_1fr_150px_120px_120px_36px] gap-2 items-center">
+                                  <div key={`ad-${row.id}-${i}`} className="grid grid-cols-1 md:grid-cols-[84px_1fr_150px_120px_120px_170px_36px] gap-2 items-center rounded-xl border border-slate-200 bg-slate-50/70 p-2.5 md:border-0 md:bg-transparent md:p-0">
                                     <span className="text-xs text-slate-500">Реклама {i + 1}</span>
-                                    <div className="flex items-center gap-2">
+                                    <div className="flex flex-col sm:flex-row sm:items-center gap-2">
                                       <input
                                         value={row.ad_links[i] || ''}
-                                        onChange={(e) => setBarterRows((prev) => prev.map((x) => x.id === row.id ? { ...x, ad_links: x.ad_links.map((v, vi) => vi === i ? e.target.value : v) } : x))}
+                                        onChange={(e) => {
+                                          const nextRows = (barterRows || []).map((x) => x.id === row.id ? { ...x, ad_links: x.ad_links.map((v, vi) => vi === i ? e.target.value : v) } : x);
+                                          applyBarterRowsEdit(nextRows, row.supplier_id, [String(row.id)]);
+                                        }}
                                         placeholder="https://..."
                                         className="oc-input"
                                       />
                                       {String(row.ad_links[i] || '').trim() ? (
-                                        <a href={String(row.ad_links[i])} target="_blank" rel="noopener noreferrer" className="text-xs text-indigo-600 hover:text-indigo-800 whitespace-nowrap">Открыть</a>
+                                        <a href={String(row.ad_links[i])} target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center rounded-lg border border-indigo-200 px-3 py-2 text-xs font-medium text-indigo-600 hover:bg-indigo-50 whitespace-nowrap">Открыть</a>
                                       ) : null}
                                     </div>
                                     <input
                                       type="date"
                                       value={row.ad_dates?.[i] || ''}
-                                      onChange={(e) => setBarterRows((prev) => prev.map((x) => x.id === row.id ? { ...x, ad_dates: (x.ad_dates || []).map((v, vi) => vi === i ? e.target.value : v) } : x))}
+                                      onChange={(e) => {
+                                        const nextRows = (barterRows || []).map((x) => x.id === row.id ? { ...x, ad_dates: (x.ad_dates || []).map((v, vi) => vi === i ? e.target.value : v) } : x);
+                                        applyBarterRowsEdit(nextRows, row.supplier_id, [String(row.id)]);
+                                      }}
                                       className="oc-input"
                                     />
                                     <input
                                       type="number"
                                       value={row.ad_prices?.[i] || ''}
-                                      onChange={(e) => setBarterRows((prev) => prev.map((x) => x.id === row.id ? { ...x, ad_prices: (x.ad_prices || []).map((v, vi) => vi === i ? e.target.value : v) } : x))}
+                                      onChange={(e) => {
+                                        const nextRows = (barterRows || []).map((x) => x.id === row.id ? { ...x, ad_prices: (x.ad_prices || []).map((v, vi) => vi === i ? e.target.value : v) } : x);
+                                        applyBarterRowsEdit(nextRows, row.supplier_id, [String(row.id)]);
+                                      }}
                                       placeholder="Цена"
                                       className="oc-input"
                                     />
                                     <input
                                       type="number"
                                       value={row.ad_views?.[i] || ''}
-                                      onChange={(e) => setBarterRows((prev) => prev.map((x) => x.id === row.id ? { ...x, ad_views: (x.ad_views || []).map((v, vi) => vi === i ? e.target.value : v) } : x))}
+                                      onChange={(e) => {
+                                        const nextRows = (barterRows || []).map((x) => x.id === row.id ? { ...x, ad_views: (x.ad_views || []).map((v, vi) => vi === i ? e.target.value : v) } : x);
+                                        applyBarterRowsEdit(nextRows, row.supplier_id, [String(row.id)]);
+                                      }}
                                       placeholder="Просмотры"
                                       className="oc-input"
                                     />
-                                    {i >= (2 + adGlobalExtra) ? (
+                                    <select
+                                      value={row.ad_ratings?.[i] || ''}
+                                      onChange={(e) => {
+                                        const nextRows = (barterRows || []).map((x) => x.id === row.id ? { ...x, ad_ratings: (x.ad_ratings || []).map((v, vi) => vi === i ? e.target.value : v) } : x);
+                                        applyBarterRowsEdit(nextRows, row.supplier_id, [String(row.id)]);
+                                      }}
+                                      className={getBarterRatingClassName(row.ad_ratings?.[i] || '')}
+                                    >
+                                      <option value="">Оценка</option>
+                                      {BARTER_RATING_OPTIONS.filter(Boolean).map((option) => (
+                                        <option key={`ad-rating-${row.id}-${i}-${option}`} value={option}>{option}</option>
+                                      ))}
+                                    </select>
+                                    {i >= 2 ? (
                                       <button
                                         type="button"
                                         title="Удалить строку рекламы"
-                                        onClick={() => setBarterRows((prev) => prev.map((x: any) => {
-                                          if (x.id !== row.id) return x;
-                                          const al = [...(x.ad_links || [])]; al.splice(i, 1);
-                                          const ad = [...(x.ad_dates || [])]; ad.splice(i, 1);
-                                          const ap = [...(x.ad_prices || [])]; ap.splice(i, 1);
-                                          const av = [...(x.ad_views || [])]; av.splice(i, 1);
-                                          return { ...x, ad_links: al, ad_dates: ad, ad_prices: ap, ad_views: av };
-                                        }))}
+                                        onClick={() => {
+                                          const nextRows = (barterRows || []).map((x: any) => {
+                                            if (x.id !== row.id) return x;
+                                            const al = [...(x.ad_links || [])]; al.splice(i, 1);
+                                            const ad = [...(x.ad_dates || [])]; ad.splice(i, 1);
+                                            const ap = [...(x.ad_prices || [])]; ap.splice(i, 1);
+                                            const av = [...(x.ad_views || [])]; av.splice(i, 1);
+                                            const ar = [...(x.ad_ratings || [])]; ar.splice(i, 1);
+                                            return { ...x, ad_links: al, ad_dates: ad, ad_prices: ap, ad_views: av, ad_ratings: ar };
+                                          });
+                                          applyBarterRowsEdit(nextRows, row.supplier_id, [String(row.id)]);
+                                        }}
                                         className="p-1.5 rounded-md text-rose-600 hover:bg-rose-50"
                                       >
                                         <Trash2 className="h-4 w-4" />
@@ -14945,18 +17040,95 @@ export default function Dashboard() {
               </div>
               )}
 
-              {barterPreviewImage && (
-                <div className="fixed inset-0 z-[85] bg-black/80 flex items-center justify-center p-4" onClick={() => setBarterPreviewImage(null)}>
-                  <img src={barterPreviewImage} alt="preview" className="max-w-[92vw] max-h-[92vh] rounded-xl shadow-2xl" />
+              {barterPreviewGallery && (
+                <div className={`fixed inset-0 z-[85] bg-black/85 flex items-center justify-center p-3 sm:p-4 transition-opacity duration-200 ease-out ${barterPreviewGallery.closing ? 'opacity-0' : 'opacity-100'}`} onClick={() => closeBarterPreviewGallery()}>
+                  <div className={`relative w-full max-w-6xl transition-all duration-200 ease-out ${barterPreviewGallery.closing ? (barterPreviewGallery.closeMode === 'down' ? 'translate-y-12 scale-[0.97] opacity-0' : 'scale-[0.985] opacity-0') : 'translate-y-0 scale-100 opacity-100'}`} onClick={(e) => e.stopPropagation()}>
+                    <button
+                      type="button"
+                      onClick={() => closeBarterPreviewGallery()}
+                      className="absolute right-0 top-0 z-10 inline-flex h-10 w-10 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70"
+                      title="Закрыть"
+                    >
+                      <X className="h-5 w-5" />
+                    </button>
+                    <div className="flex items-center justify-center gap-2 sm:gap-4">
+                      {barterPreviewGallery.images.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={showPreviousBarterPreviewImage}
+                          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/15 text-white hover:bg-white/25"
+                          title="Предыдущее фото"
+                        >
+                          <ChevronLeft className="h-5 w-5" />
+                        </button>
+                      )}
+                      <div
+                        className="flex-1 flex flex-col items-center"
+                        onTouchStart={(e) => {
+                          const touch = e.changedTouches?.[0];
+                          barterPreviewTouchStartRef.current = touch ? { x: touch.clientX, y: touch.clientY } : null;
+                        }}
+                        onTouchEnd={(e) => {
+                          const start = barterPreviewTouchStartRef.current;
+                          const touch = e.changedTouches?.[0];
+                          barterPreviewTouchStartRef.current = null;
+                          if (!start || !touch) return;
+                          const deltaX = touch.clientX - start.x;
+                          const deltaY = touch.clientY - start.y;
+                          if (Math.abs(deltaY) > Math.abs(deltaX) && deltaY > 70) {
+                            closeBarterPreviewGallery('down');
+                            return;
+                          }
+                          if (barterPreviewGallery.images.length < 2 || Math.abs(deltaX) < 40) return;
+                          if (deltaX < 0) showNextBarterPreviewImage();
+                          else showPreviousBarterPreviewImage();
+                        }}
+                      >
+                        <img
+                          src={barterPreviewGallery.images[barterPreviewGallery.index]}
+                          alt={`preview-${barterPreviewGallery.index + 1}`}
+                          className="max-w-[92vw] max-h-[78vh] rounded-xl shadow-2xl object-contain select-none"
+                        />
+                        {barterPreviewGallery.images.length > 1 && (
+                          <>
+                            <div className="mt-3 text-sm text-white/90">{barterPreviewGallery.index + 1} / {barterPreviewGallery.images.length}</div>
+                            <div className="mt-3 flex max-w-full gap-2 overflow-x-auto pb-1">
+                              {barterPreviewGallery.images.map((src, idx) => (
+                                <button
+                                  key={`barter-preview-thumb-${idx}`}
+                                  type="button"
+                                  onClick={() => setBarterPreviewGallery((prev) => prev ? ({ ...prev, index: idx, closing: false, closeMode: 'fade' }) : prev)}
+                                  className={`h-16 w-16 shrink-0 overflow-hidden rounded-lg border-2 ${idx === barterPreviewGallery.index ? 'border-white' : 'border-white/30'}`}
+                                  title={`Открыть фото ${idx + 1}`}
+                                >
+                                  <img src={src} alt={`thumb-${idx + 1}`} className="h-full w-full object-cover" />
+                                </button>
+                              ))}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                      {barterPreviewGallery.images.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={showNextBarterPreviewImage}
+                          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/15 text-white hover:bg-white/25"
+                          title="Следующее фото"
+                        >
+                          <ChevronRight className="h-5 w-5" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 </div>
               )}
 
               {barterModalOpen && (
-                <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-3" onClick={() => setBarterModalOpen(false)}>
+                <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-3" onClick={() => closeBarterAddModal()}>
                   <div className="w-full max-w-3xl bg-white rounded-2xl shadow-xl p-4" onClick={(e) => e.stopPropagation()}>
                     <div className="flex items-center justify-between mb-3">
                       <div className="text-base font-semibold text-slate-900">Добавить товар</div>
-                      <button className="text-slate-500 hover:text-slate-700" onClick={() => setBarterModalOpen(false)}><X className="h-4 w-4" /></button>
+                      <button className="text-slate-500 hover:text-slate-700" onClick={() => closeBarterAddModal()}><X className="h-4 w-4" /></button>
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-4 gap-2 mb-3">
                       <select value={barterSupplierId} onChange={(e) => setBarterSupplierId(e.target.value)} className="oc-select">
@@ -14968,6 +17140,18 @@ export default function Dashboard() {
                         {barterPhotoLoading ? 'Обновляю фото...' : 'Обновить фото'}
                       </button>
                     </div>
+                    <label className="mb-3 flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700">
+                      <input
+                        type="checkbox"
+                        className="mt-1"
+                        checked={barterCreateMergedCard}
+                        onChange={(e) => setBarterCreateMergedCard(e.target.checked)}
+                      />
+                      <span>
+                        <span className="block font-medium text-slate-900">Объединить карточки</span>
+                        <span className="block text-xs text-slate-500 mt-0.5">Если выбрать несколько товаров, сразу создастся одна объединённая карточка.</span>
+                      </span>
+                    </label>
                     <div className="max-h-[45vh] overflow-y-auto border rounded-xl p-2 space-y-1">
                       {barterCatalogLoading ? (
                         <div className="text-sm text-slate-500 p-3">Загрузка товаров...</div>
@@ -14997,8 +17181,8 @@ export default function Dashboard() {
                       })}
                     </div>
                     <div className="mt-3 flex justify-end gap-2">
-                      <button className="btn-ghost" onClick={() => setBarterModalOpen(false)}>Отмена</button>
-                      <button className="btn-primary" onClick={addSelectedBarterProducts} disabled={!barterCheckedProductIds.length || !barterSupplierId}>Добавить выбранные</button>
+                      <button className="btn-ghost" onClick={() => closeBarterAddModal()}>Отмена</button>
+                      <button className="btn-primary" onClick={addSelectedBarterProducts} disabled={!barterCheckedProductIds.length || !barterSupplierId}>{barterCreateMergedCard ? 'Создать объединённую карточку' : 'Добавить выбранные'}</button>
                     </div>
                   </div>
                 </div>
@@ -15089,7 +17273,7 @@ export default function Dashboard() {
                   ) : (
                     <div className="oc-card overflow-hidden">
                       <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
-                        <span className="font-medium text-gray-700">Найдено кодов: {honestSignCodes.length}</span>
+                        <span className="font-medium text-gray-700">Отсканировано поставок: {honestSignCodes.length}</span>
                         <button
                           onClick={handleDownloadHonestSign}
                           className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center text-sm font-medium"
@@ -15099,12 +17283,15 @@ export default function Dashboard() {
                       </div>
                       <div className="divide-y divide-gray-100">
                         {honestSignCodes.map((item) => (
-                          <div key={item.id} className="p-4 hover:bg-gray-50 flex justify-between items-center">
+                          <div key={item.id} className="p-4 hover:bg-gray-50 flex justify-between items-center gap-4">
                             <div>
                               <div className="font-medium text-gray-900">{item.name}</div>
-                              <div className="text-xs text-gray-500 font-mono mt-1">Кодов: {item.code_count}</div>
+                              <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-gray-500 font-mono">
+                                <span>Кодов: {item.code_count}</span>
+                                <span className="font-sans text-gray-600">Пол: <span className="font-medium text-gray-800">{item.gender_label || '-'}</span></span>
+                              </div>
                             </div>
-                            <div className="flex items-center gap-4">
+                            <div className="flex items-center gap-4 shrink-0">
                               <div className="text-xs text-gray-400">
                                 {new Date(item.created_at).toLocaleDateString()}
                               </div>
@@ -15151,6 +17338,7 @@ export default function Dashboard() {
                                             <th className="p-3 font-medium text-gray-500">Дата печати</th>
                                             <th className="p-3 font-medium text-gray-500">Файл</th>
                                             <th className="p-3 font-medium text-gray-500">Категория</th>
+                                            <th className="p-3 font-medium text-gray-500">Пол</th>
                                             <th className="p-3 font-medium text-gray-500 text-right">Действия</th>
                                         </tr>
                                     </thead>
@@ -15160,6 +17348,7 @@ export default function Dashboard() {
                                                 <td className="p-3">{new Date(item.created_at).toLocaleString('ru-RU')}</td>
                                                 <td className="p-3">{item.file_name}</td>
                                                 <td className="p-3">{item.category || '-'}</td>
+                                                <td className="p-3">{getHSGenderLabel(item.gender)}</td>
                                                 <td className="p-3 text-right flex gap-2 justify-end">
                                                     <button
                                                         onClick={() => handleDownloadHonestSignHistory(item.file_name, item.created_at)}
@@ -15211,6 +17400,7 @@ export default function Dashboard() {
                                             <th className="p-3 font-medium text-gray-500">Дата сканирования</th>
                                             <th className="p-3 font-medium text-gray-500">Файл</th>
                                             <th className="p-3 font-medium text-gray-500">Категория</th>
+                                            <th className="p-3 font-medium text-gray-500">Пол</th>
                                             <th className="p-3 font-medium text-gray-500 text-right">Действия</th>
                                         </tr>
                                     </thead>
@@ -15220,6 +17410,7 @@ export default function Dashboard() {
                                                 <td className="p-3">{new Date(item.created_at).toLocaleString('ru-RU')}</td>
                                                 <td className="p-3">{item.file_name}</td>
                                                 <td className="p-3">{item.category || '-'}</td>
+                                                <td className="p-3">{getHSGenderLabel(item.gender)}</td>
                                                 <td className="p-3 text-right flex gap-2 justify-end">
                                                     <button
                                                         onClick={() => handleDownloadHonestSignHistory(item.file_name, item.created_at)}
@@ -15248,7 +17439,7 @@ export default function Dashboard() {
                 <div className="oc-card p-6 mb-6">
                     <h2 className="text-lg font-bold text-gray-900 mb-4">Загрузка базы кодов</h2>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                         <div>
                             <label className="block text-sm font-medium text-gray-700 mb-2">Выберите поставщика</label>
                             <select
@@ -15281,6 +17472,18 @@ export default function Dashboard() {
                                   <option value="other">Другое</option>
                                 </>
                               )}
+                            </select>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">Пол</label>
+                            <select
+                              value={honestSignBaseGender}
+                              onChange={(e) => setHonestSignBaseGender(normalizeHSGender(e.target.value) as 'male' | 'female' | '')}
+                              className="w-full p-3 bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                            >
+                              <option value="">-- Выберите пол --</option>
+                              <option value="male">Мужской</option>
+                              <option value="female">Женский</option>
                             </select>
                         </div>
                     </div>
@@ -15317,14 +17520,14 @@ export default function Dashboard() {
                     <div className="flex items-center justify-center w-full mb-8">
                         <label
                           className={`flex flex-col items-center justify-center w-full h-64 border-2 border-dashed rounded-lg transition-colors ${
-                            !honestSignSupplierId || !honestSignBaseCategory
+                            !honestSignSupplierId || !honestSignBaseCategory || !honestSignBaseGender
                               ? 'border-gray-200 bg-gray-100 cursor-not-allowed opacity-70'
                               : 'border-gray-300 cursor-pointer bg-gray-50 hover:bg-gray-100'
                           }`}
                           onClick={(ev) => {
-                            if (!honestSignSupplierId || !honestSignBaseCategory) {
+                            if (!honestSignSupplierId || !honestSignBaseCategory || !honestSignBaseGender) {
                               ev.preventDefault();
-                              showToast('Сначала выберите поставщика и категорию', 'error');
+                              showToast('Сначала выберите поставщика, категорию и пол', 'error');
                             }
                           }}
                         >
@@ -15338,7 +17541,7 @@ export default function Dashboard() {
                               className="hidden"
                               accept=".csv,.txt,.xlsx,.xls"
                               onChange={handleHonestSignBaseUpload}
-                              disabled={!honestSignSupplierId || !honestSignBaseCategory}
+                              disabled={!honestSignSupplierId || !honestSignBaseCategory || !honestSignBaseGender}
                             />
                         </label>
                     </div>
@@ -15346,7 +17549,7 @@ export default function Dashboard() {
                     <div className="flex justify-end mb-8">
                       <button
                         onClick={handleHonestSignBaseImportFromTelegram}
-                        disabled={loadingHonestSign || !honestSignSupplierId || !honestSignBaseCategory}
+                        disabled={loadingHonestSign || !honestSignSupplierId || !honestSignBaseCategory || !honestSignBaseGender}
                         className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         {loadingHonestSign ? 'Загрузка...' : 'Загрузить файл из Telegram'}
@@ -15363,6 +17566,7 @@ export default function Dashboard() {
                                             <th className="p-3 font-medium text-gray-500">Дата</th>
                                             <th className="p-3 font-medium text-gray-500">Файл</th>
                                             <th className="p-3 font-medium text-gray-500">Категория</th>
+                                            <th className="p-3 font-medium text-gray-500">Пол</th>
                                             <th className="p-3 font-medium text-gray-500 text-right">Действия</th>
                                         </tr>
                                     </thead>
@@ -15372,6 +17576,7 @@ export default function Dashboard() {
                                                 <td className="p-3">{new Date(item.created_at).toLocaleString('ru-RU')}</td>
                                                 <td className="p-3">{item.file_name}</td>
                                                 <td className="p-3">{item.category || '-'}</td>
+                                                <td className="p-3">{getHSGenderLabel(item.gender)}</td>
                                                 <td className="p-3 text-right flex gap-2 justify-end">
                                                     <button
                                                         onClick={() => handlePrintHonestSignHistory(item.file_name, item.created_at)}
@@ -15413,6 +17618,7 @@ export default function Dashboard() {
                                 <th className="p-3 font-medium text-gray-500">Дата печати</th>
                                 <th className="p-3 font-medium text-gray-500">Файл</th>
                                 <th className="p-3 font-medium text-gray-500">Категория</th>
+                                <th className="p-3 font-medium text-gray-500">Пол</th>
                                 <th className="p-3 font-medium text-gray-500 text-right">Действия</th>
                               </tr>
                             </thead>
@@ -15422,6 +17628,7 @@ export default function Dashboard() {
                                   <td className="p-3">{new Date(item.created_at).toLocaleString('ru-RU')}</td>
                                   <td className="p-3">{item.file_name}</td>
                                   <td className="p-3">{item.category || '-'}</td>
+                                  <td className="p-3">{getHSGenderLabel(item.gender)}</td>
                                   <td className="p-3 text-right">
                                     <button
                                       onClick={() => handleDownloadHonestSignHistory(item.file_name, item.created_at)}
@@ -18385,7 +20592,14 @@ export default function Dashboard() {
             <div className="max-w-4xl mx-auto">
               <div className="mb-8">
                 <h1 className="text-2xl font-bold text-gray-900">База данных</h1>
-                <p className="text-gray-500 mt-1">Управление версиями и резервное копирование</p>
+                <p className="text-gray-500 mt-1">Полные бэкапы, восстановление и лог версий базы данных</p>
+                <input
+                  ref={databaseRestoreInputRef}
+                  type="file"
+                  accept="application/json"
+                  onChange={handleRestoreDatabase}
+                  className="hidden"
+                />
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
@@ -18393,9 +20607,12 @@ export default function Dashboard() {
                   <div className="w-12 h-12 bg-indigo-100 rounded-lg flex items-center justify-center mb-4">
                     <Upload className="h-6 w-6 text-indigo-600" />
                   </div>
-                  <h3 className="font-bold text-gray-900 mb-2">Загрузить базу</h3>
-                  <p className="text-sm text-gray-500 mb-4">Восстановление из резервной копии</p>
-                  <button className="w-full py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium text-sm">
+                  <h3 className="font-bold text-gray-900 mb-2">Восстановить базу</h3>
+                  <p className="text-sm text-gray-500 mb-4">Загрузка JSON-бэкапа и восстановление данных в Supabase</p>
+                  <button
+                    onClick={() => databaseRestoreInputRef.current?.click()}
+                    className="w-full py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium text-sm"
+                  >
                     Загрузить файл
                   </button>
                 </div>
@@ -18405,8 +20622,11 @@ export default function Dashboard() {
                     <History className="h-6 w-6 text-green-600" />
                   </div>
                   <h3 className="font-bold text-gray-900 mb-2">История базы</h3>
-                  <p className="text-sm text-gray-500 mb-4">Просмотр истории изменений</p>
-                  <button className="w-full py-2 bg-white border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 font-medium text-sm">
+                  <p className="text-sm text-gray-500 mb-4">Последние бэкапы и лог версий базы данных</p>
+                  <button
+                    onClick={() => databaseHistoryRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                    className="w-full py-2 bg-white border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 font-medium text-sm"
+                  >
                     Открыть историю
                   </button>
                 </div>
@@ -18415,37 +20635,36 @@ export default function Dashboard() {
                   <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center mb-4">
                     <Database className="h-6 w-6 text-blue-600" />
                   </div>
-                  <h3 className="font-bold text-gray-900 mb-2">Текущая версия</h3>
-                  <p className="text-sm text-gray-500 mb-4">v{databaseLogs[0]?.version || '1.0.0'}</p>
+                  <h3 className="font-bold text-gray-900 mb-2">Автобэкап БД</h3>
+                  <p className="text-sm text-gray-500 mb-2">{databaseBackupScheduleLabel}</p>
+                  <p className="text-xs text-gray-400 mb-4">Последний лог: {databaseLogs[0]?.date || 'пока нет записей'}</p>
                   <div className="space-y-2">
                     <button
                       onClick={refreshDatabaseLogs}
-                      className="w-full py-2 bg-white border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 font-medium text-sm flex items-center justify-center"
+                      disabled={databaseLogsLoading}
+                      className="w-full py-2 bg-white border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 font-medium text-sm flex items-center justify-center disabled:opacity-50"
                     >
-                      <RefreshCw className="h-4 w-4 mr-2" /> Обновить историю
+                      <RefreshCw className={`h-4 w-4 mr-2 ${databaseLogsLoading ? 'animate-spin' : ''}`} /> Обновить историю
                     </button>
                     <button
-                      onClick={() => {
-                        if (window.confirm('Вы уверены, что хотите создать резервную копию и отправить в Telegram?')) {
-                            sendDatabaseBackupToTelegram();
-                            showToast('Бэкап отправляется...', 'info');
-                        }
-                      }}
-                      className="w-full py-2 bg-blue-50 border border-blue-200 text-blue-700 rounded-lg hover:bg-blue-100 font-medium text-sm flex items-center justify-center"
+                      onClick={handleCreateDatabaseBackup}
+                      disabled={databaseBackupLoading}
+                      className="w-full py-2 bg-blue-50 border border-blue-200 text-blue-700 rounded-lg hover:bg-blue-100 font-medium text-sm flex items-center justify-center disabled:opacity-50"
                     >
-                      <Send className="h-4 w-4 mr-2" /> Создать бэкап
+                      <Send className={`h-4 w-4 mr-2 ${databaseBackupLoading ? 'animate-pulse' : ''}`} /> {databaseBackupLoading ? 'Создание бэкапа...' : 'Создать бэкап'}
                     </button>
                     <button
                       onClick={handleDownloadDatabase}
-                      className="w-full py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium text-sm flex items-center justify-center"
+                      disabled={databaseDownloadLoading}
+                      className="w-full py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium text-sm flex items-center justify-center disabled:opacity-50"
                     >
-                      <Download className="h-4 w-4 mr-2" /> Скачать базу
+                      <Download className={`h-4 w-4 mr-2 ${databaseDownloadLoading ? 'animate-pulse' : ''}`} /> {databaseDownloadLoading ? 'Скачивание...' : 'Скачать базу'}
                     </button>
                   </div>
                 </div>
               </div>
 
-              <div className="oc-card overflow-hidden">
+              <div ref={databaseHistoryRef} className="oc-card overflow-hidden">
                 <div className="px-6 py-4 border-b border-gray-100">
                   <h3 className="font-bold text-gray-900">Лог версий базы данных</h3>
                 </div>
@@ -18458,11 +20677,24 @@ export default function Dashboard() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {databaseLogs.map((log, index) => (
-                      <tr key={index} className="hover:bg-gray-50">
+                    {databaseLogs.length === 0 ? (
+                      <tr>
+                        <td colSpan={3} className="px-6 py-10 text-center text-gray-400">История бэкапов пока пустая</td>
+                      </tr>
+                    ) : databaseLogs.map((log, index) => (
+                      <tr key={`${log.created_at || log.date || 'log'}-${index}`} className="hover:bg-gray-50 align-top">
                         <td className="px-6 py-4 font-medium text-indigo-600">{log.version}</td>
-                        <td className="px-6 py-4 text-gray-600">{log.date}</td>
-                        <td className="px-6 py-4 text-gray-600">{log.details}</td>
+                        <td className="px-6 py-4 text-gray-600 whitespace-nowrap">{log.date}</td>
+                        <td className="px-6 py-4 text-gray-600">
+                          <div>{log.details}</div>
+                          {(log.source || log.status || log.file_name) && (
+                            <div className="mt-2 flex flex-wrap gap-2 text-xs text-gray-400">
+                              {log.source && <span className="rounded-full bg-gray-100 px-2 py-1">Источник: {log.source}</span>}
+                              {log.status && <span className="rounded-full bg-gray-100 px-2 py-1">Статус: {log.status}</span>}
+                              {log.file_name && <span className="rounded-full bg-gray-100 px-2 py-1">Файл: {log.file_name}</span>}
+                            </div>
+                          )}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -18591,7 +20823,14 @@ export default function Dashboard() {
                             await logAssemblyChange('work_rates', 'update', before || null, { ...(before || {}), name: cwRateForm.name, price: newPrice });
                             setEditingRateId(null);
                         } else {
-                            const { data: createdRate } = await supabase.from('work_rates').insert([{ name: cwRateForm.name, price: parseFloat(cwRateForm.price) }]).select('*').maybeSingle();
+                            let createdRate: any = null;
+                            const primaryInsert = await supabase.from('work_rates').insert([{ name: cwRateForm.name, price: parseFloat(cwRateForm.price), use_shared_price: true }]).select('*').maybeSingle();
+                            if (primaryInsert.error) {
+                              const fallbackInsert = await supabase.from('work_rates').insert([{ name: cwRateForm.name, price: parseFloat(cwRateForm.price) }]).select('*').maybeSingle();
+                              createdRate = fallbackInsert.data || null;
+                            } else {
+                              createdRate = primaryInsert.data || null;
+                            }
                             await logAssemblyChange('work_rates', 'create', null, createdRate || { name: cwRateForm.name, price: parseFloat(cwRateForm.price) });
                         }
 
@@ -18599,6 +20838,7 @@ export default function Dashboard() {
                         // Refresh rates
                         const { data } = await supabase.from('work_rates').select('*').is('deleted_at', null);
                         setCwWorkRates(data || []);
+                        await loadCwWorkRateEmployeePrices(data || []);
                         if (cwSelectedEmployee?.id) {
                           const startOfMonth = new Date(cwSelectedPeriod.getFullYear(), cwSelectedPeriod.getMonth(), 1).toISOString().split('T')[0];
                           const endOfMonth = new Date(cwSelectedPeriod.getFullYear(), cwSelectedPeriod.getMonth() + 1, 0).toISOString().split('T')[0];
@@ -18618,44 +20858,175 @@ export default function Dashboard() {
                       {editingRateId ? 'Сохранить' : 'Добавить'}
                     </button>
                   </div>
-                  <div className="space-y-2">
-                    {cwWorkRates.map(rate => (
-                      <div key={rate.id} className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
-                        <span className="font-medium">{rate.name}</span>
-                        <div className="flex items-center gap-2 sm:gap-4 flex-wrap justify-end">
-                          <span className="font-bold text-green-600">{rate.price} ₽</span>
-                          <button
-                            onClick={() => setCwRateHistoryModal({ open: true, rateId: String(rate.id), rateName: String(rate.name || '') })}
-                            className="text-slate-500 hover:text-slate-700 text-xs px-2 py-1 rounded border border-slate-200"
-                          >
-                            История
-                          </button>
-                          <button
-                            onClick={() => setCwRateBulkModal({ open: true, rateId: String(rate.id), rateName: String(rate.name || ''), oldPrice: String(rate.price || ''), price: String(rate.price || ''), start: new Date().toISOString().split('T')[0], end: new Date().toISOString().split('T')[0] })}
-                            className="text-indigo-600 hover:text-indigo-800 text-xs px-2 py-1 rounded border border-indigo-200"
-                          >
-                            Обновить
-                          </button>
-                          <button
-                            onClick={() => {
-                                setEditingRateId(rate.id);
-                                setCwRateForm({ name: rate.name, price: rate.price.toString() });
-                            }}
-                            className="text-blue-500 hover:text-blue-700"
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </button>
-                          <button onClick={async () => {
-                            if (!hasAssemblyButtonAccess('cw_rates_delete')) return;
-                            const before = { ...rate };
-                            await supabase.from('work_rates').update({ deleted_at: new Date().toISOString() }).eq('id', rate.id);
-                            await logAssemblyChange('work_rates', 'delete', before, null);
-                            const { data } = await supabase.from('work_rates').select('*').is('deleted_at', null);
-                            setCwWorkRates(data || []);
-                          }} disabled={!hasAssemblyButtonAccess('cw_rates_delete')} className={`text-red-500 hover:text-red-700 ${!hasAssemblyButtonAccess('cw_rates_delete') ? 'opacity-40 cursor-not-allowed' : ''}`}><Trash2 className="h-4 w-4" /></button>
+                  <div className="space-y-3">
+                    {cwWorkRates.map(rate => {
+                      const rateConfig = getCwRateEmployeeConfig(String(rate.id));
+                      const activeEmployees = employees.filter((employee: any) => !employee?.deleted_at);
+                      return (
+                        <div key={rate.id} className="p-3 bg-gray-50 rounded-lg space-y-3">
+                          <div className="flex justify-between items-start gap-3 flex-wrap">
+                            <div>
+                              <div className="font-medium">{rate.name}</div>
+                              <div className="text-sm text-gray-500">
+                                {rateConfig.useSharedPrice ? `Одна цена для всех: ${rate.price} ₽` : 'Индивидуальные цены по сотрудникам'}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2 sm:gap-4 flex-wrap justify-end">
+                              <span className="font-bold text-green-600">{rateConfig.useSharedPrice ? `${rate.price} ₽` : 'По сотрудникам'}</span>
+                              <button
+                                onClick={() => setCwRateHistoryModal({ open: true, rateId: String(rate.id), rateName: String(rate.name || '') })}
+                                className="text-slate-500 hover:text-slate-700 text-xs px-2 py-1 rounded border border-slate-200"
+                              >
+                                История
+                              </button>
+                              <button
+                                onClick={() => setCwRateBulkModal({ open: true, rateId: String(rate.id), rateName: String(rate.name || ''), oldPrice: String(rate.price || ''), price: String(rate.price || ''), start: new Date().toISOString().split('T')[0], end: new Date().toISOString().split('T')[0] })}
+                                className="text-indigo-600 hover:text-indigo-800 text-xs px-2 py-1 rounded border border-indigo-200"
+                              >
+                                Обновить
+                              </button>
+                              <button
+                                onClick={() => {
+                                    setEditingRateId(rate.id);
+                                    setCwRateForm({ name: rate.name, price: rate.price.toString() });
+                                }}
+                                className="text-blue-500 hover:text-blue-700"
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </button>
+                              <button onClick={async () => {
+                                if (!hasAssemblyButtonAccess('cw_rates_delete')) return;
+                                const before = { ...rate };
+                                await supabase.from('work_rates').update({ deleted_at: new Date().toISOString() }).eq('id', rate.id);
+                                await supabase.from('employee_work_rates').delete().eq('work_rate_id', rate.id);
+                                const nextRateSettings = { ...(cwWorkRateEmployeePrices || {}) };
+                                delete nextRateSettings[String(rate.id)];
+                                setCwWorkRateEmployeePrices(nextRateSettings);
+                                await logAssemblyChange('work_rates', 'delete', before, null);
+                                const { data } = await supabase.from('work_rates').select('*').is('deleted_at', null);
+                                setCwWorkRates(data || []);
+                                await loadCwWorkRateEmployeePrices(data || []);
+                              }} disabled={!hasAssemblyButtonAccess('cw_rates_delete')} className={`text-red-500 hover:text-red-700 ${!hasAssemblyButtonAccess('cw_rates_delete') ? 'opacity-40 cursor-not-allowed' : ''}`}><Trash2 className="h-4 w-4" /></button>
+                            </div>
+                          </div>
+
+                          <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                            <input
+                              type="checkbox"
+                              checked={rateConfig.useSharedPrice}
+                              onChange={async (e) => {
+                                await saveCwRateEmployeeConfig(String(rate.id), {
+                                  useSharedPrice: e.target.checked,
+                                  employeePrices: { ...(rateConfig.employeePrices || {}) },
+                                });
+                                showToast(e.target.checked ? 'Включена одна цена для всех' : 'Включены цены по сотрудникам', 'success');
+                              }}
+                              className="h-4 w-4"
+                            />
+                            Одна цена для всех
+                          </label>
+
+                          {!rateConfig.useSharedPrice && (
+                            <div className="border border-dashed border-slate-200 rounded-xl bg-white p-3 space-y-3">
+                              {activeEmployees.length === 0 ? (
+                                <div className="text-sm text-gray-500">Нет активных сотрудников для настройки индивидуальных цен.</div>
+                              ) : (
+                                <>
+                                  <div className="flex flex-wrap gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const nextEmployeePrices = { ...(rateConfig.employeePrices || {}) };
+                                        activeEmployees.forEach((employee: any) => {
+                                          const key = String(employee.id || '');
+                                          if (!key) return;
+                                          const currentValue = String(nextEmployeePrices[key] ?? '').trim();
+                                          if (!currentValue) nextEmployeePrices[key] = String(rate.price ?? '');
+                                        });
+                                        setCwWorkRateEmployeePrices(prev => ({
+                                          ...(prev || {}),
+                                          [String(rate.id)]: {
+                                            useSharedPrice: false,
+                                            employeePrices: nextEmployeePrices,
+                                          },
+                                        }));
+                                      }}
+                                      className="px-3 py-2 rounded-lg border border-slate-200 text-sm hover:bg-slate-50"
+                                    >
+                                      Заполнить пустые общей ценой
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const nextEmployeePrices = { ...(rateConfig.employeePrices || {}) };
+                                        activeEmployees.forEach((employee: any) => {
+                                          const key = String(employee.id || '');
+                                          if (!key) return;
+                                          nextEmployeePrices[key] = String(rate.price ?? '');
+                                        });
+                                        setCwWorkRateEmployeePrices(prev => ({
+                                          ...(prev || {}),
+                                          [String(rate.id)]: {
+                                            useSharedPrice: false,
+                                            employeePrices: nextEmployeePrices,
+                                          },
+                                        }));
+                                      }}
+                                      className="px-3 py-2 rounded-lg border border-indigo-200 text-sm text-indigo-700 hover:bg-indigo-50"
+                                    >
+                                      Скопировать общую цену всем
+                                    </button>
+                                  </div>
+
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                    {activeEmployees.map((employee: any) => (
+                                      <div key={`rate-employee-${rate.id}-${employee.id}`} className="rounded-lg border border-slate-200 p-3">
+                                        <div className="text-sm font-medium text-gray-800 mb-2">{employee.full_name || employee.login || `#${employee.id}`}</div>
+                                        <input
+                                          type="number"
+                                          step="0.01"
+                                          placeholder={`По умолчанию: ${rate.price}`}
+                                          value={String(rateConfig.employeePrices[String(employee.id)] ?? '')}
+                                          onChange={(e) => {
+                                            const value = e.target.value;
+                                            setCwWorkRateEmployeePrices(prev => ({
+                                              ...(prev || {}),
+                                              [String(rate.id)]: {
+                                                useSharedPrice: false,
+                                                employeePrices: {
+                                                  ...(((prev || {})[String(rate.id)] as any)?.employeePrices || {}),
+                                                  [String(employee.id)]: value,
+                                                },
+                                              },
+                                            }));
+                                          }}
+                                          className="oc-input"
+                                        />
+                                      </div>
+                                    ))}
+                                  </div>
+                                </>
+                              )}
+                              <div className="flex justify-end">
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    await saveCwRateEmployeeConfig(String(rate.id), {
+                                      useSharedPrice: false,
+                                      employeePrices: { ...(cwWorkRateEmployeePrices[String(rate.id)]?.employeePrices || {}) },
+                                    });
+                                    showToast('Цены сотрудников сохранены', 'success');
+                                  }}
+                                  className="px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700"
+                                >
+                                  Сохранить цены сотрудников
+                                </button>
+                              </div>
+                            </div>
+                          )}
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
 
@@ -18729,6 +21100,7 @@ export default function Dashboard() {
                             await supabase.from('work_rates').update({ price: newPrice }).eq('id', cwRateBulkModal.rateId);
                             const { data: refreshedRates } = await supabase.from('work_rates').select('*').is('deleted_at', null);
                             setCwWorkRates(refreshedRates || []);
+                            await loadCwWorkRateEmployeePrices(refreshedRates || []);
                             setCwRateBulkModal({ open: false, rateId: '', rateName: '', oldPrice: '', price: '', start: new Date().toISOString().split('T')[0], end: new Date().toISOString().split('T')[0] });
                             showToast('Новая цена сохранена. Старые записи не пересчитаны', 'success');
                           }}
@@ -20373,8 +22745,7 @@ export default function Dashboard() {
                                         };
                                         await supabase.from('work_logs').update(updatedPayload).eq('id', editingWorkLogId);
                                         const nextSnapshots = { ...(cwWorkRateSnapshots || {}) } as Record<string, number>;
-                                        const selectedRate = cwWorkRates.find((r: any) => String(r.id) === String(updatedPayload.work_rate_id));
-                                        nextSnapshots[String(editingWorkLogId)] = Number(selectedRate?.price || 0);
+                                        nextSnapshots[String(editingWorkLogId)] = Number(getEffectiveWorkRatePrice(String(updatedPayload.work_rate_id || ''), String(cwSelectedEmployee?.id || before?.employee_id || '')) || 0);
                                         setCwWorkRateSnapshots(nextSnapshots);
                                         await supabase.from('app_settings').upsert([{ key: 'cw_work_rate_snapshots_v1', value: JSON.stringify(nextSnapshots) }], { onConflict: 'key' });
                                         await logAssemblyChange('work_logs', 'update', before || null, { ...(before || {}), ...updatedPayload, id: editingWorkLogId });
@@ -20424,13 +22795,15 @@ export default function Dashboard() {
                                           if (existing) {
                                             const newQty = Number(existing.quantity || 0) + Number(item.quantity || 0);
                                             await supabase.from('work_logs').update({ quantity: newQty }).eq('id', existing.id);
+                                            if (!(String(existing.id) in nextSnapshots)) {
+                                              nextSnapshots[String(existing.id)] = Number(getEffectiveWorkRatePrice(String(existing.work_rate_id || ''), String(existing.employee_id || item.employee_id || '')) || 0);
+                                            }
                                             updatedCount += 1;
                                             await logAssemblyChange('work_logs', 'update', existing, { ...existing, quantity: newQty });
                                           } else {
                                             const { data: created } = await supabase.from('work_logs').insert([item]).select('*').maybeSingle();
                                             if (created) {
-                                              const rate = cwWorkRates.find((r: any) => String(r.id) === String(created.work_rate_id));
-                                              nextSnapshots[String(created.id)] = Number(rate?.price || 0);
+                                              nextSnapshots[String(created.id)] = Number(getEffectiveWorkRatePrice(String(created.work_rate_id || ''), String(created.employee_id || '')) || 0);
                                               createdCount += 1;
                                               logAssemblyChange('work_logs', 'create', null, created);
                                             }
@@ -20476,9 +22849,9 @@ export default function Dashboard() {
                                             <div className="font-bold text-green-600">
                                             {/юл|juli/i.test(String(cwSelectedEmployee?.full_name || cwSelectedEmployee?.login || ''))
                                               ? (/админ/i.test(String(rate?.name || ''))
-                                                  ? `${Math.floor(Number(log.quantity || 0) * Number(rate?.price || 0)).toLocaleString('ru-RU')} ₽`
+                                                  ? `${Math.floor(Number(log.quantity || 0) * Number(getWorkLogSnapshotPrice(log) || 0)).toLocaleString('ru-RU')} ₽`
                                                   : '—')
-                                              : `${(Number(log.quantity || 0) * Number(rate?.price || 0)).toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽`}
+                                              : `${(Number(log.quantity || 0) * Number(getWorkLogSnapshotPrice(log) || 0)).toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽`}
                                             </div>
                                             )}
                                             <button
@@ -20732,7 +23105,7 @@ export default function Dashboard() {
 
                             let query = supabase
                               .from('work_logs')
-                              .select('date, quantity, work_rate_id, supplier_id, employee_id')
+                              .select('id, date, quantity, work_rate_id, supplier_id, employee_id')
                               .is('deleted_at', null)
                               .gte('date', cwReportForm.start_date)
                               .lte('date', cwReportForm.end_date)
@@ -20753,14 +23126,15 @@ export default function Dashboard() {
                               const rate = cwWorkRates.find(r => r.id === log.work_rate_id);
                               const supplierName = suppliers.find(s => String(s.id) === String((log as any).supplier_id || ''))?.name || '-';
                               const employeeName = employees.find(e => String(e.id) === String((log as any).employee_id || ''))?.full_name || '-';
+                              const price = Number(getWorkLogSnapshotPrice(log) || 0);
                               return {
                                 date: log.date,
                                 supplier_name: supplierName,
                                 employee_name: employeeName,
                                 work_name: rate?.name || 'Неизвестно',
                                 quantity: Number(log.quantity || 0),
-                                price: Number(rate?.price || 0),
-                                total: Number(log.quantity || 0) * Number(rate?.price || 0)
+                                price,
+                                total: Number(log.quantity || 0) * price
                               };
                             });
 
@@ -20781,10 +23155,15 @@ export default function Dashboard() {
 
                             const message = `Отчет по сотруднику: ${employee?.full_name}\nПоставщик: ${supplierLabel}\nПериод: ${new Date(cwReportForm.start_date).toLocaleDateString('ru-RU')} - ${new Date(cwReportForm.end_date).toLocaleDateString('ru-RU')}\n\nИтого к оплате: ${total}₽`;
 
-                            const botToken = '8525065676:AAF-cjwf1EvT56-TkALsbN1D0JAYR3Gqozo';
+                            const botToken = String((telegramBotTokenFile || telegramBotToken || '').trim());
 
                             if (cwReportForm.supplier_id === '__ALL__') {
                               showToast('Для «По всем поставщикам» отправка в Telegram недоступна', 'error');
+                              return;
+                            }
+
+                            if (!botToken) {
+                              showToast('Не задан Telegram Bot Token', 'error');
                               return;
                             }
 
@@ -21819,22 +24198,126 @@ export default function Dashboard() {
                         setCwWarehouseMoneyForm({ amount: '', comment: '' }); await fetchCwWarehouseMoneyHistory(); showToast('Операция списана', 'success');
                       }} className="w-full py-2 bg-rose-600 text-white rounded-lg hover:bg-rose-700">Списать</button>
                     </div>
+                    <div className="mb-2 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setCwWarehouseMoneyFilter('all')}
+                        className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${cwWarehouseMoneyFilter === 'all' ? 'bg-slate-900 text-white' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                      >
+                        Все
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCwWarehouseMoneyFilter('add')}
+                        className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${cwWarehouseMoneyFilter === 'add' ? 'bg-emerald-600 text-white' : 'bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-50'}`}
+                      >
+                        Добавления
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCwWarehouseMoneyFilter('writeoff')}
+                        className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${cwWarehouseMoneyFilter === 'writeoff' ? 'bg-rose-600 text-white' : 'bg-white border border-rose-200 text-rose-700 hover:bg-rose-50'}`}
+                      >
+                        Списания
+                      </button>
+                    </div>
                     <div className="max-h-48 overflow-y-auto border rounded-lg bg-white">
-                      {cwWarehouseMoneyHistory.length === 0 ? (
+                      {filteredCwWarehouseMoneyHistory.length === 0 ? (
                         <div className="p-3 text-sm text-gray-500">Пока нет операций.</div>
                       ) : (
                         <div className="divide-y">
-                          {cwWarehouseMoneyHistory.map((row) => (
-                            <div key={`temp-money-${row.id}`} className="p-3 flex items-center justify-between gap-3 text-sm">
-                              <div>
-                                <div className="font-medium text-gray-900">{row.comment || 'Без комментария'}</div>
-                                <div className="text-xs text-gray-500">{new Date(row.created_at).toLocaleString('ru-RU')}</div>
+                          {filteredCwWarehouseMoneyHistory.map((row) => {
+                            const isEditing = cwWarehouseMoneyEdit?.id === String(row.id);
+                            const isManual = !row.type || row.type === 'manual';
+
+                            return (
+                              <div key={`temp-money-${row.id}`} className="p-3 text-sm">
+                                {isEditing && cwWarehouseMoneyEdit ? (
+                                  <div className="space-y-2">
+                                    <div className="grid grid-cols-1 md:grid-cols-[140px_140px_1fr_auto_auto] gap-2">
+                                      <select
+                                        value={cwWarehouseMoneyEdit.mode}
+                                        onChange={(e) => setCwWarehouseMoneyEdit(prev => prev ? { ...prev, mode: e.target.value as 'add' | 'writeoff' } : prev)}
+                                        className="oc-select"
+                                      >
+                                        <option value="add">Добавить</option>
+                                        <option value="writeoff">Списать</option>
+                                      </select>
+                                      <input
+                                        type="number"
+                                        step="0.01"
+                                        placeholder="Сумма"
+                                        value={cwWarehouseMoneyEdit.amount}
+                                        onChange={(e) => setCwWarehouseMoneyEdit(prev => prev ? { ...prev, amount: e.target.value } : prev)}
+                                        className="oc-select"
+                                      />
+                                      <input
+                                        type="text"
+                                        placeholder="Комментарий"
+                                        value={cwWarehouseMoneyEdit.comment}
+                                        onChange={(e) => setCwWarehouseMoneyEdit(prev => prev ? { ...prev, comment: e.target.value } : prev)}
+                                        className="oc-select"
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={handleSaveWarehouseMoneyEdit}
+                                        className="inline-flex items-center justify-center rounded-lg bg-emerald-600 px-3 py-2 text-white hover:bg-emerald-700"
+                                        title="Сохранить"
+                                      >
+                                        <Save className="h-4 w-4" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={handleCancelEditWarehouseMoney}
+                                        className="inline-flex items-center justify-center rounded-lg border border-gray-200 px-3 py-2 text-gray-600 hover:bg-gray-50"
+                                        title="Отмена"
+                                      >
+                                        <X className="h-4 w-4" />
+                                      </button>
+                                    </div>
+                                    <div className="text-xs text-gray-500">{new Date(row.created_at).toLocaleString('ru-RU')}</div>
+                                  </div>
+                                ) : (
+                                  <div className="flex items-center justify-between gap-3">
+                                    <div>
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        <div className="font-medium text-gray-900">{row.comment || 'Без комментария'}</div>
+                                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${isManual ? 'bg-slate-100 text-slate-600' : 'bg-violet-100 text-violet-700'}`}>
+                                          {isManual ? 'Ручная' : 'ЗП'}
+                                        </span>
+                                      </div>
+                                      <div className="text-xs text-gray-500">{new Date(row.created_at).toLocaleString('ru-RU')}</div>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      <div className={`font-bold ${Number(row.amount) >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                                        {Number(row.amount) >= 0 ? '+' : ''}{Math.floor(Number(row.amount || 0)).toLocaleString('ru-RU')} ₽
+                                      </div>
+                                      {isManual && (
+                                        <>
+                                          <button
+                                            type="button"
+                                            onClick={() => handleStartEditWarehouseMoney(row)}
+                                            className="inline-flex items-center justify-center rounded-lg border border-blue-200 p-2 text-blue-600 hover:bg-blue-50"
+                                            title="Редактировать"
+                                          >
+                                            <Pencil className="h-4 w-4" />
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => handleDeleteWarehouseMoney(row)}
+                                            className="inline-flex items-center justify-center rounded-lg border border-red-200 p-2 text-red-600 hover:bg-red-50"
+                                            title="Удалить"
+                                          >
+                                            <Trash2 className="h-4 w-4" />
+                                          </button>
+                                        </>
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
                               </div>
-                              <div className={`font-bold ${Number(row.amount) >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
-                                {Number(row.amount) >= 0 ? '+' : ''}{Math.floor(Number(row.amount || 0)).toLocaleString('ru-RU')} ₽
-                              </div>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       )}
                     </div>

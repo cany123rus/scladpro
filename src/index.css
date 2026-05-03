@@ -1,0 +1,214 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply font-sans text-gray-900 antialiased;
+    background: radial-gradient(1200px 600px at 10% -10%, #e0e7ff 0%, rgba(224,231,255,0) 60%), radial-gradient(1000px 500px at 100% 0%, #dbeafe 0%, rgba(219,234,254,0) 55%), #f8fafc;
+  }
+
+  input,
+  select,
+  textarea {
+    @apply rounded-xl border-slate-200 bg-white/90 transition-all;
+  }
+
+  input:focus,
+  select:focus,
+  textarea:focus {
+    @apply outline-none ring-2 ring-indigo-500 border-indigo-300;
+  }
+
+  button {
+    @apply transition-all;
+  }
+}
+
+@layer components {
+  .oc-card {
+    @apply bg-white/90 backdrop-blur rounded-2xl border border-slate-200 shadow-lg shadow-slate-200/40;
+  }
+
+  .oc-card-soft {
+    @apply bg-white/70 backdrop-blur rounded-2xl border border-slate-200/70 shadow-sm;
+  }
+
+  .oc-title {
+    @apply text-slate-900 font-bold tracking-tight;
+  }
+
+  .oc-subtitle {
+    @apply text-slate-500;
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center justify-center px-4 py-2.5 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-success {
+    @apply inline-flex items-center justify-center px-4 py-2.5 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-danger {
+    @apply inline-flex items-center justify-center px-4 py-2.5 rounded-xl bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center justify-center px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50;
+  }
+
+  .oc-input {
+    @apply w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none;
+  }
+
+  .oc-select {
+    @apply w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none;
+  }
+
+  .oc-filterbar {
+    @apply oc-card p-3 md:p-4;
+  }
+}
+
+@media (max-width: 768px) {
+  .oc-card {
+    @apply rounded-xl shadow-md;
+  }
+
+  .oc-card-soft {
+    @apply rounded-xl;
+  }
+
+  .oc-input,
+  .oc-select {
+    @apply px-3 py-2.5 text-sm;
+  }
+
+  .btn-primary,
+  .btn-success,
+  .btn-danger,
+  .btn-ghost {
+    @apply px-3 py-2 text-sm;
+  }
+}
+
+@layer utilities {
+  .oc-surface {
+    @apply oc-card;
+  }
+
+  .oc-surface-soft {
+    @apply oc-card-soft;
+  }
+}
+
+/* Stage 1 redesign baseline: keep semantic Tailwind colors, unify shape/shadow only */
+button {
+  border-radius: 12px;
+}
+
+button:hover {
+  transform: translateY(-0.5px);
+}
+
+button:active {
+  transform: translateY(0);
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Unified modern date/month inputs across the app */
+input[type='date'],
+input[type='month'] {
+  appearance: none;
+  -webkit-appearance: none;
+  min-height: 42px;
+  padding: 0.55rem 0.9rem;
+  border-radius: 0.85rem;
+  border: 1px solid rgb(203 213 225 / 0.9);
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  color: #0f172a;
+  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.02), 0 4px 14px rgba(15, 23, 42, 0.05);
+}
+
+input[type='date']::-webkit-calendar-picker-indicator,
+input[type='month']::-webkit-calendar-picker-indicator {
+  opacity: 0.9;
+  cursor: pointer;
+  filter: saturate(0.8);
+}
+
+input[type='date']:hover,
+input[type='month']:hover {
+  border-color: rgb(129 140 248 / 0.6);
+}
+
+input[type='date']:focus,
+input[type='month']:focus {
+  outline: none;
+  border-color: rgb(99 102 241 / 0.65);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.18), 0 8px 20px rgba(99, 102, 241, 0.12);
+}
+
+/* Better tap/click reliability on TV browsers and touch remotes */
+button,
+a,
+[role='button'],
+summary,
+input,
+select,
+textarea,
+label {
+  touch-action: manipulation;
+}
+
+@media (hover: none), (pointer: coarse) {
+  button:hover {
+    transform: none;
+  }
+
+  button,
+  a,
+  [role='button'],
+  summary,
+  input,
+  select,
+  textarea {
+    min-height: 48px;
+  }
+
+  .oc-input,
+  .oc-select {
+    font-size: 16px;
+  }
+}
+
+@media (min-width: 1200px) and (hover: none), (min-width: 1200px) and (pointer: coarse) {
+  html,
+  body {
+    font-size: 18px;
+  }
+
+  .oc-card,
+  .oc-card-soft {
+    border-radius: 18px;
+  }
+
+  button,
+  .btn-primary,
+  .btn-success,
+  .btn-danger,
+  .btn-ghost {
+    padding-top: 0.75rem;
+    padding-bottom: 0.75rem;
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+}

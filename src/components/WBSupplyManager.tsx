@@ -91,6 +91,29 @@ interface SupplyOrderItem extends ProductCard {
   selectedSize: string;
 }
 
+interface FbsSupplyScanSavedItem {
+  storageKey: string;
+  stickerDigits: string;
+  stickerScanText?: string;
+  honestSignCode: string;
+  updatedAt: string;
+  orderId?: string;
+  title?: string;
+  article?: string;
+  size?: string;
+}
+
+interface FbsSupplyScanOrderRow {
+  storageKey: string;
+  orderId: string;
+  title: string;
+  article: string;
+  size: string;
+  stickerDigits: string;
+  stickerText: string;
+  stickerScanText: string;
+}
+
 // --- Helper Functions ---
 
 const formatDate = (dateString: string) => {
@@ -223,6 +246,114 @@ const formatStickerDigits = (digits: string) => {
   return `${clean.slice(0, -4)}_${clean.slice(-4)}`;
 };
 
+const normalizeDataMatrixText = (raw: string) => {
+  let value = String(raw || '').trim();
+  value = value.replace(/[\u001d\u001e\u001f]/g, '');
+  if (value.startsWith('01') && value.length > 18) {
+    const gtinPart = value.slice(0, 16);
+    const tail = value.slice(16);
+    if (!tail.startsWith('21')) {
+      value = `${gtinPart}21${tail}`;
+    }
+  }
+  return value;
+};
+
+const normalizeScanStickerText = (raw: string) => String(raw || '')
+  .replace(/[\r\n\t]+/g, ' ')
+  .replace(/\s+/g, ' ')
+  .trim();
+
+const extractSvgStickerScanText = (svgBase64: string) => {
+  try {
+    const svg = atob(String(svgBase64 || ''));
+    const decodeEntities = (input: string) => input
+      .replace(/&quot;/g, '"')
+      .replace(/&apos;/g, "'")
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&amp;/g, '&');
+
+    const texts = Array.from(svg.matchAll(/<text\b[^>]*>([\s\S]*?)<\/text>/gi))
+      .map((m) => decodeEntities(String(m?.[1] || '')).replace(/<[^>]+>/g, ''))
+      .map((value) => normalizeScanStickerText(value))
+      .filter(Boolean);
+
+    const candidates = texts.filter((value) => {
+      if (!value || value.length < 6 || value.length > 32) return false;
+      if (/\s/.test(value)) return false;
+      if (!/[A-Za-z]/.test(value)) return false;
+      if (/^(wildberries|wb)$/i.test(value)) return false;
+      return true;
+    });
+
+    const preferred = candidates.find((value) => /[*/+=]/.test(value))
+      || candidates.find((value) => /[a-z]/.test(value) && /[A-Z]/.test(value))
+      || candidates[0];
+
+    return normalizeScanStickerText(preferred || '');
+  } catch {
+    return '';
+  }
+};
+
+const isGarbageStickerScanText = (value: string) => {
+  const normalized = normalizeScanStickerText(value);
+  if (!normalized) return true;
+  if (normalized === '[object Object]') return true;
+  if (/^\d{10,}\.\d+\.\d+$/.test(normalized)) return true;
+  if (/^e[A-Za-z0-9]+\.[A-Za-z0-9]+(?:\.[A-Za-z0-9]+)+$/i.test(normalized)) return true;
+  return false;
+};
+
+const looksReadableStickerScanText = (value: string) => {
+  const normalized = normalizeScanStickerText(value);
+  if (!normalized || isGarbageStickerScanText(normalized)) return false;
+  if (normalized.startsWith('*')) return true;
+  if (/^[A-Za-z0-9/+_-]{6,24}$/.test(normalized) && /[A-Za-z]/.test(normalized)) return true;
+  return false;
+};
+
+const extractAutoStickerScanText = (order: any) => {
+  const fromStickerFile = extractSvgStickerScanText(String(order?.sticker?.file || order?.file || ''));
+  if (looksReadableStickerScanText(fromStickerFile)) return fromStickerFile;
+
+  const candidates = [
+    order?.stickerScanText,
+    order?.sticker_scan_text,
+    order?.scanStickerText,
+    order?.barcode,
+    order?.barcodeText,
+    order?.barcode_text,
+  ];
+
+  let numericFallback = '';
+  for (const candidate of candidates) {
+    const value = normalizeScanStickerText(String(candidate ?? ''));
+    if (!value || value === '[object Object]') continue;
+    if (isGarbageStickerScanText(value)) continue;
+
+    const digits = normalizeStickerDigits(value);
+    const formattedDigits = digits ? formatStickerDigits(digits) : '';
+    if (digits && (value === digits || value === formattedDigits)) {
+      if (!numericFallback) numericFallback = value;
+      continue;
+    }
+
+    if (looksReadableStickerScanText(value)) return value;
+  }
+
+  return numericFallback;
+};
+
+const normalizeFbsStorageKey = (row: { stickerDigits?: string; stickerScanText?: string; orderId?: string }) => {
+  const stickerDigits = normalizeStickerDigits(String(row?.stickerDigits || ''));
+  if (stickerDigits) return `sticker:${stickerDigits}`;
+  const stickerScanText = normalizeScanStickerText(String(row?.stickerScanText || ''));
+  if (stickerScanText) return `scan:${stickerScanText}`;
+  return `order:${String(row?.orderId || '').trim()}`;
+};
+
 const normalizeBlockName = (v: string) => String(v || '')
   .toLowerCase()
   .replace(/ё/g, 'е')
@@ -282,12 +413,31 @@ const getImageCandidates = (photoUrl?: string, nmId?: number, extraUrls: string[
   return Array.from(new Set(list));
 };
 
-export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) => {
+type WBSupplyManagerTab = 'fbs' | 'supply_order' | 'fbs_calc' | 'fbs_orders' | 'fbo_acceptance';
+
+export const WBSupplyManager = ({
+  suppliers = [],
+  initialTab = 'fbs',
+  embeddedTab,
+}: {
+  suppliers?: Supplier[];
+  initialTab?: WBSupplyManagerTab;
+  embeddedTab?: WBSupplyManagerTab;
+}) => {
+  const forcedTab = embeddedTab || null;
+  const embeddedMode = Boolean(forcedTab);
+
   // --- State ---
-  const [activeTab, setActiveTab] = useState<'fbs' | 'supply_order' | 'fbs_calc' | 'fbs_orders' | 'fbo_acceptance'>('fbs');
+  const [activeTab, setActiveTab] = useState<WBSupplyManagerTab>(forcedTab || initialTab);
   const fbsOrdersNamespace = activeTab === 'fbo_acceptance' ? 'fbo_acceptance' : 'fbs_orders';
   const fbsOrdersTabTitle = activeTab === 'fbo_acceptance' ? 'Приемка ФБО' : 'Заказы ФБС';
   const fbsMetricLabel = activeTab === 'fbo_acceptance' ? 'товара' : 'заданий';
+
+  useEffect(() => {
+    if (forcedTab && activeTab !== forcedTab) {
+      setActiveTab(forcedTab);
+    }
+  }, [forcedTab, activeTab]);
 
   useEffect(() => {
     // Do not carry unsaved report between "Заказы ФБС" and "Приемка ФБО"
@@ -330,6 +480,15 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
   const [showCreateSupplyModal, setShowCreateSupplyModal] = useState(false);
   const [newSupplyName, setNewSupplyName] = useState('');
   const [showAllSupplies, setShowAllSupplies] = useState(true);
+  const [fbsScanModalOpen, setFbsScanModalOpen] = useState(false);
+  const [fbsScanLoading, setFbsScanLoading] = useState(false);
+  const [fbsScanRows, setFbsScanRows] = useState<FbsSupplyScanOrderRow[]>([]);
+  const [fbsScansBySticker, setFbsScansBySticker] = useState<Record<string, FbsSupplyScanSavedItem>>({});
+  const [fbsScanMode, setFbsScanMode] = useState<'sticker' | 'honest_sign'>('sticker');
+  const [fbsScanInputValue, setFbsScanInputValue] = useState('');
+  const [fbsPendingStickerRow, setFbsPendingStickerRow] = useState<FbsSupplyScanOrderRow | null>(null);
+  const [fbsScanNotice, setFbsScanNotice] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
+  const fbsScanInputRef = useRef<HTMLInputElement | null>(null);
   const lastFbsFetchRef = useRef<{ supplierId: string; ts: number } | null>(null);
   const cachedPdfFontRef = useRef<string | null>(null);
   const groupedImageCacheRef = useRef<Map<string, string>>(new Map());
@@ -787,6 +946,18 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
       }
     }
   }, [selectedSupplierId, currentToken, activeTab]);
+
+  useEffect(() => {
+    if (!fbsScanModalOpen || fbsScanLoading) return;
+    const timer = setTimeout(() => {
+      try {
+        fbsScanInputRef.current?.focus({ preventScroll: true });
+      } catch {
+        fbsScanInputRef.current?.focus();
+      }
+    }, 80);
+    return () => clearTimeout(timer);
+  }, [fbsScanModalOpen, fbsScanLoading, fbsScanMode, fbsPendingStickerRow]);
 
   // --- API Helpers ---
 
@@ -1569,17 +1740,42 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
     return digits;
   };
 
-  const fetchStickerLabels = async (orderIds: number[]) => {
+  const fetchStickerMeta = async (orderIds: number[]) => {
     const token = getSupplierToken();
-    if (!token || orderIds.length === 0) return new Map<number, string>();
+    if (!token || orderIds.length === 0) return new Map<number, { stickerDigits: string; stickerScanText: string }>();
 
-    const labels = new Map<number, string>();
-    const chunkSize = 40;
+    const meta = new Map<number, { stickerDigits: string; stickerScanText: string }>();
+    const chunkSize = 20;
     const chunks: number[][] = [];
     for (let i = 0; i < orderIds.length; i += chunkSize) chunks.push(orderIds.slice(i, i + chunkSize));
 
+    const applyStickers = (stickers: any[]) => {
+      for (const st of stickers) {
+        const mappedId = Number(st?.orderId ?? st?.id ?? st?.order_id);
+        if (!Number.isFinite(mappedId)) continue;
+        const stickerDigits = pickStickerDigits(st?.sticker || st?.name || st?.code || '', st?.partA, st?.partB);
+        const fromFile = extractSvgStickerScanText(String(st?.file || ''));
+        const rawScanText = normalizeScanStickerText(
+          String(
+            st?.scanStickerText
+            || st?.stickerScanText
+            || fromFile
+            || st?.barcode
+            || st?.barcodeText
+            || ''
+          )
+        );
+        const stickerScanText = looksReadableStickerScanText(rawScanText)
+          ? rawScanText
+          : looksReadableStickerScanText(fromFile)
+            ? fromFile
+            : '';
+        meta.set(mappedId, { stickerDigits, stickerScanText });
+      }
+    };
+
     const fetchChunk = async (chunk: number[]) => {
-      for (let attempt = 0; attempt < 3; attempt++) {
+      for (let attempt = 0; attempt < 4; attempt++) {
         try {
           const res = await fetch('https://marketplace-api.wildberries.ru/api/v3/orders/stickers?type=svg&width=58&height=40', {
             method: 'POST',
@@ -1590,32 +1786,538 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
             body: JSON.stringify({ orders: chunk }),
           });
           if (!res.ok) {
-            await new Promise((r) => setTimeout(r, 250 + attempt * 350));
+            if (attempt === 3) console.warn('fetchStickerMeta chunk non-ok:', res.status, chunk.slice(0, 3));
+            await new Promise((r) => setTimeout(r, 350 + attempt * 500));
             continue;
           }
           const data = await res.json();
           const stickers = Array.isArray(data?.stickers) ? data.stickers : [];
-          for (const st of stickers) {
-            const mappedId = Number(st?.orderId ?? st?.id ?? st?.order_id);
-            const direct = pickStickerDigits(st?.sticker || st?.name || st?.code || '', st?.partA, st?.partB);
-            if (Number.isFinite(mappedId) && direct) labels.set(mappedId, direct);
-          }
+          applyStickers(stickers);
           return;
         } catch (e) {
-          if (attempt === 2) console.warn('fetchStickerLabels chunk failed:', e);
-          await new Promise((r) => setTimeout(r, 250 + attempt * 350));
+          if (attempt === 3) console.warn('fetchStickerMeta chunk failed:', e);
+          await new Promise((r) => setTimeout(r, 350 + attempt * 500));
         }
       }
     };
 
-    const workers = Array.from({ length: Math.min(4, chunks.length) }, async (_, wi) => {
-      for (let i = wi; i < chunks.length; i += 4) {
-        await fetchChunk(chunks[i]);
-      }
-    });
-    await Promise.all(workers);
+    for (const chunk of chunks) {
+      await fetchChunk(chunk);
+      await new Promise((r) => setTimeout(r, 120));
+    }
 
+    const missingIds = orderIds.filter((id) => !meta.has(id));
+    if (missingIds.length) {
+      console.warn('fetchStickerMeta missing ids after first pass:', missingIds.length);
+      for (let i = 0; i < missingIds.length; i += 10) {
+        await fetchChunk(missingIds.slice(i, i + 10));
+        await new Promise((r) => setTimeout(r, 180));
+      }
+    }
+
+    return meta;
+  };
+
+  const fetchStickerLabels = async (orderIds: number[]) => {
+    const meta = await fetchStickerMeta(orderIds);
+    const labels = new Map<number, string>();
+    meta.forEach((value, key) => {
+      if (value?.stickerDigits) labels.set(key, value.stickerDigits);
+    });
     return labels;
+  };
+
+  const getFbsScanStorageKey = (supplyId: string, supplierId?: string) => {
+    const safeSupplierId = String(supplierId || selectedSupplierId || 'unknown').trim() || 'unknown';
+    return `fbs_supply_scan_chz_v1:${safeSupplierId}:${String(supplyId || '').trim()}`;
+  };
+
+  const parseFbsScanPayload = (raw: any): Record<string, FbsSupplyScanSavedItem> => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+    const next: Record<string, FbsSupplyScanSavedItem> = {};
+    Object.entries(raw).forEach(([entryKey, entryValue]) => {
+      const value = entryValue as any;
+      const stickerDigits = normalizeStickerDigits(String(value?.stickerDigits || ''));
+      const stickerScanText = normalizeScanStickerText(String(value?.stickerScanText || ''));
+      const storageKey = String(value?.storageKey || normalizeFbsStorageKey({ stickerDigits, stickerScanText, orderId: value?.orderId || entryKey })) || '';
+      const honestSignCode = normalizeDataMatrixText(String(value?.honestSignCode || value?.code || ''));
+      if (!storageKey || !honestSignCode) return;
+      next[storageKey] = {
+        storageKey,
+        stickerDigits,
+        stickerScanText,
+        honestSignCode,
+        updatedAt: String(value?.updatedAt || new Date().toISOString()),
+        orderId: String(value?.orderId || ''),
+        title: String(value?.title || ''),
+        article: String(value?.article || ''),
+        size: String(value?.size || ''),
+      };
+    });
+    return next;
+  };
+
+  const loadFbsSupplyScanMap = async (supplyId: string, supplierId?: string) => {
+    const key = getFbsScanStorageKey(supplyId, supplierId);
+    try {
+      const { data } = await supabase.from('app_settings').select('value').eq('key', key).maybeSingle();
+      const parsed = data?.value ? JSON.parse(String(data.value)) : {};
+      return parseFbsScanPayload(parsed);
+    } catch {
+      return {} as Record<string, FbsSupplyScanSavedItem>;
+    }
+  };
+
+  const saveFbsSupplyScanMap = async (supplyId: string, next: Record<string, FbsSupplyScanSavedItem>, supplierId?: string) => {
+    const key = getFbsScanStorageKey(supplyId, supplierId);
+    const clean = parseFbsScanPayload(next);
+    await supabase.from('app_settings').upsert([{ key, value: JSON.stringify(clean) }], { onConflict: 'key' });
+    return clean;
+  };
+
+  const getFbsScanSheetStorageKey = (supplyId: string, supplierId?: string) => {
+    const safeSupplierId = String(supplierId || selectedSupplierId || 'unknown').trim() || 'unknown';
+    return `fbs_supply_scan_sheet_v1:${safeSupplierId}:${String(supplyId || '').trim()}`;
+  };
+
+  const sanitizeFbsScanRows = (rows: any[]): FbsSupplyScanOrderRow[] => {
+    if (!Array.isArray(rows)) return [];
+    return rows.map((row: any) => {
+      const stickerDigits = normalizeStickerDigits(String(row?.stickerDigits || row?.stickerText || ''));
+      const stickerText = String(row?.stickerText || formatStickerDigits(stickerDigits));
+      const rawStickerScanText = normalizeScanStickerText(String(row?.stickerScanText || ''));
+      const stickerScanText = isGarbageStickerScanText(rawStickerScanText) ? '' : rawStickerScanText;
+      const orderId = String(row?.orderId || '').trim();
+      const cleanRow: FbsSupplyScanOrderRow = {
+        storageKey: normalizeFbsStorageKey({ stickerDigits, stickerScanText, orderId }),
+        orderId,
+        title: String(row?.title || ''),
+        article: String(row?.article || ''),
+        size: String(row?.size || ''),
+        stickerDigits,
+        stickerText: stickerText || formatStickerDigits(stickerDigits),
+        stickerScanText,
+      };
+      return cleanRow;
+    }).filter((row) => Boolean(row.orderId || row.stickerText || row.stickerScanText));
+  };
+
+  const loadFbsSupplyScanSheetRows = async (supplyId: string, supplierId?: string) => {
+    const key = getFbsScanSheetStorageKey(supplyId, supplierId);
+    try {
+      const { data } = await supabase.from('app_settings').select('value').eq('key', key).maybeSingle();
+      const parsed = data?.value ? JSON.parse(String(data.value)) : [];
+      return sanitizeFbsScanRows(Array.isArray(parsed) ? parsed : []);
+    } catch {
+      return [] as FbsSupplyScanOrderRow[];
+    }
+  };
+
+  const getFbsScanRowMatchKey = (row: Partial<FbsSupplyScanOrderRow>) => {
+    const stickerDigits = normalizeStickerDigits(String(row?.stickerDigits || ''));
+    if (stickerDigits) return `sticker:${stickerDigits}`;
+    const orderId = String(row?.orderId || '').trim();
+    if (orderId) return `order:${orderId}`;
+    const stickerScanText = normalizeScanStickerText(String(row?.stickerScanText || ''));
+    if (stickerScanText) return `scan:${stickerScanText}`;
+    return '';
+  };
+
+  const hasMeaningfulFbsValue = (value: any) => {
+    const text = String(value ?? '').trim();
+    if (!text) return false;
+    return text !== '-' && text !== '—';
+  };
+
+  const mergeFbsScanRows = (apiRows: FbsSupplyScanOrderRow[], storedRows: FbsSupplyScanOrderRow[]) => {
+    const apiClean = sanitizeFbsScanRows(apiRows || []);
+    const storedClean = sanitizeFbsScanRows(storedRows || []);
+    const storedByKey = new Map<string, FbsSupplyScanOrderRow>();
+    storedClean.forEach((row) => {
+      const key = getFbsScanRowMatchKey(row);
+      if (key) storedByKey.set(key, row);
+    });
+
+    const merged: FbsSupplyScanOrderRow[] = apiClean.map((apiRow) => {
+      const exact = storedByKey.get(getFbsScanRowMatchKey(apiRow));
+      const byOrder = apiRow.orderId ? storedByKey.get(`order:${apiRow.orderId}`) : undefined;
+      const storedRow = exact || byOrder;
+      if (!storedRow) return apiRow;
+      const stickerDigits = apiRow.stickerDigits || storedRow.stickerDigits;
+      const stickerText = hasMeaningfulFbsValue(apiRow.stickerText)
+        ? apiRow.stickerText
+        : hasMeaningfulFbsValue(storedRow.stickerText)
+          ? storedRow.stickerText
+          : formatStickerDigits(stickerDigits || '');
+      const stickerScanText = looksReadableStickerScanText(apiRow.stickerScanText)
+        ? apiRow.stickerScanText
+        : looksReadableStickerScanText(storedRow.stickerScanText)
+          ? storedRow.stickerScanText
+          : '';
+
+      return sanitizeFbsScanRows([{
+        ...storedRow,
+        ...apiRow,
+        orderId: apiRow.orderId || storedRow.orderId,
+        title: hasMeaningfulFbsValue(apiRow.title) && apiRow.title !== 'Без названия' ? apiRow.title : storedRow.title || apiRow.title,
+        article: hasMeaningfulFbsValue(apiRow.article) ? apiRow.article : storedRow.article || apiRow.article,
+        size: hasMeaningfulFbsValue(apiRow.size) ? apiRow.size : storedRow.size || apiRow.size,
+        stickerDigits,
+        stickerText,
+        stickerScanText,
+      }])[0] || apiRow;
+    });
+
+    const mergedKeys = new Set(merged.map((row) => getFbsScanRowMatchKey(row)).filter(Boolean));
+    const extraStored = storedClean.filter((row) => {
+      const key = getFbsScanRowMatchKey(row);
+      return key && !mergedKeys.has(key);
+    });
+
+    return sanitizeFbsScanRows([...merged, ...extraStored]);
+  };
+
+  const saveFbsSupplyScanSheetRows = async (supplyId: string, rows: FbsSupplyScanOrderRow[], supplierId?: string) => {
+    const key = getFbsScanSheetStorageKey(supplyId, supplierId);
+    const clean = sanitizeFbsScanRows(rows);
+    await supabase.from('app_settings').upsert([{ key, value: JSON.stringify(clean) }], { onConflict: 'key' });
+    return clean;
+  };
+
+  const parseFbsScanSheetFile = async (file: File) => {
+    const workbook = new ExcelJS.Workbook();
+    const buf = await file.arrayBuffer();
+    await workbook.xlsx.load(buf as ArrayBuffer);
+    const ws = workbook.worksheets[0];
+    if (!ws) throw new Error('Не удалось прочитать лист Excel');
+
+    const rows: FbsSupplyScanOrderRow[] = [];
+    ws.eachRow((row, rowNumber) => {
+      if (rowNumber === 1) return;
+      const orderId = String(row.getCell(1).value ?? '').trim();
+      const stickerTextRaw = String(row.getCell(2).value ?? '').trim();
+      const stickerScanTextRaw = String(row.getCell(3).value ?? '').trim();
+      if (!orderId && !stickerTextRaw && !stickerScanTextRaw) return;
+      const stickerDigits = normalizeStickerDigits(stickerTextRaw);
+      const stickerText = stickerTextRaw || formatStickerDigits(stickerDigits);
+      const stickerScanText = normalizeScanStickerText(stickerScanTextRaw);
+      rows.push({
+        storageKey: normalizeFbsStorageKey({ orderId, stickerDigits, stickerScanText }),
+        orderId,
+        title: '',
+        article: '',
+        size: '',
+        stickerDigits,
+        stickerText,
+        stickerScanText,
+      });
+    });
+    return sanitizeFbsScanRows(rows);
+  };
+
+  const getSupplyOrdersForScan = async (supplyId: string): Promise<FbsSupplyScanOrderRow[]> => {
+    let supplyOrdersRaw = await fetchOrdersForSupply(supplyId, { enrich: true, fresh: true });
+    if (!supplyOrdersRaw || supplyOrdersRaw.length === 0) {
+      supplyOrdersRaw = await fetchOrdersForSupply(supplyId, { enrich: false, fresh: true });
+    }
+    if (!supplyOrdersRaw || supplyOrdersRaw.length === 0) {
+      return [];
+    }
+
+    const targetSupplyId = String(supplyId || '').trim().toLowerCase();
+    const strictFiltered = supplyOrdersRaw.filter((o: any) => {
+      const candidates = [o?.supplyId, o?.supplyID, o?.supply_id, o?.supply?.id]
+        .map((v) => String(v || '').trim().toLowerCase())
+        .filter(Boolean);
+      return candidates.length === 0 ? true : candidates.some((c) => c === targetSupplyId);
+    });
+
+    const relaxedFiltered = strictFiltered.length > 0 ? strictFiltered : supplyOrdersRaw.filter((o: any) => {
+      const candidates = [o?.supplyId, o?.supplyID, o?.supply_id, o?.supply?.id]
+        .map((v) => String(v || '').trim().toLowerCase())
+        .filter(Boolean);
+      return candidates.length === 0 ? true : candidates.some((c) => c.includes(targetSupplyId) || targetSupplyId.includes(c));
+    });
+
+    const supplyOrders = relaxedFiltered.map((o: any) => ({
+      ...o,
+      title: o.title || o.subject || 'Без названия',
+      size: o.size || o.techSize || o.wbSize || '-',
+      article: o.article || o.vendorCode || '-',
+    }));
+
+    const orderIds = Array.from(new Set(
+      supplyOrders
+        .map((o: any) => Number(o.id ?? o.orderId ?? o.order_id))
+        .filter((id: number) => Number.isFinite(id) && id > 0)
+    ));
+
+    let fetchedStickerMeta = new Map<number, { stickerDigits: string; stickerScanText: string }>();
+    try {
+      fetchedStickerMeta = await withTimeout(fetchStickerMeta(orderIds), 25000, 'Таймаут загрузки стикеров');
+    } catch {
+      fetchedStickerMeta = new Map<number, { stickerDigits: string; stickerScanText: string }>();
+    }
+
+    const localStickerById = new Map<number, string>();
+    for (const o of supplyOrders) {
+      const oid = Number(o.id ?? o.orderId ?? o.order_id);
+      const digits = extractStickerLabel(o);
+      if (Number.isFinite(oid) && digits) localStickerById.set(oid, digits);
+    }
+
+    return sanitizeFbsScanRows(sortOrdersForPicking(supplyOrders)
+      .map((o: any) => {
+        const orderIdNum = Number(o.id ?? o.orderId ?? o.order_id);
+        const meta = Number.isFinite(orderIdNum) ? fetchedStickerMeta.get(orderIdNum) : undefined;
+        const fromApi = meta?.stickerDigits || '';
+        const fromOrder = extractStickerLabel(o);
+        const stickerDigits = normalizeStickerDigits(fromApi || fromOrder || localStickerById.get(orderIdNum) || '');
+        const orderId = String(o.id ?? o.orderId ?? o.order_id ?? '-');
+        const stickerText = formatStickerDigits(stickerDigits);
+        const stickerScanText = meta?.stickerScanText || extractAutoStickerScanText(o);
+        return {
+          storageKey: normalizeFbsStorageKey({ orderId, stickerDigits, stickerScanText }),
+          orderId,
+          title: String(o.title || 'Без названия'),
+          article: String(o.article || o.vendorCode || '-'),
+          size: String(o.size || o.techSize || o.wbSize || '-'),
+          stickerDigits,
+          stickerText,
+          stickerScanText,
+        };
+      }));
+  };
+
+  const openFbsScanModal = async () => {
+    if (!activeSupplyId) return;
+    setFbsScanModalOpen(true);
+    setFbsScanLoading(true);
+    setFbsScanMode('sticker');
+    setFbsScanInputValue('');
+    setFbsPendingStickerRow(null);
+    setFbsScanNotice(null);
+    try {
+      const [sheetRows, apiRows, savedMap] = await Promise.all([
+        loadFbsSupplyScanSheetRows(activeSupplyId, selectedSupplierId),
+        getSupplyOrdersForScan(activeSupplyId),
+        loadFbsSupplyScanMap(activeSupplyId, selectedSupplierId),
+      ]);
+      const rows = apiRows.length ? mergeFbsScanRows(apiRows, sheetRows) : sheetRows;
+      setFbsScanRows(rows);
+      setFbsScansBySticker(savedMap);
+      if (apiRows.length) {
+        void saveFbsSupplyScanSheetRows(activeSupplyId, rows, selectedSupplierId).catch(() => undefined);
+      }
+      if (!rows.length) {
+        setFbsScanNotice({ type: 'info', text: 'В поставке пока нет строк для сканирования. Попробую добирать их из WB автоматически, а пока можно скачать шаблон Excel по текущим данным.' });
+      } else if (apiRows.length) {
+        const withReadableSticker = rows.filter((row) => looksReadableStickerScanText(row.stickerScanText || '')).length;
+        setFbsScanNotice({ type: 'success', text: `Список сформирован автоматически: ${rows.length} строк, из них ${withReadableSticker} уже с заполненным «Стикер при считывании».` });
+      } else if (sheetRows.length) {
+        setFbsScanNotice({ type: 'success', text: `Загружен шаблон поставки: ${sheetRows.length} строк.` });
+      }
+    } catch (e: any) {
+      setFbsScanNotice({ type: 'error', text: e?.message || 'Ошибка загрузки данных для сканирования ЧЗ' });
+    } finally {
+      setFbsScanLoading(false);
+    }
+  };
+
+  const handleFbsScanFileUpload = async (file: File) => {
+    if (!activeSupplyId) return;
+    setFbsScanLoading(true);
+    setFbsScanNotice(null);
+    try {
+      const [uploadedRows, apiRows] = await Promise.all([
+        parseFbsScanSheetFile(file),
+        getSupplyOrdersForScan(activeSupplyId).catch(() => [] as FbsSupplyScanOrderRow[]),
+      ]);
+      const rows = apiRows.length ? mergeFbsScanRows(apiRows, uploadedRows) : uploadedRows;
+      const savedRows = await saveFbsSupplyScanSheetRows(activeSupplyId, rows, selectedSupplierId);
+      setFbsScanRows(savedRows);
+      setFbsScanNotice({ type: 'success', text: `Файл поставки загружен: ${savedRows.length} строк.` });
+    } catch (e: any) {
+      setFbsScanNotice({ type: 'error', text: e?.message || 'Не удалось загрузить Excel-файл поставки' });
+    } finally {
+      setFbsScanLoading(false);
+    }
+  };
+
+  const resetFbsScannedCode = async (row: FbsSupplyScanOrderRow) => {
+    if (!activeSupplyId) return;
+    try {
+      const next = { ...(fbsScansBySticker || {}) };
+      delete next[row.storageKey];
+      const saved = await saveFbsSupplyScanMap(activeSupplyId, next, selectedSupplierId);
+      setFbsScansBySticker(saved);
+      if (fbsPendingStickerRow?.storageKey === row.storageKey) {
+        setFbsPendingStickerRow(null);
+        setFbsScanMode('sticker');
+        setFbsScanInputValue('');
+      }
+      setFbsScanNotice({ type: 'success', text: `ЧЗ для заказа ${row.orderId} сброшен. Можно сканировать заново.` });
+    } catch (e: any) {
+      setFbsScanNotice({ type: 'error', text: e?.message || 'Не удалось сбросить ЧЗ' });
+    }
+  };
+
+  const downloadFbsScanTemplateExcel = async () => {
+    if (!activeSupplyId) return;
+    try {
+      let rows = fbsScanRows;
+      if (!rows.length) {
+        rows = await getSupplyOrdersForScan(activeSupplyId);
+      }
+      if (!rows.length) {
+        setFbsScanNotice({ type: 'error', text: 'Не удалось сформировать Excel: в поставке нет строк для сканирования.' });
+        return;
+      }
+
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet('Worksheet');
+      ws.addRow(['Номер заказа', 'Стикер', 'Стикер при считывании']);
+      rows.forEach((row) => {
+        ws.addRow([
+          String(row.orderId || ''),
+          String(row.stickerText || '').replace(/_/g, ' '),
+          String(row.stickerScanText || ''),
+        ]);
+      });
+      ws.columns = [
+        { width: 18 },
+        { width: 18 },
+        { width: 24 },
+      ];
+      ws.getRow(1).font = { bold: true } as any;
+
+      const buffer = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `supply-list-${String(activeSupplyId || 'supply')}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setFbsScanNotice({ type: 'success', text: `Excel сформирован автоматически: ${rows.length} строк.` });
+    } catch (e: any) {
+      setFbsScanNotice({ type: 'error', text: e?.message || 'Не удалось скачать Excel по поставке' });
+    }
+  };
+
+  const downloadFbsScanResultExcel = async () => {
+    if (!activeSupplyId) return;
+    try {
+      let rows = fbsScanRows;
+      if (!rows.length) {
+        rows = await getSupplyOrdersForScan(activeSupplyId);
+      }
+      if (!rows.length) {
+        setFbsScanNotice({ type: 'error', text: 'Не удалось сформировать скан файл: в поставке нет строк.' });
+        return;
+      }
+
+      const rowsWithKiz = rows.filter((row) => Boolean(fbsScansBySticker[row.storageKey]?.honestSignCode));
+      if (!rowsWithKiz.length) {
+        setFbsScanNotice({ type: 'error', text: 'Скан файл пока пустой: нет строк с заполненным КИЗ.' });
+        return;
+      }
+
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet('Scan');
+      ws.addRow(['№ задания', 'Стикер', 'КИЗ']);
+      rowsWithKiz.forEach((row) => {
+        ws.addRow([
+          String(row.orderId || ''),
+          String(row.stickerText || '').replace(/_/g, ' '),
+          String(fbsScansBySticker[row.storageKey]?.honestSignCode || ''),
+        ]);
+      });
+      ws.columns = [
+        { width: 18 },
+        { width: 18 },
+        { width: 42 },
+      ];
+      ws.getRow(1).font = { bold: true } as any;
+
+      const buffer = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `scan-file-${String(activeSupplyId || 'supply')}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setFbsScanNotice({ type: 'success', text: `Скан файл выгружен: ${rowsWithKiz.length} строк с заполненным КИЗ.` });
+    } catch (e: any) {
+      setFbsScanNotice({ type: 'error', text: e?.message || 'Не удалось скачать скан файл' });
+    }
+  };
+
+  const handleFbsScanSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const raw = String(fbsScanInputValue || '').trim();
+    if (!raw) return;
+
+    if (fbsScanMode === 'sticker') {
+      const scanText = normalizeScanStickerText(raw);
+      const stickerDigits = normalizeStickerDigits(raw);
+      const row = fbsScanRows.find((item) => {
+        const rowScanText = normalizeScanStickerText(item.stickerScanText || '');
+        if (scanText && rowScanText && rowScanText === scanText) return true;
+        if (stickerDigits && item.stickerDigits === stickerDigits) return true;
+        if (scanText && normalizeScanStickerText(item.stickerText || '') === scanText) return true;
+        return false;
+      });
+      if (!row) {
+        setFbsScanNotice({ type: 'error', text: 'Стикер не найден в текущей поставке. Проверь файл поставки или сам скан.' });
+        setFbsScanInputValue('');
+        return;
+      }
+      setFbsScanNotice({ type: 'success', text: `Найден заказ ${row.orderId}. Теперь сканируйте ЧЗ.` });
+      setFbsPendingStickerRow(row);
+      setFbsScanMode('honest_sign');
+      setFbsScanInputValue('');
+      return;
+    }
+
+    if (!activeSupplyId || !fbsPendingStickerRow) {
+      setFbsScanMode('sticker');
+      setFbsScanInputValue('');
+      return;
+    }
+
+    const honestSignCode = normalizeDataMatrixText(raw);
+    if (!honestSignCode) {
+      setFbsScanNotice({ type: 'error', text: 'Не удалось распознать код Честного знака' });
+      setFbsScanInputValue('');
+      return;
+    }
+
+    try {
+      const next = {
+        ...fbsScansBySticker,
+        [fbsPendingStickerRow.storageKey]: {
+          storageKey: fbsPendingStickerRow.storageKey,
+          stickerDigits: fbsPendingStickerRow.stickerDigits,
+          stickerScanText: fbsPendingStickerRow.stickerScanText,
+          honestSignCode,
+          updatedAt: new Date().toISOString(),
+          orderId: fbsPendingStickerRow.orderId,
+          title: fbsPendingStickerRow.title,
+          article: fbsPendingStickerRow.article,
+          size: fbsPendingStickerRow.size,
+        },
+      };
+      const saved = await saveFbsSupplyScanMap(activeSupplyId, next, selectedSupplierId);
+      setFbsScansBySticker(saved);
+      setFbsScanNotice({ type: 'success', text: `ЧЗ сохранён для заказа ${fbsPendingStickerRow.orderId}` });
+      setFbsPendingStickerRow(null);
+      setFbsScanMode('sticker');
+      setFbsScanInputValue('');
+    } catch (e: any) {
+      setFbsScanNotice({ type: 'error', text: e?.message || 'Ошибка сохранения ЧЗ' });
+    }
   };
 
   const sortOrdersForPicking = (list: any[]) => {
@@ -2641,9 +3343,9 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
           } catch {}
         }
 
-        let supplyOrdersRaw = await fetchOrdersForSupply(supplyId, { enrich: true, fresh: false });
+        let supplyOrdersRaw = await fetchOrdersForSupply(supplyId, { enrich: true, fresh: true });
         if (!supplyOrdersRaw.length) {
-          supplyOrdersRaw = await fetchOrdersForSupply(supplyId, { enrich: true, fresh: true });
+          supplyOrdersRaw = await fetchOrdersForSupply(supplyId, { enrich: false, fresh: true });
         }
 
         const groups = new Map<string, { key: string; nmId?: number; article: string; title: string; qty: number; sizes: Set<string> }>();
@@ -3078,12 +3780,9 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
     setLoading(true);
     try {
       // 1. Fetch orders for this supply via robust resolver with fallback chain
-      let supplyOrdersRaw = await withTimeout(fetchOrdersForSupply(activeSupplyId, { enrich: true, fresh: false }), 15000, 'Таймаут загрузки заказов (1)');
+      let supplyOrdersRaw = await withTimeout(fetchOrdersForSupply(activeSupplyId, { enrich: true, fresh: true }), 15000, 'Таймаут загрузки заказов (1)');
       if (!supplyOrdersRaw || supplyOrdersRaw.length === 0) {
-        supplyOrdersRaw = await withTimeout(fetchOrdersForSupply(activeSupplyId, { enrich: true, fresh: true }), 15000, 'Таймаут загрузки заказов (2)');
-      }
-      if (!supplyOrdersRaw || supplyOrdersRaw.length === 0) {
-        supplyOrdersRaw = await withTimeout(fetchOrdersForSupply(activeSupplyId, { enrich: false, fresh: true }), 15000, 'Таймаут загрузки заказов (3)');
+        supplyOrdersRaw = await withTimeout(fetchOrdersForSupply(activeSupplyId, { enrich: false, fresh: true }), 15000, 'Таймаут загрузки заказов (2)');
       }
       if (!supplyOrdersRaw || supplyOrdersRaw.length === 0) {
         throw new Error('По выбранной поставке не найдены заказы для листа подбора');
@@ -3135,6 +3834,7 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
         if (Number.isFinite(oid) && digits) localStickerById.set(oid, digits);
       }
       const stickerLabels = new Map<number, string>([...localStickerById.entries(), ...fetchedStickerLabels.entries()]);
+      const fbsSupplyScans = await loadFbsSupplyScanMap(activeSupplyId, selectedSupplierId);
 
       // 2. Sort
       const sortedSupplyOrders = sortOrdersForPicking(supplyOrders);
@@ -3188,6 +3888,9 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
           const fromOrder = extractStickerLabel(o);
           const stickerRaw = normalizeStickerDigits(fromApi || fromOrder || '');
           const stickerText = formatStickerDigits(stickerRaw || '');
+          const scanStorageKey = normalizeFbsStorageKey({ stickerDigits: stickerRaw, orderId: String(o.id ?? o.orderId ?? o.order_id ?? '') });
+          const scannedHonestSign = stickerRaw ? String(fbsSupplyScans?.[scanStorageKey]?.honestSignCode || '') : '';
+          const stickerOrScanText = scannedHonestSign || stickerText;
           const imgCandidates = getImageCandidates(o.photoUrl, o.nmId, [productPhotoByNmId.get(Number(o.nmId)) || '']);
           const imgData = imgCandidates.map((u) => imageDataByUrl.get(u) || '').find(Boolean) || '';
 
@@ -3199,7 +3902,7 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
               o.size,
               o.color,
               o.article,
-              stickerText
+              stickerOrScanText
           ];
       });
 
@@ -3223,7 +3926,7 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
 
         (autoTable as any)(doc, {
           startY: 30,
-          head: [['№ задания', 'Фото', 'Наименование', 'Размер', 'Цвет', 'Артикул', 'Стикер']],
+          head: [['№ задания', 'Фото', 'Наименование', 'Размер', 'Цвет', 'Артикул', 'Стикер / ЧЗ']],
           body: pageRows,
           styles: { fontSize: 8, cellPadding: 2, valign: 'middle', font: 'Roboto' },
           headStyles: { font: 'Roboto', fontStyle: 'normal' },
@@ -3236,7 +3939,7 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
             3: { cellWidth: 14, halign: 'center' },
             4: { cellWidth: 18, halign: 'center' },
             5: { cellWidth: 20 },
-            6: { cellWidth: 30 }
+            6: { cellWidth: 34 }
           },
           didParseCell: (data: any) => {
             if (data.column.index === 1 && data.section === 'body') {
@@ -3282,11 +3985,10 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
     if (!activeSupplyId) return;
     setLoading(true);
     try {
-      // Fast path: avoid forced fallback merge across huge /orders pagination unless really needed
-      let supplyOrdersRaw = await fetchOrdersForSupply(activeSupplyId, { enrich: true, fresh: false });
+      // For grouped picking we need the full supply content, not a possibly partial direct payload.
+      let supplyOrdersRaw = await fetchOrdersForSupply(activeSupplyId, { enrich: true, fresh: true });
       if (!supplyOrdersRaw || supplyOrdersRaw.length === 0) {
-        // Retry with fresh=true in case cache is stale for this supply
-        supplyOrdersRaw = await fetchOrdersForSupply(activeSupplyId, { enrich: true, fresh: true });
+        supplyOrdersRaw = await fetchOrdersForSupply(activeSupplyId, { enrich: false, fresh: true });
       }
       if (!supplyOrdersRaw || supplyOrdersRaw.length === 0) {
         throw new Error('По выбранной поставке не найдены заказы');
@@ -3488,7 +4190,7 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
     if (!activeSupplyId) return;
     setLoading(true);
     try {
-      const supplyOrdersRaw = await withTimeout(fetchOrdersForSupply(activeSupplyId, { enrich: true, fresh: false }), 15000, 'Таймаут загрузки заказов для стикеров');
+      const supplyOrdersRaw = await withTimeout(fetchOrdersForSupply(activeSupplyId, { enrich: true, fresh: true }), 15000, 'Таймаут загрузки заказов для стикеров');
       const targetSupplyId = String(activeSupplyId || '').trim().toLowerCase();
       const supplyOrders = (supplyOrdersRaw || [])
         .filter((o: any) => {
@@ -3695,86 +4397,81 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
   };
 
   return (
-    <div className="p-3 md:p-6 bg-gray-50 min-h-screen font-sans text-gray-800">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
-        <h1 className="text-2xl font-bold flex items-center gap-2">
-          <Truck className="w-8 h-8 text-purple-600" />
-          Управление поставками FBS
-        </h1>
-        
-        <div className="flex items-center gap-4">
-            {/* Supplier Selector (only for Управление FBS) */}
-            {(activeTab === 'fbs') && (
-              <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium">Поставщик:</span>
-                  <select 
-                      className="border rounded p-2 bg-white shadow-sm"
-                      value={selectedSupplierId}
-                      onChange={(e) => {
-                        const value = e.target.value;
-                        if (activeTab === 'fbs') setSelectedSupplierIdFbs(value);
-                        else if (activeTab === 'supply_order') setSelectedSupplierIdSupplyOrder(value);
-                        else if (activeTab === 'fbs_calc') setSelectedSupplierIdCalc(value);
-                      }}
-                  >
-                      {suppliers.map(s => (
-                          <option key={s.id} value={s.id}>{s.name}</option>
-                      ))}
-                  </select>
-              </div>
-            )}
-        </div>
-      </div>
+    <div className={embeddedMode ? 'font-sans text-gray-800' : 'p-3 md:p-6 bg-gray-50 min-h-screen font-sans text-gray-800'}>
+      {!embeddedMode && (
+        <>
+          {/* Header */}
+          <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
+            <h1 className="text-2xl font-bold flex items-center gap-2">
+              <Truck className="w-8 h-8 text-purple-600" />
+              Управление поставками FBS
+            </h1>
+            
+            <div className="flex items-center gap-4">
+                {/* Supplier Selector (only for Управление FBS) */}
+                {(activeTab === 'fbs') && (
+                  <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium">Поставщик:</span>
+                      <select 
+                          className="border rounded p-2 bg-white shadow-sm"
+                          value={selectedSupplierId}
+                          onChange={(e) => {
+                            const value = e.target.value;
+                            if (activeTab === 'fbs') setSelectedSupplierIdFbs(value);
+                            else if (activeTab === 'supply_order') setSelectedSupplierIdSupplyOrder(value);
+                            else if (activeTab === 'fbs_calc') setSelectedSupplierIdCalc(value);
+                          }}
+                      >
+                          {suppliers.map(s => (
+                              <option key={s.id} value={s.id}>{s.name}</option>
+                          ))}
+                      </select>
+                  </div>
+                )}
+            </div>
+          </div>
 
-      {/* Tabs */}
-      <div className="flex gap-2 mb-6 border-b overflow-x-auto whitespace-nowrap">
-          <button 
-            onClick={() => setActiveTab('fbs')}
-            className={`px-4 py-2 font-medium transition-colors border-b-2 ${activeTab === 'fbs' ? 'border-purple-600 text-purple-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
-          >
-              <div className="flex items-center gap-2">
-                  <LayoutGrid className="w-4 h-4" />
-                  Управление FBS
-              </div>
-          </button>
-          <button 
-            onClick={() => setActiveTab('supply_order')}
-            className={`px-4 py-2 font-medium transition-colors border-b-2 ${activeTab === 'supply_order' ? 'border-purple-600 text-purple-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
-          >
-              <div className="flex items-center gap-2">
-                  <ShoppingCart className="w-4 h-4" />
-                  Заказ товара
-              </div>
-          </button>
-          <button 
-            onClick={() => setActiveTab('fbs_calc')}
-            className={`px-4 py-2 font-medium transition-colors border-b-2 ${activeTab === 'fbs_calc' ? 'border-purple-600 text-purple-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
-          >
-              <div className="flex items-center gap-2">
-                  <Calculator className="w-4 h-4" />
-                  ФБС расчет
-              </div>
-          </button>
-          <button 
-            onClick={() => setActiveTab('fbs_orders')}
-            className={`px-4 py-2 font-medium transition-colors border-b-2 ${activeTab === 'fbs_orders' ? 'border-purple-600 text-purple-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
-          >
-              <div className="flex items-center gap-2">
-                  <FileSpreadsheet className="w-4 h-4" />
-                  Заказы ФБС
-              </div>
-          </button>
-          <button 
-            onClick={() => setActiveTab('fbo_acceptance')}
-            className={`px-4 py-2 font-medium transition-colors border-b-2 ${activeTab === 'fbo_acceptance' ? 'border-purple-600 text-purple-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
-          >
-              <div className="flex items-center gap-2">
-                  <FileSpreadsheet className="w-4 h-4" />
-                  Приемка ФБО
-              </div>
-          </button>
-      </div>
+          {/* Tabs */}
+          <div className="flex gap-2 mb-6 border-b overflow-x-auto whitespace-nowrap">
+              <button 
+                onClick={() => setActiveTab('fbs')}
+                className={`px-4 py-2 font-medium transition-colors border-b-2 ${activeTab === 'fbs' ? 'border-purple-600 text-purple-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+              >
+                  <div className="flex items-center gap-2">
+                      <LayoutGrid className="w-4 h-4" />
+                      Управление FBS
+                  </div>
+              </button>
+              <button 
+                onClick={() => setActiveTab('fbs_calc')}
+                className={`px-4 py-2 font-medium transition-colors border-b-2 ${activeTab === 'fbs_calc' ? 'border-purple-600 text-purple-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+              >
+                  <div className="flex items-center gap-2">
+                      <Calculator className="w-4 h-4" />
+                      ФБС расчет
+                  </div>
+              </button>
+              <button 
+                onClick={() => setActiveTab('fbs_orders')}
+                className={`px-4 py-2 font-medium transition-colors border-b-2 ${activeTab === 'fbs_orders' ? 'border-purple-600 text-purple-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+              >
+                  <div className="flex items-center gap-2">
+                      <FileSpreadsheet className="w-4 h-4" />
+                      Заказы ФБС
+                  </div>
+              </button>
+              <button 
+                onClick={() => setActiveTab('fbo_acceptance')}
+                className={`px-4 py-2 font-medium transition-colors border-b-2 ${activeTab === 'fbo_acceptance' ? 'border-purple-600 text-purple-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+              >
+                  <div className="flex items-center gap-2">
+                      <FileSpreadsheet className="w-4 h-4" />
+                      Приемка ФБО
+                  </div>
+              </button>
+          </div>
+        </>
+      )}
 
       {/* Messages */}
       {error && (
@@ -4028,6 +4725,12 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
                                         >
                                             <Printer className="w-3 h-3" /> Стикеры
                                         </button>
+                                        <button
+                                            onClick={(e) => { e.stopPropagation(); openFbsScanModal(); }}
+                                            className="flex items-center gap-1 bg-white border border-emerald-300 text-emerald-700 px-2 py-1 rounded text-xs hover:bg-emerald-50"
+                                        >
+                                            <CheckSquare className="w-3 h-3" /> Скан ЧЗ
+                                        </button>
                                     </div>
                                 )}
                             </div>
@@ -4035,6 +4738,166 @@ export const WBSupplyManager = ({ suppliers = [] }: { suppliers?: Supplier[] }) 
                     )}
                 </div>
             </div>
+        </div>
+      )}
+
+      {fbsScanModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={() => { setFbsScanModalOpen(false); setFbsPendingStickerRow(null); setFbsScanMode('sticker'); setFbsScanInputValue(''); }}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b border-gray-200 flex items-start justify-between gap-4">
+              <div>
+                <div className="text-lg font-bold text-gray-900">Скан ЧЗ</div>
+                <div className="text-sm text-gray-500">Поставка: {supplies.find((s) => s.id === activeSupplyId)?.name || activeSupplyId || '-'}</div>
+                <div className="text-xs text-gray-500 mt-1 space-y-1">
+                  <div>Отсканировано: {fbsScanRows.filter((row) => Boolean(fbsScansBySticker[row.storageKey]?.honestSignCode)).length} из {fbsScanRows.length}</div>
+                  <div>Заменено стикеров в поставке: {fbsScanRows.filter((row) => Boolean(fbsScansBySticker[row.storageKey]?.honestSignCode)).length}</div>
+                </div>
+              </div>
+              <button onClick={() => { setFbsScanModalOpen(false); setFbsPendingStickerRow(null); setFbsScanMode('sticker'); setFbsScanInputValue(''); }} className="p-2 rounded-lg hover:bg-gray-100 text-gray-500">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-5 border-b border-gray-100 bg-gray-50 space-y-3">
+              <div className="flex flex-col lg:flex-row gap-3 lg:items-center lg:justify-between">
+                <div className={`rounded-xl border px-4 py-3 flex-1 ${fbsScanMode === 'sticker' ? 'border-blue-200 bg-blue-50 text-blue-900' : 'border-amber-200 bg-amber-50 text-amber-900'}`}>
+                  {fbsScanMode === 'sticker' ? (
+                    <div>
+                      <div className="font-semibold">Шаг 1. Сканируйте стикер при считывании</div>
+                      <div className="text-sm opacity-80 mt-1">Ищу строку сначала по колонке `Стикер при считывании`, потом по обычному номеру стикера.</div>
+                    </div>
+                  ) : (
+                    <div>
+                      <div className="font-semibold">Шаг 2. Сканируйте ЧЗ</div>
+                      <div className="text-sm opacity-80 mt-1">Заказ {fbsPendingStickerRow?.orderId}, стикер <span className="font-mono">{fbsPendingStickerRow?.stickerText || '—'}</span>{fbsPendingStickerRow?.stickerScanText ? `, при считывании: ${fbsPendingStickerRow.stickerScanText}` : ''}</div>
+                    </div>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={downloadFbsScanTemplateExcel}
+                    className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-indigo-300 bg-indigo-50 hover:bg-indigo-100 text-sm font-medium text-indigo-700"
+                  >
+                    <Download className="w-4 h-4" /> Скачать шаблон Excel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={downloadFbsScanResultExcel}
+                    className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-sm font-medium text-emerald-700"
+                  >
+                    <Download className="w-4 h-4" /> Скачать скан файл
+                  </button>
+                  <label className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-gray-300 bg-white hover:bg-gray-50 cursor-pointer text-sm font-medium text-gray-700">
+                    <Upload className="w-4 h-4" /> Загрузить файл поставки
+                    <input
+                      type="file"
+                      accept=".xlsx,.xls"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) handleFbsScanFileUpload(file);
+                        e.currentTarget.value = '';
+                      }}
+                    />
+                  </label>
+                </div>
+              </div>
+
+              {fbsScanNotice && (
+                <div className={`rounded-xl border px-4 py-3 text-sm ${fbsScanNotice.type === 'error' ? 'border-rose-200 bg-rose-50 text-rose-700' : fbsScanNotice.type === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-indigo-200 bg-indigo-50 text-indigo-700'}`}>
+                  {fbsScanNotice.text}
+                </div>
+              )}
+
+              <form onSubmit={handleFbsScanSubmit} className="flex flex-col md:flex-row gap-3">
+                <input
+                  ref={fbsScanInputRef}
+                  type="text"
+                  value={fbsScanInputValue}
+                  onChange={(e) => setFbsScanInputValue(e.target.value)}
+                  placeholder={fbsScanMode === 'sticker' ? 'Сканируйте значение из колонки «Стикер при считывании»...' : 'Сканируйте код Честного знака...'}
+                  className="flex-1 oc-input"
+                  autoFocus
+                />
+                <button
+                  type="submit"
+                  disabled={fbsScanLoading || !fbsScanInputValue.trim()}
+                  className="px-4 py-2 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
+                >
+                  {fbsScanMode === 'sticker' ? 'Найти строку' : 'Сохранить ЧЗ'}
+                </button>
+                {fbsScanMode === 'honest_sign' && (
+                  <button
+                    type="button"
+                    onClick={() => { setFbsPendingStickerRow(null); setFbsScanMode('sticker'); setFbsScanInputValue(''); setFbsScanNotice({ type: 'info', text: 'Скан ЧЗ сброшен. Можно сканировать следующий стикер.' }); }}
+                    className="px-4 py-2 rounded-xl border border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
+                  >
+                    Сбросить
+                  </button>
+                )}
+              </form>
+            </div>
+
+            <div className="p-5 overflow-auto">
+              {fbsScanLoading ? (
+                <div className="text-gray-500">Загрузка заказов поставки...</div>
+              ) : !fbsScanRows.length ? (
+                <div className="text-gray-500">В этой поставке пока нет заказов со стикерами.</div>
+              ) : (
+                <div className="overflow-auto rounded-xl border border-gray-200">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 text-gray-600">
+                      <tr>
+                        <th className="px-3 py-2 text-left">Номер заказа</th>
+                        <th className="px-3 py-2 text-left">Стикер</th>
+                        <th className="px-3 py-2 text-left">Стикер при считывании</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {fbsScanRows.map((row) => {
+                        const scan = fbsScansBySticker[row.storageKey];
+                        const isActive = fbsPendingStickerRow?.storageKey === row.storageKey;
+                        const finalReadValue = scan?.honestSignCode || row.stickerScanText || '—';
+                        return (
+                          <tr
+                            key={row.storageKey}
+                            className={`${scan?.honestSignCode ? 'bg-emerald-50/60' : isActive ? 'bg-amber-50' : 'bg-white'} border-t border-gray-100`}
+                          >
+                            <td className="px-3 py-2 font-medium text-gray-900 whitespace-nowrap">{row.orderId || '—'}</td>
+                            <td className="px-3 py-2 font-mono text-gray-700 whitespace-nowrap">{row.stickerText || '—'}</td>
+                            <td className="px-3 py-2">
+                              <div className={`font-mono text-[11px] break-all ${scan?.honestSignCode ? 'text-emerald-700' : 'text-gray-700'}`}>{finalReadValue}</div>
+                              <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px]">
+                                {scan?.honestSignCode ? (
+                                  <>
+                                    <span className="text-emerald-600">ЧЗ сохранён</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => resetFbsScannedCode(row)}
+                                      className="inline-flex items-center rounded-lg border border-rose-300 bg-rose-50 px-2 py-0.5 text-rose-700 hover:bg-rose-100"
+                                    >
+                                      Сбросить ЧЗ
+                                    </button>
+                                  </>
+                                ) : isActive ? (
+                                  <span className="text-amber-600">Ждёт ЧЗ</span>
+                                ) : !row.stickerScanText ? (
+                                  <span className="text-rose-600">Нет значения для считывания</span>
+                                ) : (
+                                  <span className="text-slate-500">Готов к сканированию</span>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
 

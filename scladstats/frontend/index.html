@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ScladSTATS</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; background:#0b1020; color:#e6e9f5; }
+    .wrap { max-width: 1200px; margin: 0 auto; padding: 20px; }
+    .cards { display:grid; grid-template-columns: repeat(5,1fr); gap:12px; margin-bottom:14px; }
+    .card { background:#161d35; border-radius:12px; padding:14px; }
+    .title { opacity:.8; font-size:12px; }
+    .val { font-size:22px; margin-top:8px; font-weight:700; }
+    .row { display:grid; grid-template-columns: 1.3fr 1fr; gap:12px; margin-bottom:12px; }
+    .panel { background:#161d35; border-radius:12px; padding:14px; }
+    table { width:100%; border-collapse:collapse; }
+    th,td { padding:8px; border-bottom:1px solid #2a3357; text-align:left; font-size:13px; }
+    .ok { color:#44d18d; }
+    input { background:#0f1530; border:1px solid #2a3357; color:#fff; border-radius:8px; padding:8px; width:280px; }
+    button { background:#3b82f6; color:#fff; border:0; border-radius:8px; padding:8px 12px; cursor:pointer; }
+    .muted { opacity:.75; font-size:12px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>ScladSTATS <span class="ok" id="status">● online</span></h1>
+
+    <div class="cards">
+      <div class="card"><div class="title">Выручка (аккаунт)</div><div class="val" id="rev">0</div></div>
+      <div class="card"><div class="title">Заказы (аккаунт)</div><div class="val" id="ord">0</div></div>
+      <div class="card"><div class="title">Средний чек</div><div class="val" id="avg">0</div></div>
+      <div class="card"><div class="title">Запросов ниш</div><div class="val" id="qcount">0</div></div>
+      <div class="card"><div class="title">Снапшотов сегодня</div><div class="val" id="snap">0</div></div>
+    </div>
+
+    <div class="row">
+      <div class="panel">
+        <h3>Ниши (opportunity top)</h3>
+        <table>
+          <thead><tr><th>Запрос</th><th>Категория</th><th>Score</th><th>Спрос est</th></tr></thead>
+          <tbody id="niches"><tr><td colspan="4">загрузка...</td></tr></tbody>
+        </table>
+      </div>
+      <div class="panel">
+        <h3>Поиск чужих карточек</h3>
+        <div style="display:flex; gap:8px; margin-bottom:8px; flex-wrap:wrap;">
+          <input id="search" placeholder="поиск по названию/бренду" />
+          <input id="sku" placeholder="поиск по SKU (nmId)" style="width:220px;" />
+          <button id="searchBtn">Искать</button>
+        </div>
+        <table>
+          <thead><tr><th>nmId</th><th>Название</th><th>Цена</th><th>Оценка</th></tr></thead>
+          <tbody id="products"><tr><td colspan="4">пока пусто</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>Debug</h3>
+      <div class="muted">Market status</div>
+      <pre id="debug">{}</pre>
+    </div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    async function loadSummary() {
+      const summary = await fetch('/api/v1/dashboard/summary').then(r=>r.json());
+      $('rev').textContent = summary.revenue ?? 0;
+      $('ord').textContent = summary.orders ?? 0;
+      $('avg').textContent = summary.avgCheck ?? 0;
+    }
+
+    async function loadMarketStatus() {
+      const st = await fetch('/api/v1/market/status').then(r=>r.json());
+      $('qcount').textContent = st.active_queries ?? 0;
+      $('snap').textContent = st.snapshots_today ?? 0;
+      $('debug').textContent = JSON.stringify(st, null, 2);
+    }
+
+    async function loadNiches() {
+      const data = await fetch('/api/v1/market/opportunities').then(r=>r.json());
+      const items = data.items || [];
+      const tbody = $('niches');
+      if (!items.length) {
+        tbody.innerHTML = '<tr><td colspan="4">нет данных (прогони worker + миграции)</td></tr>';
+        return;
+      }
+      tbody.innerHTML = items.slice(0, 15).map(i =>
+        `<tr><td>${i.query}</td><td>${i.category || ''}</td><td>${Number(i.opportunity_score).toFixed(2)}</td><td>${Number(i.demand_est).toFixed(0)}</td></tr>`
+      ).join('');
+    }
+
+    async function searchProducts() {
+      const q = $('search').value.trim();
+      const sku = $('sku').value.trim();
+      const params = new URLSearchParams();
+      if (q) params.set('q', q);
+      if (sku) params.set('sku', sku);
+      const data = await fetch('/api/v1/market/products?' + params.toString()).then(r=>r.json());
+      const items = data.items || [];
+      const tbody = $('products');
+      if (!items.length) {
+        tbody.innerHTML = '<tr><td colspan="4">ничего не найдено</td></tr>';
+        return;
+      }
+      tbody.innerHTML = items.slice(0, 20).map(p =>
+        `<tr><td>${p.wb_nm_id}</td><td>${p.name || ''}</td><td>${p.sale_price || p.price || ''}</td><td>${p.rating || ''}</td></tr>`
+      ).join('');
+    }
+
+    async function boot() {
+      await Promise.all([loadSummary(), loadMarketStatus(), loadNiches()]);
+      $('searchBtn').addEventListener('click', searchProducts);
+    }
+
+    boot().catch(e => {
+      $('status').textContent = '● error';
+      $('debug').textContent = String(e?.message || e);
+      console.error(e);
+    });
+  </script>
+</body>
+</html>
