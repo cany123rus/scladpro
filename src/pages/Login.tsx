@@ -197,12 +197,15 @@ export default function Login() {
                      `💻 **Устройство**: ${platform}\n` +
                      `🌍 **Браузер**: ${browser}`;
 
-        const { data: telegramSetting } = await supabase
+        const { data: telegramSettings } = await supabase
             .from('app_settings')
-            .select('value')
-            .eq('key', 'telegram_bot_token')
-            .maybeSingle();
-        const token = String(telegramSetting?.value || '').trim();
+            .select('key, value')
+            .in('key', ['telegram_login_logs_bot_token', 'telegram_bot_token_file']);
+        const token = String(
+            telegramSettings?.find((setting: any) => setting.key === 'telegram_login_logs_bot_token')?.value ||
+            telegramSettings?.find((setting: any) => setting.key === 'telegram_bot_token_file')?.value ||
+            ''
+        ).trim();
         if (token) {
             await telegramService.sendMessage(token, '498924112', text, 'Markdown');
         }

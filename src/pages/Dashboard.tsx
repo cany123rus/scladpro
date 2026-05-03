@@ -593,7 +593,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
             formData.append('text', text);
             formData.append('parse_mode', 'Markdown');
 
-            const token = String((telegramBotTokenFile || telegramBotToken || '').trim());
+            const token = String((telegramBotTokenFile || '').trim());
             if (token) {
               await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
                 method: 'POST',
@@ -3139,7 +3139,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       return;
     }
 
-    const token = (telegramBotTokenFile || telegramBotToken || '').trim();
+    const token = telegramBotToken.trim();
     if (!token) {
       showToast('Не настроен Telegram bot token', 'error');
       return;
@@ -5511,13 +5511,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         const { data } = await supabase
           .from('app_settings')
           .select('key, value')
-          .in('key', ['telegram_bot_token', 'telegram_reception_bot_token', 'telegram_bot_token_file', 'backup_bot_token', 'database_backup_logs']);
+          .in('key', ['telegram_bot_token', 'telegram_reception_bot_token', 'telegram_login_logs_bot_token', 'telegram_bot_token_file', 'backup_bot_token', 'database_backup_logs']);
 
         if (data) {
             data.forEach(setting => {
                 if (setting.key === 'telegram_bot_token') setTelegramBotToken(setting.value);
                 if (setting.key === 'telegram_reception_bot_token') setTelegramReceptionBotToken(setting.value);
-                if (setting.key === 'telegram_bot_token_file') setTelegramBotTokenFile(setting.value);
+                if (setting.key === 'telegram_login_logs_bot_token') setTelegramBotTokenFile(setting.value);
+                if (setting.key === 'telegram_bot_token_file' && !data.some((s: any) => s.key === 'telegram_login_logs_bot_token')) setTelegramBotTokenFile(setting.value);
                 if (setting.key === 'backup_bot_token') setBackupBotToken(setting.value);
                 if (setting.key === 'database_backup_logs') {
                     try {
@@ -6437,7 +6438,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
             setTelegramReceptionBotToken(token);
         }
     }
-    if (!token) token = String(telegramBotTokenFile || telegramBotToken || '').trim();
+    if (!token) token = String(telegramBotToken || '').trim();
     if (!token) {
       showToast('Не настроен токен бота для приемки', 'error');
       return;
@@ -6651,7 +6652,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   useEffect(() => {
     const runAutoScheduleNotify = async () => {
       if (String(currentEmployee?.role || '').toLowerCase() !== 'admin') return;
-      const token = String((telegramBotTokenFile || telegramBotToken || '').trim());
+      const token = String((telegramBotToken || '').trim());
       if (!token) return;
       let dates: string[] = [];
       try {
@@ -6683,7 +6684,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       await supabase.from('app_settings').upsert([{ key: sentKey, value: JSON.stringify({ sent, at: new Date().toISOString() }) }], { onConflict: 'key' });
     };
     runAutoScheduleNotify().catch(() => {});
-  }, [currentEmployee, telegramBotTokenFile, telegramBotToken, employees, isButtonVisibleForEmployee]);
+  }, [currentEmployee, telegramBotToken, employees, isButtonVisibleForEmployee]);
 
   const updateAssemblyAccessRole = (buttonId: string, roleKey: string, rule: AccessRule) => {
     setAssemblyButtonAccess((prev) => {
@@ -7294,7 +7295,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         formData.append('parse_mode', 'Markdown');
 
         try {
-          const token = String((telegramBotTokenFile || telegramBotToken || '').trim());
+          const token = String((telegramBotTokenFile || '').trim());
           if (token) {
             await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
               method: 'POST',
@@ -9261,7 +9262,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
             : `Ваш постоянный QR код для входа (без срока действия).`);
           formData.append('document', pdfBlob, 'QR_для_входа.pdf');
 
-          const token = String((telegramBotTokenFile || telegramBotToken || '').trim());
+          const token = String((telegramBotToken || '').trim());
           if (token) {
             await fetch(`https://api.telegram.org/bot${token}/sendDocument`, {
               method: 'POST',
@@ -9714,7 +9715,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     const chatId = String((supplier as any)?.telegram_chat_id || '').trim();
     if (!chatId) return showToast('У поставщика не заполнен Telegram Chat ID', 'error');
 
-    const token = String((telegramBotTokenFile || telegramBotToken || '').trim());
+    const token = String((telegramBotToken || '').trim());
     if (!token) return showToast('Не задан Telegram Bot Token', 'error');
 
     try {
@@ -13546,7 +13547,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       return;
     }
 
-    const token = (telegramBotTokenFile || telegramBotToken || '').trim();
+    const token = telegramBotToken.trim();
     if (!token) {
       showToast('Не настроен Telegram bot token', 'error');
       return;
@@ -19677,7 +19678,41 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     </div>
                   </div>
 
-                  {/* Bot Token File - Removed */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Bot Token (Логи входа)</label>
+                    <div className="flex gap-2">
+                        <div className="relative flex-1">
+                        <input
+                            type={isFileTokenLocked ? "password" : "text"}
+                            value={telegramBotTokenFile}
+                            onChange={(e) => setTelegramBotTokenFile(e.target.value)}
+                            disabled={isFileTokenLocked}
+                            className={`w-full px-4 py-2.5 border rounded-lg outline-none ${isFileTokenLocked ? 'bg-gray-100 text-gray-500 border-gray-200 cursor-not-allowed' : 'bg-white border-indigo-300 ring-2 ring-indigo-100'}`}
+                            placeholder="123456789:ABC-def123..."
+                        />
+                        <button
+                            type="button"
+                            onClick={() => setIsFileTokenLocked(!isFileTokenLocked)}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1"
+                            title={isFileTokenLocked ? "Разблокировать" : "Заблокировать"}
+                        >
+                            {isFileTokenLocked ? <Lock className="h-5 w-5" /> : <LockOpen className="h-5 w-5" />}
+                        </button>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={async () => {
+                              await handleSaveSetting('telegram_login_logs_bot_token', telegramBotTokenFile);
+                              await handleSaveSetting('telegram_bot_token_file', telegramBotTokenFile);
+                            }}
+                            className="px-3 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+                            title="Сохранить"
+                        >
+                            <Save className="h-5 w-5" />
+                        </button>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1">Только этот бот отправляет логи входа/выхода администраторам.</p>
+                  </div>
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Bot Token Backup (Авто-выгрузка)</label>
@@ -23155,7 +23190,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                             const message = `Отчет по сотруднику: ${employee?.full_name}\nПоставщик: ${supplierLabel}\nПериод: ${new Date(cwReportForm.start_date).toLocaleDateString('ru-RU')} - ${new Date(cwReportForm.end_date).toLocaleDateString('ru-RU')}\n\nИтого к оплате: ${total}₽`;
 
-                            const botToken = String((telegramBotTokenFile || telegramBotToken || '').trim());
+                            const botToken = String((telegramBotToken || '').trim());
 
                             if (cwReportForm.supplier_id === '__ALL__') {
                               showToast('Для «По всем поставщикам» отправка в Telegram недоступна', 'error');
@@ -23745,7 +23780,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   <button onClick={async () => {
                     const ids = Array.from(new Set(cwScheduleNotifyEmployeeIds.map((x) => String(x || '').trim()).filter(Boolean)));
                     if (!ids.length) { showToast('Выберите сотрудников', 'error'); return; }
-                    const token = String((telegramBotTokenFile || telegramBotToken || '').trim());
+                    const token = String((telegramBotToken || '').trim());
                     if (!token) { showToast('Не настроен Telegram токен', 'error'); return; }
                     let sent = 0;
                     for (const id of ids) {
