@@ -2503,6 +2503,36 @@ export const WBSupplyManager = ({
     return sanitizeFbsScanRows(rows);
   };
 
+  const filterOrdersForSupplyId = (supplyId: string, supplyOrdersRaw: any[]) => {
+    const targetSupplyId = String(supplyId || '').trim().toLowerCase();
+    const rows = Array.isArray(supplyOrdersRaw) ? supplyOrdersRaw : [];
+    const getCandidates = (o: any) => [o?.supplyId, o?.supplyID, o?.supply_id, o?.supply?.id]
+      .map((v) => String(v || '').trim().toLowerCase())
+      .filter(Boolean);
+
+    const strictFiltered = rows.filter((o: any) => {
+      const candidates = getCandidates(o);
+      return candidates.length === 0 ? true : candidates.some((c) => c === targetSupplyId);
+    });
+
+    if (strictFiltered.length > 0) return strictFiltered;
+
+    return rows.filter((o: any) => {
+      const candidates = getCandidates(o);
+      return candidates.length === 0 ? true : candidates.some((c) => c.includes(targetSupplyId) || targetSupplyId.includes(c));
+    });
+  };
+
+  const getFbsOrderCountKey = (o: any) => String(o?.id ?? o?.orderId ?? o?.order_id ?? o?.rid ?? o?.orderUid ?? '').trim();
+
+  const getFreshSupplyOrdersCount = async (supplyId: string) => {
+    const supplyOrdersRaw = await fetchOrdersForSupply(supplyId, { enrich: false, fresh: true });
+    if (!supplyOrdersRaw || supplyOrdersRaw.length === 0) return 0;
+    const filtered = filterOrdersForSupplyId(supplyId, supplyOrdersRaw);
+    const uniqueKeys = new Set(filtered.map(getFbsOrderCountKey).filter(Boolean));
+    return uniqueKeys.size || filtered.length;
+  };
+
   const getSupplyOrdersForScan = async (supplyId: string): Promise<FbsSupplyScanOrderRow[]> => {
     let supplyOrdersRaw = await fetchOrdersForSupply(supplyId, { enrich: true, fresh: true });
     if (!supplyOrdersRaw || supplyOrdersRaw.length === 0) {
@@ -2512,20 +2542,7 @@ export const WBSupplyManager = ({
       return [];
     }
 
-    const targetSupplyId = String(supplyId || '').trim().toLowerCase();
-    const strictFiltered = supplyOrdersRaw.filter((o: any) => {
-      const candidates = [o?.supplyId, o?.supplyID, o?.supply_id, o?.supply?.id]
-        .map((v) => String(v || '').trim().toLowerCase())
-        .filter(Boolean);
-      return candidates.length === 0 ? true : candidates.some((c) => c === targetSupplyId);
-    });
-
-    const relaxedFiltered = strictFiltered.length > 0 ? strictFiltered : supplyOrdersRaw.filter((o: any) => {
-      const candidates = [o?.supplyId, o?.supplyID, o?.supply_id, o?.supply?.id]
-        .map((v) => String(v || '').trim().toLowerCase())
-        .filter(Boolean);
-      return candidates.length === 0 ? true : candidates.some((c) => c.includes(targetSupplyId) || targetSupplyId.includes(c));
-    });
+    const relaxedFiltered = filterOrdersForSupplyId(supplyId, supplyOrdersRaw);
 
     const supplyOrders = relaxedFiltered.map((o: any) => ({
       ...o,
@@ -2594,8 +2611,15 @@ export const WBSupplyManager = ({
       && sheetMeta.rowsWithScanText === cachedCompleteness.rowsWithScanText
     );
 
-    if (!forceRefresh && canUseCachedSheet) {
-      return { rows: sheetRows, sheetRows, apiRows: [] as FbsSupplyScanOrderRow[], mergedRows: sheetRows, sheetMeta, source: 'cache' as const };
+    if (canUseCachedSheet) {
+      if (!forceRefresh) {
+        return { rows: sheetRows, sheetRows, apiRows: [] as FbsSupplyScanOrderRow[], mergedRows: sheetRows, sheetMeta, source: 'cache' as const };
+      }
+
+      const freshCount = await getFreshSupplyOrdersCount(supplyId);
+      if (freshCount > 0 && freshCount === cachedCompleteness.totalRows) {
+        return { rows: sheetRows, sheetRows, apiRows: [] as FbsSupplyScanOrderRow[], mergedRows: sheetRows, sheetMeta, source: 'cache' as const, freshCount };
+      }
     }
 
     const apiRows = await getSupplyOrdersForScan(supplyId);
@@ -2690,7 +2714,7 @@ export const WBSupplyManager = ({
   const downloadFbsScanTemplateExcel = async () => {
     if (!activeSupplyId) return;
     try {
-      setFbsScanNotice({ type: 'info', text: 'Обновляю состав поставки из WB перед формированием Excel...' });
+      setFbsScanNotice({ type: 'info', text: 'Проверяю количество заказов в WB перед формированием Excel...' });
       const { rows, apiRows, source } = await loadPreparedFbsScanRows(activeSupplyId, selectedSupplierId, { forceRefresh: true });
       if (!rows.length) {
         setFbsScanNotice({ type: 'error', text: 'Не удалось сформировать Excel: в поставке нет строк для сканирования.' });
@@ -2728,7 +2752,9 @@ export const WBSupplyManager = ({
       a.click();
       URL.revokeObjectURL(url);
       const stats = getFbsScanProgressStats(rows, fbsScansBySticker);
-      setFbsScanNotice({ type: 'success', text: `Excel сформирован по актуальным данным WB: ${stats.totalRows} строк, стикеры ${completeness.rowsWithSticker}/${completeness.totalRows}, «Стикер при считывании» ${completeness.rowsWithScanText}/${completeness.totalRows}.` });
+      setFbsScanNotice({ type: 'success', text: source === 'cache'
+        ? `Excel сформирован из кеша: количество заказов не изменилось (${stats.totalRows} строк).`
+        : `Excel сформирован по актуальным данным WB: ${stats.totalRows} строк, стикеры ${completeness.rowsWithSticker}/${completeness.totalRows}, «Стикер при считывании» ${completeness.rowsWithScanText}/${completeness.totalRows}.` });
     } catch (e: any) {
       setFbsScanNotice({ type: 'error', text: e?.message || 'Не удалось скачать Excel по поставке' });
     }
