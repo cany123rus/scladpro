@@ -5518,7 +5518,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 if (setting.key === 'telegram_bot_token') setTelegramBotToken(setting.value);
                 if (setting.key === 'telegram_reception_bot_token') setTelegramReceptionBotToken(setting.value);
                 if (setting.key === 'telegram_login_logs_bot_token') setTelegramBotTokenFile(setting.value);
-                if (setting.key === 'telegram_bot_token_file' && !data.some((s: any) => s.key === 'telegram_login_logs_bot_token')) setTelegramBotTokenFile(setting.value);
                 if (setting.key === 'backup_bot_token') setBackupBotToken(setting.value);
                 if (setting.key === 'database_backup_logs') {
                     try {
@@ -19703,7 +19702,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             type="button"
                             onClick={async () => {
                               await handleSaveSetting('telegram_login_logs_bot_token', telegramBotTokenFile);
-                              await handleSaveSetting('telegram_bot_token_file', telegramBotTokenFile);
                             }}
                             className="px-3 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
                             title="Сохранить"
