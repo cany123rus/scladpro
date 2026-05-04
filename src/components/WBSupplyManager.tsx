@@ -2577,7 +2577,8 @@ export const WBSupplyManager = ({
       }));
   };
 
-  const loadPreparedFbsScanRows = async (supplyId: string, supplierId?: string) => {
+  const loadPreparedFbsScanRows = async (supplyId: string, supplierId?: string, options?: { forceRefresh?: boolean }) => {
+    const forceRefresh = Boolean(options?.forceRefresh);
     const [sheetRows, sheetMeta] = await Promise.all([
       loadFbsSupplyScanSheetRows(supplyId, supplierId),
       loadFbsSupplyScanSheetMeta(supplyId, supplierId),
@@ -2593,7 +2594,7 @@ export const WBSupplyManager = ({
       && sheetMeta.rowsWithScanText === cachedCompleteness.rowsWithScanText
     );
 
-    if (canUseCachedSheet) {
+    if (!forceRefresh && canUseCachedSheet) {
       return { rows: sheetRows, sheetRows, apiRows: [] as FbsSupplyScanOrderRow[], mergedRows: sheetRows, sheetMeta, source: 'cache' as const };
     }
 
@@ -2689,7 +2690,8 @@ export const WBSupplyManager = ({
   const downloadFbsScanTemplateExcel = async () => {
     if (!activeSupplyId) return;
     try {
-      const { rows, apiRows, source } = await loadPreparedFbsScanRows(activeSupplyId, selectedSupplierId);
+      setFbsScanNotice({ type: 'info', text: 'Обновляю состав поставки из WB перед формированием Excel...' });
+      const { rows, apiRows, source } = await loadPreparedFbsScanRows(activeSupplyId, selectedSupplierId, { forceRefresh: true });
       if (!rows.length) {
         setFbsScanNotice({ type: 'error', text: 'Не удалось сформировать Excel: в поставке нет строк для сканирования.' });
         return;
@@ -2726,7 +2728,7 @@ export const WBSupplyManager = ({
       a.click();
       URL.revokeObjectURL(url);
       const stats = getFbsScanProgressStats(rows, fbsScansBySticker);
-      setFbsScanNotice({ type: 'success', text: `Excel сформирован автоматически: ${stats.totalRows} строк, стикеры ${completeness.rowsWithSticker}/${completeness.totalRows}, «Стикер при считывании» ${completeness.rowsWithScanText}/${completeness.totalRows}.` });
+      setFbsScanNotice({ type: 'success', text: `Excel сформирован по актуальным данным WB: ${stats.totalRows} строк, стикеры ${completeness.rowsWithSticker}/${completeness.totalRows}, «Стикер при считывании» ${completeness.rowsWithScanText}/${completeness.totalRows}.` });
     } catch (e: any) {
       setFbsScanNotice({ type: 'error', text: e?.message || 'Не удалось скачать Excel по поставке' });
     }
