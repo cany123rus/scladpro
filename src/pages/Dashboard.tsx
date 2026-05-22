@@ -26,7 +26,7 @@ import { downloadJsonRowsAsExcel, ensureExcelFileSize, ensureExcelRowLimit, ensu
 import ExcelJS from 'exceljs/dist/exceljs.min.js';
 import { mergeWarehouseUpdates, removeWarehouseShelfItem, upsertWarehouseShelfItem } from '../utils/warehouseActions';
 import { DASHBOARD_TAB_IDS, isDashboardTabId } from '../constants/dashboardTabs';
-import { getWarehouseOfflineUrl, isWarehouseOfflineEnabled, setWarehouseOfflineEnabled, setWarehouseOfflineUrl, warehouseOfflineClient, WarehouseOfflineStatus } from '../lib/warehouseOffline';
+import { getWarehouseOfflineUrl, isWarehouseOfflineEnabled, setWarehouseOfflineEnabled, setWarehouseOfflineUrl, warehouseOfflineClient, WarehouseOfflineSnapshot, WarehouseOfflineStatus } from '../lib/warehouseOffline';
 
 
 const getSafeId = () => (globalThis?.crypto && typeof globalThis.crypto.randomUUID === 'function'
@@ -718,6 +718,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   });
   const [warehouseOfflineStatus, setWarehouseOfflineStatus] = useState<WarehouseOfflineStatus | null>(null);
   const [warehouseOfflineBusy, setWarehouseOfflineBusy] = useState(false);
+  const [warehouseOfflineSnapshot, setWarehouseOfflineSnapshot] = useState<WarehouseOfflineSnapshot | null>(null);
 
   // Supplier History Modal State
   const [showSupplierHistory, setShowSupplierHistory] = useState(false);
@@ -4637,6 +4638,80 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     }
   };
 
+  const getWarehouseOfflineSnapshotOrEmpty = async (): Promise<WarehouseOfflineSnapshot> => {
+    const snapshot = await warehouseOfflineClient.getSnapshot();
+    const fallback: WarehouseOfflineSnapshot = {
+      createdAt: new Date().toISOString(),
+      suppliers: [],
+      wbProducts: [],
+      modelNumbers: {},
+      labelLayout: null,
+      fboSupplies: [],
+      fboBoxes: [],
+      honestSignSeen: [],
+    };
+    return {
+      ...fallback,
+      ...(snapshot || {}),
+      suppliers: Array.isArray(snapshot?.suppliers) ? snapshot.suppliers : [],
+      wbProducts: Array.isArray(snapshot?.wbProducts) ? snapshot.wbProducts : [],
+      modelNumbers: snapshot?.modelNumbers && typeof snapshot.modelNumbers === 'object' ? snapshot.modelNumbers : {},
+      fboSupplies: Array.isArray(snapshot?.fboSupplies) ? snapshot.fboSupplies : [],
+      fboBoxes: Array.isArray(snapshot?.fboBoxes) ? snapshot.fboBoxes : [],
+      honestSignSeen: Array.isArray(snapshot?.honestSignSeen) ? snapshot.honestSignSeen : [],
+    };
+  };
+
+  const saveWarehouseOfflineSnapshotState = async (snapshot: WarehouseOfflineSnapshot) => {
+    const normalized = { ...snapshot, createdAt: snapshot.createdAt || new Date().toISOString() };
+    await warehouseOfflineClient.saveSnapshot(normalized);
+    setWarehouseOfflineSnapshot(normalized);
+    await checkWarehouseOfflineServer(false);
+    return normalized;
+  };
+
+  const normalizeWarehouseOfflineSupply = (row: any): Supply => ({
+    id: String(row?.id || ''),
+    supplier_id: String(row?.supplier_id || row?.supplierId || ''),
+    name: String(row?.name || ''),
+    status: String(row?.status || 'active'),
+    created_at: String(row?.created_at || row?.createdAt || new Date().toISOString()),
+    updated_at: row?.updated_at || row?.updatedAt,
+    total_items: Number(row?.total_items || row?.totalItems || 0),
+  });
+
+  const normalizeWarehouseOfflineBox = (row: any): SupplyBox => ({
+    id: String(row?.id || ''),
+    supply_id: String(row?.supply_id || row?.supplyId || ''),
+    name: String(row?.name || ''),
+    created_at: String(row?.created_at || row?.createdAt || new Date().toISOString()),
+  });
+
+  const loadWarehouseOfflineSnapshot = async (applyToList = true) => {
+    const snapshot = await getWarehouseOfflineSnapshotOrEmpty();
+    setWarehouseOfflineSnapshot(snapshot);
+    if (applyToList) {
+      const supplies = (snapshot.fboSupplies || [])
+        .map(normalizeWarehouseOfflineSupply)
+        .filter((s) => s.id && (!selectedSupplierId || String(s.supplier_id) === String(selectedSupplierId)))
+        .sort((a, b) => new Date(String(b.created_at || '')).getTime() - new Date(String(a.created_at || '')).getTime());
+      setSuppliesList(supplies);
+    }
+    return snapshot;
+  };
+
+  const getWarehouseOfflineSuppliers = () => {
+    const list = Array.isArray(warehouseOfflineSnapshot?.suppliers) ? warehouseOfflineSnapshot.suppliers : [];
+    return (list.length ? list : suppliers) as Supplier[];
+  };
+
+  const getWarehouseOfflineSupplyBoxes = (snapshot: WarehouseOfflineSnapshot, supplyId: string) => {
+    return (snapshot.fboBoxes || [])
+      .map(normalizeWarehouseOfflineBox)
+      .filter((box) => box.id && String(box.supply_id) === String(supplyId))
+      .sort((a, b) => new Date(String(b.created_at || '')).getTime() - new Date(String(a.created_at || '')).getTime());
+  };
+
   const buildWarehouseOfflineSnapshot = async () => {
     const [productsRes, modelRes, layoutRes, suppliesRes, boxesRes, hsRes] = await Promise.all([
       supabase.from('wb_products_cache').select('supplier_id, nm_id, product_json').limit(20000),
@@ -4675,6 +4750,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       await checkWarehouseOfflineServer(false);
       const snapshot = await buildWarehouseOfflineSnapshot();
       await warehouseOfflineClient.saveSnapshot(snapshot);
+      setWarehouseOfflineSnapshot(snapshot);
+      setSuppliesList((snapshot.fboSupplies || []).map(normalizeWarehouseOfflineSupply).sort((a, b) => new Date(String(b.created_at || '')).getTime() - new Date(String(a.created_at || '')).getTime()));
       const status = await checkWarehouseOfflineServer(false);
       showToast('Offline-база обновлена: товаров ' + snapshot.wbProducts.length + ', поставок ' + snapshot.fboSupplies.length, 'success');
       return status;
@@ -4723,6 +4800,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   useEffect(() => {
     if (activeTab === 'supplies' && warehouseOfflineEnabled) {
       checkWarehouseOfflineServer(false).catch(() => undefined);
+      loadWarehouseOfflineSnapshot(true).catch(() => undefined);
     }
   }, [activeTab, warehouseOfflineEnabled]);
 
@@ -5643,6 +5721,22 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   };
 
   const fetchSupplyStats = async (supplyId: string) => {
+    if (warehouseOfflineEnabled) {
+      try {
+        const snapshot = await getWarehouseOfflineSnapshotOrEmpty();
+        setWarehouseOfflineSnapshot(snapshot);
+        const boxes = getWarehouseOfflineSupplyBoxes(snapshot, supplyId);
+        const scans = await warehouseOfflineClient.getFboScans().catch(() => ({ pending: [], synced: [], conflicts: [] }));
+        const rows = [...((scans.pending || []) as any[]), ...((scans.synced || []) as any[])];
+        const itemsCount = rows.filter((row) => String(row?.supply_id || row?.supplyId || '') === String(supplyId)).length;
+        setSupplyStats({ boxes: boxes.length, items: itemsCount });
+        return;
+      } catch (e) {
+        setSupplyStats({ boxes: 0, items: 0 });
+        return;
+      }
+    }
+
     // Optimized: Fetch active boxes and their item counts in one query
     const { data: boxes } = await supabase
         .from('boxes')
@@ -5659,6 +5753,16 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   };
 
   const fetchSuppliesList = async () => {
+    if (warehouseOfflineEnabled) {
+      try {
+        await loadWarehouseOfflineSnapshot(true);
+      } catch (e: any) {
+        setSuppliesList([]);
+        showToast('Не удалось загрузить offline-поставки: ' + (e?.message || 'сервер недоступен'), 'error');
+      }
+      return;
+    }
+
     if (!selectedSupplierId) {
       setSuppliesList([]);
       return;
@@ -5685,6 +5789,28 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   };
 
   const fetchBoxesList = async (supplyId: string) => {
+    if (warehouseOfflineEnabled) {
+      try {
+        const snapshot = await getWarehouseOfflineSnapshotOrEmpty();
+        setWarehouseOfflineSnapshot(snapshot);
+        const scans = await warehouseOfflineClient.getFboScans().catch(() => ({ pending: [], synced: [], conflicts: [] }));
+        const rows = [...((scans.pending || []) as any[]), ...((scans.synced || []) as any[])];
+        const countsByBox = rows.reduce((acc: Record<string, number>, row: any) => {
+          const boxId = String(row?.box_id || row?.boxId || '');
+          if (boxId) acc[boxId] = (acc[boxId] || 0) + 1;
+          return acc;
+        }, {});
+        setBoxesList(getWarehouseOfflineSupplyBoxes(snapshot, supplyId).map((box: any) => ({
+          ...box,
+          total_items: countsByBox[String(box.id)] || 0,
+        })));
+      } catch (e: any) {
+        setBoxesList([]);
+        showToast('Не удалось загрузить offline-коробки: ' + (e?.message || 'сервер недоступен'), 'error');
+      }
+      return;
+    }
+
     const { data } = await supabase
         .from('boxes')
         .select('*, supply_items(count)')
@@ -5801,7 +5927,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
   useEffect(() => {
     if (activeTab === 'supplies') fetchSuppliesList();
-  }, [activeTab, selectedSupplierId]);
+  }, [activeTab, selectedSupplierId, warehouseOfflineEnabled]);
 
   useEffect(() => {
     if (activeTab === 'products') fetchProducts(selectedSupplierId || '');
@@ -5835,6 +5961,42 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
     if (!input || !selectedSupplierId) {
       if (!selectedSupplierId) showToast('Выберите поставщика', 'error');
+      return;
+    }
+
+    if (warehouseOfflineEnabled) {
+      try {
+        const snapshot = await getWarehouseOfflineSnapshotOrEmpty();
+        const supplies = (snapshot.fboSupplies || []).map(normalizeWarehouseOfflineSupply);
+        let supply = supplies.find((row) => String(row.name) === String(input) && String(row.supplier_id) === String(selectedSupplierId));
+
+        if (!supply) {
+          supply = {
+            id: `offline-supply-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            supplier_id: selectedSupplierId,
+            name: input,
+            status: 'active',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            total_items: 0,
+          };
+          const nextSnapshot = {
+            ...snapshot,
+            fboSupplies: [supply, ...(snapshot.fboSupplies || [])],
+          };
+          await saveWarehouseOfflineSnapshotState(nextSnapshot);
+          showToast('Offline: поставка создана локально', 'success');
+        } else {
+          setWarehouseOfflineSnapshot(snapshot);
+        }
+
+        setCurrentSupply(supply);
+        setSupplyStats({ boxes: getWarehouseOfflineSupplyBoxes(snapshot, supply.id).length, items: Number(supply.total_items || 0) });
+        await fetchBoxesList(supply.id);
+        setSupplyStep('SUPPLY');
+      } catch (e: any) {
+        showToast('Ошибка offline-поставки: ' + (e?.message || 'сервер недоступен'), 'error');
+      }
       return;
     }
 
@@ -5880,6 +6042,40 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     const normalized = String(input || '').trim();
     if (normalized === 'ACTION:GENERATE_BOX' || normalized === 'action:generate_box') {
       await createNextBoxInCurrentSupply();
+      return;
+    }
+
+    if (warehouseOfflineEnabled) {
+      try {
+        const snapshot = await getWarehouseOfflineSnapshotOrEmpty();
+        const boxes = getWarehouseOfflineSupplyBoxes(snapshot, currentSupply.id);
+        let box = boxes.find((row) => String(row.name) === String(input));
+
+        if (!box) {
+          box = {
+            id: `offline-box-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            supply_id: currentSupply.id,
+            name: input,
+            created_at: new Date().toISOString(),
+          };
+          const nextSnapshot = {
+            ...snapshot,
+            fboBoxes: [box, ...(snapshot.fboBoxes || [])],
+          };
+          await saveWarehouseOfflineSnapshotState(nextSnapshot);
+          showToast(`Offline: создана коробка ${box.name}`, 'success');
+        } else {
+          setWarehouseOfflineSnapshot(snapshot);
+        }
+
+        setCurrentBox(box);
+        setBoxItems([]);
+        await fetchBoxesList(currentSupply.id);
+        await fetchSupplyStats(currentSupply.id);
+        setSupplyStep('BOX');
+      } catch (e: any) {
+        showToast('Ошибка offline-коробки: ' + (e?.message || 'сервер недоступен'), 'error');
+      }
       return;
     }
 
@@ -5931,6 +6127,39 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
   const createNextBoxInCurrentSupply = async () => {
     if (!currentSupply?.id) {
+      return;
+    }
+
+    if (warehouseOfflineEnabled) {
+      try {
+        const snapshot = await getWarehouseOfflineSnapshotOrEmpty();
+        const existingBoxes = getWarehouseOfflineSupplyBoxes(snapshot, currentSupply.id);
+        const used = new Set(existingBoxes.map((b: any) => parseInt(String(b?.name || '').trim(), 10)).filter((n: number) => Number.isFinite(n) && n > 0));
+        let nextNumber = 1;
+        while (used.has(nextNumber)) nextNumber += 1;
+        const nextName = String(nextNumber);
+        const newBox: SupplyBox = {
+          id: `offline-box-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          name: nextName,
+          supply_id: currentSupply.id,
+          created_at: new Date().toISOString(),
+        };
+        await saveWarehouseOfflineSnapshotState({
+          ...snapshot,
+          fboBoxes: [newBox, ...(snapshot.fboBoxes || [])],
+        });
+        setCurrentBox(newBox);
+        setSupplyStep('BOX');
+        setScannedItem(null);
+        if (itemInputRef.current) itemInputRef.current.value = '';
+        if (honestSignInputRef.current) honestSignInputRef.current.value = '';
+        setBoxItems([]);
+        await fetchBoxesList(currentSupply.id);
+        await fetchSupplyStats(currentSupply.id);
+        showToast(`Offline: создана коробка №${nextName}`, 'success');
+      } catch (e: any) {
+        showToast('Ошибка создания offline-коробки: ' + (e?.message || 'сервер недоступен'), 'error');
+      }
       return;
     }
 
@@ -6206,18 +6435,67 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       setBoxItems((session.items || []).filter((item) => item.box_id === boxId).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at))));
       return;
     }
+    if (warehouseOfflineEnabled) {
+      try {
+        const scans = await warehouseOfflineClient.getFboScans();
+        const rows = [...((scans.pending || []) as any[]), ...((scans.synced || []) as any[])]
+          .filter((row) => String(row?.box_id || row?.boxId || '') === String(boxId))
+          .sort((a, b) => String(b.createdAt || b.created_at || '').localeCompare(String(a.createdAt || a.created_at || '')));
+        setBoxItems(rows.map((row: any) => ({
+          id: String(row.id || `warehouse-offline-${row.honest_sign_code || row.code || Math.random()}`),
+          box_id: String(row.box_id || row.boxId || boxId),
+          product_id: String(row.product_id || row.productId || ''),
+          honest_sign_code: String(row.honest_sign_code || row.code || ''),
+          created_at: String(row.created_at || row.createdAt || new Date().toISOString()),
+          product: {
+            id: String(row.product_id || row.productId || ''),
+            supplier_id: String(row.supplier_id || currentSupply?.supplier_id || ''),
+            name: String(row.product_name || ''),
+            wb_sku: String(row.product_barcode || ''),
+            barcode: String(row.product_barcode || ''),
+            size: String(row.product_size || ''),
+            color: String(row.product_color || ''),
+            model_number: String(row.product_model_number || ''),
+            created_at: String(row.created_at || row.createdAt || ''),
+          } as Product,
+        })));
+      } catch (e) {
+        setBoxItems([]);
+      }
+      return;
+    }
     const { data } = await supabase.from('supply_items').select('*, product:products(*)').eq('box_id', boxId).order('created_at', { ascending: false });
     setBoxItems(data || []);
   };
 
   useEffect(() => {
     if (currentBox) fetchBoxItems(currentBox.id);
-  }, [currentBox, fboOfflineMode, offlineFboSession]);
+  }, [currentBox, fboOfflineMode, offlineFboSession, warehouseOfflineEnabled]);
 
   const ensureWbSkuIndex = async (supplierId: string) => {
     if (wbSkuIndexRef.current[supplierId]) return wbSkuIndexRef.current[supplierId];
 
     const index = new Map<string, { card: any; size: any }>();
+
+    if (warehouseOfflineEnabled) {
+      const snapshot = await getWarehouseOfflineSnapshotOrEmpty();
+      setWarehouseOfflineSnapshot(snapshot);
+      for (const card of (snapshot.wbProducts || []) as any[]) {
+        const cardSupplierId = String(card?.supplierId || card?.supplier_id || card?.supplierID || '');
+        if (cardSupplierId && String(cardSupplierId) !== String(supplierId)) continue;
+        const sizes = Array.isArray(card?.sizes) ? card.sizes : [];
+        for (const size of sizes) {
+          const skus = Array.isArray(size?.skus) ? size.skus : [];
+          for (const sku of skus) {
+            const key = String(sku || '').trim();
+            if (key && !index.has(key)) index.set(key, { card, size });
+          }
+        }
+      }
+      wbSkuIndexRef.current[supplierId] = index;
+      return index;
+    }
+
     const pageSize = 200;
     let from = 0;
 
@@ -15755,24 +16033,119 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
             <>
               {supplyStep === 'LIST' && (
                 <SuppliesFBOSection>
-                <div className="max-w-2xl mx-auto">
-                  <div className="text-center mb-8">
-                    <div className="w-16 h-16 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <div className="mx-auto max-w-6xl">
+                  <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                    <div className="flex items-center gap-4">
+                      <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-indigo-100">
                       <Truck className="h-8 w-8 text-indigo-600" />
                     </div>
-                    <h1 className="text-2xl font-bold text-gray-900">Приемка поставки</h1>
-                    <p className="text-gray-500 mt-2">Отсканируйте штрихкод поставки для начала работы</p>
+                      <div>
+                        <h1 className="text-2xl font-bold text-gray-900">Приемка поставки</h1>
+                        <p className="text-gray-500 mt-1">Отсканируйте штрихкод поставки или создайте ее локально без интернета</p>
+                      </div>
+                    </div>
+                    {warehouseOfflineEnabled && (
+                      <div className="inline-flex items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700">
+                        <Database className="h-4 w-4" />
+                        Offline-режим склада включен
+                      </div>
+                    )}
                   </div>
 
-                  <div className="oc-card p-6 mb-6">
+                  <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <div className="text-sm font-bold text-slate-900">Склад offline</div>
+                          <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${warehouseOfflineEnabled ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>
+                            {warehouseOfflineEnabled ? 'Включен' : 'Выключен'}
+                          </span>
+                          <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${warehouseOfflineStatus?.ok ? 'bg-sky-100 text-sky-700' : 'bg-amber-100 text-amber-700'}`}>
+                            {warehouseOfflineStatus?.ok ? 'Сервер доступен' : 'Сервер не проверен'}
+                          </span>
+                        </div>
+                        <div className="mt-3 grid gap-2 md:grid-cols-[1fr_auto]">
+                          <input
+                            type="text"
+                            value={warehouseOfflineUrl}
+                            onChange={(e) => {
+                              setWarehouseOfflineUrlState(e.target.value);
+                              setWarehouseOfflineUrl(e.target.value);
+                            }}
+                            onBlur={() => saveWarehouseOfflineSettings(warehouseOfflineEnabled, warehouseOfflineUrl)}
+                            className="min-h-[48px] rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-base outline-none focus:ring-2 focus:ring-indigo-500"
+                            placeholder="http://IP-складского-ПК:8787"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const next = !warehouseOfflineEnabled;
+                              saveWarehouseOfflineSettings(next);
+                              if (next) loadWarehouseOfflineSnapshot(true).catch(() => undefined);
+                            }}
+                            className={`min-h-[48px] rounded-xl px-4 py-3 text-sm font-medium ${warehouseOfflineEnabled ? 'bg-slate-900 text-white hover:bg-slate-800' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+                          >
+                            {warehouseOfflineEnabled ? 'Отключить' : 'Включить'}
+                          </button>
+                        </div>
+                        <div className="mt-2 text-xs text-slate-500">
+                          {warehouseOfflineStatus?.updatedAt ? 'База обновлена: ' + new Date(warehouseOfflineStatus.updatedAt).toLocaleString('ru-RU') : 'Offline-база ещё не обновлялась'} •
+                          {' '}локальная очередь: {warehouseOfflineStatus?.pendingScans ?? 0} • синхронизировано: {warehouseOfflineStatus?.syncedScans ?? 0} • конфликты: {warehouseOfflineStatus?.conflicts ?? 0}
+                        </div>
+                        {warehouseOfflineSnapshot && (
+                          <div className="mt-1 text-xs text-slate-500">
+                            В локальной базе: поставщиков {getWarehouseOfflineSuppliers().length}, поставок {warehouseOfflineSnapshot.fboSupplies?.length || 0}, коробок {warehouseOfflineSnapshot.fboBoxes?.length || 0}, товаров WB {warehouseOfflineSnapshot.wbProducts?.length || 0}
+                          </div>
+                        )}
+                        {warehouseOfflineStatus?.error && <div className="mt-2 text-xs text-rose-600">{warehouseOfflineStatus.error}</div>}
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+                        <button
+                          type="button"
+                          onClick={() => checkWarehouseOfflineServer(true)}
+                          disabled={warehouseOfflineBusy}
+                          className="min-h-[48px] rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                        >
+                          Проверить
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => loadWarehouseOfflineSnapshot(true)}
+                          disabled={warehouseOfflineBusy || !warehouseOfflineEnabled}
+                          className="min-h-[48px] rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                        >
+                          Загрузить
+                        </button>
+                        <button
+                          type="button"
+                          onClick={refreshWarehouseOfflineBase}
+                          disabled={warehouseOfflineBusy}
+                          className="min-h-[48px] rounded-xl bg-indigo-600 px-4 py-3 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+                        >
+                          {warehouseOfflineBusy ? 'Работаю...' : 'Обновить offline-базу'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={syncWarehouseOfflineScans}
+                          disabled={warehouseOfflineBusy}
+                          className="min-h-[48px] rounded-xl bg-emerald-600 px-4 py-3 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+                        >
+                          Синхронизировать
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(340px,420px)]">
+                  <div className="oc-card p-5 md:p-6">
                     <div className="text-xs text-gray-600 mb-2">Поставщик для ШК поставки</div>
                     <select
                       value={selectedSupplierId}
                       onChange={(e) => setSelectedSupplierId(e.target.value)}
-                      className="oc-select mb-4"
+                      className="oc-select mb-4 min-h-[48px]"
                     >
                       <option value="">Выберите поставщика для ШК поставки...</option>
-                      {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                      {(warehouseOfflineEnabled ? getWarehouseOfflineSuppliers() : suppliers).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                     </select>
 
                     <form onSubmit={handleSupplyScan} className="flex gap-2">
@@ -15781,25 +16154,25 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         value={supplyInput}
                         onChange={(e) => setSupplyInput(e.target.value)}
                         placeholder="Штрихкод поставки..."
-                        className="flex-1 p-3 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                        className="min-h-[52px] flex-1 rounded-xl border border-gray-200 bg-gray-50 p-3 text-base outline-none focus:ring-2 focus:ring-indigo-500"
                         autoFocus
                       />
-                      <button type="submit" className="p-3 bg-gray-100 rounded-lg hover:bg-gray-200">
+                      <button type="submit" className="min-h-[52px] min-w-[52px] rounded-xl bg-gray-100 p-3 hover:bg-gray-200">
                         <ArrowLeft className="h-6 w-6 text-gray-600 rotate-180" />
                       </button>
                     </form>
                   </div>
 
-                  <div className="oc-card p-4 mb-4">
+                  <div className="oc-card p-5">
                     <div className="font-medium text-gray-900 mb-2">Коробки (FBO)</div>
                     <div className="text-xs text-gray-600 mb-2">Загрузите Excel с колонкой «ШК короба» (или первой колонкой с кодом), затем сгенерируйте этикетки 58x40 с нумерацией. Макет берётся из «Конструктор этикеток → Короба FBO».</div>
                     <select
                       value={fboBoxesSupplierId}
                       onChange={(e) => setFboBoxesSupplierId(e.target.value)}
-                      className="oc-select mb-2"
+                      className="oc-select mb-2 min-h-[48px]"
                     >
                       <option value="">Выберите поставщика для коробок FBO...</option>
-                      {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                      {(warehouseOfflineEnabled ? getWarehouseOfflineSuppliers() : suppliers).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                     </select>
                     <div className="flex flex-col sm:flex-row gap-2">
                       <input
@@ -15864,15 +16237,27 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       </button>
                     </div>
                   </div>
+                  </div>
 
 
-                  <div className="space-y-3">
-                    <h3 className="font-medium text-gray-900">Поставки</h3>
+                  <div className="mt-6 space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <h3 className="font-medium text-gray-900">Поставки</h3>
+                      {warehouseOfflineEnabled && (
+                        <div className="text-xs font-medium text-slate-500">Показываются данные из локальной базы ПК</div>
+                      )}
+                    </div>
+                    {!suppliesList.length && (
+                      <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-6 text-sm text-slate-500">
+                        Поставок пока нет. Выберите поставщика и отсканируйте или введите ШК поставки, чтобы создать ее локально.
+                      </div>
+                    )}
+                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                     {suppliesList
                       .slice()
                       .sort((a, b) => new Date(String(b?.created_at || '')).getTime() - new Date(String(a?.created_at || '')).getTime())
                       .map(supply => (
-                      <div key={supply.id} className={`bg-white p-4 rounded-xl border flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 ${supply.status === 'closed' ? 'border-green-200 bg-green-50' : 'border-gray-100'}`}>
+                      <div key={supply.id} className={`bg-white p-4 rounded-xl border flex flex-col justify-between gap-4 ${supply.status === 'closed' ? 'border-green-200 bg-green-50' : 'border-gray-100'}`}>
                         <div onClick={() => { setCurrentSupply(supply); fetchBoxesList(supply.id); fetchSupplyStats(supply.id); setSupplyStep('SUPPLY'); }} className="cursor-pointer flex-1 w-full sm:w-auto">
                           <div className="font-bold text-gray-900">{supply.name}</div>
                           <div className="text-sm text-gray-500 flex items-center gap-2">
@@ -15902,6 +16287,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         </div>
                       </div>
                     ))}
+                    </div>
                   </div>
                 </div>
                 </SuppliesFBOSection>
