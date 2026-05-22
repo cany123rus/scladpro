@@ -15,9 +15,11 @@ Scope: only `Поставки FBO` and `Товары WB` sticker printing.
 - Local server: `scripts/warehouse-offline-server.mjs`
 - Start command: `npm run offline:server`
 - Default server URL: `http://localhost:8787`
+- Local SkladPro URL from tablet/PC: `http://<PC-LAN-IP>:8787`
+- Frontend build served from: `dist/`
 - Data file: `warehouse-offline-data/warehouse-offline.json`
 
-The server currently stores:
+The server serves the built SkladPro interface and stores:
 
 - last offline snapshot;
 - pending FBO scan queue;
@@ -49,14 +51,14 @@ The refresh button should build and send:
 - FBO boxes;
 - already scanned Honest Sign codes.
 
-## Next Implementation Steps
+## Implemented Frontend Pieces
 
-1. Add a visible `Склад offline` status panel in `Поставки FBO`.
-2. Implement `Обновить offline-базу` in the frontend and save the snapshot to the PC server.
-3. Make `Товары WB` optionally read from the offline snapshot for sticker printing.
-4. Make `Поставки FBO` optionally read products/supplies/boxes from the offline snapshot.
-5. Route FBO scan writes to `POST /api/warehouse-offline/fbo-scans` when warehouse offline mode is enabled.
-6. Add cloud sync from pending local scans to Supabase.
+- `Склад offline` panel is visible on the main `Поставки FBO` screen.
+- `Обновить offline-базу` saves suppliers, WB products, FBO supplies, boxes, labels and model numbers to the PC server.
+- `Товары WB` can load products from the offline snapshot for sticker printing.
+- `Поставки FBO` can read supplies/boxes from the offline snapshot and create local supplies/boxes.
+- FBO scan writes go to `POST /api/warehouse-offline/fbo-scans` when warehouse offline mode is enabled.
+- `Синхронизировать` uploads pending local scans to Supabase when internet is available.
 
 ## Tomorrow On The Warehouse PC
 
@@ -80,19 +82,25 @@ cd C:\SkladPro\source_code
 npm install
 ```
 
-5. Start the server manually for the first check:
+5. Build the SkladPro interface for local offline opening:
+
+```powershell
+npm run build
+```
+
+6. Start the server manually for the first check:
 
 ```bash
 npm run offline:server
 ```
 
-6. Check from the PC:
+7. Check from the PC:
 
 ```bash
 curl http://localhost:8787/api/warehouse-offline/health
 ```
 
-7. Install Windows autostart through Task Scheduler:
+8. Install Windows autostart through Task Scheduler:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\install-warehouse-offline-autostart.ps1
@@ -101,19 +109,19 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install-warehouse-offline-aut
 This creates a Windows scheduled task named `SkladPro Warehouse Offline Server`.
 It starts `scripts\warehouse-offline-start.cmd` on user login and restarts the server if it stops.
 
-8. Find the PC LAN IP:
+9. Find the PC LAN IP:
 
 ```powershell
 ipconfig
 ```
 
-9. Open from tablet:
+10. Open from tablet:
 
 ```text
-http://<PC-LAN-IP>:8787/api/warehouse-offline/health
+http://<PC-LAN-IP>:8787
 ```
 
-If the tablet can open that health URL, the local network path is ready.
+If the tablet can open SkladPro through that URL, the interface and offline API are ready on the local network.
 
 ## Windows Files
 

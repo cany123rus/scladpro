@@ -10,8 +10,27 @@ const dataDir = process.env.WAREHOUSE_OFFLINE_DATA_DIR
   ? path.resolve(process.env.WAREHOUSE_OFFLINE_DATA_DIR)
   : path.join(rootDir, 'warehouse-offline-data');
 const dbPath = path.join(dataDir, 'warehouse-offline.json');
+const staticDir = process.env.WAREHOUSE_OFFLINE_STATIC_DIR
+  ? path.resolve(process.env.WAREHOUSE_OFFLINE_STATIC_DIR)
+  : path.join(rootDir, 'dist');
 const port = Number(process.env.WAREHOUSE_OFFLINE_PORT || 8787);
 const host = process.env.WAREHOUSE_OFFLINE_HOST || '0.0.0.0';
+
+const staticMimeTypes = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.ico': 'image/x-icon',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+};
 
 const emptyDb = () => ({
   version: 1,
@@ -72,6 +91,16 @@ const readBody = async (req) => {
 };
 
 const createId = () => 'local_' + Date.now() + '_' + Math.random().toString(36).slice(2, 10);
+
+const sendStatic = async (res, filePath) => {
+  const body = await readFile(filePath);
+  const ext = path.extname(filePath).toLowerCase();
+  res.writeHead(200, {
+    'Content-Type': staticMimeTypes[ext] || 'application/octet-stream',
+    'Cache-Control': ext === '.html' ? 'no-store' : 'public, max-age=31536000, immutable',
+  });
+  res.end(body);
+};
 
 const server = http.createServer(async (req, res) => {
   try {
@@ -158,6 +187,28 @@ const server = http.createServer(async (req, res) => {
       db.fboScans.synced = [...moved, ...(db.fboScans.synced || [])].slice(0, 5000);
       await saveDb(db);
       send(res, 200, { ok: true, synced: moved.length });
+      return;
+    }
+
+    if (req.method === 'GET' || req.method === 'HEAD') {
+      if (!existsSync(staticDir)) {
+        send(res, 404, { error: 'Frontend build not found. Run npm run build before starting the warehouse server.' });
+        return;
+      }
+
+      const rawPath = decodeURIComponent(url.pathname || '/');
+      const relativePath = rawPath === '/' ? 'index.html' : rawPath.replace(/^\/+/, '');
+      const requestedPath = path.resolve(staticDir, relativePath);
+      const safePath = requestedPath.startsWith(staticDir + path.sep) || requestedPath === staticDir;
+      const filePath = safePath && existsSync(requestedPath) ? requestedPath : path.join(staticDir, 'index.html');
+
+      if (req.method === 'HEAD') {
+        res.writeHead(200, { 'Cache-Control': 'no-store' });
+        res.end();
+        return;
+      }
+
+      await sendStatic(res, filePath);
       return;
     }
 
