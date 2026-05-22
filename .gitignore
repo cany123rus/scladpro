@@ -75,6 +75,7 @@ node_modules/
 # Build output / caches
 dist/
 .firebase/
+warehouse-offline-data/
 
 # OpenClaw/workspace/private runtime files accidentally copied into project
 .openclaw/

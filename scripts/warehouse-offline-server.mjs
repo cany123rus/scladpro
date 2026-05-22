@@ -1,0 +1,156 @@
+import http from 'node:http';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const rootDir = path.resolve(__dirname, '..');
+const dataDir = process.env.WAREHOUSE_OFFLINE_DATA_DIR
+  ? path.resolve(process.env.WAREHOUSE_OFFLINE_DATA_DIR)
+  : path.join(rootDir, 'warehouse-offline-data');
+const dbPath = path.join(dataDir, 'warehouse-offline.json');
+const port = Number(process.env.WAREHOUSE_OFFLINE_PORT || 8787);
+const host = process.env.WAREHOUSE_OFFLINE_HOST || '0.0.0.0';
+
+const emptyDb = () => ({
+  version: 1,
+  updatedAt: null,
+  snapshot: null,
+  fboScans: {
+    pending: [],
+    synced: [],
+    conflicts: [],
+  },
+});
+
+const ensureDb = async () => {
+  await mkdir(dataDir, { recursive: true });
+  if (!existsSync(dbPath)) {
+    await writeJson(dbPath, emptyDb());
+  }
+};
+
+const readJson = async () => {
+  await ensureDb();
+  try {
+    const raw = await readFile(dbPath, 'utf8');
+    return { ...emptyDb(), ...(JSON.parse(raw || '{}') || {}) };
+  } catch {
+    return emptyDb();
+  }
+};
+
+const writeJson = async (targetPath, value) => {
+  await mkdir(path.dirname(targetPath), { recursive: true });
+  const tmpPath = targetPath + '.' + process.pid + '.' + Date.now() + '.tmp';
+  await writeFile(tmpPath, JSON.stringify(value, null, 2), 'utf8');
+  await rename(tmpPath, targetPath);
+};
+
+const saveDb = async (db) => {
+  await writeJson(dbPath, db);
+};
+
+const send = (res, status, body) => {
+  const payload = body === undefined ? '' : JSON.stringify(body);
+  res.writeHead(status, {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'no-store',
+  });
+  res.end(payload);
+};
+
+const readBody = async (req) => {
+  const chunks = [];
+  for await (const chunk of req) chunks.push(chunk);
+  const raw = Buffer.concat(chunks).toString('utf8');
+  return raw ? JSON.parse(raw) : null;
+};
+
+const createId = () => 'local_' + Date.now() + '_' + Math.random().toString(36).slice(2, 10);
+
+const server = http.createServer(async (req, res) => {
+  try {
+    if (req.method === 'OPTIONS') {
+      send(res, 204);
+      return;
+    }
+
+    const url = new URL(req.url || '/', 'http://' + (req.headers.host || 'localhost'));
+
+    if (req.method === 'GET' && url.pathname === '/api/warehouse-offline/health') {
+      const db = await readJson();
+      send(res, 200, {
+        ok: true,
+        mode: 'warehouse-offline',
+        version: db.version || 1,
+        updatedAt: db.updatedAt || null,
+        pendingScans: db.fboScans?.pending?.length || 0,
+        syncedScans: db.fboScans?.synced?.length || 0,
+        conflicts: db.fboScans?.conflicts?.length || 0,
+      });
+      return;
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/warehouse-offline/snapshot') {
+      const db = await readJson();
+      send(res, 200, db.snapshot || null);
+      return;
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/warehouse-offline/snapshot') {
+      const snapshot = await readBody(req);
+      const db = await readJson();
+      const updatedAt = new Date().toISOString();
+      db.updatedAt = updatedAt;
+      db.snapshot = {
+        ...(snapshot || {}),
+        createdAt: snapshot?.createdAt || updatedAt,
+      };
+      await saveDb(db);
+      send(res, 200, { ok: true, updatedAt });
+      return;
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/warehouse-offline/fbo-scans') {
+      const db = await readJson();
+      send(res, 200, {
+        pending: db.fboScans?.pending || [],
+        synced: db.fboScans?.synced || [],
+        conflicts: db.fboScans?.conflicts || [],
+      });
+      return;
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/warehouse-offline/fbo-scans') {
+      const scan = await readBody(req);
+      const db = await readJson();
+      const id = scan?.id || createId();
+      const row = {
+        ...(scan || {}),
+        id,
+        status: 'local_pending',
+        createdAt: scan?.createdAt || new Date().toISOString(),
+      };
+      db.fboScans = db.fboScans || { pending: [], synced: [], conflicts: [] };
+      db.fboScans.pending = [row, ...(db.fboScans.pending || [])];
+      await saveDb(db);
+      send(res, 200, { ok: true, id });
+      return;
+    }
+
+    send(res, 404, { error: 'Not found' });
+  } catch (error) {
+    send(res, 500, { error: error?.message || 'Internal server error' });
+  }
+});
+
+await ensureDb();
+server.listen(port, host, () => {
+  console.log('Warehouse offline server: http://' + host + ':' + port);
+  console.log('Data file: ' + dbPath);
+});

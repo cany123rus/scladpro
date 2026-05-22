@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "offline:server": "node scripts/warehouse-offline-server.mjs",
     "build": "vite build",
     "preview": "vite preview"
   },
