@@ -143,6 +143,24 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === 'POST' && url.pathname === '/api/warehouse-offline/fbo-scans/mark-synced') {
+      const body = await readBody(req);
+      const ids = new Set((Array.isArray(body?.ids) ? body.ids : []).map((id) => String(id || '').trim()).filter(Boolean));
+      const db = await readJson();
+      db.fboScans = db.fboScans || { pending: [], synced: [], conflicts: [] };
+      const pending = db.fboScans.pending || [];
+      const moved = [];
+      db.fboScans.pending = pending.filter((row) => {
+        if (!ids.has(String(row?.id || ''))) return true;
+        moved.push({ ...row, status: 'synced', syncedAt: new Date().toISOString() });
+        return false;
+      });
+      db.fboScans.synced = [...moved, ...(db.fboScans.synced || [])].slice(0, 5000);
+      await saveDb(db);
+      send(res, 200, { ok: true, synced: moved.length });
+      return;
+    }
+
     send(res, 404, { error: 'Not found' });
   } catch (error) {
     send(res, 500, { error: error?.message || 'Internal server error' });

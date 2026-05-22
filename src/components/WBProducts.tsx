@@ -7,6 +7,7 @@ import { jsPDF } from 'jspdf';
 import bwipjs from 'bwip-js';
 import { supabase } from '../lib/supabase';
 import { FixedSizeList as List, ListChildComponentProps } from 'react-window';
+import { isWarehouseOfflineEnabled, warehouseOfflineClient } from '../lib/warehouseOffline';
 
 interface WBCharacteristic {
   name?: string;
@@ -221,6 +222,7 @@ const WB_PRODUCTS_BROWSER_CACHE_KEY = 'wb_products_browser_cache_v1';
 const WB_PRINT_CODES_CACHE_KEY = 'wb_print_codes_cache_v1';
 const WB_PRINT_PENDING_SYNC_KEY = 'wb_print_pending_codes_sync_v1';
 const WB_LOCAL_LABEL_EDITS_KEY = 'wb_local_label_edits_v1';
+const WB_MODEL_NUMBERS_SETTINGS_KEY = 'wb_model_numbers_v1';
 
 const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => {
   const [products, setProducts] = useState<WBProduct[]>([]);
@@ -242,19 +244,91 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
   const [isCheckingPrintCache, setIsCheckingPrintCache] = useState(false);
   const [printCachePreparedAt, setPrintCachePreparedAt] = useState<string | null>(null);
   const [printCacheStatus, setPrintCacheStatus] = useState<{ ok: boolean; message: string } | null>(null);
-  const [localLabelEdits, setLocalLabelEdits] = useState<Record<string, { article: string; size: string; color: string }>>({});
+  const [localLabelEdits, setLocalLabelEdits] = useState<Record<string, { article: string; size: string; color: string; modelNumber?: string }>>({});
   const [editingVariant, setEditingVariant] = useState<ProductVariant | null>(null);
-  const [editDraft, setEditDraft] = useState({ article: '', size: '', color: '' });
+  const [editDraft, setEditDraft] = useState({ article: '', size: '', color: '', modelNumber: '' });
 
   const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(WB_LOCAL_LABEL_EDITS_KEY);
-      if (!raw) return;
-      const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === 'object') setLocalLabelEdits(parsed);
-    } catch {}
+    const mergeModelNumbers = (base: Record<string, { article: string; size: string; color: string; modelNumber?: string }>, models: Record<string, string>) => {
+      const next = { ...base };
+      Object.entries(models).forEach(([nmID, modelNumber]) => {
+        const clean = String(modelNumber || '').trim();
+        if (!clean) return;
+        const key = `model:${nmID}`;
+        next[key] = {
+          article: nmID,
+          size: '',
+          color: '',
+          ...(next[key] || {}),
+          modelNumber: clean,
+        };
+      });
+      return next;
+    };
+
+    const extractLocalModelNumbers = (edits: Record<string, { article: string; size: string; color: string; modelNumber?: string }>) => {
+      const models: Record<string, string> = {};
+      Object.entries(edits).forEach(([key, value]) => {
+        const modelNumber = String(value?.modelNumber || '').trim();
+        if (!modelNumber) return;
+
+        if (key.startsWith('model:')) {
+          const nmID = key.replace(/^model:/, '').trim();
+          if (nmID) models[nmID] = modelNumber;
+          return;
+        }
+
+        // Backward compatibility: early versions stored modelNumber by variant key like "123456789-XL".
+        const nmID = key.split('-')[0]?.trim();
+        if (/^\d+$/.test(nmID)) models[nmID] = modelNumber;
+      });
+      return models;
+    };
+
+    const loadLabelEdits = async () => {
+      let localEdits: Record<string, { article: string; size: string; color: string; modelNumber?: string }> = {};
+      try {
+        const raw = localStorage.getItem(WB_LOCAL_LABEL_EDITS_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed === 'object') localEdits = parsed;
+        }
+      } catch {}
+
+      setLocalLabelEdits(localEdits);
+
+      try {
+        const { data, error } = await supabase
+          .from('app_settings')
+          .select('value')
+          .eq('key', WB_MODEL_NUMBERS_SETTINGS_KEY)
+          .maybeSingle();
+        if (error) throw error;
+
+        const parsed = data?.value ? JSON.parse(String(data.value)) : {};
+        const dbModels = (parsed?.models && typeof parsed.models === 'object' ? parsed.models : parsed) as Record<string, string>;
+        const localModels = extractLocalModelNumbers(localEdits);
+        const mergedModels = { ...(dbModels || {}), ...localModels };
+
+        if (Object.keys(mergedModels).length > 0) {
+          setLocalLabelEdits(prev => mergeModelNumbers(prev, mergedModels));
+        }
+
+        const hasLocalModels = Object.keys(localModels).length > 0;
+        const changed = hasLocalModels && JSON.stringify(dbModels || {}) !== JSON.stringify(mergedModels);
+        if (changed) {
+          await supabase
+            .from('app_settings')
+            .upsert([{ key: WB_MODEL_NUMBERS_SETTINGS_KEY, value: JSON.stringify({ models: mergedModels, updatedAt: new Date().toISOString() }) }], { onConflict: 'key' });
+        }
+      } catch (e) {
+        console.warn('Failed to load/sync WB model numbers from DB', e);
+      }
+    };
+
+    loadLabelEdits();
   }, []);
 
   useEffect(() => {
@@ -374,6 +448,30 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
     return rows
       .map((row: any) => ({ ...(row.product_json || {}), supplierId: row.supplier_id }))
       .filter((p: any) => p && p.nmID);
+  };
+
+  const loadProductsFromWarehouseOffline = async () => {
+    try {
+      if (!isWarehouseOfflineEnabled()) {
+        setError('Склад offline выключен');
+        return;
+      }
+      setLoading(true);
+      setError(null);
+      const snapshot = await warehouseOfflineClient.getSnapshot();
+      const list = Array.isArray(snapshot?.wbProducts) ? snapshot.wbProducts as WBProduct[] : [];
+      if (!list.length) {
+        setError('В локальной offline-базе пока нет товаров. Обновите offline-базу в Поставки FBO.');
+        applyProductsState([]);
+        return;
+      }
+      applyProductsState(list);
+      setPrintCacheStatus({ ok: true, message: 'Загружено из offline-базы: ' + list.length + ' товаров' });
+    } catch (e: any) {
+      setError('Не удалось загрузить товары из offline-базы: ' + (e?.message || 'неизвестно'));
+    } finally {
+      setLoading(false);
+    }
   };
 
   const saveProductsToDb = async (items: WBProduct[]) => {
@@ -897,12 +995,12 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
         withChz: {
           dmX: 1.6, dmY: 1.8, dmSize: 22,
           dmTextX: 1.8, dmTextY: 24.9,
-          textX: 24.8, textY: 5.8, titleFont: 8.1, textFont: 6.9,
+          textX: 24.8, textY: 5.8, titleFont: 8.1, titleGap: 0.0, textFont: 6.9, dataGap: 2.35,
           barcodeX: 24.8, barcodeY: 27.2, barcodeW: 29.0, barcodeH: 7.0, barcodeTextY: 38.35,
         },
         withoutChz: {
           barcodeX: 2.5, barcodeY: 1.3, barcodeW: 53, barcodeH: 9.8, barcodeTextY: 14.3,
-          titleX: 2.0, titleY: 16.3, titleFont: 8.7, textFont: 8.4,
+          titleX: 2.0, titleY: 16.3, titleFont: 8.7, titleGap: 0.0, textFont: 8.4, dataGap: 2.65,
         }
       };
 
@@ -972,6 +1070,7 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
         const { product, size, barcode } = variant;
         const localEdit = localLabelEdits[variant.id];
         const articleText = localEdit?.article || String(product.nmID || '-');
+        const modelNumberText = String(getModelNumber(variant) || '').trim();
         const sizeText = localEdit?.size || String(size.techSize || '-');
         const colorText = (localEdit?.color || String(getColor(product) || '-')).slice(0, 16);
         
@@ -1013,16 +1112,21 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
           doc.setFont('Roboto', 'bold');
           const splitTitle = doc.splitTextToSize(product.title || '', 28.8);
           doc.text(splitTitle.slice(0, 2), rightX, y);
-          y += Math.min(2, splitTitle.length) * 3.0 + 0.5;
+          y += Math.min(2, splitTitle.length) * 2.0 + (layout.withChz.titleGap ?? 0);
 
           doc.setFontSize(layout.withChz.textFont);
           doc.setFont('Roboto', 'normal');
+          const dataGap = layout.withChz.dataGap ?? 2.35;
           doc.text(`Артикул: ${articleText}`, rightX, y);
-          y += 3.3;
+          y += dataGap;
+          if (modelNumberText) {
+            doc.text(`Модель: ${modelNumberText.slice(0, 18)}`, rightX, y);
+            y += dataGap;
+          }
           doc.text(`Размер: ${sizeText}`, rightX, y);
-          y += 3.3;
+          y += dataGap;
           doc.text(`Цвет: ${colorText}`, rightX, y);
-          y += 3.3;
+          y += dataGap;
           if (supplierName) {
             doc.text(`Поставщик: ${supplierName.slice(0, 18)}`, rightX, y);
           }
@@ -1081,16 +1185,21 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
           doc.setFontSize(layout.withoutChz.titleFont);
           const title = doc.splitTextToSize(product.title || '', textW);
           doc.text(title.slice(0, 3), textX, y);
-          y += Math.min(3, title.length) * 3.3 + 0.7;
+          y += Math.min(3, title.length) * 2.25 + (layout.withoutChz.titleGap ?? 0);
 
           doc.setFont('Roboto', 'normal');
           doc.setFontSize(layout.withoutChz.textFont);
+          const dataGap = layout.withoutChz.dataGap ?? 2.65;
           doc.text(`Артикул: ${articleText}`, textX, y);
-          y += 3.8;
+          y += dataGap;
+          if (modelNumberText) {
+            doc.text(`Модель: ${modelNumberText.slice(0, 22)}`, textX, y);
+            y += dataGap;
+          }
           doc.text(`Размер: ${sizeText}`, textX, y);
-          y += 3.8;
+          y += dataGap;
           doc.text(`Цвет: ${colorText}`, textX, y);
-          y += 3.8;
+          y += dataGap;
 
           if (supplierName) {
             doc.text(`Поставщик: ${supplierName.slice(0, 18)}`, textX, y);
@@ -1166,6 +1275,14 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
     return '-';
   };
 
+  const getModelEditKey = (variant: ProductVariant) => `model:${variant.product.nmID}`;
+
+  const getModelNumber = (variant: ProductVariant) => (
+    localLabelEdits[getModelEditKey(variant)]?.modelNumber ||
+    localLabelEdits[variant.id]?.modelNumber ||
+    ''
+  );
+
   const allVariants: ProductVariant[] = useMemo(() => (
     products.flatMap(p =>
       (p.sizes || []).map(s => ({
@@ -1177,15 +1294,37 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
     )
   ), [products]);
 
+  const normalizeSearchText = (value: unknown) => String(value || '')
+    .toLowerCase()
+    .replace(/[\s_]+/g, '')
+    .replace(/[а]/g, 'a')
+    .replace(/[в]/g, 'b')
+    .replace(/[её]/g, 'e')
+    .replace(/[к]/g, 'k')
+    .replace(/[м]/g, 'm')
+    .replace(/[н]/g, 'h')
+    .replace(/[о]/g, 'o')
+    .replace(/[р]/g, 'p')
+    .replace(/[с]/g, 'c')
+    .replace(/[т]/g, 't')
+    .replace(/[у]/g, 'y')
+    .replace(/[х]/g, 'x');
+
   const filteredVariants = useMemo(() => {
-    const q = searchQuery.toLowerCase();
+    const rawQ = searchQuery.toLowerCase();
+    const q = normalizeSearchText(searchQuery);
     return allVariants.filter(v => {
-      const matchesSearch = (
-        v.product.title?.toLowerCase().includes(q) ||
-        v.product.vendorCode?.toLowerCase().includes(q) ||
-        String(v.product.nmID).includes(q) ||
-        v.barcode?.toLowerCase().includes(q)
-      );
+      const searchable = [
+        v.product.title,
+        v.product.vendorCode,
+        v.product.nmID,
+        getModelNumber(v),
+        v.barcode,
+      ];
+      const matchesSearch = !q || searchable.some(value => {
+        const raw = String(value || '').toLowerCase();
+        return raw.includes(rawQ) || normalizeSearchText(value).includes(q);
+      });
 
       const matchesBrand = !selectedBrand || (v.product.brand === selectedBrand || v.product.characteristics?.find((c: any) => c.name === 'Бренд')?.value === selectedBrand);
       const matchesCategory = !selectedCategory || v.product.subjectName === selectedCategory;
@@ -1193,7 +1332,7 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
 
       return matchesSearch && matchesBrand && matchesCategory && matchesSupplier;
     });
-  }, [allVariants, searchQuery, selectedBrand, selectedCategory, selectedSupplierId]);
+  }, [allVariants, searchQuery, selectedBrand, selectedCategory, selectedSupplierId, localLabelEdits]);
 
   const printCount = useMemo(() => {
     let total = 0;
@@ -1211,6 +1350,43 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
     return 'https://www.wildberries.ru/';
   };
 
+  const commitModelNumber = (variant: ProductVariant, value: string) => {
+    const modelNumber = value.trim();
+    const key = getModelEditKey(variant);
+    const nmID = String(variant.product.nmID || '');
+
+    setLocalLabelEdits((prev) => {
+      const next = {
+        ...prev,
+        [key]: {
+          article: nmID,
+          size: '',
+          color: '',
+          ...(prev[key] || {}),
+          modelNumber,
+        },
+      };
+
+      const models: Record<string, string> = {};
+      Object.entries(next).forEach(([editKey, editValue]) => {
+        if (!editKey.startsWith('model:')) return;
+        const id = editKey.replace(/^model:/, '');
+        const model = String(editValue?.modelNumber || '').trim();
+        if (id && model) models[id] = model;
+      });
+
+      const payload = JSON.stringify({ models, updatedAt: new Date().toISOString() });
+      supabase
+        .from('app_settings')
+        .upsert([{ key: WB_MODEL_NUMBERS_SETTINGS_KEY, value: payload }], { onConflict: 'key' })
+        .then(({ error }) => {
+          if (error) console.warn('Failed to save WB model number to DB', error);
+        });
+
+      return next;
+    });
+  };
+
   const openEditModal = (variant: ProductVariant) => {
     const current = localLabelEdits[variant.id];
     setEditingVariant(variant);
@@ -1218,12 +1394,20 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
       article: current?.article || String(variant.product.nmID || ''),
       size: current?.size || String(variant.size.techSize || ''),
       color: current?.color || String(getColor(variant.product) || ''),
+      modelNumber: getModelNumber(variant),
     });
   };
 
   const saveLocalEdit = () => {
     if (!editingVariant) return;
-    setLocalLabelEdits((prev) => ({ ...prev, [editingVariant.id]: { ...editDraft } }));
+    setLocalLabelEdits((prev) => ({
+      ...prev,
+      [editingVariant.id]: {
+        article: editDraft.article,
+        size: editDraft.size,
+        color: editDraft.color,
+      },
+    }));
     setEditingVariant(null);
   };
 
@@ -1259,6 +1443,17 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
               <span className="text-xs text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">ID: {variant.product.nmID}</span>
               {variant.product.vendorCode && <span className="text-xs text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">Арт: {variant.product.vendorCode}</span>}
             </div>
+            <input
+              type="text"
+              defaultValue={getModelNumber(variant)}
+              onBlur={(e) => commitModelNumber(variant, e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+              }}
+              className="mt-2 w-full max-w-xs px-2 py-1.5 text-sm border border-indigo-200 rounded-md focus:ring-2 focus:ring-indigo-500 outline-none"
+              placeholder="Номер модели"
+              title="Номер модели общий для всех размеров этой карточки WB"
+            />
           </div>
           <div className="text-sm text-gray-700">{localLabelEdits[variant.id]?.color || getColor(variant.product)}</div>
           <div><span className="font-bold text-sm bg-indigo-50 text-indigo-700 px-2 py-1 rounded">{localLabelEdits[variant.id]?.size || variant.size.techSize}</span></div>
@@ -1310,6 +1505,13 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
                 >
                     <RefreshCw className={`h-4 w-4 mr-1 md:mr-2 ${loading ? 'animate-spin' : ''}`} />
                     Обновить
+                </button>
+                <button
+                    onClick={loadProductsFromWarehouseOffline}
+                    disabled={loading}
+                    className="col-span-2 md:col-span-1 flex items-center justify-center px-3 md:px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 transition-colors disabled:opacity-50 text-sm md:text-base"
+                >
+                    Offline-база
                 </button>
                 <button
                     onClick={preparePrintCache}
@@ -1439,6 +1641,17 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
               <div className="min-w-0 flex-1">
                 <div className="font-medium text-gray-900 text-sm line-clamp-2">{variant.product.title || 'Без названия'}</div>
                 <div className="text-xs text-gray-500 mt-1">ID: {variant.product.nmID} • Арт: {variant.product.vendorCode || '-'}</div>
+                <input
+                  type="text"
+                  defaultValue={getModelNumber(variant)}
+                  onBlur={(e) => commitModelNumber(variant, e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                  }}
+                  className="mt-2 w-full px-2 py-1.5 text-sm border border-indigo-200 rounded-md focus:ring-2 focus:ring-indigo-500 outline-none"
+                  placeholder="Номер модели"
+                  title="Номер модели общий для всех размеров этой карточки WB"
+                />
                 <div className="text-xs text-gray-600 mt-1">Цвет: {localLabelEdits[variant.id]?.color || getColor(variant.product)} • Размер: {localLabelEdits[variant.id]?.size || variant.size.techSize}</div>
                 <div className="text-xs font-mono text-gray-600 mt-1 break-all">{variant.barcode || '-'}</div>
               </div>

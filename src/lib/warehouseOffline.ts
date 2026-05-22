@@ -84,4 +84,11 @@ export const warehouseOfflineClient = {
   async getFboScans() {
     return request<{ pending: unknown[]; synced: unknown[]; conflicts: unknown[] }>('/api/warehouse-offline/fbo-scans');
   },
+
+  async markFboScansSynced(ids: string[]) {
+    return request<{ ok: true; synced: number }>('/api/warehouse-offline/fbo-scans/mark-synced', {
+      method: 'POST',
+      body: JSON.stringify({ ids }),
+    });
+  },
 };

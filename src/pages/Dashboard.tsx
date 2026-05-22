@@ -16,6 +16,7 @@ const AdvertisingInsights = React.lazy(() => import('../components/AdvertisingIn
 import { createWorkbookBlob, downloadAoaWorkbook, downloadWorkbook } from '../utils/excelExport';
 import { QRCodeSVG } from 'qrcode.react';
 import { jsPDF } from "jspdf";
+import autoTable from 'jspdf-autotable';
 import bwipjs from 'bwip-js';
 import { telegramService } from '../services/telegram.service';
 import { useWarehousePersistence } from '../hooks/useWarehousePersistence';
@@ -25,6 +26,7 @@ import { downloadJsonRowsAsExcel, ensureExcelFileSize, ensureExcelRowLimit, ensu
 import ExcelJS from 'exceljs/dist/exceljs.min.js';
 import { mergeWarehouseUpdates, removeWarehouseShelfItem, upsertWarehouseShelfItem } from '../utils/warehouseActions';
 import { DASHBOARD_TAB_IDS, isDashboardTabId } from '../constants/dashboardTabs';
+import { getWarehouseOfflineUrl, isWarehouseOfflineEnabled, setWarehouseOfflineEnabled, setWarehouseOfflineUrl, warehouseOfflineClient, WarehouseOfflineStatus } from '../lib/warehouseOffline';
 
 
 const getSafeId = () => (globalThis?.crypto && typeof globalThis.crypto.randomUUID === 'function'
@@ -221,6 +223,10 @@ interface Product {
   size: string;
   color: string;
   created_at: string;
+  photo_url?: string;
+  model_number?: string;
+  vendor_code?: string;
+  nm_id?: string;
 }
 
 interface Supply {
@@ -270,6 +276,44 @@ interface OfflineFboValidationSummary {
   message: string;
 }
 
+const getWbCharacteristicValue = (card: any, names: string[]) => {
+  const wanted = new Set(names.map((name) => name.toLowerCase()));
+  const chars = Array.isArray(card?.characteristics) ? card.characteristics : [];
+  for (const item of chars) {
+    const name = String(item?.name || item?.Name || '').trim().toLowerCase();
+    if (!wanted.has(name)) continue;
+    const value = item?.value ?? item?.Value;
+    if (Array.isArray(value)) return value.map((x) => String(x || '').trim()).filter(Boolean).join(', ');
+    return String(value || '').trim();
+  }
+  return '';
+};
+
+const getWbPhotoUrl = (card: any) => {
+  const firstPhoto = (Array.isArray(card?.photos) && card.photos[0]) || (Array.isArray(card?.mediaFiles) && card.mediaFiles[0]) || '';
+  let src = String(card?.photoUrl || card?.image || card?.image_url || firstPhoto?.big || firstPhoto?.c516x688 || firstPhoto?.c246x328 || firstPhoto?.tm || firstPhoto || '').trim();
+  if (src.startsWith('//')) src = `https:${src}`;
+  return /^https?:\/\//i.test(src) ? src : '';
+};
+
+const buildFboScanProductCard = (product: Product, card: any, size: any, barcode: string): Product => {
+  const color = getWbCharacteristicValue(card, ['цвет']) || product.color || '';
+  const modelNumber = String(product.model_number || '').trim();
+  const nmId = String(card?.nmID || card?.nmId || product.wb_sku || '').trim();
+  return {
+    ...product,
+    name: String(card?.title || card?.name || product.name || 'Товар'),
+    wb_sku: product.wb_sku || nmId,
+    barcode: String(barcode || product.barcode || '').trim(),
+    size: String(size?.techSize || size?.wbSize || product.size || '').trim(),
+    color,
+    photo_url: getWbPhotoUrl(card),
+    model_number: modelNumber,
+    vendor_code: String(card?.vendorCode || card?.article || product.wb_sku || '').trim(),
+    nm_id: nmId,
+  };
+};
+
 type ExternalAdsSocialLink = {
   url: string;
   followers: string;
@@ -291,6 +335,7 @@ type ExternalAdsHistoryItem = {
   price: string;
   views: string;
   rating: string;
+  published?: boolean;
   createdAt: string;
 };
 
@@ -364,7 +409,7 @@ const fixLayout = (str: string) => {
   }).join('');
 };
 
-const ExcelUploader = ({ onUpload, disabled = false }: { onUpload: (data: any[], fileName?: string, sourceFile?: File) => void | Promise<void>; disabled?: boolean }) => {
+const ExcelUploader = ({ onUpload, disabled = false, maxFileBytes }: { onUpload: (data: any[], fileName?: string, sourceFile?: File) => void | Promise<void>; disabled?: boolean; maxFileBytes?: number }) => {
   return (
     <div className="oc-card p-6">
       <h2 className="text-lg font-bold text-gray-900 mb-4">Загрузка отчета</h2>
@@ -387,7 +432,7 @@ const ExcelUploader = ({ onUpload, disabled = false }: { onUpload: (data: any[],
                   await new Promise((r) => setTimeout(r, 350));
                 }
                 try {
-                  const fileSizeError = ensureExcelFileSize(file);
+                  const fileSizeError = ensureExcelFileSize(file, maxFileBytes);
                   if (fileSizeError) {
                     errors.push(`${file.name}: ${fileSizeError}`);
                     continue;
@@ -633,6 +678,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const scanAudioCtxRef = useRef<any>(null);
   const wbSkuIndexRef = useRef<Record<string, Map<string, { card: any; size: any }>>>({});
   const supplierProductsIndexRef = useRef<Record<string, Map<string, Product>>>({});
+  const wbModelNumbersRef = useRef<{ loaded: boolean; values: Record<string, string> }>({ loaded: false, values: {} });
   const offlineFboSessionWriteTimeoutRef = useRef<number | null>(null);
   const offlineFboStatsRefreshTimeoutRef = useRef<number | null>(null);
   const offlineFboIndexesWarmupRef = useRef<Record<string, Promise<void>>>({});
@@ -664,6 +710,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [notificationHistory, setNotificationHistory] = useState<{id: string, message: string, type: 'success' | 'error' | 'info', time: Date}[]>([]);
   const [isNotificationHistoryVisible, setIsNotificationHistoryVisible] = useState(false);
   const [productToDelete, setProductToDelete] = useState<Product | null>(null);
+  const [warehouseOfflineEnabled, setWarehouseOfflineEnabledState] = useState(() => {
+    try { return isWarehouseOfflineEnabled(); } catch { return false; }
+  });
+  const [warehouseOfflineUrl, setWarehouseOfflineUrlState] = useState(() => {
+    try { return getWarehouseOfflineUrl(); } catch { return 'http://localhost:8787'; }
+  });
+  const [warehouseOfflineStatus, setWarehouseOfflineStatus] = useState<WarehouseOfflineStatus | null>(null);
+  const [warehouseOfflineBusy, setWarehouseOfflineBusy] = useState(false);
 
   // Supplier History Modal State
   const [showSupplierHistory, setShowSupplierHistory] = useState(false);
@@ -1178,9 +1232,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [uploadedPhotoMap, setUploadedPhotoMap] = useState<Record<string, string>>({});
   const [uploadedPhotoLoading, setUploadedPhotoLoading] = useState(false);
   const MAX_UPLOAD_ROWS = 100000;
-  const TURBO_MODE_ROWS = 50000;
-  const UPLOAD_RAW_ROWS_DB_LIMIT = 12000;
-  const ANALYTICS_JSON_DB_LIMIT = 6000;
+  const TURBO_MODE_ROWS = 10000;
+  const UPLOAD_RAW_ROWS_DB_LIMIT = 0;
+  const ANALYTICS_JSON_DB_LIMIT = 2500;
+  const UPLOADED_TABLE_RENDER_LIMIT = 800;
   const RAW_REPORTS_BUCKET = 'analytics-raw-reports';
   const uploadedFailedPhotoUrlsRef = useRef<Set<string>>(new Set());
   const [uploadedSearch, setUploadedSearch] = useState('');
@@ -1270,6 +1325,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     start: new Date().toISOString().split('T')[0],
     end: new Date().toISOString().split('T')[0]
   });
+
+  // Employees State
+  const [employees, setEmployees] = useState<any[]>([]);
+  const [employeeToDelete, setEmployeeToDelete] = useState<any>(null);
+  const [currentEmployee, setCurrentEmployee] = useState<any>(null);
+  const currentEmployeeRef = useRef(currentEmployee);
 
   // Completed Work State
   const [completedWorkStep, setCompletedWorkStep] = useState<'CALENDAR' | 'FORM' | 'RATES' | 'PACKAGING' | 'BOXES'>('CALENDAR');
@@ -1537,6 +1598,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   // Temporary Workers State
   const [showTempWorkerModal, setShowTempWorkerModal] = useState(false);
   const [showTempWorkerHistory, setShowTempWorkerHistory] = useState(false);
+  const [showTempWorkerQuickPayModal, setShowTempWorkerQuickPayModal] = useState(false);
+  const [showDeliveryModal, setShowDeliveryModal] = useState(false);
+  const [showDeliveryReportModal, setShowDeliveryReportModal] = useState(false);
+  const [showDeliveryPersonModal, setShowDeliveryPersonModal] = useState(false);
+  const [showGeneralReportModal, setShowGeneralReportModal] = useState(false);
   const [showPalletModal, setShowPalletModal] = useState(false);
   const [showTempWorkerEditModal, setShowTempWorkerEditModal] = useState(false);
   const [showTempWorkerAddNameModal, setShowTempWorkerAddNameModal] = useState(false);
@@ -1555,6 +1621,21 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [tempWorkerSupplierFilter, setTempWorkerSupplierFilter] = useState('all');
   const [tempWorkerPaidFilter, setTempWorkerPaidFilter] = useState<'all' | 'paid' | 'unpaid'>('all');
   const [tempWorkerDateSort, setTempWorkerDateSort] = useState<'desc' | 'asc'>('desc');
+  const cwReportPdfFontRef = useRef<string | null>(null);
+  const tempWorkerReportPdfFontRef = useRef<string | null>(null);
+  const deliveryReportPdfFontRef = useRef<string | null>(null);
+  const [showTempWorkerReportModal, setShowTempWorkerReportModal] = useState(false);
+  const [tempWorkerReportForm, setTempWorkerReportForm] = useState(() => {
+    const today = new Date();
+    const start = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
+    return { supplier_id: 'all', worker_name: 'all', paid_by_supplier_id: 'all', paid_status: 'all', start_date: start, end_date: today.toISOString().split('T')[0] };
+  });
+  const [generalReportForm, setGeneralReportForm] = useState(() => {
+    const today = new Date();
+    const start = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
+    return { supplier_id: 'all', person_name: 'all', paid_by_supplier_id: 'all', paid_status: 'all', start_date: start, end_date: today.toISOString().split('T')[0] };
+  });
+  const [generalReportCwRows, setGeneralReportCwRows] = useState<any[]>([]);
   const [tempWorkerForm, setTempWorkerForm] = useState({
     supplier_id: '',
     date: new Date().toISOString().split('T')[0],
@@ -1573,8 +1654,41 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     hours: ''
   });
   const [tempWorkerPaymentModal, setTempWorkerPaymentModal] = useState<{ open: boolean; logId: string; mode: 'pay' | 'extra' | 'edit'; supplierId: string; amount: string; error?: string }>({ open: false, logId: '', mode: 'pay', supplierId: '', amount: '', error: '' });
+  const [tempWorkerQuickPayWorkerFilter, setTempWorkerQuickPayWorkerFilter] = useState('all');
+  const [tempWorkerQuickPayPayerSupplierId, setTempWorkerQuickPayPayerSupplierId] = useState('');
+  const [tempWorkerQuickPaySelectedIds, setTempWorkerQuickPaySelectedIds] = useState<string[]>([]);
+  const [tempWorkerQuickPaySaving, setTempWorkerQuickPaySaving] = useState(false);
   const [tempWorkerPaymentsMap, setTempWorkerPaymentsMap] = useState<Record<string, Array<{ amount: number; supplier_id: string; created_at: string }>>>({});
   const [tempWorkerMetaLoaded, setTempWorkerMetaLoaded] = useState(false);
+  const [deliveryHistory, setDeliveryHistory] = useState<any[]>([]);
+  const [deliveryPersons, setDeliveryPersons] = useState<string[]>([]);
+  const [deliveryPersonNewName, setDeliveryPersonNewName] = useState('');
+  const [deliverySupplierFilter, setDeliverySupplierFilter] = useState('all');
+  const [deliveryForm, setDeliveryForm] = useState({
+    date: new Date().toISOString().split('T')[0],
+    courier: '',
+    amount: '',
+    rows: [{ supplier_id: '', boxes: '' }],
+  });
+  const [deliveryReportForm, setDeliveryReportForm] = useState(() => {
+    const today = new Date();
+    const start = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
+    return { supplier_id: 'all', courier: 'all', paid_by_supplier_id: 'all', paid_status: 'all', start_date: start, end_date: today.toISOString().split('T')[0] };
+  });
+  const [deliveryEditModal, setDeliveryEditModal] = useState<{ open: boolean; id: string; date: string; courier: string; amount: string; rows: Array<{ supplier_id: string; boxes: string }> }>({
+    open: false,
+    id: '',
+    date: new Date().toISOString().split('T')[0],
+    courier: '',
+    amount: '',
+    rows: [{ supplier_id: '', boxes: '' }],
+  });
+  const [deliveryPayModal, setDeliveryPayModal] = useState<{ open: boolean; deliveryId: string; payerSupplierId: string }>({ open: false, deliveryId: '', payerSupplierId: '' });
+  const [showDeliveryQuickPayModal, setShowDeliveryQuickPayModal] = useState(false);
+  const [deliveryQuickPayCourierFilter, setDeliveryQuickPayCourierFilter] = useState('all');
+  const [deliveryQuickPayPayerSupplierId, setDeliveryQuickPayPayerSupplierId] = useState('');
+  const [deliveryQuickPaySelectedIds, setDeliveryQuickPaySelectedIds] = useState<string[]>([]);
+  const [deliveryQuickPaySaving, setDeliveryQuickPaySaving] = useState(false);
 
   const [showAssemblyAccessModal, setShowAssemblyAccessModal] = useState(false);
   const [assemblyButtonAccess, setAssemblyButtonAccess] = useState<Record<string, ButtonAccessConfig>>({});
@@ -1605,6 +1719,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         setTempWorkerMetaLoaded(false);
         fetchTempWorkerLogs();
         loadTempWorkerMeta();
+        loadDeliveryData();
         fetchCwWarehouseMoneyHistory();
     }
   }, [showTempWorkerHistory]);
@@ -1637,6 +1752,108 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     await supabase.from('app_settings').upsert([{ key: 'temp_worker_comment_templates_v1', value: JSON.stringify(clean) }], { onConflict: 'key' });
   };
 
+  const isMissingDeliveryStorageError = (error: any) => {
+    const message = String(error?.message || error?.details || error?.hint || error?.code || error || '');
+    return /delivery_(logs|items|persons)|schema cache|does not exist|could not find the table|PGRST205|42P01/i.test(message);
+  };
+
+  const loadLegacyDeliveryData = async () => {
+    const { data } = await supabase.from('app_settings').select('key, value').in('key', ['delivery_history_v1', 'delivery_persons_v1']);
+    const historyRaw = data?.find((x: any) => x.key === 'delivery_history_v1')?.value;
+    const personsRaw = data?.find((x: any) => x.key === 'delivery_persons_v1')?.value;
+    const history = Array.isArray(historyRaw) ? historyRaw : (typeof historyRaw === 'string' ? JSON.parse(historyRaw || '[]') : []);
+    const persons = Array.isArray(personsRaw) ? personsRaw : (typeof personsRaw === 'string' ? JSON.parse(personsRaw || '[]') : []);
+    setDeliveryHistory(Array.isArray(history) ? history : []);
+    setDeliveryPersons(Array.from(new Set((persons || []).map((x: any) => String(x || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'ru')));
+  };
+
+  const loadDeliveryData = async () => {
+    try {
+      const [personsResult, deliveriesResult] = await Promise.all([
+        supabase.from('delivery_persons').select('name').order('name', { ascending: true }),
+        supabase.from('delivery_logs').select('*').order('date', { ascending: false }).order('created_at', { ascending: false }),
+      ]);
+
+      if (personsResult.error) throw personsResult.error;
+      if (deliveriesResult.error) throw deliveriesResult.error;
+
+      const deliveries = Array.isArray(deliveriesResult.data) ? deliveriesResult.data : [];
+      const deliveryIds = deliveries.map((delivery: any) => String(delivery?.id || '')).filter(Boolean);
+      let itemRows: any[] = [];
+
+      if (deliveryIds.length > 0) {
+        const { data: itemsData, error: itemsError } = await supabase
+          .from('delivery_items')
+          .select('id, delivery_id, supplier_id, boxes')
+          .in('delivery_id', deliveryIds);
+        if (itemsError) throw itemsError;
+        itemRows = Array.isArray(itemsData) ? itemsData : [];
+      }
+
+      const itemsByDelivery = new Map<string, any[]>();
+      itemRows.forEach((item: any) => {
+        const deliveryId = String(item?.delivery_id || '');
+        if (!itemsByDelivery.has(deliveryId)) itemsByDelivery.set(deliveryId, []);
+        itemsByDelivery.get(deliveryId)?.push({
+          id: item?.id,
+          supplier_id: item?.supplier_id,
+          boxes: Number(item?.boxes || 0),
+        });
+      });
+
+      setDeliveryPersons(
+        Array.from(new Set((personsResult.data || []).map((row: any) => String(row?.name || '').trim()).filter(Boolean)))
+          .sort((a, b) => a.localeCompare(b, 'ru'))
+      );
+      setDeliveryHistory(deliveries.map((delivery: any) => ({
+        id: delivery?.id,
+        date: String(delivery?.date || '').slice(0, 10),
+        courier: delivery?.courier_name || delivery?.courier || '',
+        amount: Number(delivery?.amount || 0),
+        rows: itemsByDelivery.get(String(delivery?.id || '')) || [],
+        is_paid: Boolean(delivery?.is_paid),
+        paid_by_supplier_id: delivery?.paid_by_supplier_id || null,
+        paid_at: delivery?.paid_at || null,
+        created_at: delivery?.created_at || null,
+      })));
+    } catch (e) {
+      if (!isMissingDeliveryStorageError(e)) {
+        console.warn('loadDeliveryData failed, falling back to app_settings', e);
+      }
+      try {
+        await loadLegacyDeliveryData();
+      } catch (legacyError) {
+        console.warn('legacy delivery data load failed', legacyError);
+        setDeliveryHistory([]);
+        setDeliveryPersons([]);
+      }
+    }
+  };
+
+  const saveDeliveryHistory = async (items: any[]) => {
+    const next = Array.isArray(items) ? items : [];
+    setDeliveryHistory(next);
+    await supabase.from('app_settings').upsert([{ key: 'delivery_history_v1', value: JSON.stringify(next) }], { onConflict: 'key' });
+  };
+
+  const saveDeliveryPersons = async (items: string[]) => {
+    const clean = Array.from(new Set((items || []).map((x) => String(x || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'ru'));
+    setDeliveryPersons(clean);
+    try {
+      if (clean.length > 0) {
+        const { error } = await supabase
+          .from('delivery_persons')
+          .upsert(clean.map((name) => ({ name })), { onConflict: 'name' });
+        if (error) throw error;
+      }
+    } catch (error) {
+      if (!isMissingDeliveryStorageError(error)) {
+        console.warn('saveDeliveryPersons failed, falling back to app_settings', error);
+      }
+      await supabase.from('app_settings').upsert([{ key: 'delivery_persons_v1', value: JSON.stringify(clean) }], { onConflict: 'key' });
+    }
+  };
+
   const getTempWorkerPaidAmount = (log: any) => {
     const payments = tempWorkerPaymentsMap[String(log?.id || '')] || [];
     const partialPaid = (payments || []).reduce((sum: number, p: any) => sum + Number(p?.amount || 0), 0);
@@ -1660,6 +1877,508 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       supplierName: suppliers.find((s: any) => String(s.id) === supplierId)?.name || `#${supplierId}`,
       amount,
     }));
+  };
+
+  const getDeliveryPaidByText = (delivery: any) => {
+    if (!delivery?.is_paid) return '—';
+    const supplier = suppliers.find((s: any) => String(s.id) === String(delivery?.paid_by_supplier_id));
+    return supplier?.name || 'Поставщик';
+  };
+
+  const normalizeDeliveryRows = (rows: any[]) => (Array.isArray(rows) ? rows : [])
+    .map((row: any) => ({ supplier_id: String(row?.supplier_id || '').trim(), boxes: Number(row?.boxes || 0) }))
+    .filter((row: any) => row.supplier_id && row.boxes > 0);
+
+  const deliveryCourierOptions = useMemo(() => (
+    Array.from(new Set([
+      ...(deliveryPersons || []),
+      ...(deliveryHistory || []).map((delivery: any) => String(delivery?.courier || '').trim()),
+    ].filter(Boolean))).sort((a, b) => a.localeCompare(b, 'ru'))
+  ), [deliveryPersons, deliveryHistory]);
+
+  const filteredDeliveryHistory = useMemo(() => {
+    const rows = (deliveryHistory || []).filter((delivery: any) => {
+      if (deliverySupplierFilter === 'all') return true;
+      return (delivery?.rows || []).some((row: any) => String(row?.supplier_id || '') === String(deliverySupplierFilter));
+    });
+    return rows.sort((a: any, b: any) => String(b?.date || '').localeCompare(String(a?.date || '')));
+  }, [deliveryHistory, deliverySupplierFilter]);
+
+  const deliveryQuickPayRows = useMemo(() => {
+    return (deliveryHistory || [])
+      .filter((delivery: any) => !delivery?.is_paid)
+      .filter((delivery: any) => deliveryQuickPayCourierFilter === 'all' || String(delivery?.courier || '').trim() === deliveryQuickPayCourierFilter)
+      .sort((a: any, b: any) => String(a?.date || '').localeCompare(String(b?.date || '')));
+  }, [deliveryHistory, deliveryQuickPayCourierFilter]);
+
+  const deliveryQuickPaySelectedRows = useMemo(() => {
+    const selected = new Set(deliveryQuickPaySelectedIds.map(String));
+    return (deliveryHistory || []).filter((delivery: any) => selected.has(String(delivery?.id)) && !delivery?.is_paid);
+  }, [deliveryHistory, deliveryQuickPaySelectedIds]);
+
+  const deliveryQuickPaySelectedTotal = useMemo(() => (
+    deliveryQuickPaySelectedRows.reduce((sum: number, delivery: any) => sum + Number(delivery?.amount || 0), 0)
+  ), [deliveryQuickPaySelectedRows]);
+
+  const deliveryInfographics = useMemo(() => {
+    const bySupplier = new Map<string, { supplierId: string; supplierName: string; boxes: number; amount: number; unpaidAmount: number; deliveries: number }>();
+    (deliveryHistory || []).forEach((delivery: any) => {
+      const totalBoxes = (delivery?.rows || []).reduce((sum: number, row: any) => sum + Number(row?.boxes || 0), 0) || 1;
+      (delivery?.rows || []).forEach((row: any) => {
+        const supplierId = String(row?.supplier_id || '');
+        const boxes = Number(row?.boxes || 0);
+        if (!supplierId || boxes <= 0) return;
+        const supplierName = suppliers.find((s: any) => String(s.id) === supplierId)?.name || 'Без поставщика';
+        const item = bySupplier.get(supplierId) || { supplierId, supplierName, boxes: 0, amount: 0, unpaidAmount: 0, deliveries: 0 };
+        const allocatedAmount = Number(delivery?.amount || 0) * (boxes / totalBoxes);
+        item.boxes += boxes;
+        item.amount += allocatedAmount;
+        if (!delivery?.is_paid) item.unpaidAmount += allocatedAmount;
+        item.deliveries += 1;
+        bySupplier.set(supplierId, item);
+      });
+    });
+    const supplierRows = Array.from(bySupplier.values()).sort((a, b) => b.boxes - a.boxes);
+    return {
+      supplierRows,
+      totalBoxes: supplierRows.reduce((sum, row) => sum + row.boxes, 0),
+      totalAmount: (deliveryHistory || []).reduce((sum: number, delivery: any) => sum + Number(delivery?.amount || 0), 0),
+      unpaidCount: (deliveryHistory || []).filter((delivery: any) => !delivery?.is_paid).length,
+      unpaidAmount: (deliveryHistory || []).filter((delivery: any) => !delivery?.is_paid).reduce((sum: number, delivery: any) => sum + Number(delivery?.amount || 0), 0),
+    };
+  }, [deliveryHistory, suppliers]);
+
+  const deliveryReportRows = useMemo(() => {
+    const start = String(deliveryReportForm.start_date || '');
+    const end = String(deliveryReportForm.end_date || '');
+    const selectedSupplier = String(deliveryReportForm.supplier_id || 'all');
+    const selectedCourier = String(deliveryReportForm.courier || 'all');
+    const selectedPaidBy = String(deliveryReportForm.paid_by_supplier_id || 'all');
+    const selectedPaidStatus = String(deliveryReportForm.paid_status || 'all');
+
+    return (deliveryHistory || [])
+      .flatMap((delivery: any) => {
+        const date = String(delivery?.date || '').slice(0, 10);
+        const courier = String(delivery?.courier || '').trim();
+        const paidBySupplierId = String(delivery?.paid_by_supplier_id || '');
+        const isPaid = Boolean(delivery?.is_paid);
+        if (!date) return [];
+        if (start && date < start) return [];
+        if (end && date > end) return [];
+        if (selectedCourier !== 'all' && courier !== selectedCourier) return [];
+        if (selectedPaidBy !== 'all' && paidBySupplierId !== selectedPaidBy) return [];
+        if (selectedPaidStatus === 'paid' && !isPaid) return [];
+        if (selectedPaidStatus === 'unpaid' && isPaid) return [];
+
+        const rows = Array.isArray(delivery?.rows) ? delivery.rows : [];
+        const totalBoxes = rows.reduce((sum: number, row: any) => sum + Number(row?.boxes || 0), 0) || 1;
+        return rows
+          .map((row: any) => {
+            const supplierId = String(row?.supplier_id || '');
+            const boxes = Number(row?.boxes || 0);
+            if (!supplierId || boxes <= 0) return null;
+            if (selectedSupplier !== 'all' && supplierId !== selectedSupplier) return null;
+            const supplierName = suppliers.find((s: any) => String(s.id) === supplierId)?.name || 'Без поставщика';
+            const allocatedAmount = Number(delivery?.amount || 0) * (boxes / totalBoxes);
+            return {
+              deliveryId: String(delivery?.id || ''),
+              date,
+              courier: courier || 'Доставщик',
+              supplierId,
+              supplierName,
+              boxes,
+              amount: allocatedAmount,
+              totalDeliveryAmount: Number(delivery?.amount || 0),
+              is_paid: isPaid,
+              paid_by_supplier_id: delivery?.paid_by_supplier_id || null,
+              paidByText: getDeliveryPaidByText(delivery),
+            };
+          })
+          .filter(Boolean);
+      })
+      .sort((a: any, b: any) => {
+        const supplierCompare = String(a.supplierName || '').localeCompare(String(b.supplierName || ''), 'ru');
+        if (supplierCompare !== 0) return supplierCompare;
+        return String(b.date || '').localeCompare(String(a.date || ''));
+      });
+  }, [deliveryHistory, deliveryReportForm, suppliers]);
+
+  const deliveryReportGrouped = useMemo(() => {
+    const grouped = new Map<string, { supplierId: string; supplierName: string; rows: any[]; boxes: number; amount: number; paid: number; unpaid: number }>();
+    (deliveryReportRows || []).forEach((row: any) => {
+      const supplierId = String(row?.supplierId || 'none');
+      const supplierName = row?.supplierName || 'Без поставщика';
+      const item = grouped.get(supplierId) || { supplierId, supplierName, rows: [], boxes: 0, amount: 0, paid: 0, unpaid: 0 };
+      item.rows.push(row);
+      item.boxes += Number(row?.boxes || 0);
+      item.amount += Number(row?.amount || 0);
+      if (row?.is_paid) item.paid += Number(row?.amount || 0);
+      else item.unpaid += Number(row?.amount || 0);
+      grouped.set(supplierId, item);
+    });
+    const groups = Array.from(grouped.values()).sort((a, b) => a.supplierName.localeCompare(b.supplierName, 'ru'));
+    return {
+      groups,
+      totalRows: deliveryReportRows.length,
+      totalDeliveries: new Set((deliveryReportRows || []).map((row: any) => row.deliveryId)).size,
+      totalBoxes: groups.reduce((sum, group) => sum + group.boxes, 0),
+      totalAmount: groups.reduce((sum, group) => sum + group.amount, 0),
+      totalPaid: groups.reduce((sum, group) => sum + group.paid, 0),
+      totalUnpaid: groups.reduce((sum, group) => sum + group.unpaid, 0),
+    };
+  }, [deliveryReportRows]);
+
+  const handleAddDelivery = async () => {
+    const courier = String(deliveryForm.courier || '').trim();
+    const amount = Number(deliveryForm.amount || 0);
+    const rows = normalizeDeliveryRows(deliveryForm.rows);
+    if (!courier) return showToast('Выберите доставщика', 'error');
+    if (!Number.isFinite(amount) || amount <= 0) return showToast('Введите сумму доставки', 'error');
+    if (!rows.length) return showToast('Добавьте хотя бы одного поставщика и коробки', 'error');
+
+    const newDelivery = {
+      id: getSafeId(),
+      date: deliveryForm.date || new Date().toISOString().split('T')[0],
+      courier,
+      amount,
+      rows,
+      is_paid: false,
+      paid_by_supplier_id: null,
+      created_at: new Date().toISOString(),
+    };
+
+    try {
+      const createdBy = String(user?.id || currentEmployee?.id || '').trim();
+      const payload: any = {
+        date: newDelivery.date,
+        courier_name: courier,
+        amount,
+        is_paid: false,
+      };
+      if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(createdBy)) {
+        payload.created_by = createdBy;
+      }
+
+      const { data: created, error } = await supabase
+        .from('delivery_logs')
+        .insert([payload])
+        .select('id')
+        .single();
+      if (error) throw error;
+
+      const deliveryId = String(created?.id || '');
+      if (!deliveryId) throw new Error('БД не вернула id доставки');
+
+      const { error: itemsError } = await supabase.from('delivery_items').insert(
+        rows.map((row: any) => ({
+          delivery_id: deliveryId,
+          supplier_id: row.supplier_id,
+          boxes: row.boxes,
+        }))
+      );
+      if (itemsError) {
+        await supabase.from('delivery_logs').delete().eq('id', deliveryId);
+        throw itemsError;
+      }
+
+      await saveDeliveryPersons([...(deliveryPersons || []), courier]);
+      setDeliveryForm({ date: new Date().toISOString().split('T')[0], courier: '', amount: '', rows: [{ supplier_id: '', boxes: '' }] });
+      await loadDeliveryData();
+      showToast('Доставка добавлена', 'success');
+    } catch (error: any) {
+      if (isMissingDeliveryStorageError(error)) {
+        const next = [newDelivery, ...(deliveryHistory || [])];
+        await saveDeliveryHistory(next);
+        await saveDeliveryPersons([...(deliveryPersons || []), courier]);
+        setDeliveryForm({ date: new Date().toISOString().split('T')[0], courier: '', amount: '', rows: [{ supplier_id: '', boxes: '' }] });
+        showToast('Доставка добавлена. После применения миграции будет отдельная таблица БД.', 'info');
+        return;
+      }
+      console.error('Error adding delivery:', error);
+      showToast('Ошибка добавления доставки: ' + (error?.message || 'неизвестно'), 'error');
+    }
+  };
+
+  const handleToggleDeliveryPaid = async (deliveryId: string, nextPaid: boolean, payerSupplierId?: string) => {
+    if (nextPaid && !payerSupplierId) return showToast('Выберите поставщика, который оплатил', 'error');
+    const paidAt = nextPaid ? new Date().toISOString() : null;
+    const next = (deliveryHistory || []).map((delivery: any) => String(delivery?.id) === String(deliveryId)
+      ? { ...delivery, is_paid: nextPaid, paid_by_supplier_id: nextPaid ? payerSupplierId : null, paid_at: paidAt }
+      : delivery);
+    try {
+      const { error } = await supabase
+        .from('delivery_logs')
+        .update({ is_paid: nextPaid, paid_by_supplier_id: nextPaid ? payerSupplierId : null, paid_at: paidAt })
+        .eq('id', deliveryId);
+      if (error) throw error;
+      setDeliveryHistory(next);
+      setDeliveryPayModal({ open: false, deliveryId: '', payerSupplierId: '' });
+      showToast(nextPaid ? 'Доставка отмечена оплаченной' : 'Оплата доставки снята', 'success');
+    } catch (error: any) {
+      if (isMissingDeliveryStorageError(error)) {
+        await saveDeliveryHistory(next);
+        setDeliveryPayModal({ open: false, deliveryId: '', payerSupplierId: '' });
+        showToast(nextPaid ? 'Доставка отмечена оплаченной' : 'Оплата доставки снята', 'success');
+        return;
+      }
+      console.error('Error updating delivery payment:', error);
+      showToast('Ошибка оплаты доставки: ' + (error?.message || 'неизвестно'), 'error');
+    }
+  };
+
+  const handleConfirmDeliveryQuickPay = async () => {
+    const rows = deliveryQuickPaySelectedRows;
+    if (!rows.length) {
+      showToast('Выберите доставки для оплаты', 'error');
+      return;
+    }
+    if (!deliveryQuickPayPayerSupplierId) {
+      showToast('Выберите поставщика, который оплатит', 'error');
+      return;
+    }
+
+    const payerSupplier = suppliers.find((s: any) => String(s.id) === String(deliveryQuickPayPayerSupplierId));
+    const total = rows.reduce((sum: number, delivery: any) => sum + Number(delivery?.amount || 0), 0);
+    if (!window.confirm(`Подтвердить оплату выбранных доставок?\nКто оплатит: ${payerSupplier?.name || 'Поставщик'}\nДоставок: ${rows.length}\nСумма: ${total.toFixed(2)} ₽`)) return;
+
+    const ids = rows.map((delivery: any) => String(delivery?.id || '')).filter(Boolean);
+    const paidAt = new Date().toISOString();
+    const supplierId = String(deliveryQuickPayPayerSupplierId || '').trim();
+    const next = (deliveryHistory || []).map((delivery: any) => ids.includes(String(delivery?.id))
+      ? { ...delivery, is_paid: true, paid_by_supplier_id: supplierId, paid_at: paidAt }
+      : delivery);
+
+    setDeliveryQuickPaySaving(true);
+    try {
+      const { error } = await supabase
+        .from('delivery_logs')
+        .update({ is_paid: true, paid_by_supplier_id: supplierId, paid_at: paidAt })
+        .in('id', ids);
+      if (error) throw error;
+
+      setDeliveryHistory(next);
+      setDeliveryQuickPaySelectedIds([]);
+      setShowDeliveryQuickPayModal(false);
+      showToast(`Оплачено доставок: ${rows.length}`, 'success');
+    } catch (error: any) {
+      if (isMissingDeliveryStorageError(error)) {
+        await saveDeliveryHistory(next);
+        setDeliveryQuickPaySelectedIds([]);
+        setShowDeliveryQuickPayModal(false);
+        showToast(`Оплачено доставок: ${rows.length}`, 'success');
+        return;
+      }
+      console.error('Quick delivery pay error:', error);
+      showToast('Ошибка быстрой оплаты доставок: ' + (error?.message || 'неизвестно'), 'error');
+    } finally {
+      setDeliveryQuickPaySaving(false);
+    }
+  };
+
+  const openDeliveryEditModal = (delivery: any) => {
+    const rows = Array.isArray(delivery?.rows) && delivery.rows.length > 0
+      ? delivery.rows.map((row: any) => ({
+        supplier_id: String(row?.supplier_id || ''),
+        boxes: String(row?.boxes ?? ''),
+      }))
+      : [{ supplier_id: '', boxes: '' }];
+    setDeliveryEditModal({
+      open: true,
+      id: String(delivery?.id || ''),
+      date: String(delivery?.date || new Date().toISOString().split('T')[0]).slice(0, 10),
+      courier: String(delivery?.courier || ''),
+      amount: String(delivery?.amount ?? ''),
+      rows,
+    });
+  };
+
+  const closeDeliveryEditModal = () => {
+    setDeliveryEditModal({
+      open: false,
+      id: '',
+      date: new Date().toISOString().split('T')[0],
+      courier: '',
+      amount: '',
+      rows: [{ supplier_id: '', boxes: '' }],
+    });
+  };
+
+  const handleUpdateDelivery = async () => {
+    const deliveryId = String(deliveryEditModal.id || '');
+    const courier = String(deliveryEditModal.courier || '').trim();
+    const amount = Number(deliveryEditModal.amount || 0);
+    const rows = normalizeDeliveryRows(deliveryEditModal.rows);
+    if (!deliveryId) return showToast('Не найдена доставка для редактирования', 'error');
+    if (!courier) return showToast('Выберите доставщика', 'error');
+    if (!Number.isFinite(amount) || amount <= 0) return showToast('Введите сумму доставки', 'error');
+    if (!rows.length) return showToast('Добавьте хотя бы одного поставщика и коробки', 'error');
+
+    const next = (deliveryHistory || []).map((delivery: any) => String(delivery?.id) === deliveryId
+      ? { ...delivery, date: deliveryEditModal.date || new Date().toISOString().split('T')[0], courier, amount, rows }
+      : delivery);
+
+    try {
+      const { error: logError } = await supabase
+        .from('delivery_logs')
+        .update({
+          date: deliveryEditModal.date || new Date().toISOString().split('T')[0],
+          courier_name: courier,
+          amount,
+        })
+        .eq('id', deliveryId);
+      if (logError) throw logError;
+
+      const { error: deleteItemsError } = await supabase
+        .from('delivery_items')
+        .delete()
+        .eq('delivery_id', deliveryId);
+      if (deleteItemsError) throw deleteItemsError;
+
+      const { error: insertItemsError } = await supabase.from('delivery_items').insert(
+        rows.map((row: any) => ({
+          delivery_id: deliveryId,
+          supplier_id: row.supplier_id,
+          boxes: row.boxes,
+        }))
+      );
+      if (insertItemsError) throw insertItemsError;
+
+      await saveDeliveryPersons([...(deliveryPersons || []), courier]);
+      setDeliveryHistory(next);
+      closeDeliveryEditModal();
+      showToast('Доставка обновлена', 'success');
+    } catch (error: any) {
+      if (isMissingDeliveryStorageError(error)) {
+        await saveDeliveryHistory(next);
+        await saveDeliveryPersons([...(deliveryPersons || []), courier]);
+        closeDeliveryEditModal();
+        showToast('Доставка обновлена', 'success');
+        return;
+      }
+      console.error('Error updating delivery:', error);
+      showToast('Ошибка редактирования доставки: ' + (error?.message || 'неизвестно'), 'error');
+    }
+  };
+
+  const handleDeleteDelivery = async (deliveryId: string) => {
+    const delivery = (deliveryHistory || []).find((item: any) => String(item?.id) === String(deliveryId));
+    const label = delivery ? ((delivery.courier || 'Доставка') + ' за ' + (delivery?.date ? new Date(String(delivery.date) + 'T12:00:00').toLocaleDateString('ru-RU') : 'дату без даты')) : 'эту доставку';
+    if (!window.confirm('Удалить ' + label + '? Действие нельзя отменить.')) return;
+    const next = (deliveryHistory || []).filter((item: any) => String(item?.id) !== String(deliveryId));
+    try {
+      const { error } = await supabase
+        .from('delivery_logs')
+        .delete()
+        .eq('id', deliveryId);
+      if (error) throw error;
+      setDeliveryHistory(next);
+      if (String(deliveryEditModal.id || '') === String(deliveryId)) closeDeliveryEditModal();
+      showToast('Доставка удалена', 'success');
+    } catch (error: any) {
+      if (isMissingDeliveryStorageError(error)) {
+        await saveDeliveryHistory(next);
+        if (String(deliveryEditModal.id || '') === String(deliveryId)) closeDeliveryEditModal();
+        showToast('Доставка удалена', 'success');
+        return;
+      }
+      console.error('Error deleting delivery:', error);
+      showToast('Ошибка удаления доставки: ' + (error?.message || 'неизвестно'), 'error');
+    }
+  };
+
+  const handleDownloadDeliveryReportPdf = async () => {
+    try {
+      showToast('Создаю PDF отчёт по доставкам...', 'success');
+      const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+      const money = (value: any) => Number(value || 0).toFixed(2) + ' руб.';
+
+      try {
+        if (!deliveryReportPdfFontRef.current) {
+          const response = await fetch('https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.66/fonts/Roboto/Roboto-Regular.ttf');
+          if (!response.ok) throw new Error('font ' + response.status);
+          const blob = await response.blob();
+          deliveryReportPdfFontRef.current = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result || '').split(',')[1] || '');
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          });
+        }
+        if (deliveryReportPdfFontRef.current) {
+          doc.addFileToVFS('Roboto-Regular.ttf', deliveryReportPdfFontRef.current);
+          doc.addFont('Roboto-Regular.ttf', 'Roboto', 'normal');
+          doc.setFont('Roboto', 'normal');
+        }
+      } catch (fontError) {
+        console.warn('Delivery report PDF font load failed', fontError);
+      }
+
+      const supplierLabel = deliveryReportForm.supplier_id === 'all'
+        ? 'Все поставщики'
+        : (suppliers.find((s: any) => String(s.id) === String(deliveryReportForm.supplier_id))?.name || 'Поставщик');
+      const courierLabel = deliveryReportForm.courier === 'all' ? 'Все доставщики' : deliveryReportForm.courier;
+      const paidByLabel = deliveryReportForm.paid_by_supplier_id === 'all'
+        ? 'Все оплаты'
+        : (suppliers.find((s: any) => String(s.id) === String(deliveryReportForm.paid_by_supplier_id))?.name || 'Поставщик');
+      const paidStatusLabel = deliveryReportForm.paid_status === 'paid'
+        ? 'Оплачено'
+        : deliveryReportForm.paid_status === 'unpaid'
+          ? 'Не оплачено'
+          : 'Все статусы оплаты';
+
+      doc.setFontSize(14);
+      doc.text('Отчет по доставкам', 14, 14);
+      doc.setFontSize(9);
+      doc.text('Период: ' + (deliveryReportForm.start_date || '-') + ' — ' + (deliveryReportForm.end_date || '-'), 14, 21);
+      doc.text('Поставщик: ' + supplierLabel, 14, 27);
+      doc.text('Доставщик: ' + courierLabel, 14, 33);
+      doc.text('Кто оплатил: ' + paidByLabel, 14, 39);
+      doc.text('Статус оплаты: ' + paidStatusLabel, 14, 45);
+      doc.text('Доставок: ' + deliveryReportGrouped.totalDeliveries + ' • Коробок: ' + deliveryReportGrouped.totalBoxes.toFixed(0) + ' • Сумма: ' + money(deliveryReportGrouped.totalAmount) + ' • Не оплачено: ' + money(deliveryReportGrouped.totalUnpaid), 14, 51);
+
+      const body: any[] = [];
+      deliveryReportGrouped.groups.forEach((group) => {
+        const deliveriesCount = new Set(group.rows.map((row: any) => row.deliveryId)).size;
+        body.push([{ content: group.supplierName + ' — доставок: ' + deliveriesCount + ', коробок: ' + group.boxes.toFixed(0) + ', сумма: ' + money(group.amount) + ', долг: ' + money(group.unpaid), colSpan: 7, styles: { fillColor: [241, 245, 249], fontStyle: 'normal', textColor: [15, 23, 42] } }]);
+        group.rows.forEach((row: any) => {
+          body.push([
+            row?.date ? new Date(String(row.date) + 'T12:00:00').toLocaleDateString('ru-RU') : '-',
+            row.courier || '-',
+            Number(row.boxes || 0).toFixed(0),
+            money(row.amount),
+            money(row.totalDeliveryAmount),
+            row.is_paid ? 'Оплачено' : 'Не оплачено',
+            String(row.paidByText || '-').replace(/₽/g, 'руб.'),
+          ]);
+        });
+      });
+
+      (autoTable as any)(doc, {
+        startY: 57,
+        head: [['Дата', 'Доставщик', 'Коробки', 'Сумма поставщика', 'Сумма доставки', 'Статус', 'Кто оплатил']],
+        body,
+        styles: { font: 'Roboto', fontSize: 8, cellPadding: 1.8, overflow: 'linebreak' },
+        headStyles: { font: 'Roboto', fillColor: [15, 23, 42], textColor: 255, fontStyle: 'normal' },
+        bodyStyles: { font: 'Roboto', fontStyle: 'normal' },
+        alternateRowStyles: { fillColor: [250, 250, 250] },
+        margin: { left: 10, right: 10 },
+        columnStyles: {
+          0: { cellWidth: 22 },
+          1: { cellWidth: 42 },
+          2: { cellWidth: 20, halign: 'right' },
+          3: { cellWidth: 32, halign: 'right' },
+          4: { cellWidth: 32, halign: 'right' },
+          5: { cellWidth: 30 },
+          6: { cellWidth: 96 },
+        },
+      });
+
+      const safeName = ('otchet_dostavki_' + (deliveryReportForm.start_date || 'start') + '_' + (deliveryReportForm.end_date || 'end')).replace(/[^a-zA-Z0-9_\-.]+/g, '_');
+      doc.save(safeName + '.pdf');
+    } catch (error: any) {
+      console.error('Delivery report PDF error:', error);
+      showToast('Ошибка создания PDF: ' + (error?.message || 'неизвестно'), 'error');
+    }
   };
 
   const filteredTempWorkerLogs = useMemo(() => {
@@ -1695,6 +2414,619 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     const shifts = rows.reduce((s, r) => s + r.shifts, 0);
     return { rows, total, shifts };
   }, [filteredTempWorkerLogs, suppliers]);
+
+  const tempWorkerReportWorkerOptions = useMemo(() => (
+    Array.from(new Set([...(tempWorkersList || []), ...(tempWorkerLogs || []).map((log: any) => String(log?.worker_name || log?.worker || '').trim())].filter(Boolean)))
+      .sort((a, b) => a.localeCompare(b, 'ru'))
+  ), [tempWorkersList, tempWorkerLogs]);
+
+  const tempWorkerQuickPayRows = useMemo(() => {
+    const rows = (tempWorkerLogs || [])
+      .filter((log: any) => getTempWorkerRemainingAmount(log) > 0)
+      .filter((log: any) => tempWorkerQuickPayWorkerFilter === 'all' || String(log?.worker_name || log?.worker || '').trim() === tempWorkerQuickPayWorkerFilter)
+      .sort((a: any, b: any) => String(a?.date || '').localeCompare(String(b?.date || '')));
+    return rows;
+  }, [tempWorkerLogs, tempWorkerPaymentsMap, tempWorkerQuickPayWorkerFilter]);
+
+  const tempWorkerQuickPayWorkerOptions = useMemo(() => (
+    Array.from(new Set((tempWorkerLogs || [])
+      .filter((log: any) => getTempWorkerRemainingAmount(log) > 0)
+      .map((log: any) => String(log?.worker_name || log?.worker || '').trim())
+      .filter(Boolean)))
+      .sort((a, b) => a.localeCompare(b, 'ru'))
+  ), [tempWorkerLogs, tempWorkerPaymentsMap]);
+
+  const tempWorkerQuickPaySelectedRows = useMemo(() => {
+    const selected = new Set(tempWorkerQuickPaySelectedIds.map(String));
+    return (tempWorkerLogs || []).filter((log: any) => selected.has(String(log?.id)) && getTempWorkerRemainingAmount(log) > 0);
+  }, [tempWorkerLogs, tempWorkerPaymentsMap, tempWorkerQuickPaySelectedIds]);
+
+  const tempWorkerQuickPaySelectedTotal = useMemo(() => (
+    tempWorkerQuickPaySelectedRows.reduce((sum: number, log: any) => sum + getTempWorkerRemainingAmount(log), 0)
+  ), [tempWorkerQuickPaySelectedRows, tempWorkerPaymentsMap]);
+
+  const handleConfirmTempWorkerQuickPay = async () => {
+    const rows = tempWorkerQuickPaySelectedRows;
+    if (!rows.length) {
+      showToast('Выберите смены для оплаты', 'error');
+      return;
+    }
+    if (!tempWorkerQuickPayPayerSupplierId) {
+      showToast('Выберите поставщика, который оплатит', 'error');
+      return;
+    }
+    const payerSupplier = suppliers.find((s: any) => String(s.id) === String(tempWorkerQuickPayPayerSupplierId));
+    const total = rows.reduce((sum: number, log: any) => sum + getTempWorkerRemainingAmount(log), 0);
+    if (!window.confirm(`Подтвердить оплату выбранных смен?\nКто оплатит: ${payerSupplier?.name || 'Поставщик'}\nСмен: ${rows.length}\nСумма: ${total.toFixed(2)} ₽`)) return;
+
+    setTempWorkerQuickPaySaving(true);
+    try {
+      const nextMap = { ...(tempWorkerPaymentsMap || {}) } as Record<string, Array<{ amount: number; supplier_id: string; created_at: string }>>;
+      const now = new Date().toISOString();
+      rows.forEach((log: any) => {
+        const key = String(log?.id || '');
+        const amount = getTempWorkerRemainingAmount(log);
+        if (!key || amount <= 0) return;
+        const supplierId = String(tempWorkerQuickPayPayerSupplierId || '').trim();
+        nextMap[key] = [{ amount, supplier_id: supplierId, created_at: now }];
+      });
+
+      await supabase.from('app_settings').upsert([{ key: 'temp_worker_payments_v1', value: JSON.stringify(nextMap) }], { onConflict: 'key' });
+
+      const ids = rows.map((log: any) => String(log?.id || '')).filter(Boolean);
+      await Promise.all(ids.map(async (id) => {
+        const log = rows.find((x: any) => String(x?.id) === id);
+        const supplierId = String(tempWorkerQuickPayPayerSupplierId || '').trim() || null;
+        await supabase.from('temporary_workers_logs').update({ is_paid: true, paid_by_supplier_id: supplierId }).eq('id', id);
+      }));
+
+      setTempWorkerPaymentsMap(nextMap);
+      setTempWorkerLogs(prev => prev.map((log: any) => ids.includes(String(log.id)) ? { ...log, is_paid: true, paid_by_supplier_id: tempWorkerQuickPayPayerSupplierId || null } : log));
+      setTempWorkerQuickPaySelectedIds([]);
+      showToast(`Оплачено смен: ${rows.length}`, 'success');
+    } catch (error: any) {
+      console.error('Quick temp worker pay error:', error);
+      showToast('Ошибка быстрой оплаты: ' + (error?.message || 'неизвестно'), 'error');
+    } finally {
+      setTempWorkerQuickPaySaving(false);
+    }
+  };
+
+  const tempWorkerReportRows = useMemo(() => {
+    const start = String(tempWorkerReportForm.start_date || '');
+    const end = String(tempWorkerReportForm.end_date || '');
+    const selectedSupplier = String(tempWorkerReportForm.supplier_id || 'all');
+    const selectedWorker = String(tempWorkerReportForm.worker_name || 'all');
+    const selectedPaidBy = String(tempWorkerReportForm.paid_by_supplier_id || 'all');
+    const selectedPaidStatus = String(tempWorkerReportForm.paid_status || 'all');
+
+    return (tempWorkerLogs || [])
+      .filter((log: any) => {
+        const date = String(log?.date || '').slice(0, 10);
+        const workerName = String(log?.worker_name || log?.worker || '').trim();
+        const paymentsSummary = getTempWorkerPaymentsSummary(log);
+        const paidBySupplierIds = paymentsSummary.map((p: any) => String(p?.supplierId || '')).filter(Boolean);
+        const remainingAmount = getTempWorkerRemainingAmount(log);
+        if (log?.paid_by_supplier_id) paidBySupplierIds.push(String(log.paid_by_supplier_id));
+        if (!date) return false;
+        if (start && date < start) return false;
+        if (end && date > end) return false;
+        if (selectedSupplier !== 'all' && String(log?.supplier_id || '') !== selectedSupplier) return false;
+        if (selectedWorker !== 'all' && workerName !== selectedWorker) return false;
+        if (selectedPaidBy !== 'all' && !paidBySupplierIds.includes(selectedPaidBy)) return false;
+        if (selectedPaidStatus === 'paid' && remainingAmount > 0) return false;
+        if (selectedPaidStatus === 'unpaid' && remainingAmount <= 0) return false;
+        return true;
+      })
+      .map((log: any) => {
+        const supplierId = String(log?.supplier_id || '');
+        const supplierName = suppliers.find((s: any) => String(s.id) === supplierId)?.name || 'Без поставщика';
+        const paymentsSummary = getTempWorkerPaymentsSummary(log);
+        return {
+          ...log,
+          supplierName,
+          paidAmount: getTempWorkerPaidAmount(log),
+          remainingAmount: getTempWorkerRemainingAmount(log),
+          paidByText: paymentsSummary.length
+            ? paymentsSummary.map((p: any) => `${p.supplierName}: ${Number(p.amount || 0).toFixed(2)} ₽`).join(', ')
+            : '—',
+        };
+      })
+      .sort((a: any, b: any) => {
+        const supplierCompare = String(a.supplierName || '').localeCompare(String(b.supplierName || ''), 'ru');
+        if (supplierCompare !== 0) return supplierCompare;
+        return String(a.date || '').localeCompare(String(b.date || ''));
+      });
+  }, [tempWorkerLogs, tempWorkerReportForm, suppliers, tempWorkerPaymentsMap]);
+
+  const tempWorkerReportGrouped = useMemo(() => {
+    const grouped = new Map<string, { supplierId: string; supplierName: string; rows: any[]; hours: number; earnings: number; paid: number; remaining: number }>();
+    (tempWorkerReportRows || []).forEach((row: any) => {
+      const supplierId = String(row?.supplier_id || 'none');
+      const supplierName = row?.supplierName || 'Без поставщика';
+      const item = grouped.get(supplierId) || { supplierId, supplierName, rows: [], hours: 0, earnings: 0, paid: 0, remaining: 0 };
+      item.rows.push(row);
+      item.hours += Number(row?.hours || 0);
+      item.earnings += Number(row?.earnings || 0);
+      item.paid += Number(row?.paidAmount || 0);
+      item.remaining += Number(row?.remainingAmount || 0);
+      grouped.set(supplierId, item);
+    });
+    const groups = Array.from(grouped.values()).sort((a, b) => a.supplierName.localeCompare(b.supplierName, 'ru'));
+    return {
+      groups,
+      totalRows: tempWorkerReportRows.length,
+      totalHours: groups.reduce((sum, group) => sum + group.hours, 0),
+      totalEarnings: groups.reduce((sum, group) => sum + group.earnings, 0),
+      totalPaid: groups.reduce((sum, group) => sum + group.paid, 0),
+      totalRemaining: groups.reduce((sum, group) => sum + group.remaining, 0),
+    };
+  }, [tempWorkerReportRows]);
+
+  const generalReportPersonOptions = useMemo(() => (
+    Array.from(new Set([
+      ...(tempWorkerReportWorkerOptions || []),
+      ...(deliveryCourierOptions || []),
+      ...(employees || [])
+        .filter((e: any) => String(e.role || '').toLowerCase() !== 'admin' && String(e.login || '').toLowerCase() !== 'admin')
+        .map((e: any) => String(e.full_name || e.login || '').trim()),
+    ].filter(Boolean))).sort((a, b) => String(a).localeCompare(String(b), 'ru'))
+  ), [tempWorkerReportWorkerOptions, deliveryCourierOptions, employees]);
+
+  const generalTempWorkerRows = useMemo(() => {
+    const start = String(generalReportForm.start_date || '');
+    const end = String(generalReportForm.end_date || '');
+    const selectedSupplier = String(generalReportForm.supplier_id || 'all');
+    const selectedPerson = String(generalReportForm.person_name || 'all');
+    const selectedPaidBy = String(generalReportForm.paid_by_supplier_id || 'all');
+    const selectedPaidStatus = String(generalReportForm.paid_status || 'all');
+
+    return (tempWorkerLogs || [])
+      .filter((log: any) => {
+        const date = String(log?.date || '').slice(0, 10);
+        const workerName = String(log?.worker_name || log?.worker || '').trim();
+        const paymentsSummary = getTempWorkerPaymentsSummary(log);
+        const paidBySupplierIds = paymentsSummary.map((p: any) => String(p?.supplierId || '')).filter(Boolean);
+        const remainingAmount = getTempWorkerRemainingAmount(log);
+        if (log?.paid_by_supplier_id) paidBySupplierIds.push(String(log.paid_by_supplier_id));
+        if (!date) return false;
+        if (start && date < start) return false;
+        if (end && date > end) return false;
+        if (selectedSupplier !== 'all' && String(log?.supplier_id || '') !== selectedSupplier) return false;
+        if (selectedPerson !== 'all' && workerName !== selectedPerson) return false;
+        if (selectedPaidBy !== 'all' && !paidBySupplierIds.includes(selectedPaidBy)) return false;
+        if (selectedPaidStatus === 'paid' && remainingAmount > 0) return false;
+        if (selectedPaidStatus === 'unpaid' && remainingAmount <= 0) return false;
+        return true;
+      })
+      .map((log: any) => {
+        const supplierId = String(log?.supplier_id || '');
+        const supplierName = suppliers.find((s: any) => String(s.id) === supplierId)?.name || 'Без поставщика';
+        const paymentsSummary = getTempWorkerPaymentsSummary(log);
+        return {
+          ...log,
+          supplierName,
+          paidAmount: getTempWorkerPaidAmount(log),
+          remainingAmount: getTempWorkerRemainingAmount(log),
+          paidByText: paymentsSummary.length
+            ? paymentsSummary.map((p: any) => `${p.supplierName}: ${Number(p.amount || 0).toFixed(2)} ₽`).join(', ')
+            : '—',
+        };
+      });
+  }, [generalReportForm, tempWorkerLogs, suppliers, tempWorkerPaymentsMap]);
+
+  const generalDeliveryRows = useMemo(() => {
+    const start = String(generalReportForm.start_date || '');
+    const end = String(generalReportForm.end_date || '');
+    const selectedSupplier = String(generalReportForm.supplier_id || 'all');
+    const selectedPerson = String(generalReportForm.person_name || 'all');
+    const selectedPaidBy = String(generalReportForm.paid_by_supplier_id || 'all');
+    const selectedPaidStatus = String(generalReportForm.paid_status || 'all');
+
+    return (deliveryHistory || []).flatMap((delivery: any) => {
+      const date = String(delivery?.date || '').slice(0, 10);
+      const courier = String(delivery?.courier || '').trim();
+      const paidBySupplierId = String(delivery?.paid_by_supplier_id || '');
+      const isPaid = Boolean(delivery?.is_paid);
+      if (!date) return [];
+      if (start && date < start) return [];
+      if (end && date > end) return [];
+      if (selectedPerson !== 'all' && courier !== selectedPerson) return [];
+      if (selectedPaidBy !== 'all' && paidBySupplierId !== selectedPaidBy) return [];
+      if (selectedPaidStatus === 'paid' && !isPaid) return [];
+      if (selectedPaidStatus === 'unpaid' && isPaid) return [];
+
+      const rows = Array.isArray(delivery?.rows) ? delivery.rows : [];
+      const totalBoxes = rows.reduce((sum: number, row: any) => sum + Number(row?.boxes || 0), 0) || 1;
+      return rows.map((row: any) => {
+        const supplierId = String(row?.supplier_id || '');
+        const boxes = Number(row?.boxes || 0);
+        if (!supplierId || boxes <= 0) return null;
+        if (selectedSupplier !== 'all' && supplierId !== selectedSupplier) return null;
+        const supplierName = suppliers.find((s: any) => String(s.id) === supplierId)?.name || 'Без поставщика';
+        return {
+          deliveryId: String(delivery?.id || ''),
+          date,
+          courier: courier || 'Доставщик',
+          supplierName,
+          boxes,
+          amount: Number(delivery?.amount || 0) * (boxes / totalBoxes),
+          is_paid: isPaid,
+          paidByText: getDeliveryPaidByText(delivery),
+        };
+      }).filter(Boolean);
+    });
+  }, [generalReportForm, deliveryHistory, suppliers]);
+
+  useEffect(() => {
+    if (!showGeneralReportModal) return;
+
+    let cancelled = false;
+    const load = async () => {
+      let query = supabase
+        .from('work_logs')
+        .select('id, date, quantity, work_rate_id, supplier_id, employee_id')
+        .is('deleted_at', null)
+        .gte('date', generalReportForm.start_date)
+        .lte('date', generalReportForm.end_date)
+        .order('date', { ascending: true });
+
+      if (generalReportForm.supplier_id !== 'all') {
+        query = query.eq('supplier_id', generalReportForm.supplier_id);
+      }
+
+      const { data, error } = await query;
+      if (cancelled) return;
+      if (error) {
+        console.error('General completed work report load error:', error);
+        setGeneralReportCwRows([]);
+        return;
+      }
+
+      const selectedPerson = String(generalReportForm.person_name || 'all');
+      const rows = (data || [])
+        .map((log: any) => {
+          const rate = cwWorkRates.find((r: any) => String(r.id) === String(log.work_rate_id));
+          const supplierName = suppliers.find((s: any) => String(s.id) === String(log.supplier_id || ''))?.name || '-';
+          const employeeName = employees.find((e: any) => String(e.id) === String(log.employee_id || ''))?.full_name || '-';
+          const price = Number(getWorkLogSnapshotPrice(log) || 0);
+          return {
+            date: log.date,
+            supplier_name: supplierName,
+            employee_name: employeeName,
+            work_name: rate?.name || 'Неизвестно',
+            quantity: Number(log.quantity || 0),
+            price,
+            total: Number(log.quantity || 0) * price,
+          };
+        })
+        .filter((row: any) => selectedPerson === 'all' || row.employee_name === selectedPerson);
+
+      setGeneralReportCwRows(rows);
+    };
+
+    load();
+    return () => { cancelled = true; };
+  }, [showGeneralReportModal, generalReportForm, cwWorkRates, suppliers, employees]);
+
+  const generalReportTotals = useMemo(() => ({
+    tempEarned: generalTempWorkerRows.reduce((sum: number, row: any) => sum + Number(row.earnings || 0), 0),
+    tempRemaining: generalTempWorkerRows.reduce((sum: number, row: any) => sum + Number(row.remainingAmount || 0), 0),
+    deliveryAmount: generalDeliveryRows.reduce((sum: number, row: any) => sum + Number(row.amount || 0), 0),
+    deliveryUnpaid: generalDeliveryRows.filter((row: any) => !row.is_paid).reduce((sum: number, row: any) => sum + Number(row.amount || 0), 0),
+    cwAmount: generalReportCwRows.reduce((sum: number, row: any) => sum + Number(row.total || 0), 0),
+    totalAmount: generalTempWorkerRows.reduce((sum: number, row: any) => sum + Number(row.earnings || 0), 0)
+      + generalDeliveryRows.reduce((sum: number, row: any) => sum + Number(row.amount || 0), 0)
+      + generalReportCwRows.reduce((sum: number, row: any) => sum + Number(row.total || 0), 0),
+  }), [generalTempWorkerRows, generalDeliveryRows, generalReportCwRows]);
+
+  const handleDownloadGeneralReportPdf = async () => {
+    try {
+      showToast('Создаю общий PDF отчёт...', 'success');
+      const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+      const money = (value: any) => `${Number(value || 0).toLocaleString('ru-RU', { maximumFractionDigits: 2 })} руб.`;
+      const dateRu = (value: string) => value ? new Date(`${value}T12:00:00`).toLocaleDateString('ru-RU') : '-';
+
+      try {
+        if (!cwReportPdfFontRef.current) {
+          const response = await fetch('https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.66/fonts/Roboto/Roboto-Regular.ttf');
+          if (!response.ok) throw new Error(`font ${response.status}`);
+          const blob = await response.blob();
+          cwReportPdfFontRef.current = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result || '').split(',')[1] || '');
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          });
+        }
+        if (cwReportPdfFontRef.current) {
+          doc.addFileToVFS('Roboto-Regular.ttf', cwReportPdfFontRef.current);
+          doc.addFont('Roboto-Regular.ttf', 'Roboto', 'normal');
+          doc.setFont('Roboto', 'normal');
+        }
+      } catch (fontError) {
+        console.warn('General report PDF font load failed', fontError);
+      }
+
+      const supplierLabel = generalReportForm.supplier_id === 'all'
+        ? 'Все поставщики'
+        : (suppliers.find((s: any) => String(s.id) === String(generalReportForm.supplier_id))?.name || '-');
+      const personLabel = generalReportForm.person_name === 'all' ? 'Все исполнители' : generalReportForm.person_name;
+      const paidByLabel = generalReportForm.paid_by_supplier_id === 'all'
+        ? 'Все оплаты'
+        : (suppliers.find((s: any) => String(s.id) === String(generalReportForm.paid_by_supplier_id))?.name || '-');
+      const paidStatusLabel = generalReportForm.paid_status === 'paid' ? 'Оплачено' : generalReportForm.paid_status === 'unpaid' ? 'Не оплачено' : 'Все статусы';
+
+      doc.setFontSize(14);
+      doc.text('Общий отчет', 14, 14);
+      doc.setFontSize(9);
+      doc.text(`Период: ${dateRu(generalReportForm.start_date)} — ${dateRu(generalReportForm.end_date)}`, 14, 21);
+      doc.text(`Поставщик: ${supplierLabel} • Исполнитель/доставщик: ${personLabel}`, 14, 27);
+      doc.text(`Кто оплатил: ${paidByLabel} • Статус оплаты: ${paidStatusLabel}`, 14, 33);
+      doc.text(`Итого: временные ${money(generalReportTotals.tempEarned)}, доставки ${money(generalReportTotals.deliveryAmount)}, выполненная работа ${money(generalReportTotals.cwAmount)}`, 14, 39);
+      doc.text(`Общий итог всех отчетов: ${money(generalReportTotals.totalAmount)}`, 14, 45);
+
+      let y = 53;
+      (autoTable as any)(doc, {
+        startY: y,
+        head: [['Отчет по временным сотрудникам', 'Дата', 'Сотрудник', 'Поставщик', 'Работа', 'Часы', 'Заработано', 'Кто оплатил', 'Не оплачено']],
+        body: generalTempWorkerRows.map((row: any) => [
+          '',
+          dateRu(row.date),
+          row.worker_name || row.worker || 'Без имени',
+          row.supplierName || '-',
+          row.work_comment || row.comment || '-',
+          Number(row.hours || 0).toFixed(2),
+          money(row.earnings),
+          String(row.paidByText || '-').replace(/₽/g, 'руб.'),
+          money(row.remainingAmount),
+        ]),
+        styles: { font: 'Roboto', fontSize: 7.5, cellPadding: 1.5, overflow: 'linebreak' },
+        headStyles: { font: 'Roboto', fillColor: [15, 23, 42], textColor: 255, fontStyle: 'normal' },
+        margin: { left: 10, right: 10 },
+      });
+      y = ((doc as any).lastAutoTable?.finalY || y) + 8;
+
+      (autoTable as any)(doc, {
+        startY: y,
+        head: [['Отчет по доставке', 'Дата', 'Доставщик', 'Поставщик', 'Коробки', 'Сумма', 'Статус', 'Кто оплатил']],
+        body: generalDeliveryRows.map((row: any) => [
+          '',
+          dateRu(row.date),
+          row.courier || '-',
+          row.supplierName || '-',
+          Number(row.boxes || 0).toLocaleString('ru-RU'),
+          money(row.amount),
+          row.is_paid ? 'Оплачено' : 'Не оплачено',
+          row.paidByText || '-',
+        ]),
+        styles: { font: 'Roboto', fontSize: 7.5, cellPadding: 1.5, overflow: 'linebreak' },
+        headStyles: { font: 'Roboto', fillColor: [30, 64, 175], textColor: 255, fontStyle: 'normal' },
+        margin: { left: 10, right: 10 },
+      });
+      y = ((doc as any).lastAutoTable?.finalY || y) + 8;
+
+      (autoTable as any)(doc, {
+        startY: y,
+        head: [['Отчет по выполненной работе', 'Дата', 'Сотрудник', 'Поставщик', 'Вид работы', 'Кол-во', 'Цена', 'Сумма']],
+        body: generalReportCwRows.map((row: any) => [
+          '',
+          dateRu(row.date),
+          row.employee_name || '-',
+          row.supplier_name || '-',
+          row.work_name || '-',
+          Number(row.quantity || 0).toLocaleString('ru-RU'),
+          money(row.price),
+          money(row.total),
+        ]),
+        styles: { font: 'Roboto', fontSize: 7.5, cellPadding: 1.5, overflow: 'linebreak' },
+        headStyles: { font: 'Roboto', fillColor: [79, 70, 229], textColor: 255, fontStyle: 'normal' },
+        margin: { left: 10, right: 10 },
+      });
+
+      const safeName = `obschiy_otchet_${generalReportForm.start_date || 'start'}_${generalReportForm.end_date || 'end'}`.replace(/[^a-zA-Z0-9_\-.]+/g, '_');
+      doc.save(`${safeName}.pdf`);
+    } catch (error: any) {
+      console.error('General report PDF error:', error);
+      showToast('Ошибка создания PDF: ' + (error?.message || 'неизвестно'), 'error');
+    }
+  };
+
+  const handleDownloadCwReportPdf = async () => {
+    if (!cwReportResult || cwReportResult.length === 0) {
+      showToast('Сначала сформируйте отчет', 'error');
+      return;
+    }
+
+    try {
+      showToast('Создаю PDF отчёт...', 'success');
+      const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+      const money = (value: any) => `${Number(value || 0).toLocaleString('ru-RU', { maximumFractionDigits: 2 })} руб.`;
+      const dateRu = (value: string) => value ? new Date(`${value}T12:00:00`).toLocaleDateString('ru-RU') : '-';
+
+      try {
+        if (!cwReportPdfFontRef.current) {
+          const response = await fetch('https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.66/fonts/Roboto/Roboto-Regular.ttf');
+          if (!response.ok) throw new Error(`font ${response.status}`);
+          const blob = await response.blob();
+          cwReportPdfFontRef.current = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result || '').split(',')[1] || '');
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          });
+        }
+        if (cwReportPdfFontRef.current) {
+          doc.addFileToVFS('Roboto-Regular.ttf', cwReportPdfFontRef.current);
+          doc.addFont('Roboto-Regular.ttf', 'Roboto', 'normal');
+          doc.setFont('Roboto', 'normal');
+        }
+      } catch (fontError) {
+        console.warn('Completed work report PDF font load failed', fontError);
+      }
+
+      const supplierLabel = cwReportForm.supplier_id === '__ALL__'
+        ? 'По всем поставщикам'
+        : (suppliers.find((s: any) => String(s.id) === String(cwReportForm.supplier_id))?.name || '-');
+      const employeeLabel = cwReportForm.employee_id === '__ALL__'
+        ? 'Все сотрудники'
+        : (employees.find((e: any) => String(e.id) === String(cwReportForm.employee_id))?.full_name || '-');
+      const totalQuantity = cwReportResult.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+      const totalAmount = cwReportResult.reduce((sum, item) => sum + Number(item.total || 0), 0);
+      const excludedLabel = cwReportExcludedDates.length
+        ? cwReportExcludedDates.map(dateRu).join(', ')
+        : 'нет';
+
+      doc.setFontSize(14);
+      doc.text('Отчет по выполненной работе', 14, 14);
+      doc.setFontSize(9);
+      doc.text(`Период: ${dateRu(cwReportForm.start_date)} — ${dateRu(cwReportForm.end_date)}`, 14, 21);
+      doc.text(`Сотрудник: ${employeeLabel}`, 14, 27);
+      doc.text(`Поставщик: ${supplierLabel}`, 14, 33);
+      doc.text(`Исключенные даты: ${excludedLabel}`, 14, 39);
+      doc.text(`Записей: ${cwReportResult.length} • Кол-во: ${totalQuantity.toLocaleString('ru-RU')} • Итого: ${money(totalAmount)}`, 14, 45);
+
+      const head = [
+        'Дата',
+        ...(cwReportForm.employee_id === '__ALL__' ? ['Сотрудник'] : []),
+        ...(cwReportForm.supplier_id === '__ALL__' ? ['Поставщик'] : []),
+        'Вид работы',
+        'Кол-во',
+        'Цена',
+        'Сумма',
+      ];
+      const body = cwReportResult.map((item) => [
+        dateRu(item.date),
+        ...(cwReportForm.employee_id === '__ALL__' ? [item.employee_name || '-'] : []),
+        ...(cwReportForm.supplier_id === '__ALL__' ? [item.supplier_name || '-'] : []),
+        item.work_name || '-',
+        Number(item.quantity || 0).toLocaleString('ru-RU'),
+        money(item.price),
+        money(item.total),
+      ]);
+
+      (autoTable as any)(doc, {
+        startY: 51,
+        head: [head],
+        body,
+        foot: [[
+          'Итого',
+          ...Array(Math.max(head.length - 4, 0)).fill(''),
+          totalQuantity.toLocaleString('ru-RU'),
+          '',
+          money(totalAmount),
+        ]],
+        styles: { font: 'Roboto', fontSize: 8, cellPadding: 1.8, overflow: 'linebreak' },
+        headStyles: { font: 'Roboto', fillColor: [79, 70, 229], textColor: 255, fontStyle: 'normal' },
+        footStyles: { font: 'Roboto', fillColor: [241, 245, 249], textColor: [15, 23, 42], fontStyle: 'normal' },
+        bodyStyles: { font: 'Roboto', fontStyle: 'normal' },
+        alternateRowStyles: { fillColor: [250, 250, 250] },
+        margin: { left: 10, right: 10 },
+      });
+
+      const safeName = `otchet_vypolnennaya_rabota_${cwReportForm.start_date || 'start'}_${cwReportForm.end_date || 'end'}`.replace(/[^a-zA-Z0-9_\-.]+/g, '_');
+      doc.save(`${safeName}.pdf`);
+    } catch (error: any) {
+      console.error('Completed work report PDF error:', error);
+      showToast('Ошибка создания PDF: ' + (error?.message || 'неизвестно'), 'error');
+    }
+  };
+
+  const handleDownloadTempWorkerReportPdf = async () => {
+    try {
+      showToast('Создаю PDF отчёт...', 'success');
+      const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+      const money = (value: any) => `${Number(value || 0).toFixed(2)} руб.`;
+
+      try {
+        if (!tempWorkerReportPdfFontRef.current) {
+          const response = await fetch('https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.66/fonts/Roboto/Roboto-Regular.ttf');
+          if (!response.ok) throw new Error(`font ${response.status}`);
+          const blob = await response.blob();
+          tempWorkerReportPdfFontRef.current = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result || '').split(',')[1] || '');
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          });
+        }
+        if (tempWorkerReportPdfFontRef.current) {
+          doc.addFileToVFS('Roboto-Regular.ttf', tempWorkerReportPdfFontRef.current);
+          doc.addFont('Roboto-Regular.ttf', 'Roboto', 'normal');
+          doc.setFont('Roboto', 'normal');
+        }
+      } catch (fontError) {
+        console.warn('Temp worker report PDF font load failed', fontError);
+      }
+
+      const supplierLabel = tempWorkerReportForm.supplier_id === 'all'
+        ? 'Все поставщики'
+        : (suppliers.find((s: any) => String(s.id) === String(tempWorkerReportForm.supplier_id))?.name || 'Поставщик');
+      const workerLabel = tempWorkerReportForm.worker_name === 'all' ? 'Все временные сотрудники' : tempWorkerReportForm.worker_name;
+      const paidByLabel = tempWorkerReportForm.paid_by_supplier_id === 'all'
+        ? 'Все оплаты'
+        : (suppliers.find((s: any) => String(s.id) === String(tempWorkerReportForm.paid_by_supplier_id))?.name || 'Поставщик');
+      const paidStatusLabel = tempWorkerReportForm.paid_status === 'paid'
+        ? 'Оплачено'
+        : tempWorkerReportForm.paid_status === 'unpaid'
+          ? 'Не оплачено'
+          : 'Все статусы оплаты';
+
+      doc.setFontSize(14);
+      doc.text('Отчет о временном сотруднике', 14, 14);
+      doc.setFontSize(9);
+      doc.text(`Период: ${tempWorkerReportForm.start_date || '-'} — ${tempWorkerReportForm.end_date || '-'}`, 14, 21);
+      doc.text(`Поставщик работ: ${supplierLabel}`, 14, 27);
+      doc.text(`Временный сотрудник: ${workerLabel}`, 14, 33);
+      doc.text(`Кто оплатил: ${paidByLabel}`, 14, 39);
+      doc.text(`Статус оплаты: ${paidStatusLabel}`, 14, 45);
+      doc.text(`Работ: ${tempWorkerReportGrouped.totalRows} • Часы: ${tempWorkerReportGrouped.totalHours.toFixed(2)} • Заработано: ${money(tempWorkerReportGrouped.totalEarnings)} • Не оплачено: ${money(tempWorkerReportGrouped.totalRemaining)}`, 14, 51);
+
+      const body: any[] = [];
+      tempWorkerReportGrouped.groups.forEach((group) => {
+        body.push([{ content: `${group.supplierName} — работ: ${group.rows.length}, часы: ${group.hours.toFixed(2)}, оплачено: ${money(group.earnings)}, не оплачено: ${money(group.remaining)}`, colSpan: 8, styles: { fillColor: [241, 245, 249], fontStyle: 'normal', textColor: [15, 23, 42] } }]);
+        group.rows.forEach((row: any) => {
+          body.push([
+            row?.date ? new Date(`${row.date}T12:00:00`).toLocaleDateString('ru-RU') : '-',
+            row.worker_name || row.worker || 'Без имени',
+            row.work_comment || row.comment || '-',
+            Number(row.hours || 0).toFixed(2),
+            money(row.earnings),
+            money(row.paidAmount),
+            String(row.paidByText || '-').replace(/₽/g, 'руб.'),
+            money(row.remainingAmount),
+          ]);
+        });
+      });
+
+      (autoTable as any)(doc, {
+        startY: 57,
+        head: [['Дата', 'Сотрудник', 'Работа', 'Часы', 'Заработано', 'Факт оплаты', 'Кто оплатил', 'Не оплачено']],
+        body,
+        styles: { font: 'Roboto', fontSize: 8, cellPadding: 1.8, overflow: 'linebreak' },
+        headStyles: { font: 'Roboto', fillColor: [15, 23, 42], textColor: 255, fontStyle: 'normal' },
+        bodyStyles: { font: 'Roboto', fontStyle: 'normal' },
+        alternateRowStyles: { fillColor: [250, 250, 250] },
+        margin: { left: 10, right: 10 },
+        columnStyles: {
+          0: { cellWidth: 20 },
+          1: { cellWidth: 32 },
+          2: { cellWidth: 66 },
+          3: { cellWidth: 16, halign: 'right' },
+          4: { cellWidth: 24, halign: 'right' },
+          5: { cellWidth: 24, halign: 'right' },
+          6: { cellWidth: 54 },
+          7: { cellWidth: 24, halign: 'right' },
+        },
+      });
+
+      const safeName = `otchet_vremennye_sotrudniki_${tempWorkerReportForm.start_date || 'start'}_${tempWorkerReportForm.end_date || 'end'}`.replace(/[^a-zA-Z0-9_\-.]+/g, '_');
+      doc.save(`${safeName}.pdf`);
+    } catch (error: any) {
+      console.error('Temp worker report PDF error:', error);
+      showToast('Ошибка создания PDF: ' + (error?.message || 'неизвестно'), 'error');
+    }
+  };
 
   const handleAddTempWorkerLog = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -3283,6 +4615,117 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     setTimeout(() => setNotification(null), 5000);
   };
 
+  const saveWarehouseOfflineSettings = (enabled: boolean, url = warehouseOfflineUrl) => {
+    const cleanUrl = String(url || '').trim().replace(/\/+$/, '') || 'http://localhost:8787';
+    setWarehouseOfflineEnabled(enabled);
+    setWarehouseOfflineUrl(cleanUrl);
+    setWarehouseOfflineEnabledState(enabled);
+    setWarehouseOfflineUrlState(cleanUrl);
+  };
+
+  const checkWarehouseOfflineServer = async (showSuccess = true) => {
+    try {
+      const status = await warehouseOfflineClient.health();
+      setWarehouseOfflineStatus(status);
+      if (showSuccess) showToast('Локальный складской сервер доступен', 'success');
+      return status;
+    } catch (e: any) {
+      const status = { ok: false, error: e?.message || 'Сервер недоступен' } as WarehouseOfflineStatus;
+      setWarehouseOfflineStatus(status);
+      showToast('Локальный сервер недоступен: ' + status.error, 'error');
+      return status;
+    }
+  };
+
+  const buildWarehouseOfflineSnapshot = async () => {
+    const [productsRes, modelRes, layoutRes, suppliesRes, boxesRes, hsRes] = await Promise.all([
+      supabase.from('wb_products_cache').select('supplier_id, nm_id, product_json').limit(20000),
+      supabase.from('app_settings').select('value').eq('key', 'wb_model_numbers_v1').maybeSingle(),
+      supabase.from('app_settings').select('value').eq('key', 'wb_label_layout_v1').maybeSingle(),
+      supabase.from('supplies').select('*').is('deleted_at', null).order('created_at', { ascending: false }),
+      supabase.from('boxes').select('*').is('deleted_at', null).order('created_at', { ascending: false }),
+      supabase.from('unified_honest_sign_codes').select('code').or('file_name.eq.Отсканировано,status.eq.scanned').limit(50000),
+    ]);
+
+    const errors = [productsRes.error, modelRes.error, layoutRes.error, suppliesRes.error, boxesRes.error, hsRes.error].filter(Boolean);
+    if (errors.length) throw errors[0];
+
+    const modelRaw: any = modelRes.data?.value || {};
+    const modelParsed = typeof modelRaw === 'string' ? JSON.parse(modelRaw || '{}') : modelRaw;
+    const models = (modelParsed?.models && typeof modelParsed.models === 'object' ? modelParsed.models : modelParsed) || {};
+    const layoutRaw: any = layoutRes.data?.value || null;
+    const labelLayout = typeof layoutRaw === 'string' ? JSON.parse(layoutRaw || 'null') : layoutRaw;
+
+    return {
+      createdAt: new Date().toISOString(),
+      suppliers,
+      wbProducts: (productsRes.data || []).map((row: any) => ({ ...(row?.product_json || {}), supplierId: row?.supplier_id, nmID: row?.product_json?.nmID || Number(row?.nm_id || 0) })),
+      modelNumbers: models,
+      labelLayout,
+      fboSupplies: suppliesRes.data || [],
+      fboBoxes: boxesRes.data || [],
+      honestSignSeen: (hsRes.data || []).map((row: any) => String(row?.code || '').trim()).filter(Boolean),
+    };
+  };
+
+  const refreshWarehouseOfflineBase = async () => {
+    setWarehouseOfflineBusy(true);
+    try {
+      saveWarehouseOfflineSettings(true);
+      await checkWarehouseOfflineServer(false);
+      const snapshot = await buildWarehouseOfflineSnapshot();
+      await warehouseOfflineClient.saveSnapshot(snapshot);
+      const status = await checkWarehouseOfflineServer(false);
+      showToast('Offline-база обновлена: товаров ' + snapshot.wbProducts.length + ', поставок ' + snapshot.fboSupplies.length, 'success');
+      return status;
+    } catch (e: any) {
+      showToast('Ошибка обновления offline-базы: ' + (e?.message || 'неизвестно'), 'error');
+      return null;
+    } finally {
+      setWarehouseOfflineBusy(false);
+    }
+  };
+
+  const syncWarehouseOfflineScans = async () => {
+    setWarehouseOfflineBusy(true);
+    try {
+      const scans = await warehouseOfflineClient.getFboScans();
+      const pending = (scans.pending || []) as any[];
+      if (!pending.length) {
+        showToast('Нет локальных FBO-сканов для синхронизации', 'info');
+        await checkWarehouseOfflineServer(false);
+        return;
+      }
+
+      const payload = pending.map((row) => ({
+        box_id: row.box_id || row.boxId,
+        product_id: row.product_id || row.productId,
+        honest_sign_code: row.honest_sign_code || row.code,
+      })).filter((row) => row.box_id && row.product_id && row.honest_sign_code);
+
+      if (!payload.length) throw new Error('В локальной очереди нет корректных строк для отправки');
+
+      const { error } = await supabase.from('supply_items').insert(payload);
+      if (error) throw error;
+      await syncScannedCodesToUnifiedBase(payload.map((row) => row.honest_sign_code), currentSupply?.supplier_id);
+      await warehouseOfflineClient.markFboScansSynced(pending.map((row) => String(row.id || '')).filter(Boolean));
+      await checkWarehouseOfflineServer(false);
+      if (currentBox?.id) await fetchBoxItems(currentBox.id);
+      if (currentSupply?.id) await fetchSupplyStats(currentSupply.id);
+      showToast('Синхронизировано FBO-сканов: ' + payload.length, 'success');
+    } catch (e: any) {
+      showToast('Ошибка синхронизации offline-сканов: ' + (e?.message || 'неизвестно'), 'error');
+    } finally {
+      setWarehouseOfflineBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'supplies' && warehouseOfflineEnabled) {
+      checkWarehouseOfflineServer(false).catch(() => undefined);
+    }
+  }, [activeTab, warehouseOfflineEnabled]);
+
   useEffect(() => {
     const clearIssueTimer = () => {
       if (supabaseIssueHideTimerRef.current) {
@@ -4838,6 +6281,27 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     return index;
   };
 
+  const ensureWbModelNumbers = async () => {
+    if (wbModelNumbersRef.current.loaded) return wbModelNumbersRef.current.values;
+    try {
+      const { data } = await supabase.from('app_settings').select('value').eq('key', 'wb_model_numbers_v1').maybeSingle();
+      const parsed = data?.value ? (typeof data.value === 'string' ? JSON.parse(data.value) : data.value) : {};
+      const source = (parsed?.models && typeof parsed.models === 'object' ? parsed.models : parsed) as Record<string, string>;
+      const values: Record<string, string> = {};
+      Object.entries(source || {}).forEach(([key, value]) => {
+        const cleanKey = String(key || '').trim();
+        const cleanValue = String(value || '').trim();
+        if (cleanKey && cleanValue) values[cleanKey] = cleanValue;
+      });
+      wbModelNumbersRef.current = { loaded: true, values };
+      return values;
+    } catch (e) {
+      console.warn('Failed to load WB model numbers for FBO scan card', e);
+      wbModelNumbersRef.current = { loaded: true, values: {} };
+      return {};
+    }
+  };
+
   const preloadOfflineFboIndexes = useCallback(async (supplierId: string) => {
     if (!supplierId) return;
     if (wbSkuIndexRef.current[supplierId] && supplierProductsIndexRef.current[supplierId]) return;
@@ -4903,18 +6367,17 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       if (matchedCard && matchedSize) {
         const productsIndex = await ensureSupplierProductsIndex(currentSupply.supplier_id);
         const cachedProduct = productsIndex.get(String(input));
+        const modelNumbers = await ensureWbModelNumbers();
+        const nmId = String(matchedCard?.nmID || matchedCard?.nmId || '').trim();
+        const manualModelNumber = nmId ? String(modelNumbers[nmId] || '').trim() : '';
 
         if (cachedProduct) {
-          product = cachedProduct;
+          product = buildFboScanProductCard({ ...cachedProduct, model_number: manualModelNumber }, matchedCard, matchedSize, input);
         } else {
-          const colorChar = matchedCard.characteristics?.find((c: any) =>
-            (c.name && c.name.toLowerCase() === 'цвет') ||
-            (c.Name && c.Name.toLowerCase() === 'цвет')
-          );
-          const colorValue = colorChar ? (Array.isArray(colorChar.value) ? colorChar.value.join(', ') : colorChar.value) : '';
+          const colorValue = getWbCharacteristicValue(matchedCard, ['цвет']);
 
           if (fboOfflineMode) {
-            product = {
+            const offlineProduct = {
               id: `offline-product-${currentSupply.supplier_id}-${String(input).trim()}`,
               supplier_id: currentSupply.supplier_id,
               name: String(matchedCard.title || 'Товар'),
@@ -4923,7 +6386,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
               size: String(matchedSize.techSize || ''),
               color: String(colorValue || ''),
               created_at: new Date().toISOString(),
+              model_number: manualModelNumber,
             } as Product;
+            product = buildFboScanProductCard(offlineProduct, matchedCard, matchedSize, input);
             productsIndex.set(String(input), product);
           } else {
             const { data: newProd, error: insertError } = await supabase
@@ -4940,8 +6405,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
               .single();
 
             if (!insertError && newProd) {
-              product = newProd;
-              productsIndex.set(String(input), newProd as Product);
+              product = buildFboScanProductCard({ ...(newProd as Product), model_number: manualModelNumber }, matchedCard, matchedSize, input);
+              productsIndex.set(String(input), product);
             }
           }
         }
@@ -5114,6 +6579,34 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         if ((code.length === 8 || code.length === 12 || code.length === 13) && /^\d+$/.test(code)) {
           playScanTone('error');
           showToast('Это штрихкод товара, а не Честный Знак!', 'error');
+          return;
+        }
+
+        if (warehouseOfflineEnabled) {
+          const scanRow = {
+            supply_id: currentSupply?.id,
+            supply_name: currentSupply?.name,
+            supplier_id: currentSupply?.supplier_id,
+            box_id: currentBox.id,
+            box_name: currentBox.name,
+            product_id: scannedItem.id,
+            product_name: scannedItem.name,
+            product_barcode: scannedItem.barcode,
+            product_size: scannedItem.size,
+            product_color: scannedItem.color,
+            product_model_number: scannedItem.model_number || '',
+            honest_sign_code: code,
+            code,
+            createdAt: new Date().toISOString(),
+          };
+          await warehouseOfflineClient.enqueueFboScan(scanRow);
+          await checkWarehouseOfflineServer(false);
+          playScanTone('success');
+          setBoxItems((prev) => ([{ id: 'warehouse-offline-' + Date.now() + '-' + Math.random(), box_id: currentBox.id, product_id: scannedItem.id, honest_sign_code: code, created_at: new Date().toISOString(), deleted_at: null, product: scannedItem } as any, ...(prev || [])]));
+          setSupplyStats((prev) => ({ ...prev, items: Number(prev.items || 0) + 1 }));
+          showToast('Скан сохранён в локальную очередь ПК', 'success');
+          setScannedItem(null);
+          setSupplyStep('BOX');
           return;
         }
 
@@ -6562,12 +8055,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     }
   };
 
-  // Employees State
-  const [employees, setEmployees] = useState<any[]>([]);
-  const [employeeToDelete, setEmployeeToDelete] = useState<any>(null);
-  const [currentEmployee, setCurrentEmployee] = useState<any>(null);
-  const currentEmployeeRef = useRef(currentEmployee);
-
   useEffect(() => {
     currentEmployeeRef.current = currentEmployee;
   }, [currentEmployee]);
@@ -6950,11 +8437,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     barter_prices: string[];
     barter_views: string[];
     barter_ratings: string[];
+    barter_published: boolean[];
     ad_links: string[];
     ad_dates: string[];
     ad_prices: string[];
     ad_views: string[];
     ad_ratings: string[];
+    ad_published: boolean[];
   }>>([]);
   const [barterSaving, setBarterSaving] = useState(false);
   const [barterGlobalExtra, setBarterGlobalExtra] = useState(0);
@@ -7491,14 +8980,16 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   );
   const getBarterVariantLabel = (item: any) => String(item?.variantLabel || item?.vendorCode || item?.vendor_code || item?.supplierArticle || item?.supplier_article || item?.wb_sku || item?.product_id || item?.id || '').trim();
   const normalizeBarterStringArray = (value: any, size: number) => Array.from({ length: Math.max(size, Array.isArray(value) ? value.length : 0) }, (_, i) => String(Array.isArray(value) ? (value[i] || '') : ''));
+  const normalizeBarterBooleanArray = (value: any, size: number) => Array.from({ length: Math.max(size, Array.isArray(value) ? value.length : 0) }, (_, i) => Boolean(Array.isArray(value) ? value[i] : false));
   const mergeBarterSlotFields = (rows: any[], prefix: 'barter' | 'ad', baseSize: number) => {
-    const filledEntries: Array<{ link: string; date: string; price: string; views: string; rating: string }> = [];
+    const filledEntries: Array<{ link: string; date: string; price: string; views: string; rating: string; published: boolean }> = [];
     rows.forEach((row: any) => {
       const links = normalizeBarterStringArray(row?.[`${prefix}_links`], baseSize);
       const dates = normalizeBarterStringArray(row?.[`${prefix}_dates`], links.length);
       const prices = normalizeBarterStringArray(row?.[`${prefix}_prices`], links.length);
       const views = normalizeBarterStringArray(row?.[`${prefix}_views`], links.length);
       const ratings = normalizeBarterStringArray(row?.[`${prefix}_ratings`], links.length);
+      const published = normalizeBarterBooleanArray(row?.[`${prefix}_published`], links.length);
       for (let i = 0; i < links.length; i += 1) {
         const entry = {
           link: String(links[i] || ''),
@@ -7506,8 +8997,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           price: String(prices[i] || ''),
           views: String(views[i] || ''),
           rating: String(ratings[i] || ''),
+          published: Boolean(published[i]),
         };
-        if (entry.link || entry.date || entry.price || entry.views || entry.rating) filledEntries.push(entry);
+        if (entry.link || entry.date || entry.price || entry.views || entry.rating || entry.published) filledEntries.push(entry);
       }
     });
 
@@ -7518,6 +9010,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       [`${prefix}_prices`]: Array.from({ length: totalSize }, (_, i) => String(filledEntries[i]?.price || '')),
       [`${prefix}_views`]: Array.from({ length: totalSize }, (_, i) => String(filledEntries[i]?.views || '')),
       [`${prefix}_ratings`]: Array.from({ length: totalSize }, (_, i) => String(filledEntries[i]?.rating || '')),
+      [`${prefix}_published`]: Array.from({ length: totalSize }, (_, i) => Boolean(filledEntries[i]?.published || false)),
     };
   };
   const normalizeBarterRow = (r: any) => ({
@@ -7533,11 +9026,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     barter_prices: Array.isArray(r?.barter_prices) ? (r.barter_prices.length ? r.barter_prices.map((v: any) => String(v || '')) : Array((Array.isArray(r?.barter_links) ? r.barter_links.length : 5)).fill('')) : Array((Array.isArray(r?.barter_links) ? r.barter_links.length : 5)).fill(''),
     barter_views: Array.isArray(r?.barter_views) ? (r.barter_views.length ? r.barter_views.map((v: any) => String(v || '')) : Array((Array.isArray(r?.barter_links) ? r.barter_links.length : 5)).fill('')) : Array((Array.isArray(r?.barter_links) ? r.barter_links.length : 5)).fill(''),
     barter_ratings: Array.isArray(r?.barter_ratings) ? Array.from({ length: (Array.isArray(r?.barter_links) ? r.barter_links.length : 5) }, (_, i) => String(r.barter_ratings?.[i] || '')) : Array((Array.isArray(r?.barter_links) ? r.barter_links.length : 5)).fill(''),
+    barter_published: Array.from({ length: (Array.isArray(r?.barter_links) ? Math.max(r.barter_links.length, Array.isArray(r?.barter_published) ? r.barter_published.length : 0) : 5) }, (_, i) => Boolean(Array.isArray(r?.barter_published) ? r.barter_published?.[i] : false)),
     ad_links: Array.isArray(r?.ad_links) ? (r.ad_links.length ? r.ad_links.map((v: any) => String(v || '')) : ['', '']) : ['', ''],
     ad_dates: Array.isArray(r?.ad_dates) ? (r.ad_dates.length ? r.ad_dates.map((v: any) => String(v || '')) : Array((Array.isArray(r?.ad_links) ? r.ad_links.length : 2)).fill('')) : Array((Array.isArray(r?.ad_links) ? r.ad_links.length : 2)).fill(''),
     ad_prices: Array.isArray(r?.ad_prices) ? (r.ad_prices.length ? r.ad_prices.map((v: any) => String(v || '')) : Array((Array.isArray(r?.ad_links) ? r.ad_links.length : 2)).fill('')) : Array((Array.isArray(r?.ad_links) ? r.ad_links.length : 2)).fill(''),
     ad_views: Array.isArray(r?.ad_views) ? (r.ad_views.length ? r.ad_views.map((v: any) => String(v || '')) : Array((Array.isArray(r?.ad_links) ? r.ad_links.length : 2)).fill('')) : Array((Array.isArray(r?.ad_links) ? r.ad_links.length : 2)).fill(''),
     ad_ratings: Array.isArray(r?.ad_ratings) ? Array.from({ length: (Array.isArray(r?.ad_links) ? r.ad_links.length : 2) }, (_, i) => String(r.ad_ratings?.[i] || '')) : Array((Array.isArray(r?.ad_links) ? r.ad_links.length : 2)).fill(''),
+    ad_published: Array.from({ length: (Array.isArray(r?.ad_links) ? Math.max(r.ad_links.length, Array.isArray(r?.ad_published) ? r.ad_published.length : 0) : 2) }, (_, i) => Boolean(Array.isArray(r?.ad_published) ? r.ad_published?.[i] : false)),
     product_variants_count: Math.max(Number(r?.product_variants_count || 0), Array.isArray(r?.product_ids) ? r.product_ids.length : 0, Array.isArray(r?.product_variant_labels) ? r.product_variant_labels.length : 0, 1),
   });
   const getBarterRowPersistKey = (row: any) => String(row?.id || `${row?.supplier_id || ''}:${row?.product_id || ''}:${row?.month || ''}:${row?.product_name || ''}`);
@@ -7587,11 +9082,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       barter_prices: Array.isArray(normalized?.barter_prices) ? normalized.barter_prices : [],
       barter_views: Array.isArray(normalized?.barter_views) ? normalized.barter_views : [],
       barter_ratings: Array.isArray(normalized?.barter_ratings) ? normalized.barter_ratings : [],
+      barter_published: Array.isArray(normalized?.barter_published) ? normalized.barter_published.map(Boolean) : [],
       ad_links: Array.isArray(normalized?.ad_links) ? normalized.ad_links : [],
       ad_dates: Array.isArray(normalized?.ad_dates) ? normalized.ad_dates : [],
       ad_prices: Array.isArray(normalized?.ad_prices) ? normalized.ad_prices : [],
       ad_views: Array.isArray(normalized?.ad_views) ? normalized.ad_views : [],
       ad_ratings: Array.isArray(normalized?.ad_ratings) ? normalized.ad_ratings : [],
+      ad_published: Array.isArray(normalized?.ad_published) ? normalized.ad_published.map(Boolean) : [],
     };
   };
   const fetchBarterRowsFromTable = async () => {
@@ -7603,6 +9100,58 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     if (error) throw error;
     return (data || []).map((row: any) => mapDbBarterCardToRow(row));
   };
+
+  const BARTER_PUBLISHED_FLAGS_KEY = 'barter_published_flags_v1';
+
+  const loadBarterPublishedFlags = async () => {
+    const { data, error } = await supabase
+      .from('app_settings')
+      .select('value')
+      .eq('key', BARTER_PUBLISHED_FLAGS_KEY)
+      .maybeSingle();
+    if (error) return {};
+    try {
+      const parsed = data?.value ? (typeof data.value === 'string' ? JSON.parse(String(data.value)) : data.value) : {};
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      return {};
+    }
+  };
+
+  const applyBarterPublishedFlags = (rowsInput: any[], flagsInput: any) => (rowsInput || []).map((row: any) => {
+    const flags = flagsInput?.[String(row?.id || '')] || {};
+    return normalizeBarterRow({
+      ...row,
+      barter_published: Array.isArray(row?.barter_published) && row.barter_published.some(Boolean) ? row.barter_published : flags?.barter_published,
+      ad_published: Array.isArray(row?.ad_published) && row.ad_published.some(Boolean) ? row.ad_published : flags?.ad_published,
+    });
+  });
+
+  const saveBarterPublishedFlags = async (rowsInput: any[]) => {
+    try {
+      const existing = await loadBarterPublishedFlags();
+      const next = { ...(existing || {}) };
+      (rowsInput || []).forEach((row: any) => {
+        const id = String(row?.id || '').trim();
+        if (!id) return;
+        next[id] = {
+          barter_published: Array.isArray(row?.barter_published) ? row.barter_published.map(Boolean) : [],
+          ad_published: Array.isArray(row?.ad_published) ? row.ad_published.map(Boolean) : [],
+        };
+      });
+      await supabase.from('app_settings').upsert([{ key: BARTER_PUBLISHED_FLAGS_KEY, value: JSON.stringify(next) }], { onConflict: 'key' });
+    } catch (e) {
+      console.warn('saveBarterPublishedFlags failed', e);
+    }
+  };
+
+  const stripBarterPublishedDbFields = (row: any) => {
+    const { barter_published, ad_published, ...rest } = row || {};
+    return rest;
+  };
+
+  const isBarterPublishedColumnError = (error: any) => /barter_published|ad_published|schema cache|column/i.test(String(error?.message || ''));
+
   const mergeBarterRowsIntoSingle = (rows: any[], options?: { barterExtra?: number; adExtra?: number }) => {
     const sourceRows = (rows || []).filter(Boolean);
     if (!sourceRows.length) return null;
@@ -8039,6 +9588,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   price: String(h?.price || ''),
                   views: String(h?.views || ''),
                   rating: String(h?.rating || ''),
+                  published: Boolean(h?.published || h?.is_published || h?.done),
                   createdAt: String(h?.createdAt || r?.createdAt || new Date().toISOString()),
                 }))
               : [],
@@ -8083,6 +9633,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
             price: String(history?.price || ''),
             views: String(history?.views || ''),
             rating: String(history?.rating || ''),
+            published: Boolean(history?.published),
             createdAt: String(history?.createdAt || row?.createdAt || new Date().toISOString()),
           }))
           .sort((a, b) => String(b.date || b.createdAt || '').localeCompare(String(a.date || a.createdAt || ''))),
@@ -8176,7 +9727,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       history: ExternalAdsHistoryItem[];
     }>();
 
-    const appendEntry = (row: any, kind: 'barter' | 'ad', index: number, linkValue: string, dateValue: string, priceValue: string, viewsValue: string, ratingValue: string) => {
+    const appendEntry = (row: any, kind: 'barter' | 'ad', index: number, linkValue: string, dateValue: string, priceValue: string, viewsValue: string, ratingValue: string, publishedValue?: boolean) => {
       const parsed = parseExternalBloggerLink(linkValue);
       if (!parsed) return;
       const key = String(parsed.nickname || '').trim().toLowerCase();
@@ -8200,14 +9751,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         price: String(priceValue || ''),
         views: String(viewsValue || ''),
         rating: String(ratingValue || ''),
+        published: Boolean(publishedValue),
         createdAt: new Date().toISOString(),
       });
       nicknameMap.set(key, current);
     };
 
     sourceRows.forEach((row: any) => {
-      (row?.barter_links || []).forEach((link: string, index: number) => appendEntry(row, 'barter', index, link, row?.barter_dates?.[index], row?.barter_prices?.[index], row?.barter_views?.[index], row?.barter_ratings?.[index]));
-      (row?.ad_links || []).forEach((link: string, index: number) => appendEntry(row, 'ad', index, link, row?.ad_dates?.[index], row?.ad_prices?.[index], row?.ad_views?.[index], row?.ad_ratings?.[index]));
+      (row?.barter_links || []).forEach((link: string, index: number) => appendEntry(row, 'barter', index, link, row?.barter_dates?.[index], row?.barter_prices?.[index], row?.barter_views?.[index], row?.barter_ratings?.[index], row?.barter_published?.[index]));
+      (row?.ad_links || []).forEach((link: string, index: number) => appendEntry(row, 'ad', index, link, row?.ad_dates?.[index], row?.ad_prices?.[index], row?.ad_views?.[index], row?.ad_ratings?.[index], row?.ad_published?.[index]));
     });
 
     if (!nicknameMap.size) {
@@ -8368,10 +9920,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         }
 
         const tableRows = await fetchBarterRowsFromTable();
-        const nextExtra = getBarterExtraStateFromRows(tableRows);
+        const flags = await loadBarterPublishedFlags();
+        const rowsWithFlags = applyBarterPublishedFlags(tableRows, flags);
+        const nextExtra = getBarterExtraStateFromRows(rowsWithFlags);
         setBarterGlobalExtra(nextExtra.barterExtra);
         setAdGlobalExtra(nextExtra.adExtra);
-        setBarterRows(tableRows);
+        setBarterRows(rowsWithFlags);
       } catch (e) {
         console.error('loadBarters error:', e);
       }
@@ -8601,14 +10155,24 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     }
 
     if (supplierRows.length) {
+      const dbRows = supplierRows.map((row: any) => mapBarterRowToDbCard(row));
       const { error: upsertError } = await supabase
         .from('barter_cards')
-        .upsert(supplierRows.map((row: any) => mapBarterRowToDbCard(row)), { onConflict: 'id' });
-      if (upsertError) throw upsertError;
+        .upsert(dbRows, { onConflict: 'id' });
+      if (upsertError) {
+        if (!isBarterPublishedColumnError(upsertError)) throw upsertError;
+        const { error: retryError } = await supabase
+          .from('barter_cards')
+          .upsert(dbRows.map(stripBarterPublishedDbFields), { onConflict: 'id' });
+        if (retryError) throw retryError;
+      }
+      await saveBarterPublishedFlags(supplierRows);
     }
 
     if (shouldRefreshFromDb) {
-      const refreshedRows = await fetchBarterRowsFromTable();
+      const refreshedRowsRaw = await fetchBarterRowsFromTable();
+      const flags = await loadBarterPublishedFlags();
+      const refreshedRows = applyBarterPublishedFlags(refreshedRowsRaw, flags);
       const nextExtra = getBarterExtraStateFromRows(refreshedRows);
       setBarterGlobalExtra(nextExtra.barterExtra);
       setAdGlobalExtra(nextExtra.adExtra);
@@ -8619,6 +10183,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       return refreshedRows;
     }
 
+    await saveBarterPublishedFlags(supplierRows);
     await syncExternalAdsBaseFromBarterRows(localRows || [], { showToast: false, skipEmptyChecks: true });
     if (options?.successMessage) showToast(options.successMessage, 'success');
     return localRows;
@@ -8970,8 +10535,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
   const monthStats = useMemo(() => {
     const rows = monthRows || [];
-    const barterDone = rows.reduce((s: number, r: any) => s + (r?.barter_links || []).filter((x: string) => String(x || '').trim()).length, 0);
-    const adDone = rows.reduce((s: number, r: any) => s + (r?.ad_links || []).filter((x: string) => String(x || '').trim()).length, 0);
+    const barterDone = rows.reduce((s: number, r: any) => s + (r?.barter_published || []).filter(Boolean).length, 0);
+    const adDone = rows.reduce((s: number, r: any) => s + (r?.ad_published || []).filter(Boolean).length, 0);
     const barterCost = rows.reduce((sum: number, r: any) => sum + (r?.barter_prices || []).reduce((acc: number, v: string) => acc + (parseFloat(String(v || '0')) || 0), 0), 0);
     const adCost = rows.reduce((sum: number, r: any) => sum + (r?.ad_prices || []).reduce((acc: number, v: string) => acc + (parseFloat(String(v || '0')) || 0), 0), 0);
     const barterTotal = rows.reduce((sum: number, r: any) => sum + getBarterRowPlanCount(r, 'barter'), 0);
@@ -9092,11 +10657,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         barter_prices: Array(5 + barterGlobalExtra).fill(''),
         barter_views: Array(5 + barterGlobalExtra).fill(''),
         barter_ratings: Array(5 + barterGlobalExtra).fill(''),
+        barter_published: Array(5 + barterGlobalExtra).fill(false),
         ad_links: Array(2 + adGlobalExtra).fill(''),
         ad_dates: Array(2 + adGlobalExtra).fill(''),
         ad_prices: Array(2 + adGlobalExtra).fill(''),
         ad_views: Array(2 + adGlobalExtra).fill(''),
         ad_ratings: Array(2 + adGlobalExtra).fill(''),
+        ad_published: Array(2 + adGlobalExtra).fill(false),
       }));
 
     const prevRows = barterRows || [];
@@ -11379,7 +12946,43 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       const supplierName = supplier?.name || 'Без поставщика';
       const defaultHistoryName = `Период отчета: ${ps} - ${pe}, ${supplierName}`;
 
-      const analyticsSafe = Array.isArray(analyticsToSave) ? analyticsToSave.slice(0, ANALYTICS_JSON_DB_LIMIT) : [];
+      const compactAnalyticsRow = (row: any) => {
+        const sizeRows = Array.isArray(row?.size_breakdown_list) ? row.size_breakdown_list.slice(0, 20) : [];
+        return {
+          code: row?.code || '',
+          name: row?.name || '',
+          sales_net: Number(row?.sales_net || 0),
+          returns_gross: Number(row?.returns_gross || 0),
+          logistics_sum: Number(row?.logistics_sum || 0),
+          payout_sum: Number(row?.payout_sum || 0),
+          payout_net: Number(row?.payout_net || 0),
+          fine_sum: Number(row?.fine_sum || 0),
+          storage_sum: Number(row?.storage_sum || 0),
+          withhold_sum: Number(row?.withhold_sum || 0),
+          to_pay_total: Number(row?.to_pay_total || 0),
+          sold_qty: Number(row?.sold_qty || 0),
+          return_qty: Number(row?.return_qty || 0),
+          acquiring_sum: Number(row?.acquiring_sum || 0),
+          acquiring_percent: Number(row?.acquiring_percent || 0),
+          tax_sum: Number(row?.tax_sum || 0),
+          size_breakdown: row?.size_breakdown || '',
+          size_breakdown_list: sizeRows.map((sz: any) => ({
+            size: sz?.size || '',
+            sold_qty: Number(sz?.sold_qty || 0),
+            return_qty: Number(sz?.return_qty || 0),
+            sales_net: Number(sz?.sales_net || 0),
+            returns_gross: Number(sz?.returns_gross || 0),
+            logistics_sum: Number(sz?.logistics_sum || 0),
+            payout_net: Number(sz?.payout_net || 0),
+            fine_sum: Number(sz?.fine_sum || 0),
+            storage_sum: Number(sz?.storage_sum || 0),
+            withhold_sum: Number(sz?.withhold_sum || 0),
+            to_pay_total: Number(sz?.to_pay_total || 0),
+            acquiring_sum: Number(sz?.acquiring_sum || 0),
+          })),
+        };
+      };
+      const analyticsSafe = Array.isArray(analyticsToSave) ? analyticsToSave.slice(0, ANALYTICS_JSON_DB_LIMIT).map(compactAnalyticsRow) : [];
       const analyticsTruncated = Array.isArray(analyticsToSave) && analyticsToSave.length > analyticsSafe.length;
       const summarySafe = { ...(summaryToSave || {}), analytics_truncated: analyticsTruncated, analytics_rows_saved: analyticsSafe.length, analytics_rows_original: Array.isArray(analyticsToSave) ? analyticsToSave.length : 0 } as any;
 
@@ -11393,8 +12996,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
       const payloadBytes = new TextEncoder().encode(JSON.stringify(payload)).length;
       if (payloadBytes > 7_000_000) {
-        showToast('Отчёт слишком большой для записи в БД. Сохраните облегчённую версию (меньше строк).', 'error');
-        return;
+        payload.analytics_json = [];
+        payload.summary_json = { ...summarySafe, analytics_json_skipped: true, analytics_rows_saved: 0 };
+        showToast('Агрегаты слишком большие для БД: сохранена только сводка и исходный файл', 'warning');
       }
 
       if (duplicateId) {
@@ -12358,6 +13962,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     return uploadedSortDir === 'asc' ? sorted : sorted.reverse();
   }, [uploadedReportAnalytics, uploadedSearch, uploadedSortKey, uploadedSortDir, uploadedSelectedNames, uploadedSelectedNameCodes, uploadedCostByKey, uploadedPersistedCostByCode]);
 
+  const renderedUploadedAnalyticsRows = useMemo(() => (
+    (sortedFilteredUploadedAnalytics || []).slice(0, UPLOADED_TABLE_RENDER_LIMIT)
+  ), [sortedFilteredUploadedAnalytics]);
+
+  const uploadedTableRowsHidden = Math.max(0, (sortedFilteredUploadedAnalytics || []).length - renderedUploadedAnalyticsRows.length);
+
   const uploadedSummaryForView = useMemo(() => {
     const rows = sortedFilteredUploadedAnalytics || [];
     const baseSummary = uploadedReportSummary || {};
@@ -12658,6 +14268,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       dmSize: 22,
       textFont: 6.9,
       titleFont: 8.1,
+      titleGap: 0,
+      dataGap: 2.35,
       barcodeW: 29,
       barcodeH: 7,
       barcodeTextY: 38.35,
@@ -12676,7 +14288,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       barcodeH: 9.8,
       barcodeTextY: 14.3,
       titleFont: 8.7,
+      titleGap: 0,
       textFont: 8.4,
+      dataGap: 2.65,
       barcodeXpx: 12,
       barcodeYpx: 8,
       barcodeTextYpx: 80,
@@ -12859,7 +14473,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         textX: pxToMmX(wbLayoutEditor.withChz.textXpx),
         textY: pxToMmY(wbLayoutEditor.withChz.textYpx),
         titleFont: wbLayoutEditor.withChz.titleFont,
+        titleGap: wbLayoutEditor.withChz.titleGap,
         textFont: wbLayoutEditor.withChz.textFont,
+        dataGap: wbLayoutEditor.withChz.dataGap,
         barcodeX: pxToMmX(wbLayoutEditor.withChz.barcodeXpx),
         barcodeY: pxToMmY(wbLayoutEditor.withChz.barcodeYpx),
         barcodeW: wbLayoutEditor.withChz.barcodeW,
@@ -12875,7 +14491,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         titleY: pxToMmY(wbLayoutEditor.withoutChz.textYpx),
         titleX: pxToMmX(wbLayoutEditor.withoutChz.textXpx),
         titleFont: wbLayoutEditor.withoutChz.titleFont,
+        titleGap: wbLayoutEditor.withoutChz.titleGap,
         textFont: wbLayoutEditor.withoutChz.textFont,
+        dataGap: wbLayoutEditor.withoutChz.dataGap,
       },
       fboBoxes: {
         barcodeX: pxToMmX(wbLayoutEditor.fboBoxes.barcodeXpx),
@@ -12991,12 +14609,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         doc.setFontSize(layout.withChz.titleFont);
         doc.setFont('Roboto', 'bold');
         doc.text(doc.splitTextToSize('Костюм мужской домашний', 28.8).slice(0, 2), layout.withChz.textX, y);
-        y += 7;
+        y += 4.0 + (layout.withChz.titleGap ?? 0);
         doc.setFont('Roboto', 'normal');
         doc.setFontSize(layout.withChz.textFont);
-        doc.text('Артикул: 232759650', layout.withChz.textX, y); y += 3.3;
-        doc.text('Размер: 7XL', layout.withChz.textX, y); y += 3.3;
-        doc.text('Цвет: графит', layout.withChz.textX, y); y += 3.3;
+        const dataGap = layout.withChz.dataGap ?? 2.35;
+        doc.text('Артикул: 232759650', layout.withChz.textX, y); y += dataGap;
+        doc.text('Модель: M-2026', layout.withChz.textX, y); y += dataGap;
+        doc.text('Размер: 7XL', layout.withChz.textX, y); y += dataGap;
+        doc.text('Цвет: графит', layout.withChz.textX, y); y += dataGap;
         doc.text('Поставщик: ИП Власенко_И_А', layout.withChz.textX, y);
 
         bwipjs.toCanvas(canvas, { bcid: 'ean13', text: '2042797303856', scale: 4, height: 8, includetext: false, paddingwidth: 0, paddingheight: 0 });
@@ -13017,13 +14637,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         const x = layout.withoutChz.titleX || 2;
         doc.setFont('Roboto', 'bold');
         doc.setFontSize(layout.withoutChz.titleFont);
-        doc.text(doc.splitTextToSize('Костюм трикотажный с футболкой', Math.max(24, 56 - x)).slice(0, 3), x, y);
-        y += 8;
+        doc.text(doc.splitTextToSize('Костюм мужской домашний с футболкой и шортами летний', Math.max(24, 56 - x)).slice(0, 3), x, y);
+        y += 4.5 + (layout.withoutChz.titleGap ?? 0);
         doc.setFont('Roboto', 'normal');
         doc.setFontSize(layout.withoutChz.textFont);
-        doc.text('Артикул: 526817909', x, y); y += 3.8;
-        doc.text('Размер: M-L', x, y); y += 3.8;
-        doc.text('Цвет: бордовый', x, y); y += 3.8;
+        const dataGap = layout.withoutChz.dataGap ?? 2.65;
+        doc.text('Артикул: 526817909', x, y); y += dataGap;
+        doc.text('Модель: BK-104', x, y); y += dataGap;
+        doc.text('Размер: M-L', x, y); y += dataGap;
+        doc.text('Цвет: бордовый', x, y); y += dataGap;
         doc.text('Поставщик: ИП БЕКИРОВА_Л_Р', x, y);
       } else if (template === 'fboBoxes') {
         const code = 'WBBOX001234567';
@@ -14202,7 +15824,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               max={Math.max(1, fboBoxesTotalLabels)}
                               value={fboBoxesRangeFrom}
                               onChange={(e) => setFboBoxesRangeFrom(e.target.value)}
-                              className="oc-input"
+                              className="h-11 rounded-xl border-slate-200 bg-slate-50 text-sm"
                               placeholder="1"
                             />
                           </div>
@@ -14214,7 +15836,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               max={Math.max(1, fboBoxesTotalLabels)}
                               value={fboBoxesRangeTo}
                               onChange={(e) => setFboBoxesRangeTo(e.target.value)}
-                              className="oc-input"
+                              className="h-11 rounded-xl border-slate-200 bg-slate-50 text-sm"
                               placeholder={fboBoxesTotalLabels ? String(fboBoxesTotalLabels) : ''}
                             />
                           </div>
@@ -14246,7 +15868,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                   <div className="space-y-3">
                     <h3 className="font-medium text-gray-900">Поставки</h3>
-                    {suppliesList.map(supply => (
+                    {suppliesList
+                      .slice()
+                      .sort((a, b) => new Date(String(b?.created_at || '')).getTime() - new Date(String(a?.created_at || '')).getTime())
+                      .map(supply => (
                       <div key={supply.id} className={`bg-white p-4 rounded-xl border flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 ${supply.status === 'closed' ? 'border-green-200 bg-green-50' : 'border-gray-100'}`}>
                         <div onClick={() => { setCurrentSupply(supply); fetchBoxesList(supply.id); fetchSupplyStats(supply.id); setSupplyStep('SUPPLY'); }} className="cursor-pointer flex-1 w-full sm:w-auto">
                           <div className="font-bold text-gray-900">{supply.name}</div>
@@ -14352,6 +15977,73 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               )}
                             </button>
                           </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                      <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <div className="text-sm font-bold text-slate-900">Склад offline</div>
+                            <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${warehouseOfflineEnabled ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>
+                              {warehouseOfflineEnabled ? 'Включен' : 'Выключен'}
+                            </span>
+                            <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${warehouseOfflineStatus?.ok ? 'bg-sky-100 text-sky-700' : 'bg-amber-100 text-amber-700'}`}>
+                              {warehouseOfflineStatus?.ok ? 'Сервер доступен' : 'Сервер не проверен'}
+                            </span>
+                          </div>
+                          <div className="mt-2 grid gap-2 md:grid-cols-[1fr_auto]">
+                            <input
+                              type="text"
+                              value={warehouseOfflineUrl}
+                              onChange={(e) => {
+                                setWarehouseOfflineUrlState(e.target.value);
+                                setWarehouseOfflineUrl(e.target.value);
+                              }}
+                              onBlur={() => saveWarehouseOfflineSettings(warehouseOfflineEnabled, warehouseOfflineUrl)}
+                              className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                              placeholder="http://IP-складского-ПК:8787"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => saveWarehouseOfflineSettings(!warehouseOfflineEnabled)}
+                              className={`rounded-xl px-4 py-2 text-sm font-medium ${warehouseOfflineEnabled ? 'bg-slate-900 text-white hover:bg-slate-800' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+                            >
+                              {warehouseOfflineEnabled ? 'Отключить' : 'Включить'}
+                            </button>
+                          </div>
+                          <div className="mt-2 text-xs text-slate-500">
+                            {warehouseOfflineStatus?.updatedAt ? 'База обновлена: ' + new Date(warehouseOfflineStatus.updatedAt).toLocaleString('ru-RU') : 'Offline-база ещё не обновлялась'} •
+                            {' '}локальная очередь: {warehouseOfflineStatus?.pendingScans ?? 0} • синхронизировано: {warehouseOfflineStatus?.syncedScans ?? 0} • конфликты: {warehouseOfflineStatus?.conflicts ?? 0}
+                          </div>
+                          {warehouseOfflineStatus?.error && <div className="mt-2 text-xs text-rose-600">{warehouseOfflineStatus.error}</div>}
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => checkWarehouseOfflineServer(true)}
+                            disabled={warehouseOfflineBusy}
+                            className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                          >
+                            Проверить
+                          </button>
+                          <button
+                            type="button"
+                            onClick={refreshWarehouseOfflineBase}
+                            disabled={warehouseOfflineBusy}
+                            className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+                          >
+                            {warehouseOfflineBusy ? 'Работаю...' : 'Обновить offline-базу'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={syncWarehouseOfflineScans}
+                            disabled={warehouseOfflineBusy}
+                            className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+                          >
+                            Синхронизировать
+                          </button>
                         </div>
                       </div>
                     </div>
@@ -14732,9 +16424,24 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       <div className="divide-y divide-gray-100">
                         {boxItems.map(item => (
                           <div key={item.id} className="p-3 flex items-center justify-between gap-3">
-                            <div className="min-w-0 flex-1">
-                              <div className="font-medium text-gray-900">{item.product?.name || 'Unknown'}</div>
-                              <div className="text-xs text-gray-500 break-all">{item.honest_sign_code}</div>
+                            <div className="flex min-w-0 flex-1 items-center gap-3">
+                              <div className="h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-gray-200 bg-gray-50 flex items-center justify-center">
+                                {(item.product as any)?.photo_url ? (
+                                  <img src={(item.product as any).photo_url} alt={item.product?.name || 'Товар'} className="h-full w-full object-cover" />
+                                ) : (
+                                  <Package className="h-5 w-5 text-gray-300" />
+                                )}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <div className="font-medium text-gray-900 truncate">{item.product?.name || 'Unknown'}</div>
+                                <div className="mt-1 flex flex-wrap gap-1.5 text-[11px] text-gray-600">
+                                  {(item.product as any)?.vendor_code && <span className="rounded bg-slate-100 px-2 py-0.5">Арт: {(item.product as any).vendor_code}</span>}
+                                  {(item.product as any)?.model_number && <span className="rounded bg-slate-100 px-2 py-0.5">Модель: {(item.product as any).model_number}</span>}
+                                  {item.product?.size && <span className="rounded bg-slate-100 px-2 py-0.5">Размер: {item.product.size}</span>}
+                                  {item.product?.color && <span className="rounded bg-slate-100 px-2 py-0.5">Цвет: {item.product.color}</span>}
+                                </div>
+                                <div className="mt-1 text-xs text-gray-500 break-all">{item.honest_sign_code}</div>
+                              </div>
                             </div>
                             <button
                               onClick={() => handleDeleteSupplyItem(String(item.id || ''))}
@@ -14772,13 +16479,49 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     </div>
                   </div>
 
-                  <div className="bg-yellow-50 rounded-xl p-8 text-center mb-6 border border-yellow-100">
-                    <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center mx-auto mb-4 shadow-sm">
-                      <ShieldCheck className="h-6 w-6 text-yellow-600" />
+                  <div className="bg-yellow-50 rounded-xl p-4 sm:p-6 mb-6 border border-yellow-100">
+                    <div className="flex flex-col sm:flex-row gap-4 text-left">
+                      <div className="w-full sm:w-36 aspect-square rounded-xl border border-yellow-100 bg-white overflow-hidden flex items-center justify-center shrink-0 shadow-sm">
+                        {scannedItem.photo_url ? (
+                          <img src={scannedItem.photo_url} alt={scannedItem.name} className="h-full w-full object-cover" />
+                        ) : (
+                          <Package className="h-10 w-10 text-yellow-300" />
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="inline-flex items-center rounded-full bg-white px-3 py-1 text-xs font-semibold text-yellow-700 border border-yellow-100">
+                          <ShieldCheck className="mr-1.5 h-3.5 w-3.5" /> Сканируйте Честный Знак
+                        </div>
+                        <h2 className="mt-3 text-xl font-bold text-gray-900 break-words">{scannedItem.name}</h2>
+                        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                          {scannedItem.vendor_code && (
+                            <div className="rounded-lg bg-white px-3 py-2 border border-yellow-100">
+                              <div className="text-[11px] text-gray-500">Артикул / номер WB</div>
+                              <div className="text-sm font-semibold text-gray-900 break-all">{scannedItem.vendor_code}</div>
+                            </div>
+                          )}
+                          {scannedItem.model_number && (
+                            <div className="rounded-lg bg-white px-3 py-2 border border-yellow-100">
+                              <div className="text-[11px] text-gray-500">Номер модели</div>
+                              <div className="text-sm font-semibold text-gray-900 break-all">{scannedItem.model_number}</div>
+                            </div>
+                          )}
+                          <div className="rounded-lg bg-white px-3 py-2 border border-yellow-100">
+                            <div className="text-[11px] text-gray-500">Размер</div>
+                            <div className="text-sm font-semibold text-gray-900">{scannedItem.size || '-'}</div>
+                          </div>
+                          <div className="rounded-lg bg-white px-3 py-2 border border-yellow-100">
+                            <div className="text-[11px] text-gray-500">Цвет</div>
+                            <div className="text-sm font-semibold text-gray-900">{scannedItem.color || '-'}</div>
+                          </div>
+                        </div>
+                        <div className="mt-3 rounded-lg bg-white px-3 py-2 border border-yellow-100">
+                          <div className="text-[11px] text-gray-500">ШК товара</div>
+                          <div className="font-mono text-xs text-gray-700 break-all">{scannedItem.barcode || '-'}</div>
+                        </div>
+                        <p className="text-yellow-600 text-sm mt-3">Ожидание Data Matrix кода...</p>
+                      </div>
                     </div>
-                    <h2 className="text-lg font-bold text-gray-900">Сканируйте Честный Знак</h2>
-                    <p className="text-yellow-600 font-medium mt-1">Товар: {scannedItem.name}</p>
-                    <p className="text-yellow-500 text-sm mt-2">Ожидание Data Matrix кода...</p>
                   </div>
 
                   <div className="bg-white rounded-xl shadow-sm border border-yellow-200 p-1 mb-6 ring-4 ring-yellow-50">
@@ -15287,6 +17030,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <input type="range" min={18} max={25} step={0.1} value={wbLayoutEditor.withChz.dmSize} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, withChz: { ...prev.withChz, dmSize: Number(e.target.value) } }))} className="w-full" />
                         <label className="text-xs">Размер заголовка: {wbLayoutEditor.withChz.titleFont.toFixed(1)}</label>
                         <input type="range" min={7} max={10} step={0.1} value={wbLayoutEditor.withChz.titleFont} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, withChz: { ...prev.withChz, titleFont: Number(e.target.value) } }))} className="w-full" />
+                        <label className="text-xs">Отступ после названия: {wbLayoutEditor.withChz.titleGap.toFixed(1)} мм</label>
+                        <input type="range" min={0} max={3} step={0.1} value={wbLayoutEditor.withChz.titleGap} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, withChz: { ...prev.withChz, titleGap: Number(e.target.value) } }))} className="w-full" />
+                        <label className="text-xs">Отступ строк данных: {wbLayoutEditor.withChz.dataGap.toFixed(2)} мм</label>
+                        <input type="range" min={1.6} max={4} step={0.05} value={wbLayoutEditor.withChz.dataGap} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, withChz: { ...prev.withChz, dataGap: Number(e.target.value) } }))} className="w-full" />
                         <label className="text-xs">Размер текста: {wbLayoutEditor.withChz.textFont.toFixed(1)}</label>
                         <input type="range" min={6} max={8} step={0.1} value={wbLayoutEditor.withChz.textFont} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, withChz: { ...prev.withChz, textFont: Number(e.target.value) } }))} className="w-full" />
                         <label className="text-xs">Штрихкод ширина: {wbLayoutEditor.withChz.barcodeW.toFixed(1)} мм</label>
@@ -15307,6 +17054,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <input type="range" min={13} max={16.5} step={0.05} value={wbLayoutEditor.withoutChz.barcodeTextY} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, withoutChz: { ...prev.withoutChz, barcodeTextY: Number(e.target.value), barcodeTextYpx: mmToPreviewY(Number(e.target.value)) } }))} className="w-full" />
                         <label className="text-xs">Размер заголовка: {wbLayoutEditor.withoutChz.titleFont.toFixed(1)}</label>
                         <input type="range" min={7.5} max={10} step={0.1} value={wbLayoutEditor.withoutChz.titleFont} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, withoutChz: { ...prev.withoutChz, titleFont: Number(e.target.value) } }))} className="w-full" />
+                        <label className="text-xs">Отступ после названия: {wbLayoutEditor.withoutChz.titleGap.toFixed(1)} мм</label>
+                        <input type="range" min={0} max={3} step={0.1} value={wbLayoutEditor.withoutChz.titleGap} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, withoutChz: { ...prev.withoutChz, titleGap: Number(e.target.value) } }))} className="w-full" />
+                        <label className="text-xs">Отступ строк данных: {wbLayoutEditor.withoutChz.dataGap.toFixed(2)} мм</label>
+                        <input type="range" min={1.8} max={4.5} step={0.05} value={wbLayoutEditor.withoutChz.dataGap} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, withoutChz: { ...prev.withoutChz, dataGap: Number(e.target.value) } }))} className="w-full" />
                         <label className="text-xs">Размер текста: {wbLayoutEditor.withoutChz.textFont.toFixed(1)}</label>
                         <input type="range" min={7} max={9.5} step={0.1} value={wbLayoutEditor.withoutChz.textFont} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, withoutChz: { ...prev.withoutChz, textFont: Number(e.target.value) } }))} className="w-full" />
                       </div>
@@ -15369,10 +17120,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <div className="absolute text-gray-900 border-2 border-emerald-300 rounded px-2 py-1 bg-white/70 cursor-move" onMouseDown={(e) => startWbBlockDrag(e, 'withChz', 'textXpx', 'textYpx', wbLayoutEditor.withChz.textXpx, wbLayoutEditor.withChz.textYpx)} style={{ left: `${wbLayoutEditor.withChz.textXpx}px`, top: `${wbLayoutEditor.withChz.textYpx}px`, right: '10px', fontSize: `${ptToPreviewPx(wbLayoutEditor.withChz.titleFont)}px`, lineHeight: 1.05, fontWeight: 700 }}>
                           Костюм мужской домашний
                         </div>
-                        <div className="absolute text-gray-800" style={{ left: `${wbLayoutEditor.withChz.textXpx + 2}px`, top: `${wbLayoutEditor.withChz.textYpx + mmToPreviewY(7)}px`, fontSize: `${ptToPreviewPx(wbLayoutEditor.withChz.textFont)}px` }}>Артикул: 232759650</div>
-                        <div className="absolute text-gray-800" style={{ left: `${wbLayoutEditor.withChz.textXpx + 2}px`, top: `${wbLayoutEditor.withChz.textYpx + mmToPreviewY(10.3)}px`, fontSize: `${ptToPreviewPx(wbLayoutEditor.withChz.textFont)}px` }}>Размер: 7XL</div>
-                        <div className="absolute text-gray-800" style={{ left: `${wbLayoutEditor.withChz.textXpx + 2}px`, top: `${wbLayoutEditor.withChz.textYpx + mmToPreviewY(13.6)}px`, fontSize: `${ptToPreviewPx(wbLayoutEditor.withChz.textFont)}px` }}>Цвет: графит</div>
-                        <div className="absolute text-gray-800" style={{ left: `${wbLayoutEditor.withChz.textXpx + 2}px`, top: `${wbLayoutEditor.withChz.textYpx + mmToPreviewY(16.9)}px`, fontSize: `${ptToPreviewPx(wbLayoutEditor.withChz.textFont)}px` }}>Поставщик: ИП Власенко_И_А</div>
+                        <div className="absolute text-gray-800" style={{ left: `${wbLayoutEditor.withChz.textXpx + 2}px`, top: `${wbLayoutEditor.withChz.textYpx + mmToPreviewY(4.0 + wbLayoutEditor.withChz.titleGap)}px`, fontSize: `${ptToPreviewPx(wbLayoutEditor.withChz.textFont)}px` }}>Артикул: 232759650</div>
+                        <div className="absolute text-gray-800" style={{ left: `${wbLayoutEditor.withChz.textXpx + 2}px`, top: `${wbLayoutEditor.withChz.textYpx + mmToPreviewY(4.0 + wbLayoutEditor.withChz.titleGap + wbLayoutEditor.withChz.dataGap)}px`, fontSize: `${ptToPreviewPx(wbLayoutEditor.withChz.textFont)}px` }}>Модель: M-2026</div>
+                        <div className="absolute text-gray-800" style={{ left: `${wbLayoutEditor.withChz.textXpx + 2}px`, top: `${wbLayoutEditor.withChz.textYpx + mmToPreviewY(4.0 + wbLayoutEditor.withChz.titleGap + wbLayoutEditor.withChz.dataGap * 2)}px`, fontSize: `${ptToPreviewPx(wbLayoutEditor.withChz.textFont)}px` }}>Размер: 7XL</div>
+                        <div className="absolute text-gray-800" style={{ left: `${wbLayoutEditor.withChz.textXpx + 2}px`, top: `${wbLayoutEditor.withChz.textYpx + mmToPreviewY(4.0 + wbLayoutEditor.withChz.titleGap + wbLayoutEditor.withChz.dataGap * 3)}px`, fontSize: `${ptToPreviewPx(wbLayoutEditor.withChz.textFont)}px` }}>Цвет: графит</div>
+                        <div className="absolute text-gray-800" style={{ left: `${wbLayoutEditor.withChz.textXpx + 2}px`, top: `${wbLayoutEditor.withChz.textYpx + mmToPreviewY(4.0 + wbLayoutEditor.withChz.titleGap + wbLayoutEditor.withChz.dataGap * 4)}px`, fontSize: `${ptToPreviewPx(wbLayoutEditor.withChz.textFont)}px` }}>Поставщик: ИП Власенко_И_А</div>
 
                         <div className="absolute text-[11px] text-gray-700 border border-amber-300 rounded px-1 bg-white/70 cursor-move" onMouseDown={(e) => startWbBlockDrag(e, 'withChz', 'dmTextXpx', 'dmTextYpx', wbLayoutEditor.withChz.dmTextXpx, wbLayoutEditor.withChz.dmTextYpx)} style={{ left: `${wbLayoutEditor.withChz.dmTextXpx}px`, top: `${wbLayoutEditor.withChz.dmTextYpx}px`, width: `${Math.max(90, wbLayoutEditor.withChz.dmSize * PREVIEW_SCALE_X)}px` }}>
                           01046240600993100000...
@@ -15417,12 +17169,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                         <div className="absolute border-2 border-emerald-300 rounded px-2 py-1 bg-white/70 cursor-move text-gray-900" onMouseDown={(e) => startWbBlockDrag(e, 'withoutChz', 'textXpx', 'textYpx', wbLayoutEditor.withoutChz.textXpx, wbLayoutEditor.withoutChz.textYpx)} style={{ left: `${wbLayoutEditor.withoutChz.textXpx}px`, top: `${wbLayoutEditor.withoutChz.textYpx}px`, width: '350px' }}>
                           <div className="text-center" style={{ fontSize: `${ptToPreviewPx(wbLayoutEditor.withoutChz.titleFont)}px`, lineHeight: 1.07, fontWeight: 700 }}>
-                            Костюм трикотажный с футболкой
+                            Костюм мужской домашний с футболкой и шортами летний
                           </div>
-                          <div className="text-center text-gray-800 mt-2" style={{ fontSize: `${ptToPreviewPx(wbLayoutEditor.withoutChz.textFont)}px` }}>Артикул: 526817909</div>
-                          <div className="text-center text-gray-800" style={{ fontSize: `${ptToPreviewPx(wbLayoutEditor.withoutChz.textFont)}px` }}>Размер: M-L</div>
-                          <div className="text-center text-gray-800" style={{ fontSize: `${ptToPreviewPx(wbLayoutEditor.withoutChz.textFont)}px` }}>Цвет: бордовый</div>
-                          <div className="text-center text-gray-800" style={{ fontSize: `${ptToPreviewPx(wbLayoutEditor.withoutChz.textFont)}px` }}>Поставщик: ИП БЕКИРОВА_Л_Р</div>
+                          <div className="text-center text-gray-800" style={{ marginTop: `${mmToPreviewY(wbLayoutEditor.withoutChz.titleGap)}px`, fontSize: `${ptToPreviewPx(wbLayoutEditor.withoutChz.textFont)}px`, lineHeight: `${mmToPreviewY(wbLayoutEditor.withoutChz.dataGap)}px` }}>Артикул: 526817909</div>
+                          <div className="text-center text-gray-800" style={{ fontSize: `${ptToPreviewPx(wbLayoutEditor.withoutChz.textFont)}px`, lineHeight: `${mmToPreviewY(wbLayoutEditor.withoutChz.dataGap)}px` }}>Модель: BK-104</div>
+                          <div className="text-center text-gray-800" style={{ fontSize: `${ptToPreviewPx(wbLayoutEditor.withoutChz.textFont)}px`, lineHeight: `${mmToPreviewY(wbLayoutEditor.withoutChz.dataGap)}px` }}>Размер: M-L</div>
+                          <div className="text-center text-gray-800" style={{ fontSize: `${ptToPreviewPx(wbLayoutEditor.withoutChz.textFont)}px`, lineHeight: `${mmToPreviewY(wbLayoutEditor.withoutChz.dataGap)}px` }}>Цвет: бордовый</div>
+                          <div className="text-center text-gray-800" style={{ fontSize: `${ptToPreviewPx(wbLayoutEditor.withoutChz.textFont)}px`, lineHeight: `${mmToPreviewY(wbLayoutEditor.withoutChz.dataGap)}px` }}>Поставщик: ИП БЕКИРОВА_Л_Р</div>
                         </div>
                       </div>
                     </div>
@@ -15796,7 +17549,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 <div className="oc-card p-4">
                   <div className="text-sm font-semibold text-slate-900 mb-2">Настройки подключения</div>
                   <div className="space-y-2">
-                    <input value={instagramConfig.appId} onChange={(e) => setInstagramConfig(prev => ({ ...prev, appId: e.target.value }))} className="oc-input" placeholder="Meta App ID" />
+                    <input value={instagramConfig.appId} onChange={(e) => setInstagramConfig(prev => ({ ...prev, appId: e.target.value }))} className="h-11 rounded-xl border-slate-200 bg-slate-50 text-sm" placeholder="Meta App ID" />
                     <input value={instagramConfig.redirectUri} onChange={(e) => setInstagramConfig(prev => ({ ...prev, redirectUri: e.target.value }))} className="oc-input" placeholder="Redirect URI" />
                     <textarea value={instagramAccessToken} onChange={(e) => setInstagramAccessToken(e.target.value)} className="oc-input min-h-[84px]" placeholder="Access Token (временный, пока без callback обмена кода)" />
                   </div>
@@ -15988,6 +17741,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                   barter_prices: [...(r?.barter_prices || []), ''],
                                   barter_views: [...(r?.barter_views || []), ''],
                                   barter_ratings: [...(r?.barter_ratings || []), ''],
+                                  barter_published: [...(r?.barter_published || []), false],
                                 };
                               });
                               const changedIds = nextRows.filter((r: any) => String(r?.supplier_id || '') === String(barterTopSupplierId)).map((r: any) => String(r?.id || '')).filter(Boolean);
@@ -16011,6 +17765,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                   barter_prices: (r?.barter_prices || []).slice(0, -1),
                                   barter_views: (r?.barter_views || []).slice(0, -1),
                                   barter_ratings: (r?.barter_ratings || []).slice(0, -1),
+                                  barter_published: (r?.barter_published || []).slice(0, -1),
                                 };
                               });
                               const changedIds = nextRows.filter((r: any) => String(r?.supplier_id || '') === String(barterTopSupplierId)).map((r: any) => String(r?.id || '')).filter(Boolean);
@@ -16031,6 +17786,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                   ad_prices: [...(r?.ad_prices || []), ''],
                                   ad_views: [...(r?.ad_views || []), ''],
                                   ad_ratings: [...(r?.ad_ratings || []), ''],
+                                  ad_published: [...(r?.ad_published || []), false],
                                 };
                               });
                               const changedIds = nextRows.filter((r: any) => String(r?.supplier_id || '') === String(barterTopSupplierId)).map((r: any) => String(r?.id || '')).filter(Boolean);
@@ -16054,6 +17810,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                   ad_prices: (r?.ad_prices || []).slice(0, -1),
                                   ad_views: (r?.ad_views || []).slice(0, -1),
                                   ad_ratings: (r?.ad_ratings || []).slice(0, -1),
+                                  ad_published: (r?.ad_published || []).slice(0, -1),
                                 };
                               });
                               const changedIds = nextRows.filter((r: any) => String(r?.supplier_id || '') === String(barterTopSupplierId)).map((r: any) => String(r?.id || '')).filter(Boolean);
@@ -16754,8 +18511,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     )}
                     {monthRows.map((row, idx) => {
                       const cardCollapsed = !!barterCollapsedCards[row.id];
-                      const rowBarterDone = (row.barter_links || []).filter((x) => String(x || '').trim()).length;
-                      const rowAdsDone = (row.ad_links || []).filter((x) => String(x || '').trim()).length;
+                      const rowBarterDone = (row.barter_published || []).filter(Boolean).length;
+                      const rowAdsDone = (row.ad_published || []).filter(Boolean).length;
                       const rowCost = [...(row.barter_prices || []), ...(row.ad_prices || [])].reduce((s, v) => s + (parseFloat(String(v || '0')) || 0), 0);
                       const rowPhotoList = Array.from(new Set([
                         ...(Array.isArray(row?.product_photos) ? row.product_photos : []),
@@ -16835,14 +18592,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             </div>
                             <div className="grid grid-cols-2 sm:grid-cols-3 xl:flex xl:flex-wrap gap-2 xl:shrink-0">
                               <button onClick={() => {
-                                const nextRows = (barterRows || []).map((x: any) => x.id === row.id ? { ...x, barter_links: [...(x.barter_links || []), ''], barter_dates: [...(x.barter_dates || []), ''], barter_prices: [...(x.barter_prices || []), ''], barter_views: [...(x.barter_views || []), ''], barter_ratings: [...(x.barter_ratings || []), ''] } : x);
+                                const nextRows = (barterRows || []).map((x: any) => x.id === row.id ? { ...x, barter_links: [...(x.barter_links || []), ''], barter_dates: [...(x.barter_dates || []), ''], barter_prices: [...(x.barter_prices || []), ''], barter_views: [...(x.barter_views || []), ''], barter_ratings: [...(x.barter_ratings || []), ''], barter_published: [...(x.barter_published || []), false] } : x);
                                 applyBarterRowsEdit(nextRows, row.supplier_id, [String(row.id)]);
                               }} className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-blue-200 px-3 py-2 text-xs font-medium text-blue-700 hover:bg-blue-50" title="Добавить бартер в карточку">
                                 <Plus className="h-4 w-4" />
                                 <span>Бартер</span>
                               </button>
                               <button onClick={() => {
-                                const nextRows = (barterRows || []).map((x: any) => x.id === row.id ? { ...x, ad_links: [...(x.ad_links || []), ''], ad_dates: [...(x.ad_dates || []), ''], ad_prices: [...(x.ad_prices || []), ''], ad_views: [...(x.ad_views || []), ''], ad_ratings: [...(x.ad_ratings || []), ''] } : x);
+                                const nextRows = (barterRows || []).map((x: any) => x.id === row.id ? { ...x, ad_links: [...(x.ad_links || []), ''], ad_dates: [...(x.ad_dates || []), ''], ad_prices: [...(x.ad_prices || []), ''], ad_views: [...(x.ad_views || []), ''], ad_ratings: [...(x.ad_ratings || []), ''], ad_published: [...(x.ad_published || []), false] } : x);
                                 applyBarterRowsEdit(nextRows, row.supplier_id, [String(row.id)]);
                               }} className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-violet-200 px-3 py-2 text-xs font-medium text-violet-700 hover:bg-violet-50" title="Добавить рекламу в карточку">
                                 <Plus className="h-4 w-4" />
@@ -16863,7 +18620,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             <>
                               <div className="space-y-2 mb-3">
                                 {(row.barter_links || []).map((_: any, i: number) => (
-                                  <div key={`barter-${row.id}-${i}`} className="grid grid-cols-1 md:grid-cols-[84px_1fr_150px_120px_120px_170px_36px] gap-2 items-center rounded-xl border border-slate-200 bg-slate-50/70 p-2.5 md:border-0 md:bg-transparent md:p-0">
+                                  <div key={`barter-${row.id}-${i}`} className="grid grid-cols-1 md:grid-cols-[84px_1fr_150px_120px_120px_170px_118px_36px] gap-2 items-center rounded-xl border border-slate-200 bg-slate-50/70 p-2.5 md:border-0 md:bg-transparent md:p-0">
                                     <span className="text-xs text-slate-500">Бартер {i + 1}</span>
                                     <div className="flex flex-col sm:flex-row sm:items-center gap-2">
                                       <input
@@ -16921,6 +18678,18 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                         <option key={`barter-rating-${row.id}-${i}-${option}`} value={option}>{option}</option>
                                       ))}
                                     </select>
+                                    <label className={`inline-flex items-center justify-center gap-2 rounded-lg border px-2.5 py-2 text-xs font-medium ${row.barter_published?.[i] ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-white text-slate-600'}`}>
+                                      <input
+                                        type="checkbox"
+                                        checked={Boolean(row.barter_published?.[i])}
+                                        onChange={(e) => {
+                                          const nextRows = (barterRows || []).map((x) => x.id === row.id ? { ...x, barter_published: Array.from({ length: Math.max((x.barter_links || []).length, (x.barter_published || []).length) }, (_, vi) => vi === i ? e.target.checked : Boolean(x.barter_published?.[vi])) } : x);
+                                          applyBarterRowsEdit(nextRows, row.supplier_id, [String(row.id)]);
+                                        }}
+                                        className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                                      />
+                                      <span>Вышел</span>
+                                    </label>
                                     {i >= 5 ? (
                                       <button
                                         type="button"
@@ -16933,7 +18702,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                             const bp = [...(x.barter_prices || [])]; bp.splice(i, 1);
                                             const bv = [...(x.barter_views || [])]; bv.splice(i, 1);
                                             const br = [...(x.barter_ratings || [])]; br.splice(i, 1);
-                                            return { ...x, barter_links: bl, barter_dates: bd, barter_prices: bp, barter_views: bv, barter_ratings: br };
+                                            const bpub = [...(x.barter_published || [])]; bpub.splice(i, 1);
+                                            return { ...x, barter_links: bl, barter_dates: bd, barter_prices: bp, barter_views: bv, barter_ratings: br, barter_published: bpub };
                                           });
                                           applyBarterRowsEdit(nextRows, row.supplier_id, [String(row.id)]);
                                         }}
@@ -16948,7 +18718,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                               <div className="space-y-2 mb-1">
                                 {(row.ad_links || []).map((_: any, i: number) => (
-                                  <div key={`ad-${row.id}-${i}`} className="grid grid-cols-1 md:grid-cols-[84px_1fr_150px_120px_120px_170px_36px] gap-2 items-center rounded-xl border border-slate-200 bg-slate-50/70 p-2.5 md:border-0 md:bg-transparent md:p-0">
+                                  <div key={`ad-${row.id}-${i}`} className="grid grid-cols-1 md:grid-cols-[84px_1fr_150px_120px_120px_170px_118px_36px] gap-2 items-center rounded-xl border border-slate-200 bg-slate-50/70 p-2.5 md:border-0 md:bg-transparent md:p-0">
                                     <span className="text-xs text-slate-500">Реклама {i + 1}</span>
                                     <div className="flex flex-col sm:flex-row sm:items-center gap-2">
                                       <input
@@ -17006,6 +18776,18 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                         <option key={`ad-rating-${row.id}-${i}-${option}`} value={option}>{option}</option>
                                       ))}
                                     </select>
+                                    <label className={`inline-flex items-center justify-center gap-2 rounded-lg border px-2.5 py-2 text-xs font-medium ${row.ad_published?.[i] ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-white text-slate-600'}`}>
+                                      <input
+                                        type="checkbox"
+                                        checked={Boolean(row.ad_published?.[i])}
+                                        onChange={(e) => {
+                                          const nextRows = (barterRows || []).map((x) => x.id === row.id ? { ...x, ad_published: Array.from({ length: Math.max((x.ad_links || []).length, (x.ad_published || []).length) }, (_, vi) => vi === i ? e.target.checked : Boolean(x.ad_published?.[vi])) } : x);
+                                          applyBarterRowsEdit(nextRows, row.supplier_id, [String(row.id)]);
+                                        }}
+                                        className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                                      />
+                                      <span>Вышел</span>
+                                    </label>
                                     {i >= 2 ? (
                                       <button
                                         type="button"
@@ -17018,7 +18800,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                             const ap = [...(x.ad_prices || [])]; ap.splice(i, 1);
                                             const av = [...(x.ad_views || [])]; av.splice(i, 1);
                                             const ar = [...(x.ad_ratings || [])]; ar.splice(i, 1);
-                                            return { ...x, ad_links: al, ad_dates: ad, ad_prices: ap, ad_views: av, ad_ratings: ar };
+                                            const apub = [...(x.ad_published || [])]; apub.splice(i, 1);
+                                            return { ...x, ad_links: al, ad_dates: ad, ad_prices: ap, ad_views: av, ad_ratings: ar, ad_published: apub };
                                           });
                                           applyBarterRowsEdit(nextRows, row.supplier_id, [String(row.id)]);
                                         }}
@@ -18155,6 +19938,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                   <ExcelUploader
                     disabled={!uploadedSelectedSupplierId}
+                    maxFileBytes={60 * 1024 * 1024}
                     onUpload={async (data, fileName, sourceFile) => {
                       if (!uploadedSelectedSupplierId) {
                         showToast('Сначала выберите поставщика', 'error');
@@ -18795,6 +20579,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     <div className="bg-gray-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-gray-500">Эквайринг/Комиссии</div><div className="font-bold">{Number(uploadedSummaryForView.acquiring_sum || 0).toLocaleString('ru-RU')}</div></div>
                     <div className="bg-gray-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-gray-500">Комиссия эквайринга, %</div><div className="font-bold">{Number(uploadedSummaryForView.acquiring_percent || 0).toLocaleString('ru-RU', { maximumFractionDigits: 2 })}</div></div>
                   </div>
+                  {uploadedTableRowsHidden > 0 && (
+                    <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                      Показаны первые {renderedUploadedAnalyticsRows.length.toLocaleString('ru-RU')} строк из {sortedFilteredUploadedAnalytics.length.toLocaleString('ru-RU')}. Для полного списка используйте поиск/фильтры или скачайте Excel.
+                    </div>
+                  )}
                   <div className="overflow-auto max-h-[84vh] border border-gray-100 rounded-lg">
                     <table className="min-w-full text-sm border-separate border-spacing-0">
                       <thead className="bg-white/95 backdrop-blur sticky top-0 z-50 text-left text-gray-600 shadow-sm">
@@ -18820,7 +20609,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         </tr>
                       </thead>
                       <tbody>
-                        {sortedFilteredUploadedAnalytics.map((row, idx) => {
+                        {renderedUploadedAnalyticsRows.map((row, idx) => {
                           const rowKey = `${row.code || ''}|${row.name || ''}`;
                           const rowOpen = !!uploadedSizeDetailsOpen[rowKey];
                           const sizeRows = Array.isArray((row as any).size_breakdown_list) ? (row as any).size_breakdown_list : [];
@@ -20752,7 +22541,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     </button>
                   )}
                 </div>
-                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2 bg-white/10 p-1.5 rounded-xl border border-white/15 backdrop-blur-sm">
+                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 bg-white/10 p-1.5 rounded-xl border border-white/15 backdrop-blur-sm">
                   {hasAssemblyButtonAccess('cw_tab_calendar') && (
                   <button
                     onClick={() => setCompletedWorkStep('CALENDAR')}
@@ -20761,6 +22550,17 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     Календарь
                   </button>
                   )}
+                  <button
+                    onClick={() => {
+                      fetchTempWorkerLogs();
+                      loadTempWorkerMeta();
+                      loadDeliveryData();
+                      setShowGeneralReportModal(true);
+                    }}
+                    className="px-4 py-2 rounded-lg text-sm font-medium transition-all text-indigo-100/90 hover:text-white hover:bg-white/10"
+                  >
+                    Общий отчет
+                  </button>
                   {hasAssemblyButtonAccess('cw_tab_rates') && (
                   <button
                     onClick={() => setCompletedWorkStep('RATES')}
@@ -23180,6 +24980,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                       {cwReportResult && cwReportResult.length > 0 && (
                         <button
+                          onClick={handleDownloadCwReportPdf}
+                          className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 flex items-center gap-2"
+                        >
+                          <Download className="h-4 w-4" /> PDF
+                        </button>
+                      )}
+
+                      {cwReportResult && cwReportResult.length > 0 && (
+                        <button
                           onClick={async () => {
                             const total = cwReportResult.reduce((sum, item) => sum + item.total, 0);
                             const supplier = suppliers.find(s => s.id === cwReportForm.supplier_id);
@@ -24070,34 +25879,70 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           )}
 
           {showTempWorkerHistory && (
-            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-end md:items-center justify-center z-50 transition-opacity p-2 md:p-4" onClick={() => setShowTempWorkerHistory(false)}>
-              <div className="bg-white rounded-t-3xl md:rounded-xl shadow-2xl w-[98vw] max-w-[1500px] h-[88vh] md:h-[90vh] flex flex-col overflow-hidden transform transition-all scale-100" onClick={e => e.stopPropagation()}>
-                <div className="sticky top-0 z-20 bg-white px-4 pt-2 pb-2 md:px-6 md:pt-6 md:pb-4 border-b">
+            <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm flex items-end md:items-center justify-center z-50 transition-opacity p-2 md:p-4" onClick={() => setShowTempWorkerHistory(false)}>
+              <div className="bg-slate-50 rounded-t-3xl md:rounded-3xl shadow-2xl w-[98vw] max-w-[1500px] h-[88vh] md:h-[90vh] flex flex-col overflow-hidden transform transition-all scale-100 border border-white/70" onClick={e => e.stopPropagation()}>
+                <div className="sticky top-0 z-20 bg-white/90 backdrop-blur border-b border-slate-200 px-4 pt-2 pb-3 md:px-6 md:pt-6 md:pb-4">
                   <div className="mx-auto mb-1.5 h-1.5 w-12 rounded-full bg-gray-300 md:hidden" />
                   <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                     <div className="pr-0 md:pr-4">
-                      <h2 className="text-base md:text-2xl font-bold text-gray-900 leading-tight">История временных сотрудников</h2>
-                      <p className="text-[11px] md:text-sm text-gray-500 mt-0.5 md:mt-1 leading-tight">Журнал смен и выплат</p>
+                      <div className="inline-flex items-center gap-2 rounded-full bg-indigo-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-indigo-700 mb-2">
+                        <History className="h-3.5 w-3.5" /> Журнал выплат
+                      </div>
+                      <h2 className="text-base md:text-2xl font-bold text-slate-950 leading-tight">История временных сотрудников</h2>
+                      <p className="text-[11px] md:text-sm text-slate-500 mt-0.5 md:mt-1 leading-tight">Смены, долги, оплаты и деньги на складе</p>
                     </div>
                     <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end sm:gap-3 w-full md:w-auto">
                       <button
                           onClick={() => setShowTempWorkerAddNameModal(true)}
-                          className="w-full sm:w-auto px-4 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 inline-flex items-center justify-center gap-2 shadow-sm transition-colors text-sm md:text-base"
+                          className="h-10 w-full sm:w-auto rounded-2xl border border-slate-200 bg-white px-3.5 text-sm font-semibold text-slate-700 shadow-sm transition-all hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 hover:shadow-md inline-flex items-center justify-center gap-2"
                       >
                           <Plus className="w-4 h-4 shrink-0" />
                           <span className="text-center">Добавить сотрудника</span>
                       </button>
                       <button
                           onClick={() => setShowTempWorkerAddTemplateModal(true)}
-                          className="w-full sm:w-auto px-4 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 inline-flex items-center justify-center gap-2 shadow-sm transition-colors text-sm md:text-base"
+                          className="h-10 w-full sm:w-auto rounded-2xl border border-slate-200 bg-white px-3.5 text-sm font-semibold text-slate-700 shadow-sm transition-all hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 hover:shadow-md inline-flex items-center justify-center gap-2"
                       >
                           <Plus className="w-4 h-4 shrink-0" />
                           <span className="text-center">Шаблон комментария</span>
                       </button>
                       <button
+                          onClick={async () => {
+                            setShowTempWorkerQuickPayModal(true);
+                            setTempWorkerQuickPayWorkerFilter('all');
+                            setTempWorkerQuickPayPayerSupplierId('');
+                            setTempWorkerQuickPaySelectedIds([]);
+                            if (!tempWorkerLogs.length) await fetchTempWorkerLogs();
+                          }}
+                          className="h-10 w-full sm:w-auto rounded-2xl border border-emerald-600 bg-emerald-600 px-3.5 text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-emerald-700 hover:shadow-md inline-flex items-center justify-center gap-2"
+                      >
+                          <Wallet className="w-4 h-4 shrink-0" />
+                          <span className="text-center">Быстрая оплата</span>
+                      </button>
+                      <button
+                          onClick={async () => {
+                            setShowTempWorkerReportModal(true);
+                            if (!tempWorkerLogs.length) await fetchTempWorkerLogs();
+                          }}
+                          className="h-10 w-full sm:w-auto rounded-2xl border border-sky-600 bg-sky-600 px-3.5 text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-sky-700 hover:shadow-md inline-flex items-center justify-center gap-2"
+                      >
+                          <FileText className="w-4 h-4 shrink-0" />
+                          <span className="text-center">Отчет</span>
+                      </button>
+                      <button
+                          onClick={async () => {
+                            setShowDeliveryModal(true);
+                            await loadDeliveryData();
+                          }}
+                          className="h-10 w-full sm:w-auto rounded-2xl border border-orange-500 bg-orange-500 px-3.5 text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-orange-600 hover:shadow-md inline-flex items-center justify-center gap-2"
+                      >
+                          <Truck className="w-4 h-4 shrink-0" />
+                          <span className="text-center">Доставка</span>
+                      </button>
+                      <button
                           onClick={() => setShowTempWorkerModal(true)}
                           disabled={!hasAssemblyButtonAccess('temp_shift_add')}
-                          className={`w-full sm:w-auto px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 inline-flex items-center justify-center gap-2 shadow-sm transition-colors text-sm md:text-base ${!hasAssemblyButtonAccess('temp_shift_add') ? 'opacity-50 cursor-not-allowed' : ''}`}
+                          className={`h-10 w-full sm:w-auto rounded-2xl bg-indigo-600 px-3.5 text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-indigo-700 hover:shadow-md inline-flex items-center justify-center gap-2 ${!hasAssemblyButtonAccess('temp_shift_add') ? 'opacity-50 cursor-not-allowed' : ''}`}
                       >
                           <Plus className="w-4 h-4 shrink-0" />
                           <span className="text-center">Добавить смену</span>
@@ -24113,43 +25958,57 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   </div>
                 </div>
 
-                <div className="mb-3 md:hidden -mx-1 px-1 overflow-x-auto">
-                  <div className="flex gap-2 min-w-max pb-1">
-                    <div className="min-w-[170px] rounded-xl border border-rose-200 bg-rose-50 px-3 py-2">
-                      <div className="text-[11px] text-rose-700">Не оплачено всего</div>
-                      <div className="text-lg font-bold text-rose-800 leading-tight">{tempUnpaidBySupplier.total.toFixed(2)} ₽</div>
+                <div className="px-3 pt-3 md:px-6 md:pt-4">
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                    <div className="group relative overflow-hidden rounded-3xl border border-rose-100 bg-white p-4 shadow-sm ring-1 ring-rose-50">
+                      <div className="absolute -right-8 -top-8 h-24 w-24 rounded-full bg-rose-100 blur-2xl transition-transform group-hover:scale-125" />
+                      <div className="relative flex items-start justify-between gap-3">
+                        <div>
+                          <div className="text-xs font-semibold uppercase tracking-wide text-rose-500">Не оплачено всего</div>
+                          <div className="mt-2 text-2xl font-black text-slate-950 md:text-3xl">{tempUnpaidBySupplier.total.toFixed(2)} ₽</div>
+                          <div className="mt-1 text-xs text-slate-500">Суммарный остаток по сменам</div>
+                        </div>
+                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-rose-50 text-rose-600 ring-1 ring-rose-100">
+                          <Wallet className="h-5 w-5" />
+                        </div>
+                      </div>
                     </div>
-                    <div className="min-w-[150px] rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
-                      <div className="text-[11px] text-amber-700">Не оплаченных смен</div>
-                      <div className="text-lg font-bold text-amber-800 leading-tight">{tempUnpaidBySupplier.shifts}</div>
-                    </div>
-                    <div className="min-w-[170px] rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2">
-                      <div className="text-[11px] text-indigo-700">Поставщиков с долгом</div>
-                      <div className="text-lg font-bold text-indigo-800 leading-tight">{tempUnpaidBySupplier.rows.length}</div>
-                    </div>
-                  </div>
-                </div>
 
-                <div className="hidden md:grid mb-4 grid-cols-1 md:grid-cols-3 gap-3">
-                  <div className="bg-rose-50 border border-rose-200 rounded-xl p-3">
-                    <div className="text-xs text-rose-700">Не оплачено всего</div>
-                    <div className="text-2xl font-bold text-rose-800">{tempUnpaidBySupplier.total.toFixed(2)} ₽</div>
-                  </div>
-                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
-                    <div className="text-xs text-amber-700">Не оплаченных смен</div>
-                    <div className="text-2xl font-bold text-amber-800">{tempUnpaidBySupplier.shifts}</div>
-                  </div>
-                  <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-3">
-                    <div className="text-xs text-indigo-700">Поставщиков с долгом</div>
-                    <div className="text-2xl font-bold text-indigo-800">{tempUnpaidBySupplier.rows.length}</div>
+                    <div className="group relative overflow-hidden rounded-3xl border border-amber-100 bg-white p-4 shadow-sm ring-1 ring-amber-50">
+                      <div className="absolute -right-8 -top-8 h-24 w-24 rounded-full bg-amber-100 blur-2xl transition-transform group-hover:scale-125" />
+                      <div className="relative flex items-start justify-between gap-3">
+                        <div>
+                          <div className="text-xs font-semibold uppercase tracking-wide text-amber-600">Не оплаченных смен</div>
+                          <div className="mt-2 text-2xl font-black text-slate-950 md:text-3xl">{tempUnpaidBySupplier.shifts}</div>
+                          <div className="mt-1 text-xs text-slate-500">Записи, ожидающие оплаты</div>
+                        </div>
+                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-amber-50 text-amber-600 ring-1 ring-amber-100">
+                          <Clock className="h-5 w-5" />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="group relative overflow-hidden rounded-3xl border border-indigo-100 bg-white p-4 shadow-sm ring-1 ring-indigo-50">
+                      <div className="absolute -right-8 -top-8 h-24 w-24 rounded-full bg-indigo-100 blur-2xl transition-transform group-hover:scale-125" />
+                      <div className="relative flex items-start justify-between gap-3">
+                        <div>
+                          <div className="text-xs font-semibold uppercase tracking-wide text-indigo-600">Поставщиков с долгом</div>
+                          <div className="mt-2 text-2xl font-black text-slate-950 md:text-3xl">{tempUnpaidBySupplier.rows.length}</div>
+                          <div className="mt-1 text-xs text-slate-500">Контрагенты с открытым остатком</div>
+                        </div>
+                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600 ring-1 ring-indigo-100">
+                          <Users className="h-5 w-5" />
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
 
                 {tempUnpaidBySupplier.rows.length > 0 && (
-                  <div className="md:hidden mb-3 -mx-1 px-1 overflow-x-auto">
+                  <div className="md:hidden my-3 px-3 overflow-x-auto">
                     <div className="flex gap-2 min-w-max pb-1">
                       {tempUnpaidBySupplier.rows.map((r) => (
-                        <div key={`temp-unpaid-mobile-${r.supplierId || 'none'}`} className="w-[220px] rounded-xl border border-gray-200 bg-gray-50 p-3 shrink-0">
+                        <div key={`temp-unpaid-mobile-${r.supplierId || 'none'}`} className="w-[220px] shrink-0 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
                           <div className="text-sm font-medium text-gray-900 truncate" title={r.supplierName}>{r.supplierName}</div>
                           <div className="mt-1 text-xs text-gray-500">Смен: {r.shifts}</div>
                           <div className="mt-2 text-sm font-bold text-rose-700">{r.amount.toFixed(2)} ₽</div>
@@ -24160,7 +26019,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 )}
 
                 {tempUnpaidBySupplier.rows.length > 0 && (
-                  <div className="hidden md:block mb-4 bg-white border rounded-xl p-3">
+                  <div className="mx-3 my-4 hidden rounded-3xl border border-slate-200 bg-white p-4 shadow-sm md:mx-6 md:block">
                     <div className="text-sm font-semibold text-gray-800 mb-2">Не оплачено по поставщикам</div>
                     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
                       {tempUnpaidBySupplier.rows.map((r) => (
@@ -24176,7 +26035,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   </div>
                 )}
 
-                <div className="mb-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="mx-3 mb-4 grid grid-cols-1 gap-3 rounded-3xl border border-slate-200 bg-white p-3 shadow-sm md:mx-6 md:grid-cols-3">
                   <select
                     value={tempWorkerSupplierFilter}
                     onChange={(e) => setTempWorkerSupplierFilter(e.target.value)}
@@ -24206,8 +26065,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   </select>
                 </div>
 
-                <div className="flex-1 overflow-y-auto custom-scrollbar px-0.5 md:px-0 pb-4">
-                  <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+                <div className="flex-1 overflow-y-auto custom-scrollbar px-3 md:px-6 pb-6">
+                  <div className="mb-4 rounded-2xl border border-emerald-200 bg-white p-4 shadow-sm ring-1 ring-emerald-50">
                     <div className="flex items-center justify-between mb-2 gap-2">
                       <div className="font-semibold text-emerald-900">Деньги на складе</div>
                       <div className="text-lg font-extrabold text-emerald-700">{Math.floor(cwWarehouseMoneyBalance).toLocaleString('ru-RU')} ₽</div>
@@ -24221,7 +26080,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         const { error } = await supabase.from('warehouse_money_log').insert([{ amount, comment: cwWarehouseMoneyForm.comment.trim(), type: 'manual' }]);
                         if (error) { showToast('Ошибка добавления операции: ' + (error.message || 'неизвестно'), 'error'); return; }
                         setCwWarehouseMoneyForm({ amount: '', comment: '' }); await fetchCwWarehouseMoneyHistory(); showToast('Операция добавлена', 'success');
-                      }} className="w-full py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">Добавить</button>
+                      }} className="h-10 w-full rounded-xl bg-emerald-600 px-3 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700">Добавить</button>
                       <button onClick={async () => {
                         const amountRaw = Number(cwWarehouseMoneyForm.amount || 0); const amount = Math.abs(amountRaw);
                         if (!Number.isFinite(amount) || amount === 0) { showToast('Введите сумму', 'error'); return; }
@@ -24229,7 +26088,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         const { error } = await supabase.from('warehouse_money_log').insert([{ amount: -amount, comment: cwWarehouseMoneyForm.comment.trim(), type: 'manual' }]);
                         if (error) { showToast('Ошибка списания операции: ' + (error.message || 'неизвестно'), 'error'); return; }
                         setCwWarehouseMoneyForm({ amount: '', comment: '' }); await fetchCwWarehouseMoneyHistory(); showToast('Операция списана', 'success');
-                      }} className="w-full py-2 bg-rose-600 text-white rounded-lg hover:bg-rose-700">Списать</button>
+                      }} className="h-10 w-full rounded-xl bg-rose-600 px-3 text-sm font-semibold text-white shadow-sm hover:bg-rose-700">Списать</button>
                     </div>
                     <div className="mb-2 flex flex-wrap gap-2">
                       <button
@@ -24537,6 +26396,1459 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             )}
                         </tbody>
                     </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {showTempWorkerQuickPayModal && (
+            <div className="fixed inset-0 z-[76] bg-slate-950/60 backdrop-blur-sm flex items-end md:items-center justify-center p-2 md:p-4" onClick={() => setShowTempWorkerQuickPayModal(false)}>
+              <div className="bg-slate-50 rounded-t-3xl md:rounded-3xl shadow-2xl w-[98vw] max-w-5xl h-[82vh] flex flex-col overflow-hidden border border-white/70" onClick={(e) => e.stopPropagation()}>
+                <div className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b border-slate-200 px-4 py-4 md:px-6">
+                  <div className="mx-auto mb-2 h-1.5 w-12 rounded-full bg-gray-300 md:hidden" />
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-emerald-700 mb-2">
+                        <Wallet className="h-3.5 w-3.5" /> Массовая выплата
+                      </div>
+                      <h2 className="text-lg md:text-2xl font-bold text-slate-950">Быстрая оплата</h2>
+                      <p className="text-xs md:text-sm text-slate-500 mt-1">Выберите поставщика-плательщика и неоплаченные смены. После подтверждения они будут полностью оплачены.</p>
+                    </div>
+                    <button onClick={() => setShowTempWorkerQuickPayModal(false)} className="p-2 rounded-lg hover:bg-gray-100" aria-label="Закрыть быструю оплату">
+                      <X className="h-5 w-5 text-gray-500" />
+                    </button>
+                  </div>
+                  <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50/80 p-3 grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-3 items-end">
+                    <label className="block">
+                      <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Фильтр по рабочему</span>
+                      <select
+                        value={tempWorkerQuickPayWorkerFilter}
+                        onChange={(e) => {
+                          setTempWorkerQuickPayWorkerFilter(e.target.value);
+                          setTempWorkerQuickPaySelectedIds([]);
+                        }}
+                        className="oc-input h-11 rounded-xl bg-white text-sm"
+                      >
+                        <option value="all">Все сотрудники с неоплаченными сменами</option>
+                        {tempWorkerQuickPayWorkerOptions.map((name) => (
+                          <option key={`quick-pay-worker-${name}`} value={name}>{name}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="block">
+                      <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Кто оплатит</span>
+                      <select
+                        value={tempWorkerQuickPayPayerSupplierId}
+                        onChange={(e) => setTempWorkerQuickPayPayerSupplierId(e.target.value)}
+                        className="oc-input h-11 rounded-xl bg-white text-sm"
+                      >
+                        <option value="">Выберите поставщика</option>
+                        {suppliers.map((s) => (
+                          <option key={`quick-pay-payer-${s.id}`} value={String(s.id)}>{s.name}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const visibleIds = tempWorkerQuickPayRows.map((log: any) => String(log.id));
+                        const allSelected = visibleIds.length > 0 && visibleIds.every((id) => tempWorkerQuickPaySelectedIds.includes(id));
+                        setTempWorkerQuickPaySelectedIds(allSelected ? [] : visibleIds);
+                      }}
+                      className="h-11 px-4 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                    >
+                      {tempWorkerQuickPayRows.length > 0 && tempWorkerQuickPayRows.every((log: any) => tempWorkerQuickPaySelectedIds.includes(String(log.id))) ? 'Снять выбор' : 'Выбрать все'}
+                    </button>
+                  </div>
+                  <div className="mt-3 grid grid-cols-3 gap-2">
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                      <div className="text-[11px] text-slate-500">Неоплаченных</div>
+                      <div className="text-lg font-bold text-slate-900">{tempWorkerQuickPayRows.length}</div>
+                    </div>
+                    <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-3">
+                      <div className="text-[11px] text-indigo-700">Выбрано</div>
+                      <div className="text-lg font-bold text-indigo-800">{tempWorkerQuickPaySelectedRows.length}</div>
+                    </div>
+                    <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+                      <div className="text-[11px] text-emerald-700">К оплате</div>
+                      <div className="text-lg font-bold text-emerald-800">{tempWorkerQuickPaySelectedTotal.toFixed(2)} ₽</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-4 md:p-6 custom-scrollbar">
+                  {tempWorkerQuickPayRows.length === 0 ? (
+                    <div className="h-full min-h-[220px] flex flex-col items-center justify-center text-center text-gray-400">
+                      <CheckCircle2 className="h-12 w-12 mb-3 text-emerald-300" />
+                      <div className="font-medium">Неоплаченных смен нет</div>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {tempWorkerQuickPayRows.map((log: any) => {
+                        const id = String(log.id);
+                        const selected = tempWorkerQuickPaySelectedIds.includes(id);
+                        const supplier = suppliers.find((s: any) => String(s.id) === String(log.supplier_id));
+                        const remaining = getTempWorkerRemainingAmount(log);
+                        return (
+                          <label key={`quick-pay-row-${id}`} className={`block rounded-2xl border p-3 cursor-pointer transition-all ${selected ? 'border-emerald-400 bg-emerald-50 shadow-sm' : 'border-slate-200 bg-white hover:bg-slate-50'}`}>
+                            <div className="flex items-start gap-3">
+                              <input
+                                type="checkbox"
+                                checked={selected}
+                                onChange={(e) => {
+                                  setTempWorkerQuickPaySelectedIds(prev => e.target.checked ? Array.from(new Set([...prev, id])) : prev.filter((x) => x !== id));
+                                }}
+                                className="mt-1 h-5 w-5 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                              />
+                              <div className="min-w-0 flex-1">
+                                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-1">
+                                  <div className="font-semibold text-slate-900">{log.worker_name || log.worker || 'Без имени'}</div>
+                                  <div className="text-lg font-extrabold text-emerald-700 whitespace-nowrap">{remaining.toFixed(2)} ₽</div>
+                                </div>
+                                <div className="mt-1 text-sm text-slate-600">
+                                  {log?.date ? new Date(`${log.date}T12:00:00`).toLocaleDateString('ru-RU') : '—'} • {supplier?.name || 'Без поставщика'} • {Number(log.hours || 0).toFixed(2)} ч.
+                                </div>
+                                <div className="mt-1 text-xs text-slate-500">{log.work_comment || log.comment || 'Без комментария'}</div>
+                              </div>
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                <div className="border-t bg-white px-4 py-3 md:px-6 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                  <div className="text-sm text-slate-600">
+                    Выбрано смен: <b>{tempWorkerQuickPaySelectedRows.length}</b> • сумма: <b className="text-emerald-700">{tempWorkerQuickPaySelectedTotal.toFixed(2)} ₽</b>
+                  </div>
+                  <div className="flex gap-2">
+                    <button type="button" onClick={() => setShowTempWorkerQuickPayModal(false)} className="px-4 py-2 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-50">Отмена</button>
+                    <button
+                      type="button"
+                      onClick={handleConfirmTempWorkerQuickPay}
+                      disabled={tempWorkerQuickPaySaving || tempWorkerQuickPaySelectedRows.length === 0}
+                      className={`px-4 py-2 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 ${tempWorkerQuickPaySaving || tempWorkerQuickPaySelectedRows.length === 0 ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                      {tempWorkerQuickPaySaving ? 'Оплачиваю...' : 'Оплатить выбранные'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {showDeliveryQuickPayModal && (
+            <div className="fixed inset-0 z-[77] bg-slate-950/60 backdrop-blur-sm flex items-end md:items-center justify-center p-2 md:p-4" onClick={() => setShowDeliveryQuickPayModal(false)}>
+              <div className="bg-slate-50 rounded-t-3xl md:rounded-3xl shadow-2xl w-[98vw] max-w-5xl h-[82vh] flex flex-col overflow-hidden border border-white/70" onClick={(e) => e.stopPropagation()}>
+                <div className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b border-slate-200 px-4 py-4 md:px-6">
+                  <div className="mx-auto mb-2 h-1.5 w-12 rounded-full bg-gray-300 md:hidden" />
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-emerald-700 mb-2">
+                        <Wallet className="h-3.5 w-3.5" /> Массовая оплата доставок
+                      </div>
+                      <h2 className="text-lg md:text-2xl font-bold text-slate-950">Быстрая оплата</h2>
+                      <p className="text-xs md:text-sm text-slate-500 mt-1">Выберите поставщика-плательщика и неоплаченные доставки. После подтверждения они будут отмечены оплаченными.</p>
+                    </div>
+                    <button onClick={() => setShowDeliveryQuickPayModal(false)} className="p-2 rounded-lg hover:bg-gray-100" aria-label="Закрыть быструю оплату доставок">
+                      <X className="h-5 w-5 text-gray-500" />
+                    </button>
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-3">
+                    <select
+                      value={deliveryQuickPayCourierFilter}
+                      onChange={(e) => {
+                        setDeliveryQuickPayCourierFilter(e.target.value);
+                        setDeliveryQuickPaySelectedIds([]);
+                      }}
+                      className="oc-input h-11 rounded-xl bg-white text-sm"
+                    >
+                      <option value="all">Все доставщики</option>
+                      {deliveryCourierOptions.map((name) => (
+                        <option key={`quick-pay-delivery-courier-${name}`} value={name}>{name}</option>
+                      ))}
+                    </select>
+                    <select
+                      value={deliveryQuickPayPayerSupplierId}
+                      onChange={(e) => setDeliveryQuickPayPayerSupplierId(e.target.value)}
+                      className="oc-input h-11 rounded-xl bg-white text-sm"
+                    >
+                      <option value="">Кто оплатит доставку</option>
+                      {suppliers.map((s: any) => (
+                        <option key={`quick-pay-delivery-payer-${s.id}`} value={String(s.id)}>{s.name}</option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const visibleIds = deliveryQuickPayRows.map((delivery: any) => String(delivery.id));
+                        const allSelected = visibleIds.length > 0 && visibleIds.every((id) => deliveryQuickPaySelectedIds.includes(id));
+                        setDeliveryQuickPaySelectedIds(allSelected ? [] : visibleIds);
+                      }}
+                      className="h-11 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                    >
+                      {deliveryQuickPayRows.length > 0 && deliveryQuickPayRows.every((delivery: any) => deliveryQuickPaySelectedIds.includes(String(delivery.id))) ? 'Снять выбор' : 'Выбрать все'}
+                    </button>
+                  </div>
+
+                  <div className="mt-3 grid grid-cols-3 gap-2">
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                      <div className="text-[11px] text-slate-500">К оплате</div>
+                      <div className="text-lg font-bold text-slate-900">{deliveryQuickPayRows.length}</div>
+                    </div>
+                    <div className="rounded-2xl border border-indigo-200 bg-indigo-50 p-3">
+                      <div className="text-[11px] text-indigo-700">Выбрано</div>
+                      <div className="text-lg font-bold text-indigo-800">{deliveryQuickPaySelectedRows.length}</div>
+                    </div>
+                    <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-3">
+                      <div className="text-[11px] text-emerald-700">Сумма</div>
+                      <div className="text-lg font-bold text-emerald-800">{deliveryQuickPaySelectedTotal.toFixed(2)} ₽</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-4 md:p-6 custom-scrollbar">
+                  {deliveryQuickPayRows.length === 0 ? (
+                    <div className="h-full min-h-[220px] flex flex-col items-center justify-center text-center text-slate-400">
+                      <Truck className="h-12 w-12 mb-3 text-emerald-200" />
+                      <div className="font-medium">Нет неоплаченных доставок</div>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {deliveryQuickPayRows.map((delivery: any) => {
+                        const id = String(delivery?.id || '');
+                        const selected = deliveryQuickPaySelectedIds.includes(id);
+                        const rows = Array.isArray(delivery?.rows) ? delivery.rows : [];
+                        const totalBoxes = rows.reduce((sum: number, row: any) => sum + Number(row?.boxes || 0), 0);
+                        return (
+                          <label key={`quick-pay-delivery-row-${id}`} className={`block rounded-2xl border p-3 cursor-pointer transition-all ${selected ? 'border-emerald-400 bg-emerald-50 shadow-sm' : 'border-slate-200 bg-white hover:bg-slate-50'}`}>
+                            <div className="flex items-start gap-3">
+                              <input
+                                type="checkbox"
+                                checked={selected}
+                                onChange={(e) => {
+                                  setDeliveryQuickPaySelectedIds(prev => e.target.checked ? Array.from(new Set([...prev, id])) : prev.filter((x) => x !== id));
+                                }}
+                                className="mt-1 h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                              />
+                              <div className="min-w-0 flex-1">
+                                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-1">
+                                  <div className="font-semibold text-slate-900 truncate">{delivery?.courier || 'Доставщик'}</div>
+                                  <div className="font-bold text-emerald-700">{Number(delivery?.amount || 0).toFixed(2)} ₽</div>
+                                </div>
+                                <div className="mt-1 text-xs text-slate-500">
+                                  {delivery?.date ? new Date(String(delivery.date) + 'T12:00:00').toLocaleDateString('ru-RU') : '—'} • коробок: {Math.floor(totalBoxes).toLocaleString('ru-RU')}
+                                </div>
+                                <div className="mt-1 text-xs text-slate-500 truncate">
+                                  {rows.map((row: any) => suppliers.find((s: any) => String(s.id) === String(row?.supplier_id))?.name || 'Поставщик').join(', ') || 'Без поставщиков'}
+                                </div>
+                              </div>
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                <div className="border-t bg-white px-4 py-3 md:px-6 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                  <div className="text-sm text-slate-600">
+                    Выбрано доставок: <b>{deliveryQuickPaySelectedRows.length}</b> • сумма: <b className="text-emerald-700">{deliveryQuickPaySelectedTotal.toFixed(2)} ₽</b>
+                  </div>
+                  <div className="flex gap-2">
+                    <button type="button" onClick={() => setShowDeliveryQuickPayModal(false)} className="px-4 py-2 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-50">Отмена</button>
+                    <button
+                      type="button"
+                      onClick={handleConfirmDeliveryQuickPay}
+                      disabled={deliveryQuickPaySaving || deliveryQuickPaySelectedRows.length === 0}
+                      className={`px-4 py-2 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 ${deliveryQuickPaySaving || deliveryQuickPaySelectedRows.length === 0 ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                      {deliveryQuickPaySaving ? 'Оплачиваю...' : 'Оплатить выбранные'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {showDeliveryModal && (
+            <div className="fixed inset-0 z-[76] bg-slate-950/60 backdrop-blur-sm flex items-end md:items-center justify-center p-2 md:p-4" onClick={() => setShowDeliveryModal(false)}>
+              <div className="bg-slate-50 rounded-t-3xl md:rounded-3xl shadow-2xl w-[98vw] max-w-6xl h-[88vh] flex flex-col overflow-hidden border border-white/70" onClick={(e) => e.stopPropagation()}>
+                <div className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b border-slate-200 px-4 py-4 md:px-6">
+                  <div className="mx-auto mb-2 h-1.5 w-12 rounded-full bg-gray-300 md:hidden" />
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="inline-flex items-center gap-2 rounded-full bg-orange-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-orange-700 mb-2">
+                        <Truck className="h-3.5 w-3.5" /> Логистика
+                      </div>
+                      <h2 className="text-lg md:text-2xl font-bold text-slate-950">История доставок</h2>
+                      <p className="text-xs md:text-sm text-slate-500 mt-1">Доставщик, коробки по поставщикам, стоимость и статус оплаты.</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          setShowDeliveryQuickPayModal(true);
+                          setDeliveryQuickPayCourierFilter('all');
+                          setDeliveryQuickPayPayerSupplierId('');
+                          setDeliveryQuickPaySelectedIds([]);
+                          if (!deliveryHistory.length) await loadDeliveryData();
+                        }}
+                        className="h-10 rounded-2xl border border-emerald-600 bg-emerald-600 px-3 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 inline-flex items-center justify-center gap-2"
+                      >
+                        <Wallet className="h-4 w-4" />
+                        <span className="hidden sm:inline">Быстрая оплата</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowDeliveryReportModal(true)}
+                        className="h-10 rounded-2xl border border-sky-600 bg-sky-600 px-3 text-sm font-semibold text-white shadow-sm hover:bg-sky-700 inline-flex items-center justify-center gap-2"
+                      >
+                        <FileText className="h-4 w-4" />
+                        <span className="hidden sm:inline">Отчет</span>
+                      </button>
+                      <button onClick={() => setShowDeliveryModal(false)} className="p-2 rounded-lg hover:bg-gray-100" aria-label="Закрыть доставки">
+                        <X className="h-5 w-5 text-gray-500" />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-2">
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                      <div className="text-[11px] text-slate-500">Коробок всего</div>
+                      <div className="text-xl font-black text-slate-900">{Math.floor(deliveryInfographics.totalBoxes).toLocaleString('ru-RU')}</div>
+                    </div>
+                    <div className="rounded-2xl border border-orange-200 bg-orange-50 p-3">
+                      <div className="text-[11px] text-orange-700">Затраты на доставку</div>
+                      <div className="text-xl font-black text-orange-800">{deliveryInfographics.totalAmount.toFixed(2)} ₽</div>
+                    </div>
+                    <div className="rounded-2xl border border-rose-200 bg-rose-50 p-3">
+                      <div className="text-[11px] text-rose-700">Не оплаченных</div>
+                      <div className="text-xl font-black text-rose-800">{deliveryInfographics.unpaidCount}</div>
+                    </div>
+                    <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3">
+                      <div className="text-[11px] text-amber-700">Сумма к оплате</div>
+                      <div className="text-xl font-black text-amber-800">{deliveryInfographics.unpaidAmount.toFixed(2)} ₽</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-4 md:p-6 custom-scrollbar space-y-4">
+                  <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <div className="mb-3 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+                      <div>
+                        <div className="text-sm font-bold text-slate-900">Новая доставка</div>
+                        <div className="text-xs text-slate-500">Сначала создаем доставку, потом отдельно проставляем оплату.</div>
+                      </div>
+                      <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setShowDeliveryPersonModal(true)}
+                          className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 inline-flex items-center justify-center gap-2"
+                        >
+                          <Plus className="h-4 w-4" />
+                          Добавить доставщика
+                        </button>
+                        <div className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
+                          Коробок в форме: {deliveryForm.rows.reduce((sum, row) => sum + Number(row.boxes || 0), 0).toLocaleString('ru-RU')}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-[150px_1fr_180px] gap-3">
+                      <label className="block">
+                        <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Дата</span>
+                        <input
+                          type="date"
+                          value={deliveryForm.date}
+                          onChange={(e) => setDeliveryForm(prev => ({ ...prev, date: e.target.value }))}
+                          className="oc-input h-11 rounded-xl bg-white text-sm"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Доставщик</span>
+                        <select
+                          value={deliveryForm.courier}
+                          onChange={(e) => setDeliveryForm(prev => ({ ...prev, courier: e.target.value }))}
+                          className="oc-input h-11 rounded-xl bg-white text-sm"
+                        >
+                          <option value="">Выберите доставщика</option>
+                          {deliveryPersons.map((name) => (
+                            <option key={'delivery-person-' + name} value={name}>{name}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="block">
+                        <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Сумма</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={deliveryForm.amount}
+                          onChange={(e) => setDeliveryForm(prev => ({ ...prev, amount: e.target.value }))}
+                          placeholder="0"
+                          className="oc-input h-11 rounded-xl bg-white text-sm"
+                        />
+                      </label>
+                    </div>
+
+                    <div className="mt-4 space-y-2">
+                      {deliveryForm.rows.map((row, index) => (
+                        <div key={'delivery-form-row-' + index} className="grid grid-cols-1 md:grid-cols-[1fr_150px_44px] gap-2">
+                          <select
+                            value={row.supplier_id}
+                            onChange={(e) => setDeliveryForm(prev => ({
+                              ...prev,
+                              rows: prev.rows.map((item, itemIndex) => itemIndex === index ? { ...item, supplier_id: e.target.value } : item),
+                            }))}
+                            className="oc-input h-11 rounded-xl bg-white text-sm"
+                          >
+                            <option value="">Поставщик</option>
+                            {suppliers.map((supplier) => (
+                              <option key={'delivery-row-supplier-' + index + '-' + supplier.id} value={String(supplier.id)}>{supplier.name}</option>
+                            ))}
+                          </select>
+                          <input
+                            type="number"
+                            min="0"
+                            step="1"
+                            value={row.boxes}
+                            onChange={(e) => setDeliveryForm(prev => ({
+                              ...prev,
+                              rows: prev.rows.map((item, itemIndex) => itemIndex === index ? { ...item, boxes: e.target.value } : item),
+                            }))}
+                            placeholder="Коробки"
+                            className="oc-input h-11 rounded-xl bg-white text-sm"
+                          />
+                          <button
+                            type="button"
+                            disabled={deliveryForm.rows.length === 1}
+                            onClick={() => setDeliveryForm(prev => ({ ...prev, rows: prev.rows.filter((_, itemIndex) => itemIndex !== index) }))}
+                            className={'h-11 rounded-xl border border-rose-200 bg-white text-rose-600 inline-flex items-center justify-center ' + (deliveryForm.rows.length === 1 ? 'opacity-40 cursor-not-allowed' : 'hover:bg-rose-50')}
+                            title="Удалить поле"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="mt-3 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setDeliveryForm(prev => ({ ...prev, rows: [...prev.rows, { supplier_id: '', boxes: '' }] }))}
+                        className="h-10 rounded-xl border border-orange-200 bg-orange-50 px-4 text-sm font-semibold text-orange-700 hover:bg-orange-100 inline-flex items-center justify-center gap-2"
+                      >
+                        <Plus className="h-4 w-4" />
+                        + Добавить поставщика к доставке
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleAddDelivery}
+                        className="h-10 rounded-xl bg-orange-600 px-5 text-sm font-semibold text-white shadow-sm hover:bg-orange-700 inline-flex items-center justify-center gap-2"
+                      >
+                        <Truck className="h-4 w-4" />
+                        Создать доставку
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <div className="mb-3 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                      <div className="text-sm font-bold text-slate-900">Фильтр и поставщики с доставками</div>
+                      <select
+                        value={deliverySupplierFilter}
+                        onChange={(e) => setDeliverySupplierFilter(e.target.value)}
+                        className="oc-input h-11 rounded-xl bg-white text-sm md:max-w-xs"
+                      >
+                        <option value="all">Все поставщики с доставками</option>
+                        {deliveryInfographics.supplierRows.map((row) => (
+                          <option key={'delivery-filter-' + row.supplierId} value={row.supplierId}>{row.supplierName}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {deliveryInfographics.supplierRows.length === 0 ? (
+                      <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-5 text-center text-sm text-slate-500">Пока нет доставок.</div>
+                    ) : (
+                      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
+                        {deliveryInfographics.supplierRows.map((row) => (
+                          <div key={'delivery-supplier-card-' + row.supplierId} className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                            <div className="font-semibold text-slate-900 truncate" title={row.supplierName}>{row.supplierName}</div>
+                            <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                              <div>
+                                <div className="text-slate-500">Коробок</div>
+                                <div className="font-bold text-slate-900">{Math.floor(row.boxes).toLocaleString('ru-RU')}</div>
+                              </div>
+                              <div>
+                                <div className="text-slate-500">Доставок</div>
+                                <div className="font-bold text-slate-900">{row.deliveries}</div>
+                              </div>
+                              <div>
+                                <div className="text-slate-500">Сумма</div>
+                                <div className="font-bold text-orange-700">{row.amount.toFixed(2)} ₽</div>
+                              </div>
+                              <div>
+                                <div className="text-slate-500">Долг</div>
+                                <div className="font-bold text-rose-700">{row.unpaidAmount.toFixed(2)} ₽</div>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="space-y-2">
+                    {filteredDeliveryHistory.length === 0 ? (
+                      <div className="min-h-[220px] rounded-3xl border border-dashed border-slate-200 bg-white flex flex-col items-center justify-center text-center text-gray-400">
+                        <Truck className="h-12 w-12 mb-3 text-orange-200" />
+                        <div className="font-medium">История доставок пуста</div>
+                      </div>
+                    ) : filteredDeliveryHistory.map((delivery: any) => {
+                      const rows = Array.isArray(delivery?.rows) ? delivery.rows : [];
+                      const totalBoxes = rows.reduce((sum: number, row: any) => sum + Number(row?.boxes || 0), 0);
+                      const paidBySupplier = suppliers.find((s: any) => String(s.id) === String(delivery?.paid_by_supplier_id));
+                      return (
+                        <div key={'delivery-history-' + delivery.id} className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
+                          <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <div className="font-bold text-slate-950">{delivery.courier || 'Доставщик'}</div>
+                                <span className={'rounded-full px-2.5 py-1 text-[11px] font-semibold ' + (delivery.is_paid ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700')}>
+                                  {delivery.is_paid ? 'Оплачено' : 'Не оплачено'}
+                                </span>
+                              </div>
+                              <div className="mt-1 text-xs text-slate-500">
+                                {delivery?.date ? new Date(String(delivery.date) + 'T12:00:00').toLocaleDateString('ru-RU') : '—'} • коробок: {Math.floor(totalBoxes).toLocaleString('ru-RU')}
+                              </div>
+                              {delivery.is_paid && (
+                                <div className="mt-1 text-xs text-emerald-700">
+                                  Кто оплатил: {paidBySupplier?.name || 'Поставщик'}
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex flex-col md:items-end gap-2">
+                              <div className="text-2xl font-black text-orange-700">{Number(delivery.amount || 0).toFixed(2)} ₽</div>
+                              <div className="flex flex-wrap justify-start md:justify-end gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => openDeliveryEditModal(delivery)}
+                                  className="h-9 rounded-xl border border-sky-200 bg-sky-50 px-3 text-xs font-semibold text-sky-700 hover:bg-sky-100 inline-flex items-center gap-1.5"
+                                >
+                                  <Pencil className="h-3.5 w-3.5" />
+                                  Редактировать
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteDelivery(String(delivery.id))}
+                                  className="h-9 rounded-xl border border-rose-200 bg-rose-50 px-3 text-xs font-semibold text-rose-700 hover:bg-rose-100 inline-flex items-center gap-1.5"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                  Удалить
+                                </button>
+                              </div>
+                              {delivery.is_paid ? (
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleDeliveryPaid(String(delivery.id), false)}
+                                  className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                                >
+                                  Снять оплату
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => setDeliveryPayModal({ open: true, deliveryId: String(delivery.id), payerSupplierId: '' })}
+                                  className="h-9 rounded-xl bg-emerald-600 px-3 text-xs font-semibold text-white hover:bg-emerald-700"
+                                >
+                                  Оплатить
+                                </button>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {rows.map((row: any, rowIndex: number) => {
+                              const supplier = suppliers.find((s: any) => String(s.id) === String(row?.supplier_id));
+                              return (
+                                <span key={'delivery-history-row-' + delivery.id + '-' + rowIndex} className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-700">
+                                  {supplier?.name || 'Поставщик'}: <b>{Math.floor(Number(row?.boxes || 0)).toLocaleString('ru-RU')}</b> коробок
+                                </span>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {deliveryEditModal.open && (
+            <div className="fixed inset-0 z-[93] bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={closeDeliveryEditModal}>
+              <div className="w-full max-w-2xl rounded-2xl bg-white p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-lg font-bold text-slate-950">Редактировать доставку</h3>
+                    <div className="mt-1 text-sm text-slate-500">Измените доставщика, сумму и строки поставщиков.</div>
+                  </div>
+                  <button onClick={closeDeliveryEditModal} className="rounded-lg p-2 hover:bg-slate-100" aria-label="Закрыть редактирование доставки">
+                    <X className="h-5 w-5 text-slate-500" />
+                  </button>
+                </div>
+
+                <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <label className="block">
+                    <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Дата</span>
+                    <input
+                      type="date"
+                      value={deliveryEditModal.date}
+                      onChange={(e) => setDeliveryEditModal(prev => ({ ...prev, date: e.target.value }))}
+                      className="oc-input h-11 rounded-xl bg-white text-sm"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Доставщик</span>
+                    <select
+                      value={deliveryEditModal.courier}
+                      onChange={(e) => setDeliveryEditModal(prev => ({ ...prev, courier: e.target.value }))}
+                      className="oc-input h-11 rounded-xl bg-white text-sm"
+                    >
+                      <option value="">Выберите доставщика</option>
+                      {deliveryCourierOptions.map((name) => (
+                        <option key={'delivery-edit-person-' + name} value={name}>{name}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block">
+                    <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Сумма</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={deliveryEditModal.amount}
+                      onChange={(e) => setDeliveryEditModal(prev => ({ ...prev, amount: e.target.value }))}
+                      className="oc-input h-11 rounded-xl bg-white text-sm"
+                    />
+                  </label>
+                </div>
+
+                <div className="mt-4 space-y-2">
+                  {deliveryEditModal.rows.map((row, index) => (
+                    <div key={'delivery-edit-row-' + index} className="grid grid-cols-1 md:grid-cols-[1fr_150px_44px] gap-2">
+                      <select
+                        value={row.supplier_id}
+                        onChange={(e) => setDeliveryEditModal(prev => ({
+                          ...prev,
+                          rows: prev.rows.map((item, itemIndex) => itemIndex === index ? { ...item, supplier_id: e.target.value } : item),
+                        }))}
+                        className="oc-input h-11 rounded-xl bg-white text-sm"
+                      >
+                        <option value="">Поставщик</option>
+                        {suppliers.map((supplier) => (
+                          <option key={'delivery-edit-supplier-' + index + '-' + supplier.id} value={String(supplier.id)}>{supplier.name}</option>
+                        ))}
+                      </select>
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={row.boxes}
+                        onChange={(e) => setDeliveryEditModal(prev => ({
+                          ...prev,
+                          rows: prev.rows.map((item, itemIndex) => itemIndex === index ? { ...item, boxes: e.target.value } : item),
+                        }))}
+                        placeholder="Коробки"
+                        className="oc-input h-11 rounded-xl bg-white text-sm"
+                      />
+                      <button
+                        type="button"
+                        disabled={deliveryEditModal.rows.length === 1}
+                        onClick={() => setDeliveryEditModal(prev => ({ ...prev, rows: prev.rows.filter((_, itemIndex) => itemIndex !== index) }))}
+                        className={'h-11 rounded-xl border border-rose-200 bg-white text-rose-600 inline-flex items-center justify-center ' + (deliveryEditModal.rows.length === 1 ? 'opacity-40 cursor-not-allowed' : 'hover:bg-rose-50')}
+                        title="Удалить поле"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-4 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setDeliveryEditModal(prev => ({ ...prev, rows: [...prev.rows, { supplier_id: '', boxes: '' }] }))}
+                    className="h-10 rounded-xl border border-orange-200 bg-orange-50 px-4 text-sm font-semibold text-orange-700 hover:bg-orange-100 inline-flex items-center justify-center gap-2"
+                  >
+                    <Plus className="h-4 w-4" />
+                    + Добавить поставщика к доставке
+                  </button>
+                  <div className="flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={closeDeliveryEditModal}
+                      className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                    >
+                      Отмена
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleUpdateDelivery}
+                      className="rounded-xl bg-orange-600 px-4 py-2 text-sm font-semibold text-white hover:bg-orange-700"
+                    >
+                      Сохранить
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {showDeliveryReportModal && (
+            <div className="fixed inset-0 z-[94] bg-black/50 flex items-end md:items-center justify-center p-2 md:p-4" onClick={() => setShowDeliveryReportModal(false)}>
+              <div className="bg-white rounded-t-3xl md:rounded-2xl shadow-2xl w-[98vw] max-w-6xl h-[86vh] md:h-[82vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                <div className="sticky top-0 z-10 bg-white border-b px-4 py-4 md:px-6">
+                  <div className="mx-auto mb-2 h-1.5 w-12 rounded-full bg-gray-300 md:hidden" />
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h2 className="text-lg md:text-2xl font-bold text-gray-900">Отчет по доставкам</h2>
+                      <p className="text-xs md:text-sm text-gray-500 mt-1">Период, поставщик, доставщик, оплата и PDF по текущей выборке.</p>
+                    </div>
+                    <button onClick={() => setShowDeliveryReportModal(false)} className="p-2 rounded-lg hover:bg-gray-100" aria-label="Закрыть отчет по доставкам">
+                      <X className="h-5 w-5 text-gray-500" />
+                    </button>
+                  </div>
+
+                  <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50/80 p-3 md:p-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+                      <label className="block">
+                        <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Поставщик</span>
+                        <select
+                          value={deliveryReportForm.supplier_id}
+                          onChange={(e) => setDeliveryReportForm(prev => ({ ...prev, supplier_id: e.target.value }))}
+                          className="oc-input h-11 rounded-xl bg-white text-sm"
+                        >
+                          <option value="all">Все поставщики</option>
+                          {deliveryInfographics.supplierRows.map((row) => (
+                            <option key={'delivery-report-supplier-' + row.supplierId} value={row.supplierId}>{row.supplierName}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="block">
+                        <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Доставщик</span>
+                        <select
+                          value={deliveryReportForm.courier}
+                          onChange={(e) => setDeliveryReportForm(prev => ({ ...prev, courier: e.target.value }))}
+                          className="oc-input h-11 rounded-xl bg-white text-sm"
+                        >
+                          <option value="all">Все доставщики</option>
+                          {deliveryCourierOptions.map((name) => (
+                            <option key={'delivery-report-courier-' + name} value={name}>{name}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="block">
+                        <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Кто оплатил</span>
+                        <select
+                          value={deliveryReportForm.paid_by_supplier_id}
+                          onChange={(e) => setDeliveryReportForm(prev => ({ ...prev, paid_by_supplier_id: e.target.value }))}
+                          className="oc-input h-11 rounded-xl bg-white text-sm"
+                        >
+                          <option value="all">Все оплаты</option>
+                          {suppliers.map((supplier) => (
+                            <option key={'delivery-report-paid-by-' + supplier.id} value={String(supplier.id)}>{supplier.name}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="block">
+                        <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Статус оплаты</span>
+                        <select
+                          value={deliveryReportForm.paid_status}
+                          onChange={(e) => setDeliveryReportForm(prev => ({ ...prev, paid_status: e.target.value }))}
+                          className="oc-input h-11 rounded-xl bg-white text-sm"
+                        >
+                          <option value="all">Все статусы</option>
+                          <option value="paid">Оплачено</option>
+                          <option value="unpaid">Не оплачено</option>
+                        </select>
+                      </label>
+                      <label className="block">
+                        <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Дата с</span>
+                        <input
+                          type="date"
+                          value={deliveryReportForm.start_date}
+                          onChange={(e) => setDeliveryReportForm(prev => ({ ...prev, start_date: e.target.value }))}
+                          className="oc-input h-11 rounded-xl bg-white text-sm"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Дата по</span>
+                        <input
+                          type="date"
+                          value={deliveryReportForm.end_date}
+                          onChange={(e) => setDeliveryReportForm(prev => ({ ...prev, end_date: e.target.value }))}
+                          className="oc-input h-11 rounded-xl bg-white text-sm"
+                        />
+                      </label>
+                      <div className="flex items-end">
+                        <button
+                          type="button"
+                          onClick={handleDownloadDeliveryReportPdf}
+                          className="h-11 w-full px-4 rounded-xl bg-slate-900 text-white hover:bg-slate-800 inline-flex items-center justify-center gap-2 whitespace-nowrap shadow-sm"
+                        >
+                          <Download className="h-4 w-4" />
+                          PDF
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-2">
+                    <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+                      <div className="text-[11px] text-slate-500">Доставок</div>
+                      <div className="text-lg font-bold text-slate-900">{deliveryReportGrouped.totalDeliveries}</div>
+                    </div>
+                    <div className="rounded-xl border border-orange-200 bg-orange-50 p-3 shadow-sm">
+                      <div className="text-[11px] text-orange-700">Коробок</div>
+                      <div className="text-lg font-bold text-orange-800">{Math.floor(deliveryReportGrouped.totalBoxes).toLocaleString('ru-RU')}</div>
+                    </div>
+                    <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 shadow-sm">
+                      <div className="text-[11px] text-emerald-700">Заработано</div>
+                      <div className="text-lg font-bold text-emerald-800">{deliveryReportGrouped.totalPaid.toFixed(2)} ₽</div>
+                    </div>
+                    <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 shadow-sm">
+                      <div className="text-[11px] text-rose-700">Не оплачено</div>
+                      <div className="text-lg font-bold text-rose-800">{deliveryReportGrouped.totalUnpaid.toFixed(2)} ₽</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 custom-scrollbar">
+                  {deliveryReportGrouped.groups.length === 0 ? (
+                    <div className="h-full min-h-[220px] flex flex-col items-center justify-center text-center text-gray-400">
+                      <Truck className="h-12 w-12 mb-3 text-orange-200" />
+                      <div className="font-medium">За выбранный период доставок нет</div>
+                    </div>
+                  ) : deliveryReportGrouped.groups.map((group) => {
+                    const deliveriesCount = new Set(group.rows.map((row: any) => row.deliveryId)).size;
+                    return (
+                      <div key={'delivery-report-group-' + group.supplierId} className="rounded-2xl border border-gray-200 overflow-hidden bg-white">
+                        <div className="bg-gray-50 px-4 py-3 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+                          <div>
+                            <div className="font-bold text-gray-900">{group.supplierName}</div>
+                            <div className="text-xs text-gray-500">Доставок: {deliveriesCount} • Коробок: {Math.floor(group.boxes).toLocaleString('ru-RU')}</div>
+                          </div>
+                          <div className="text-sm font-semibold text-gray-700">
+                            Оплачено: <span className="text-emerald-700">{group.paid.toFixed(2)} ₽</span>
+                            <span className="mx-2 text-gray-300">/</span>
+                            Не оплачено: <span className="text-rose-700">{group.unpaid.toFixed(2)} ₽</span>
+                          </div>
+                        </div>
+
+                        <div className="md:hidden divide-y divide-gray-100">
+                          {group.rows.map((row: any, rowIndex: number) => (
+                            <div key={'delivery-report-mobile-' + row.deliveryId + '-' + rowIndex} className="p-3 text-sm">
+                              <div className="flex items-start justify-between gap-2">
+                                <div>
+                                  <div className="font-medium text-gray-900">{row.courier || 'Доставщик'}</div>
+                                  <div className="text-xs text-gray-500">{row?.date ? new Date(String(row.date) + 'T12:00:00').toLocaleDateString('ru-RU') : '—'} • {Math.floor(Number(row.boxes || 0)).toLocaleString('ru-RU')} кор.</div>
+                                </div>
+                                <div className="font-bold text-orange-700 whitespace-nowrap">{Number(row.amount || 0).toFixed(2)} ₽</div>
+                              </div>
+                              <div className="mt-1 text-xs text-gray-500">Статус: {row.is_paid ? 'Оплачено' : 'Не оплачено'} • Кто оплатил: {row.paidByText || '—'}</div>
+                            </div>
+                          ))}
+                        </div>
+
+                        <table className="hidden md:table w-full text-left text-sm">
+                          <thead className="bg-white border-b border-gray-100">
+                            <tr>
+                              <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Дата</th>
+                              <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Доставщик</th>
+                              <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Коробки</th>
+                              <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Сумма поставщика</th>
+                              <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Сумма доставки</th>
+                              <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Статус</th>
+                              <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Кто оплатил</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-100">
+                            {group.rows.map((row: any, rowIndex: number) => (
+                              <tr key={'delivery-report-row-' + row.deliveryId + '-' + rowIndex} className="hover:bg-gray-50">
+                                <td className="px-4 py-2 whitespace-nowrap">{row?.date ? new Date(String(row.date) + 'T12:00:00').toLocaleDateString('ru-RU') : '—'}</td>
+                                <td className="px-4 py-2 font-medium text-gray-900">{row.courier || 'Доставщик'}</td>
+                                <td className="px-4 py-2">{Math.floor(Number(row.boxes || 0)).toLocaleString('ru-RU')}</td>
+                                <td className="px-4 py-2 font-semibold text-orange-700">{Number(row.amount || 0).toFixed(2)} ₽</td>
+                                <td className="px-4 py-2 text-gray-600">{Number(row.totalDeliveryAmount || 0).toFixed(2)} ₽</td>
+                                <td className={'px-4 py-2 font-semibold ' + (row.is_paid ? 'text-emerald-700' : 'text-rose-700')}>{row.is_paid ? 'Оплачено' : 'Не оплачено'}</td>
+                                <td className="px-4 py-2 text-gray-600 max-w-[260px] truncate" title={row.paidByText || ''}>{row.paidByText || '—'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {showDeliveryPersonModal && (
+            <div className="fixed inset-0 z-[92] bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setShowDeliveryPersonModal(false)}>
+              <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-lg font-bold text-slate-950">Добавить доставщика</h3>
+                    <div className="mt-1 text-sm text-slate-500">Новый доставщик сразу появится в выборе для доставки.</div>
+                  </div>
+                  <button onClick={() => setShowDeliveryPersonModal(false)} className="rounded-lg p-2 hover:bg-slate-100" aria-label="Закрыть добавление доставщика">
+                    <X className="h-5 w-5 text-slate-500" />
+                  </button>
+                </div>
+
+                <form
+                  className="mt-4 space-y-3"
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    const name = String(deliveryPersonNewName || '').trim();
+                    if (!name) return;
+                    await saveDeliveryPersons([...(deliveryPersons || []), name]);
+                    setDeliveryForm(prev => ({ ...prev, courier: name }));
+                    setDeliveryPersonNewName('');
+                    setShowDeliveryPersonModal(false);
+                    showToast('Доставщик добавлен', 'success');
+                  }}
+                >
+                  <label className="block">
+                    <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Имя доставщика</span>
+                    <input
+                      value={deliveryPersonNewName}
+                      onChange={(e) => setDeliveryPersonNewName(e.target.value)}
+                      autoFocus
+                      placeholder="Например: Иван"
+                      className="oc-input h-11 rounded-xl bg-white text-sm"
+                    />
+                  </label>
+
+                  {deliveryPersons.length > 0 && (
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Сохраненные доставщики</div>
+                      <div className="flex flex-wrap gap-2">
+                        {deliveryPersons.map((name) => (
+                          <button
+                            key={'delivery-person-chip-' + name}
+                            type="button"
+                            onClick={() => setDeliveryPersonNewName(name)}
+                            className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                          >
+                            {name}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex justify-end gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowDeliveryPersonModal(false)}
+                      className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                    >
+                      Отмена
+                    </button>
+                    <button
+                      type="submit"
+                      className="rounded-xl bg-orange-600 px-4 py-2 text-sm font-semibold text-white hover:bg-orange-700"
+                    >
+                      Сохранить
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {deliveryPayModal.open && (
+            <div className="fixed inset-0 z-[90] bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setDeliveryPayModal({ open: false, deliveryId: '', payerSupplierId: '' })}>
+              <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+                {(() => {
+                  const delivery = (deliveryHistory || []).find((item: any) => String(item?.id) === String(deliveryPayModal.deliveryId));
+                  return (
+                    <>
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <h3 className="text-lg font-bold text-slate-950">Оплата доставки</h3>
+                          <div className="mt-1 text-sm text-slate-500">
+                            {delivery?.courier || 'Доставщик'} • {Number(delivery?.amount || 0).toFixed(2)} ₽
+                          </div>
+                        </div>
+                        <button onClick={() => setDeliveryPayModal({ open: false, deliveryId: '', payerSupplierId: '' })} className="rounded-lg p-2 hover:bg-slate-100" aria-label="Закрыть оплату доставки">
+                          <X className="h-5 w-5 text-slate-500" />
+                        </button>
+                      </div>
+
+                      <label className="mt-4 block">
+                        <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Кто оплатил</span>
+                        <select
+                          value={deliveryPayModal.payerSupplierId}
+                          onChange={(e) => setDeliveryPayModal(prev => ({ ...prev, payerSupplierId: e.target.value }))}
+                          className="oc-input h-11 rounded-xl bg-white text-sm"
+                        >
+                          <option value="">Выберите поставщика</option>
+                          {suppliers.map((supplier) => (
+                            <option key={'delivery-pay-supplier-' + supplier.id} value={String(supplier.id)}>{supplier.name}</option>
+                          ))}
+                        </select>
+                      </label>
+
+                      <div className="mt-5 flex justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setDeliveryPayModal({ open: false, deliveryId: '', payerSupplierId: '' })}
+                          className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                        >
+                          Отмена
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!deliveryPayModal.payerSupplierId}
+                          onClick={() => handleToggleDeliveryPaid(deliveryPayModal.deliveryId, true, deliveryPayModal.payerSupplierId)}
+                          className={'rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 ' + (!deliveryPayModal.payerSupplierId ? 'opacity-50 cursor-not-allowed' : '')}
+                        >
+                          Проставить оплату
+                        </button>
+                      </div>
+                    </>
+                  );
+                })()}
+              </div>
+            </div>
+          )}
+
+          {showGeneralReportModal && (
+            <div className="fixed inset-0 z-[76] bg-black/50 flex items-end md:items-center justify-center p-2 md:p-4" onClick={() => setShowGeneralReportModal(false)}>
+              <div className="bg-white rounded-t-3xl md:rounded-2xl shadow-2xl w-[98vw] max-w-6xl h-[86vh] md:h-[82vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                <div className="sticky top-0 z-10 bg-white border-b px-4 py-4 md:px-6">
+                  <div className="mx-auto mb-2 h-1.5 w-12 rounded-full bg-gray-300 md:hidden" />
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h2 className="text-lg md:text-2xl font-bold text-gray-900">Общий отчет</h2>
+                      <p className="text-xs md:text-sm text-gray-500 mt-1">Временные сотрудники, доставки и выполненная работа в одном отчете.</p>
+                    </div>
+                    <button onClick={() => setShowGeneralReportModal(false)} className="p-2 rounded-lg hover:bg-gray-100" aria-label="Закрыть общий отчет">
+                      <X className="h-5 w-5 text-gray-500" />
+                    </button>
+                  </div>
+                  <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50/80 p-3 md:p-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+                      <label className="block">
+                        <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Поставщик</span>
+                        <select value={generalReportForm.supplier_id} onChange={(e) => setGeneralReportForm(prev => ({ ...prev, supplier_id: e.target.value }))} className="oc-input h-11 rounded-xl bg-white text-sm">
+                          <option value="all">Все поставщики</option>
+                          {suppliers.map((s) => <option key={`general-report-s-${s.id}`} value={String(s.id)}>{s.name}</option>)}
+                        </select>
+                      </label>
+                      <label className="block">
+                        <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Исполнитель / доставщик</span>
+                        <select value={generalReportForm.person_name} onChange={(e) => setGeneralReportForm(prev => ({ ...prev, person_name: e.target.value }))} className="oc-input h-11 rounded-xl bg-white text-sm">
+                          <option value="all">Все исполнители</option>
+                          {generalReportPersonOptions.map((name) => <option key={`general-report-person-${name}`} value={name}>{name}</option>)}
+                        </select>
+                      </label>
+                      <label className="block">
+                        <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Кто оплатил</span>
+                        <select value={generalReportForm.paid_by_supplier_id} onChange={(e) => setGeneralReportForm(prev => ({ ...prev, paid_by_supplier_id: e.target.value }))} className="oc-input h-11 rounded-xl bg-white text-sm">
+                          <option value="all">Все оплаты</option>
+                          {suppliers.map((s) => <option key={`general-report-paid-by-${s.id}`} value={String(s.id)}>{s.name}</option>)}
+                        </select>
+                      </label>
+                      <label className="block">
+                        <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Статус оплаты</span>
+                        <select value={generalReportForm.paid_status} onChange={(e) => setGeneralReportForm(prev => ({ ...prev, paid_status: e.target.value }))} className="oc-input h-11 rounded-xl bg-white text-sm">
+                          <option value="all">Все статусы</option>
+                          <option value="paid">Оплачено</option>
+                          <option value="unpaid">Не оплачено</option>
+                        </select>
+                      </label>
+                      <label className="block">
+                        <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Дата с</span>
+                        <input type="date" value={generalReportForm.start_date} onChange={(e) => setGeneralReportForm(prev => ({ ...prev, start_date: e.target.value }))} className="oc-input h-11 rounded-xl bg-white text-sm" />
+                      </label>
+                      <label className="block">
+                        <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Дата по</span>
+                        <input type="date" value={generalReportForm.end_date} onChange={(e) => setGeneralReportForm(prev => ({ ...prev, end_date: e.target.value }))} className="oc-input h-11 rounded-xl bg-white text-sm" />
+                      </label>
+                      <div className="flex items-end">
+                        <button type="button" onClick={handleDownloadGeneralReportPdf} className="h-11 w-full px-4 rounded-xl bg-slate-900 text-white hover:bg-slate-800 inline-flex items-center justify-center gap-2 whitespace-nowrap shadow-sm">
+                          <Download className="h-4 w-4" /> PDF
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 grid grid-cols-2 md:grid-cols-6 gap-2">
+                    <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+                      <div className="text-[11px] text-slate-500">Временные</div>
+                      <div className="text-lg font-bold text-slate-900">{generalTempWorkerRows.length}</div>
+                    </div>
+                    <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 shadow-sm">
+                      <div className="text-[11px] text-emerald-700">Заработано</div>
+                      <div className="text-lg font-bold text-emerald-800">{generalReportTotals.tempEarned.toFixed(2)} ₽</div>
+                    </div>
+                    <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 shadow-sm">
+                      <div className="text-[11px] text-blue-700">Доставки</div>
+                      <div className="text-lg font-bold text-blue-800">{generalReportTotals.deliveryAmount.toFixed(2)} ₽</div>
+                    </div>
+                    <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-3 shadow-sm">
+                      <div className="text-[11px] text-indigo-700">Выполненная работа</div>
+                      <div className="text-lg font-bold text-indigo-800">{generalReportTotals.cwAmount.toFixed(2)} ₽</div>
+                    </div>
+                    <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 shadow-sm">
+                      <div className="text-[11px] text-rose-700">Не оплачено</div>
+                      <div className="text-lg font-bold text-rose-800">{(generalReportTotals.tempRemaining + generalReportTotals.deliveryUnpaid).toFixed(2)} ₽</div>
+                    </div>
+                    <div className="rounded-xl border border-slate-300 bg-slate-900 p-3 shadow-sm">
+                      <div className="text-[11px] text-slate-200">Общий итог</div>
+                      <div className="text-lg font-bold text-white">{generalReportTotals.totalAmount.toFixed(2)} ₽</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 custom-scrollbar">
+                  <div className="rounded-2xl border border-gray-200 overflow-hidden bg-white">
+                    <div className="bg-gray-50 px-4 py-3 font-bold text-gray-900">Отчет по временным сотрудникам</div>
+                    {generalTempWorkerRows.length === 0 ? (
+                      <div className="p-4 text-sm text-gray-500">Нет данных</div>
+                    ) : (
+                      <table className="w-full text-left text-sm">
+                        <thead className="bg-white border-b border-gray-100">
+                          <tr>
+                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Дата</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Сотрудник</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Поставщик</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Работа</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Часы</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Заработано</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Кто оплатил</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Не оплачено</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                          {generalTempWorkerRows.slice(0, 80).map((row: any) => (
+                            <tr key={`general-temp-${row.id}`}>
+                              <td className="px-4 py-2 whitespace-nowrap">{row?.date ? new Date(String(row.date) + 'T12:00:00').toLocaleDateString('ru-RU') : '—'}</td>
+                              <td className="px-4 py-2 font-medium">{row.worker_name || row.worker || 'Без имени'}</td>
+                              <td className="px-4 py-2">{row.supplierName || '-'}</td>
+                              <td className="px-4 py-2 max-w-[320px] truncate">{row.work_comment || row.comment || '—'}</td>
+                              <td className="px-4 py-2">{Number(row.hours || 0).toFixed(2)}</td>
+                              <td className="px-4 py-2 text-emerald-700 font-semibold">{Number(row.earnings || 0).toFixed(2)} ₽</td>
+                              <td className="px-4 py-2 text-gray-600 max-w-[260px] truncate" title={row.paidByText || ''}>{row.paidByText || '—'}</td>
+                              <td className="px-4 py-2 text-rose-700">{Number(row.remainingAmount || 0).toFixed(2)} ₽</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+
+                  <div className="rounded-2xl border border-gray-200 overflow-hidden bg-white">
+                    <div className="bg-gray-50 px-4 py-3 font-bold text-gray-900">Отчет по доставке</div>
+                    {generalDeliveryRows.length === 0 ? (
+                      <div className="p-4 text-sm text-gray-500">Нет данных</div>
+                    ) : (
+                      <table className="w-full text-left text-sm">
+                        <thead className="bg-white border-b border-gray-100">
+                          <tr>
+                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Дата</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Доставщик</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Поставщик</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Коробки</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Сумма</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Статус</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                          {generalDeliveryRows.slice(0, 80).map((row: any, idx: number) => (
+                            <tr key={`general-delivery-${row.deliveryId}-${idx}`}>
+                              <td className="px-4 py-2 whitespace-nowrap">{row?.date ? new Date(String(row.date) + 'T12:00:00').toLocaleDateString('ru-RU') : '—'}</td>
+                              <td className="px-4 py-2 font-medium">{row.courier || '-'}</td>
+                              <td className="px-4 py-2">{row.supplierName || '-'}</td>
+                              <td className="px-4 py-2">{Number(row.boxes || 0)}</td>
+                              <td className="px-4 py-2 font-semibold">{Number(row.amount || 0).toFixed(2)} ₽</td>
+                              <td className={`px-4 py-2 font-semibold ${row.is_paid ? 'text-emerald-700' : 'text-rose-700'}`}>{row.is_paid ? 'Оплачено' : 'Не оплачено'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+
+                  <div className="rounded-2xl border border-gray-200 overflow-hidden bg-white">
+                    <div className="bg-gray-50 px-4 py-3 font-bold text-gray-900">Отчет по выполненной работе</div>
+                    {generalReportCwRows.length === 0 ? (
+                      <div className="p-4 text-sm text-gray-500">Нет данных</div>
+                    ) : (
+                      <table className="w-full text-left text-sm">
+                        <thead className="bg-white border-b border-gray-100">
+                          <tr>
+                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Дата</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Сотрудник</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Поставщик</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Вид работы</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Кол-во</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Сумма</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                          {generalReportCwRows.slice(0, 80).map((row: any, idx: number) => (
+                            <tr key={`general-cw-${idx}`}>
+                              <td className="px-4 py-2 whitespace-nowrap">{row?.date ? new Date(String(row.date) + 'T12:00:00').toLocaleDateString('ru-RU') : '—'}</td>
+                              <td className="px-4 py-2 font-medium">{row.employee_name || '-'}</td>
+                              <td className="px-4 py-2">{row.supplier_name || '-'}</td>
+                              <td className="px-4 py-2">{row.work_name || '-'}</td>
+                              <td className="px-4 py-2">{Number(row.quantity || 0)}</td>
+                              <td className="px-4 py-2 text-indigo-700 font-semibold">{Number(row.total || 0).toFixed(2)} ₽</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {showTempWorkerReportModal && (
+            <div className="fixed inset-0 z-[75] bg-black/50 flex items-end md:items-center justify-center p-2 md:p-4" onClick={() => setShowTempWorkerReportModal(false)}>
+              <div className="bg-white rounded-t-3xl md:rounded-2xl shadow-2xl w-[98vw] max-w-6xl h-[86vh] md:h-[82vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                <div className="sticky top-0 z-10 bg-white border-b px-4 py-4 md:px-6">
+                  <div className="mx-auto mb-2 h-1.5 w-12 rounded-full bg-gray-300 md:hidden" />
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h2 className="text-lg md:text-2xl font-bold text-gray-900">Отчет о временном сотруднике</h2>
+                      <p className="text-xs md:text-sm text-gray-500 mt-1">Выберите период и поставщика — отчет покажет список работ по выбранному поставщику или по всем.</p>
+                    </div>
+                    <button onClick={() => setShowTempWorkerReportModal(false)} className="p-2 rounded-lg hover:bg-gray-100" aria-label="Закрыть отчет">
+                      <X className="h-5 w-5 text-gray-500" />
+                    </button>
+                  </div>
+                  <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50/80 p-3 md:p-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+                      <label className="block">
+                        <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Поставщик работ</span>
+                        <select
+                          value={tempWorkerReportForm.supplier_id}
+                          onChange={(e) => setTempWorkerReportForm(prev => ({ ...prev, supplier_id: e.target.value }))}
+                          className="oc-input h-11 rounded-xl bg-white text-sm"
+                        >
+                          <option value="all">Все поставщики</option>
+                          {suppliers.map((s) => (
+                            <option key={`temp-report-s-${s.id}`} value={String(s.id)}>{s.name}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="block">
+                        <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Временный сотрудник</span>
+                        <select
+                          value={tempWorkerReportForm.worker_name}
+                          onChange={(e) => setTempWorkerReportForm(prev => ({ ...prev, worker_name: e.target.value }))}
+                          className="oc-input h-11 rounded-xl bg-white text-sm"
+                        >
+                          <option value="all">Все временные сотрудники</option>
+                          {tempWorkerReportWorkerOptions.map((name) => (
+                            <option key={`temp-report-worker-${name}`} value={name}>{name}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="block">
+                        <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Кто оплатил</span>
+                        <select
+                          value={tempWorkerReportForm.paid_by_supplier_id}
+                          onChange={(e) => setTempWorkerReportForm(prev => ({ ...prev, paid_by_supplier_id: e.target.value }))}
+                          className="oc-input h-11 rounded-xl bg-white text-sm"
+                        >
+                          <option value="all">Все оплаты</option>
+                          {suppliers.map((s) => (
+                            <option key={`temp-report-paid-by-${s.id}`} value={String(s.id)}>{s.name}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="block">
+                        <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Статус оплаты</span>
+                        <select
+                          value={tempWorkerReportForm.paid_status}
+                          onChange={(e) => setTempWorkerReportForm(prev => ({ ...prev, paid_status: e.target.value }))}
+                          className="oc-input h-11 rounded-xl bg-white text-sm"
+                        >
+                          <option value="all">Все статусы</option>
+                          <option value="paid">Оплачено</option>
+                          <option value="unpaid">Не оплачено</option>
+                        </select>
+                      </label>
+                      <label className="block">
+                        <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Дата с</span>
+                        <input
+                          type="date"
+                          value={tempWorkerReportForm.start_date}
+                          onChange={(e) => setTempWorkerReportForm(prev => ({ ...prev, start_date: e.target.value }))}
+                          className="oc-input h-11 rounded-xl bg-white text-sm"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Дата по</span>
+                        <input
+                          type="date"
+                          value={tempWorkerReportForm.end_date}
+                          onChange={(e) => setTempWorkerReportForm(prev => ({ ...prev, end_date: e.target.value }))}
+                          className="oc-input h-11 rounded-xl bg-white text-sm"
+                        />
+                      </label>
+                      <div className="flex items-end">
+                        <button
+                          type="button"
+                          onClick={handleDownloadTempWorkerReportPdf}
+                          className="h-11 w-full px-4 rounded-xl bg-slate-900 text-white hover:bg-slate-800 inline-flex items-center justify-center gap-2 whitespace-nowrap shadow-sm"
+                        >
+                          <Download className="h-4 w-4" />
+                          PDF
+                        </button>
+                      </div>
+                    </div>
+
+                    {tempWorkerReportWorkerOptions.length > 0 && (
+                      <div className="mt-4 border-t border-slate-200 pt-3">
+                        <div className="mb-2 flex items-center justify-between gap-2">
+                          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Быстрый выбор сотрудника</div>
+                          {tempWorkerReportForm.worker_name !== 'all' && (
+                            <button
+                              type="button"
+                              onClick={() => setTempWorkerReportForm(prev => ({ ...prev, worker_name: 'all' }))}
+                              className="text-xs font-medium text-slate-500 hover:text-slate-900"
+                            >
+                              Сбросить
+                            </button>
+                          )}
+                        </div>
+                        <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 md:flex-wrap md:overflow-visible">
+                          <button
+                            type="button"
+                            onClick={() => setTempWorkerReportForm(prev => ({ ...prev, worker_name: 'all' }))}
+                            className={`shrink-0 rounded-full border px-3 py-2 text-sm font-medium transition-all ${tempWorkerReportForm.worker_name === 'all' ? 'border-slate-900 bg-slate-900 text-white shadow-sm' : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50'}`}
+                          >
+                            Все
+                          </button>
+                          {tempWorkerReportWorkerOptions.map((name) => {
+                            const selected = tempWorkerReportForm.worker_name === name;
+                            return (
+                              <button
+                                key={`temp-report-worker-chip-${name}`}
+                                type="button"
+                                onClick={() => setTempWorkerReportForm(prev => ({ ...prev, worker_name: name }))}
+                                className={`shrink-0 rounded-full border px-3 py-2 text-sm font-medium transition-all ${selected ? 'border-indigo-600 bg-indigo-600 text-white shadow-sm' : 'border-slate-200 bg-white text-slate-700 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700'}`}
+                              >
+                                {name}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-2">
+                    <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+                      <div className="text-[11px] text-slate-500">Работ</div>
+                      <div className="text-lg font-bold text-slate-900">{tempWorkerReportGrouped.totalRows}</div>
+                    </div>
+                    <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 shadow-sm">
+                      <div className="text-[11px] text-blue-700">Часы</div>
+                      <div className="text-lg font-bold text-blue-800">{tempWorkerReportGrouped.totalHours.toFixed(2)}</div>
+                    </div>
+                    <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 shadow-sm">
+                      <div className="text-[11px] text-emerald-700">Оплачено</div>
+                      <div className="text-lg font-bold text-emerald-800">{tempWorkerReportGrouped.totalEarnings.toFixed(2)} ₽</div>
+                    </div>
+                    <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 shadow-sm">
+                      <div className="text-[11px] text-rose-700">Не оплачено</div>
+                      <div className="text-lg font-bold text-rose-800">{tempWorkerReportGrouped.totalRemaining.toFixed(2)} ₽</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 custom-scrollbar">
+                  {tempWorkerReportGrouped.groups.length === 0 ? (
+                    <div className="h-full min-h-[220px] flex flex-col items-center justify-center text-center text-gray-400">
+                      <FileText className="h-12 w-12 mb-3 text-gray-300" />
+                      <div className="font-medium">За выбранный период работ нет</div>
+                    </div>
+                  ) : tempWorkerReportGrouped.groups.map((group) => (
+                    <div key={`temp-report-group-${group.supplierId}`} className="rounded-2xl border border-gray-200 overflow-hidden bg-white">
+                      <div className="bg-gray-50 px-4 py-3 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+                        <div>
+                          <div className="font-bold text-gray-900">{group.supplierName}</div>
+                          <div className="text-xs text-gray-500">Работ: {group.rows.length} • Часы: {group.hours.toFixed(2)}</div>
+                        </div>
+                        <div className="text-sm font-semibold text-gray-700">
+                          Заработано: <span className="text-emerald-700">{group.earnings.toFixed(2)} ₽</span>
+                          <span className="mx-2 text-gray-300">/</span>
+                          Не оплачено: <span className="text-rose-700">{group.remaining.toFixed(2)} ₽</span>
+                        </div>
+                      </div>
+
+                      <div className="md:hidden divide-y divide-gray-100">
+                        {group.rows.map((row: any) => (
+                          <div key={`temp-report-mobile-${row.id}`} className="p-3 text-sm">
+                            <div className="flex items-start justify-between gap-2">
+                              <div>
+                                <div className="font-medium text-gray-900">{row.worker_name || row.worker || 'Без имени'}</div>
+                                <div className="text-xs text-gray-500">{row?.date ? new Date(`${row.date}T12:00:00`).toLocaleDateString('ru-RU') : '—'} • {Number(row.hours || 0).toFixed(2)} ч.</div>
+                              </div>
+                              <div className="font-bold text-emerald-700 whitespace-nowrap">{Number(row.earnings || 0).toFixed(2)} ₽</div>
+                            </div>
+                            <div className="mt-1 text-xs text-gray-600">{row.work_comment || row.comment || 'Без комментария'}</div>
+                            <div className="mt-1 text-xs text-gray-500">Факт оплаты: {Number(row.paidAmount || 0).toFixed(2)} ₽ • Не оплачено: {Number(row.remainingAmount || 0).toFixed(2)} ₽</div>
+                            <div className="mt-1 text-xs text-gray-500">Кто оплатил: {row.paidByText || '—'}</div>
+                          </div>
+                        ))}
+                      </div>
+
+                      <table className="hidden md:table w-full text-left text-sm">
+                        <thead className="bg-white border-b border-gray-100">
+                          <tr>
+                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Дата</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Сотрудник</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Работа</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Часы</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Заработано</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Факт оплаты</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Кто оплатил</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Не оплачено</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                          {group.rows.map((row: any) => (
+                            <tr key={`temp-report-row-${row.id}`} className="hover:bg-gray-50">
+                              <td className="px-4 py-2 whitespace-nowrap">{row?.date ? new Date(`${row.date}T12:00:00`).toLocaleDateString('ru-RU') : '—'}</td>
+                              <td className="px-4 py-2 font-medium text-gray-900">{row.worker_name || row.worker || 'Без имени'}</td>
+                              <td className="px-4 py-2 text-gray-600 max-w-[360px] truncate" title={row.work_comment || row.comment || ''}>{row.work_comment || row.comment || '—'}</td>
+                              <td className="px-4 py-2">{Number(row.hours || 0).toFixed(2)}</td>
+                              <td className="px-4 py-2 font-semibold text-emerald-700">{Number(row.earnings || 0).toFixed(2)} ₽</td>
+                              <td className="px-4 py-2 text-violet-700">{Number(row.paidAmount || 0).toFixed(2)} ₽</td>
+                              <td className="px-4 py-2 text-gray-600 max-w-[260px] truncate" title={row.paidByText || ''}>{row.paidByText || '—'}</td>
+                              <td className="px-4 py-2 text-rose-700">{Number(row.remainingAmount || 0).toFixed(2)} ₽</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>
@@ -24994,8 +28306,3 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     </div>
   );
 }
-
-
-
-
-
