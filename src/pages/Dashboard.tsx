@@ -4751,6 +4751,20 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       saveWarehouseOfflineSettings(true);
       await checkWarehouseOfflineServer(false);
       const snapshot = await buildWarehouseOfflineSnapshot();
+      const previousSnapshot = await warehouseOfflineClient.getSnapshot().catch(() => null);
+      const previousProductsCount = Array.isArray(previousSnapshot?.wbProducts) ? previousSnapshot.wbProducts.length : 0;
+      const nextProductsCount = Array.isArray(snapshot.wbProducts) ? snapshot.wbProducts.length : 0;
+
+      if (nextProductsCount === 0) {
+        showToast(
+          previousProductsCount > 0
+            ? 'WB товары не загрузились, старая offline-база сохранена. Проверьте интернет и обновите Товары WB.'
+            : 'WB товары не загрузились. Сначала обновите Товары WB при наличии интернета.',
+          'error'
+        );
+        return null;
+      }
+
       await warehouseOfflineClient.saveSnapshot(snapshot);
       wbSkuIndexRef.current = {};
       supplierProductsIndexRef.current = {};
