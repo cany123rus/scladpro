@@ -113,11 +113,16 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'GET' && url.pathname === '/api/warehouse-offline/health') {
       const db = await readJson();
+      const snapshot = db.snapshot || {};
       send(res, 200, {
         ok: true,
         mode: 'warehouse-offline',
         version: db.version || 1,
         updatedAt: db.updatedAt || null,
+        wbProducts: Array.isArray(snapshot.wbProducts) ? snapshot.wbProducts.length : 0,
+        fboSupplies: Array.isArray(snapshot.fboSupplies) ? snapshot.fboSupplies.length : 0,
+        fboBoxes: Array.isArray(snapshot.fboBoxes) ? snapshot.fboBoxes.length : 0,
+        suppliers: Array.isArray(snapshot.suppliers) ? snapshot.suppliers.length : 0,
         pendingScans: db.fboScans?.pending?.length || 0,
         syncedScans: db.fboScans?.synced?.length || 0,
         conflicts: db.fboScans?.conflicts?.length || 0,
