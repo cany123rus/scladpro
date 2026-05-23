@@ -4665,6 +4665,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const saveWarehouseOfflineSnapshotState = async (snapshot: WarehouseOfflineSnapshot) => {
     const normalized = { ...snapshot, createdAt: snapshot.createdAt || new Date().toISOString() };
     await warehouseOfflineClient.saveSnapshot(normalized);
+    wbSkuIndexRef.current = {};
+    supplierProductsIndexRef.current = {};
     setWarehouseOfflineSnapshot(normalized);
     await checkWarehouseOfflineServer(false);
     return normalized;
@@ -4750,6 +4752,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       await checkWarehouseOfflineServer(false);
       const snapshot = await buildWarehouseOfflineSnapshot();
       await warehouseOfflineClient.saveSnapshot(snapshot);
+      wbSkuIndexRef.current = {};
+      supplierProductsIndexRef.current = {};
       setWarehouseOfflineSnapshot(snapshot);
       setSuppliesList((snapshot.fboSupplies || []).map(normalizeWarehouseOfflineSupply).sort((a, b) => new Date(String(b.created_at || '')).getTime() - new Date(String(a.created_at || '')).getTime()));
       const status = await checkWarehouseOfflineServer(false);
@@ -6476,6 +6480,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     if (wbSkuIndexRef.current[supplierId]) return wbSkuIndexRef.current[supplierId];
 
     const index = new Map<string, { card: any; size: any }>();
+    const addSkuToIndex = (sku: unknown, card: any, size: any = null) => {
+      const key = String(sku || '').trim();
+      if (key && !index.has(key)) index.set(key, { card, size });
+    };
 
     if (warehouseOfflineEnabled) {
       const snapshot = await getWarehouseOfflineSnapshotOrEmpty();
@@ -6483,13 +6491,16 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       for (const card of (snapshot.wbProducts || []) as any[]) {
         const cardSupplierId = String(card?.supplierId || card?.supplier_id || card?.supplierID || '');
         if (cardSupplierId && String(cardSupplierId) !== String(supplierId)) continue;
+        addSkuToIndex(card?.barcode, card);
+        const cardSkus = [
+          ...(Array.isArray(card?.skus) ? card.skus : []),
+          ...(Array.isArray(card?.barcodes) ? card.barcodes : []),
+        ];
+        cardSkus.forEach((sku) => addSkuToIndex(sku, card));
         const sizes = Array.isArray(card?.sizes) ? card.sizes : [];
         for (const size of sizes) {
           const skus = Array.isArray(size?.skus) ? size.skus : [];
-          for (const sku of skus) {
-            const key = String(sku || '').trim();
-            if (key && !index.has(key)) index.set(key, { card, size });
-          }
+          for (const sku of skus) addSkuToIndex(sku, card, size);
         }
       }
       wbSkuIndexRef.current[supplierId] = index;
@@ -6511,13 +6522,16 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       const chunk = rows || [];
       for (const row of chunk as any[]) {
         const card = row?.product_json;
+        addSkuToIndex(card?.barcode, card);
+        const cardSkus = [
+          ...(Array.isArray(card?.skus) ? card.skus : []),
+          ...(Array.isArray(card?.barcodes) ? card.barcodes : []),
+        ];
+        cardSkus.forEach((sku) => addSkuToIndex(sku, card));
         const sizes = Array.isArray(card?.sizes) ? card.sizes : [];
         for (const size of sizes) {
           const skus = Array.isArray(size?.skus) ? size.skus : [];
-          for (const sku of skus) {
-            const key = String(sku || '').trim();
-            if (key && !index.has(key)) index.set(key, { card, size });
-          }
+          for (const sku of skus) addSkuToIndex(sku, card, size);
         }
       }
 
@@ -6533,6 +6547,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     if (supplierProductsIndexRef.current[supplierId]) return supplierProductsIndexRef.current[supplierId];
 
     const index = new Map<string, Product>();
+
+    if (warehouseOfflineEnabled || fboOfflineMode) {
+      supplierProductsIndexRef.current[supplierId] = index;
+      return index;
+    }
+
     const pageSize = 200;
     let from = 0;
 
