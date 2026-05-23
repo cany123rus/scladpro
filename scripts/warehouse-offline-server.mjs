@@ -195,6 +195,29 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === 'POST' && url.pathname === '/api/warehouse-offline/fbo-scans/delete-box') {
+      const body = await readBody(req);
+      const boxId = String(body?.boxId || '').trim();
+      if (!boxId) {
+        send(res, 400, { error: 'boxId is required' });
+        return;
+      }
+
+      const db = await readJson();
+      db.fboScans = db.fboScans || { pending: [], synced: [], conflicts: [] };
+      let deleted = 0;
+      for (const key of ['pending', 'synced', 'conflicts']) {
+        const rows = Array.isArray(db.fboScans[key]) ? db.fboScans[key] : [];
+        const nextRows = rows.filter((row) => String(row?.box_id || row?.boxId || '') !== boxId);
+        deleted += rows.length - nextRows.length;
+        db.fboScans[key] = nextRows;
+      }
+
+      await saveDb(db);
+      send(res, 200, { ok: true, deleted });
+      return;
+    }
+
     if (req.method === 'GET' || req.method === 'HEAD') {
       if (!existsSync(staticDir)) {
         send(res, 404, { error: 'Frontend build not found. Run npm run build before starting the warehouse server.' });

@@ -7008,6 +7008,28 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const handleDeleteBox = async (boxId: string) => {
     if (!window.confirm('Вы уверены, что хотите удалить эту коробку?')) return;
     try {
+      if (warehouseOfflineEnabled) {
+        const snapshot = await getWarehouseOfflineSnapshotOrEmpty();
+        const box = (snapshot.fboBoxes || []).find((row: any) => String(row?.id || '') === String(boxId));
+        const nextSnapshot = {
+          ...snapshot,
+          fboBoxes: (snapshot.fboBoxes || []).filter((row: any) => String(row?.id || '') !== String(boxId)),
+        };
+        await saveWarehouseOfflineSnapshotState(nextSnapshot);
+        await warehouseOfflineClient.deleteFboScansByBox(boxId).catch(() => ({ ok: true, deleted: 0 }));
+        if (currentBox?.id === boxId) {
+          setCurrentBox(null);
+          setSupplyStep('SUPPLY');
+          setBoxItems([]);
+        }
+        if (currentSupply) {
+          await fetchBoxesList(currentSupply.id);
+          await fetchSupplyStats(currentSupply.id);
+        }
+        showToast('Offline-коробка удалена' + (box?.name ? `: ${box.name}` : ''), 'success');
+        return;
+      }
+
       if (fboOfflineMode && currentSupply) {
         updateOfflineFboSession((session) => ({
           ...session,

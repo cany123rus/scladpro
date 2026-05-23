@@ -91,4 +91,11 @@ export const warehouseOfflineClient = {
       body: JSON.stringify({ ids }),
     });
   },
+
+  async deleteFboScansByBox(boxId: string) {
+    return request<{ ok: true; deleted: number }>('/api/warehouse-offline/fbo-scans/delete-box', {
+      method: 'POST',
+      body: JSON.stringify({ boxId }),
+    });
+  },
 };
