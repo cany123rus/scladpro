@@ -123,6 +123,8 @@ http://<PC-LAN-IP>:8787
 
 If the tablet can open SkladPro through that URL, the interface and offline API are ready on the local network.
 
+Do not use http://localhost:8787 on the tablet: localhost points to the tablet itself, not the warehouse PC. If the hosted HTTPS site is open on the tablet, local HTTP checks may also be blocked by the browser; use the local URL above for offline warehouse work.
+
 ## Windows Files
 
 - `scripts/warehouse-offline-start.cmd`

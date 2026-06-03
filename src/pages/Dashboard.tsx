@@ -26,12 +26,34 @@ import { downloadJsonRowsAsExcel, ensureExcelFileSize, ensureExcelRowLimit, ensu
 import ExcelJS from 'exceljs/dist/exceljs.min.js';
 import { mergeWarehouseUpdates, removeWarehouseShelfItem, upsertWarehouseShelfItem } from '../utils/warehouseActions';
 import { DASHBOARD_TAB_IDS, isDashboardTabId } from '../constants/dashboardTabs';
-import { getWarehouseOfflineUrl, isWarehouseOfflineEnabled, setWarehouseOfflineEnabled, setWarehouseOfflineUrl, warehouseOfflineClient, WarehouseOfflineSnapshot, WarehouseOfflineStatus } from '../lib/warehouseOffline';
+import { getDefaultWarehouseOfflineUrl, getWarehouseOfflineUrl, isWarehouseOfflineEnabled, setWarehouseOfflineEnabled, setWarehouseOfflineUrl, warehouseOfflineClient, WarehouseOfflineSnapshot, WarehouseOfflineStatus } from '../lib/warehouseOffline';
 
 
 const getSafeId = () => (globalThis?.crypto && typeof globalThis.crypto.randomUUID === 'function'
   ? globalThis.crypto.randomUUID()
   : `id_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`);
+
+type NotificationType = 'success' | 'error' | 'info' | 'warning';
+type NotificationItem = {
+  id: string;
+  message: string;
+  type: NotificationType;
+  time: Date;
+};
+
+const getNotificationToneClass = (type: NotificationType) => {
+  if (type === 'error') return 'bg-red-600';
+  if (type === 'success') return 'bg-green-600';
+  if (type === 'warning') return 'bg-amber-500';
+  return 'bg-blue-600';
+};
+
+const getNotificationHistoryTextClass = (type: NotificationType) => {
+  if (type === 'error') return 'text-red-600';
+  if (type === 'success') return 'text-green-600';
+  if (type === 'warning') return 'text-amber-600';
+  return 'text-blue-600';
+};
 
 const BARTER_RATING_OPTIONS = ['', 'Удовлетворительно', 'Средне', 'Хорошо', 'Отлично'] as const;
 
@@ -354,6 +376,71 @@ type AccessRule = 'inherit' | 'allow' | 'deny';
 type ButtonAccessConfig = {
   roles?: Record<string, AccessRule>;
   employees?: Record<string, AccessRule>;
+};
+
+const WAREHOUSE_MONEY_LEHA_PREFIX = '[warehouse_money_owner:leha] ';
+const WAREHOUSE_MONEY_OWNERS = [
+  {
+    id: 'sasha',
+    title: 'Деньги на складе Саша',
+    borderClass: 'border-emerald-200 ring-emerald-50',
+    titleClass: 'text-emerald-900',
+    balanceClass: 'text-emerald-700',
+    addButtonClass: 'bg-emerald-600 hover:bg-emerald-700',
+    addFilterClass: 'border-emerald-200 text-emerald-700 hover:bg-emerald-50',
+    addFilterActiveClass: 'bg-emerald-600 text-white',
+  },
+  {
+    id: 'leha',
+    title: 'Деньги на складе Леха',
+    borderClass: 'border-sky-200 ring-sky-50',
+    titleClass: 'text-sky-900',
+    balanceClass: 'text-sky-700',
+    addButtonClass: 'bg-sky-600 hover:bg-sky-700',
+    addFilterClass: 'border-sky-200 text-sky-700 hover:bg-sky-50',
+    addFilterActiveClass: 'bg-sky-600 text-white',
+  },
+] as const;
+
+type WarehouseMoneyOwner = typeof WAREHOUSE_MONEY_OWNERS[number]['id'];
+type WarehouseMoneyFilter = 'all' | 'add' | 'writeoff';
+type WarehouseMoneyFormState = Record<WarehouseMoneyOwner, { amount: string; comment: string }>;
+type WarehouseMoneyFilterState = Record<WarehouseMoneyOwner, WarehouseMoneyFilter>;
+type WarehouseMoneyLog = {
+  id: string;
+  amount: number;
+  comment: string;
+  created_at: string;
+  type?: 'manual' | 'salary';
+  employee_id?: string;
+  employee_name?: string;
+  period_start?: string;
+  period_end?: string;
+};
+
+const getEmptyWarehouseMoneyForms = (): WarehouseMoneyFormState => ({
+  sasha: { amount: '', comment: '' },
+  leha: { amount: '', comment: '' },
+});
+
+const getDefaultWarehouseMoneyFilters = (): WarehouseMoneyFilterState => ({
+  sasha: 'all',
+  leha: 'all',
+});
+
+const getWarehouseMoneyOwner = (row: Pick<WarehouseMoneyLog, 'comment'>): WarehouseMoneyOwner => (
+  String(row?.comment || '').startsWith(WAREHOUSE_MONEY_LEHA_PREFIX) ? 'leha' : 'sasha'
+);
+
+const getWarehouseMoneyDisplayComment = (comment?: string | null) => {
+  const value = String(comment || '');
+  if (value.startsWith(WAREHOUSE_MONEY_LEHA_PREFIX)) return value.slice(WAREHOUSE_MONEY_LEHA_PREFIX.length).trim();
+  return value.trim();
+};
+
+const buildWarehouseMoneyStoredComment = (owner: WarehouseMoneyOwner, comment: string) => {
+  const clean = String(comment || '').trim();
+  return owner === 'leha' ? WAREHOUSE_MONEY_LEHA_PREFIX + clean : clean;
 };
 
 const ASSEMBLY_BUTTONS = [
@@ -706,9 +793,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   // Import & Notification State
   const [lastImportedIds, setLastImportedIds] = useState<string[]>([]);
   const [syncingProductsFromWb, setSyncingProductsFromWb] = useState(false);
-  const [notification, setNotification] = useState<{message: string, type: 'success' | 'error' | 'info'} | null>(null);
-  const [notificationHistory, setNotificationHistory] = useState<{id: string, message: string, type: 'success' | 'error' | 'info', time: Date}[]>([]);
+  const [notification, setNotification] = useState<NotificationItem | null>(null);
+  const [notificationHistory, setNotificationHistory] = useState<NotificationItem[]>([]);
   const [isNotificationHistoryVisible, setIsNotificationHistoryVisible] = useState(false);
+  const notificationTimeoutRef = useRef<number | null>(null);
   const [productToDelete, setProductToDelete] = useState<Product | null>(null);
   const [warehouseOfflineEnabled, setWarehouseOfflineEnabledState] = useState(() => {
     try { return isWarehouseOfflineEnabled(); } catch { return false; }
@@ -3262,19 +3350,37 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [tempDebtComment, setTempDebtComment] = useState('');
   const [tempDebtLogs, setTempDebtLogs] = useState<any[]>([]);
   const [debtPaymentRows, setDebtPaymentRows] = useState<Array<{ id: string; requisiteId: string; amount: string }>>([]);
-  const [cwWarehouseMoneyForm, setCwWarehouseMoneyForm] = useState({ amount: '', comment: '' });
-  const [cwWarehouseMoneyEdit, setCwWarehouseMoneyEdit] = useState<null | { id: string; amount: string; comment: string; mode: 'add' | 'writeoff' }>(null);
-  const [cwWarehouseMoneyFilter, setCwWarehouseMoneyFilter] = useState<'all' | 'add' | 'writeoff'>('all');
+  const [cwWarehouseMoneyForms, setCwWarehouseMoneyForms] = useState<WarehouseMoneyFormState>(() => getEmptyWarehouseMoneyForms());
+  const [cwWarehouseMoneyEdit, setCwWarehouseMoneyEdit] = useState<null | { id: string; amount: string; comment: string; mode: 'add' | 'writeoff'; owner: WarehouseMoneyOwner }>(null);
+  const [cwWarehouseMoneyFilters, setCwWarehouseMoneyFilters] = useState<WarehouseMoneyFilterState>(() => getDefaultWarehouseMoneyFilters());
   const [cwSupplierDebtCollapsed, setCwSupplierDebtCollapsed] = useState(false);
   const [cwWarehouseMoneyCollapsed, setCwWarehouseMoneyCollapsed] = useState(false);
   const [cwBoxesFormsCollapsed, setCwBoxesFormsCollapsed] = useState(false);
-  const [cwWarehouseMoneyHistory, setCwWarehouseMoneyHistory] = useState<Array<{ id: string; amount: number; comment: string; created_at: string; type?: 'manual' | 'salary'; employee_id?: string; employee_name?: string; period_start?: string; period_end?: string }>>([]);
-  const cwWarehouseMoneyBalance = useMemo(() => cwWarehouseMoneyHistory.reduce((sum, row) => sum + Number(row.amount || 0), 0), [cwWarehouseMoneyHistory]);
-  const filteredCwWarehouseMoneyHistory = useMemo(() => {
-    if (cwWarehouseMoneyFilter === 'add') return cwWarehouseMoneyHistory.filter((row) => Number(row.amount || 0) > 0);
-    if (cwWarehouseMoneyFilter === 'writeoff') return cwWarehouseMoneyHistory.filter((row) => Number(row.amount || 0) < 0);
-    return cwWarehouseMoneyHistory;
-  }, [cwWarehouseMoneyHistory, cwWarehouseMoneyFilter]);
+  const [cwWarehouseMoneyHistory, setCwWarehouseMoneyHistory] = useState<WarehouseMoneyLog[]>([]);
+  const cwWarehouseMoneyRowsByOwner = useMemo(() => {
+    const grouped: Record<WarehouseMoneyOwner, WarehouseMoneyLog[]> = { sasha: [], leha: [] };
+    cwWarehouseMoneyHistory.forEach((row) => {
+      grouped[getWarehouseMoneyOwner(row)].push(row);
+    });
+    return grouped;
+  }, [cwWarehouseMoneyHistory]);
+  const cwWarehouseMoneyBalanceByOwner = useMemo(() => ({
+    sasha: cwWarehouseMoneyRowsByOwner.sasha.reduce((sum, row) => sum + Number(row.amount || 0), 0),
+    leha: cwWarehouseMoneyRowsByOwner.leha.reduce((sum, row) => sum + Number(row.amount || 0), 0),
+  }), [cwWarehouseMoneyRowsByOwner]);
+  const filteredCwWarehouseMoneyHistoryByOwner = useMemo(() => {
+    const filterRows = (owner: WarehouseMoneyOwner) => {
+      const filter = cwWarehouseMoneyFilters[owner];
+      const rows = cwWarehouseMoneyRowsByOwner[owner];
+      if (filter === 'add') return rows.filter((row) => Number(row.amount || 0) > 0);
+      if (filter === 'writeoff') return rows.filter((row) => Number(row.amount || 0) < 0);
+      return rows;
+    };
+    return {
+      sasha: filterRows('sasha'),
+      leha: filterRows('leha'),
+    };
+  }, [cwWarehouseMoneyRowsByOwner, cwWarehouseMoneyFilters]);
   const [cwSalaryIssueForm, setCwSalaryIssueForm] = useState({ employee_id: '', period_key: '' });
   const [cwSalaryIssuePreview, setCwSalaryIssuePreview] = useState<{ amount: number; logsCount: number; periodLabel: string; periodStart: string; periodEnd: string } | null>(null);
   const [cwSalaryIssueLoading, setCwSalaryIssueLoading] = useState(false);
@@ -3599,7 +3705,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     setCwWarehouseMoneyHistory(Array.isArray(data) ? data : []);
   };
 
-  const handleStartEditWarehouseMoney = (row: { id: string; amount: number; comment?: string; type?: 'manual' | 'salary' }) => {
+  const handleStartEditWarehouseMoney = (row: WarehouseMoneyLog) => {
     if (row.type && row.type !== 'manual') {
       showToast('Редактирование доступно только для ручных операций', 'error');
       return;
@@ -3608,8 +3714,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     setCwWarehouseMoneyEdit({
       id: String(row.id),
       amount: String(Math.abs(Number(row.amount || 0))),
-      comment: String(row.comment || ''),
+      comment: getWarehouseMoneyDisplayComment(row.comment),
       mode: Number(row.amount || 0) >= 0 ? 'add' : 'writeoff',
+      owner: getWarehouseMoneyOwner(row),
     });
   };
 
@@ -3663,7 +3770,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       return;
     }
 
-    const nextComment = cwWarehouseMoneyEdit.comment.trim();
+    const nextComment = buildWarehouseMoneyStoredComment(cwWarehouseMoneyEdit.owner, cwWarehouseMoneyEdit.comment);
     const nextAmount = cwWarehouseMoneyEdit.mode === 'add' ? amount : -amount;
     const currentMode = Number(currentRow.amount || 0) >= 0 ? 'add' : 'writeoff';
     const modeChanged = currentMode !== cwWarehouseMoneyEdit.mode;
@@ -3730,6 +3837,231 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           setConfirmModal(prev => ({ ...prev, isOpen: false }));
         }
       }
+    );
+  };
+
+  const updateWarehouseMoneyForm = (owner: WarehouseMoneyOwner, field: 'amount' | 'comment', value: string) => {
+    setCwWarehouseMoneyForms((prev) => ({
+      ...prev,
+      [owner]: {
+        ...prev[owner],
+        [field]: value,
+      },
+    }));
+  };
+
+  const handleCreateWarehouseMoneyOperation = async (owner: WarehouseMoneyOwner, mode: 'add' | 'writeoff') => {
+    const form = cwWarehouseMoneyForms[owner];
+    const amountRaw = Number(form.amount || 0);
+    const amount = Math.abs(amountRaw);
+
+    if (!Number.isFinite(amount) || amount === 0) {
+      showToast('Введите сумму', 'error');
+      return;
+    }
+
+    if (mode === 'writeoff' && cwWarehouseMoneyBalanceByOwner[owner] < amount) {
+      showToast('Недостаточно денег на складе', 'error');
+      return;
+    }
+
+    const { error } = await supabase.from('warehouse_money_log').insert([{
+      amount: mode === 'add' ? amount : -amount,
+      comment: buildWarehouseMoneyStoredComment(owner, form.comment),
+      type: 'manual',
+    }]);
+
+    if (error) {
+      showToast((mode === 'add' ? 'Ошибка добавления операции: ' : 'Ошибка списания операции: ') + (error.message || 'неизвестно'), 'error');
+      return;
+    }
+
+    setCwWarehouseMoneyForms((prev) => ({
+      ...prev,
+      [owner]: { amount: '', comment: '' },
+    }));
+    await fetchCwWarehouseMoneyHistory();
+    showToast(mode === 'add' ? 'Операция добавлена' : 'Операция списана', 'success');
+  };
+
+  const renderWarehouseMoneyCard = (ownerConfig: typeof WAREHOUSE_MONEY_OWNERS[number]) => {
+    const owner = ownerConfig.id;
+    const form = cwWarehouseMoneyForms[owner];
+    const filter = cwWarehouseMoneyFilters[owner];
+    const rows = filteredCwWarehouseMoneyHistoryByOwner[owner];
+    const balance = cwWarehouseMoneyBalanceByOwner[owner];
+    const filterClass = (active: boolean, activeClass: string, idleClass: string) => (
+      'rounded-lg px-3 py-2 text-xs font-semibold transition-colors ' + (active ? activeClass : 'bg-white border ' + idleClass)
+    );
+
+    return (
+      <div key={'warehouse-money-' + owner} className={'rounded-2xl border bg-white p-3 shadow-sm ring-1 sm:p-4 ' + ownerConfig.borderClass}>
+        <div className="mb-3 flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className={'font-semibold ' + ownerConfig.titleClass}>{ownerConfig.title}</div>
+            <div className="mt-1 text-xs text-slate-500">Отдельный баланс и история операций</div>
+          </div>
+          <div className={'shrink-0 text-lg font-extrabold ' + ownerConfig.balanceClass}>
+            {Math.floor(balance).toLocaleString('ru-RU')} ₽
+          </div>
+        </div>
+
+        <div className="mb-3 grid grid-cols-1 gap-2 md:grid-cols-[150px_minmax(220px,1fr)] xl:grid-cols-[150px_minmax(220px,1fr)_116px_116px]">
+          <input
+            type="number"
+            step="0.01"
+            placeholder="Сумма"
+            value={form.amount}
+            onChange={(e) => updateWarehouseMoneyForm(owner, 'amount', e.target.value)}
+            className="oc-select"
+          />
+          <input
+            type="text"
+            placeholder="Комментарий (необязательно)"
+            value={form.comment}
+            onChange={(e) => updateWarehouseMoneyForm(owner, 'comment', e.target.value)}
+            className="oc-select"
+          />
+          <button
+            onClick={() => handleCreateWarehouseMoneyOperation(owner, 'add')}
+            className={'h-11 w-full rounded-xl px-3 text-sm font-semibold text-white shadow-sm ' + ownerConfig.addButtonClass}
+          >
+            Добавить
+          </button>
+          <button
+            onClick={() => handleCreateWarehouseMoneyOperation(owner, 'writeoff')}
+            className="h-11 w-full rounded-xl bg-rose-600 px-3 text-sm font-semibold text-white shadow-sm hover:bg-rose-700"
+          >
+            Списать
+          </button>
+        </div>
+
+        <div className="mb-2 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setCwWarehouseMoneyFilters((prev) => ({ ...prev, [owner]: 'all' }))}
+            className={filterClass(filter === 'all', 'bg-slate-900 text-white', 'border-slate-200 text-slate-600 hover:bg-slate-50')}
+          >
+            Все
+          </button>
+          <button
+            type="button"
+            onClick={() => setCwWarehouseMoneyFilters((prev) => ({ ...prev, [owner]: 'add' }))}
+            className={filterClass(filter === 'add', ownerConfig.addFilterActiveClass, ownerConfig.addFilterClass)}
+          >
+            Добавления
+          </button>
+          <button
+            type="button"
+            onClick={() => setCwWarehouseMoneyFilters((prev) => ({ ...prev, [owner]: 'writeoff' }))}
+            className={filterClass(filter === 'writeoff', 'bg-rose-600 text-white', 'border-rose-200 text-rose-700 hover:bg-rose-50')}
+          >
+            Списания
+          </button>
+        </div>
+
+        <div className="max-h-56 overflow-y-auto rounded-lg border bg-white">
+          {rows.length === 0 ? (
+            <div className="p-3 text-sm text-gray-500">Пока нет операций.</div>
+          ) : (
+            <div className="divide-y">
+              {rows.map((row) => {
+                const isEditing = cwWarehouseMoneyEdit?.id === String(row.id);
+                const isManual = !row.type || row.type === 'manual';
+                const displayComment = getWarehouseMoneyDisplayComment(row.comment);
+
+                return (
+                  <div key={'temp-money-' + owner + '-' + row.id} className="p-3 text-sm">
+                    {isEditing && cwWarehouseMoneyEdit ? (
+                      <div className="space-y-2">
+                        <div className="grid grid-cols-1 gap-2 md:grid-cols-[130px_130px_1fr_auto_auto]">
+                          <select
+                            value={cwWarehouseMoneyEdit.mode}
+                            onChange={(e) => setCwWarehouseMoneyEdit(prev => prev ? { ...prev, mode: e.target.value as 'add' | 'writeoff' } : prev)}
+                            className="oc-select"
+                          >
+                            <option value="add">Добавить</option>
+                            <option value="writeoff">Списать</option>
+                          </select>
+                          <input
+                            type="number"
+                            step="0.01"
+                            placeholder="Сумма"
+                            value={cwWarehouseMoneyEdit.amount}
+                            onChange={(e) => setCwWarehouseMoneyEdit(prev => prev ? { ...prev, amount: e.target.value } : prev)}
+                            className="oc-select"
+                          />
+                          <input
+                            type="text"
+                            placeholder="Комментарий"
+                            value={cwWarehouseMoneyEdit.comment}
+                            onChange={(e) => setCwWarehouseMoneyEdit(prev => prev ? { ...prev, comment: e.target.value } : prev)}
+                            className="oc-select"
+                          />
+                          <button
+                            type="button"
+                            onClick={handleSaveWarehouseMoneyEdit}
+                            className="inline-flex items-center justify-center rounded-lg bg-emerald-600 px-3 py-2 text-white hover:bg-emerald-700"
+                            title="Сохранить"
+                          >
+                            <Save className="h-4 w-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleCancelEditWarehouseMoney}
+                            className="inline-flex items-center justify-center rounded-lg border border-gray-200 px-3 py-2 text-gray-600 hover:bg-gray-50"
+                            title="Отмена"
+                          >
+                            <X className="h-4 w-4" />
+                          </button>
+                        </div>
+                        <div className="text-xs text-gray-500">{new Date(row.created_at).toLocaleString('ru-RU')}</div>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <div className="font-medium text-gray-900">{displayComment || 'Без комментария'}</div>
+                            <span className={'rounded-full px-2 py-0.5 text-[10px] font-medium ' + (isManual ? 'bg-slate-100 text-slate-600' : 'bg-violet-100 text-violet-700')}>
+                              {isManual ? 'Ручная' : 'ЗП'}
+                            </span>
+                          </div>
+                          <div className="text-xs text-gray-500">{new Date(row.created_at).toLocaleString('ru-RU')}</div>
+                        </div>
+                        <div className="flex shrink-0 items-center justify-between gap-2 sm:justify-end">
+                          <div className={'font-bold ' + (Number(row.amount) >= 0 ? 'text-emerald-700' : 'text-rose-700')}>
+                            {Number(row.amount) >= 0 ? '+' : ''}{Math.floor(Number(row.amount || 0)).toLocaleString('ru-RU')} ₽
+                          </div>
+                          {isManual && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => handleStartEditWarehouseMoney(row)}
+                                className="inline-flex items-center justify-center rounded-lg border border-blue-200 p-2 text-blue-600 hover:bg-blue-50"
+                                title="Редактировать"
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteWarehouseMoney(row)}
+                                className="inline-flex items-center justify-center rounded-lg border border-red-200 p-2 text-red-600 hover:bg-red-50"
+                                title="Удалить"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
     );
   };
 
@@ -4609,15 +4941,55 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     };
   }, [selectedSupplierId]);
 
-  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
-    const newNotification = { id: Date.now().toString(), message, type, time: new Date() };
+  const showToast = (message: string, type: NotificationType = 'success') => {
+    const newNotification = { id: getSafeId(), message, type, time: new Date() };
     setNotification(newNotification);
     setNotificationHistory(prev => [newNotification, ...prev]);
-    setTimeout(() => setNotification(null), 5000);
+
+    if (notificationTimeoutRef.current) {
+      window.clearTimeout(notificationTimeoutRef.current);
+    }
+
+    notificationTimeoutRef.current = window.setTimeout(() => {
+      setNotification(prev => (prev?.id === newNotification.id ? null : prev));
+      notificationTimeoutRef.current = null;
+    }, 5000);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (notificationTimeoutRef.current) {
+        window.clearTimeout(notificationTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const describeWarehouseOfflineError = (error: any, url: string) => {
+    const baseMessage = String(error?.message || error || 'Сервер недоступен');
+
+    try {
+      const serverUrl = new URL(String(url || '').trim());
+      const pageUrl = new URL(window.location.href);
+      const serverHost = serverUrl.hostname;
+      const pageHost = pageUrl.hostname;
+      const loopbackHosts = ['localhost', '127.0.0.1', '[::1]'];
+
+      if (loopbackHosts.includes(serverHost) && !loopbackHosts.includes(pageHost)) {
+        return `${baseMessage}. На планшете localhost указывает на сам планшет. Откройте SkladPro через http://IP-компьютера:8787 или укажите адрес сервера http://192.168.1.111:8787.`;
+      }
+
+      if (pageUrl.protocol === 'https:' && serverUrl.protocol === 'http:' && !loopbackHosts.includes(serverHost)) {
+        return `${baseMessage}. Браузер может блокировать запрос с HTTPS-сайта к локальному HTTP-серверу. На планшете откройте SkladPro напрямую через ${serverUrl.origin}.`;
+      }
+    } catch {
+      // Keep the original network error if URL parsing fails.
+    }
+
+    return baseMessage;
   };
 
   const saveWarehouseOfflineSettings = (enabled: boolean, url = warehouseOfflineUrl) => {
-    const cleanUrl = String(url || '').trim().replace(/\/+$/, '') || 'http://localhost:8787';
+    const cleanUrl = String(url || '').trim().replace(/\/+$/, '') || getDefaultWarehouseOfflineUrl();
     setWarehouseOfflineEnabled(enabled);
     setWarehouseOfflineUrl(cleanUrl);
     setWarehouseOfflineEnabledState(enabled);
@@ -4631,7 +5003,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       if (showSuccess) showToast('Локальный складской сервер доступен', 'success');
       return status;
     } catch (e: any) {
-      const status = { ok: false, error: e?.message || 'Сервер недоступен' } as WarehouseOfflineStatus;
+      const status = { ok: false, error: describeWarehouseOfflineError(e, warehouseOfflineUrl) } as WarehouseOfflineStatus;
       setWarehouseOfflineStatus(status);
       showToast('Локальный сервер недоступен: ' + status.error, 'error');
       return status;
@@ -15798,18 +16170,18 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
       {/* Toast Notification */}
       {notification && (
-        <div className={`fixed bottom-4 right-4 z-50 px-6 py-4 rounded-lg shadow-lg flex items-center text-white animate-fade-in-up ${
-          notification.type === 'error' ? 'bg-red-600' : notification.type === 'success' ? 'bg-green-600' : 'bg-blue-600'
+        <div className={`fixed bottom-4 right-4 z-[10000] max-w-[min(92vw,32rem)] px-6 py-4 rounded-lg shadow-2xl flex items-start text-white animate-fade-in-up ${
+          getNotificationToneClass(notification.type)
         }`}>
-          {notification.type === 'error' ? <AlertCircle className="h-5 w-5 mr-3" /> : <CheckCircle2 className="h-5 w-5 mr-3" />}
-          {notification.message}
+          {notification.type === 'error' || notification.type === 'warning' ? <AlertCircle className="h-5 w-5 mr-3 mt-0.5 shrink-0" /> : <CheckCircle2 className="h-5 w-5 mr-3 mt-0.5 shrink-0" />}
+          <span className="break-words leading-snug">{notification.message}</span>
         </div>
       )}
 
       {/* Notification History Button */}
       <button
         onClick={() => setIsNotificationHistoryVisible(!isNotificationHistoryVisible)}
-        className="fixed bottom-4 right-4 z-40 p-3 bg-white rounded-full shadow-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-all"
+        className="fixed bottom-4 right-4 z-[9990] p-3 bg-white rounded-full shadow-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-all"
         title="История уведомлений"
       >
         <Bell className="h-6 w-6" />
@@ -15817,7 +16189,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
       {/* Notification History Popover */}
       {isNotificationHistoryVisible && (
-        <div className="fixed bottom-20 right-4 z-40 w-80 bg-white rounded-xl shadow-xl border border-gray-200 max-h-96 overflow-y-auto animate-fade-in-up">
+        <div className="fixed bottom-20 right-4 z-[9990] w-[min(20rem,calc(100vw-2rem))] bg-white rounded-xl shadow-2xl border border-gray-200 max-h-96 overflow-y-auto animate-fade-in-up">
           <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50 rounded-t-xl">
             <span className="font-bold text-gray-900">История уведомлений</span>
             <button onClick={() => setIsNotificationHistoryVisible(false)} className="text-gray-400 hover:text-gray-600">
@@ -15830,7 +16202,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
             ) : (
               notificationHistory.map(n => (
                 <div key={n.id} className="p-3 hover:bg-gray-50 transition-colors">
-                  <div className={`text-sm font-medium ${n.type === 'error' ? 'text-red-600' : n.type === 'success' ? 'text-green-600' : 'text-blue-600'}`}>
+                  <div className={`text-sm font-medium ${getNotificationHistoryTextClass(n.type)}`}>
                     {n.message}
                   </div>
                   <div className="text-xs text-gray-400 mt-1">
@@ -26321,11 +26693,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           )}
 
           {showTempWorkerHistory && (
-            <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm flex items-end md:items-center justify-center z-50 transition-opacity p-2 md:p-4" onClick={() => setShowTempWorkerHistory(false)}>
-              <div className="bg-slate-50 rounded-t-3xl md:rounded-3xl shadow-2xl w-[98vw] max-w-[1500px] h-[88vh] md:h-[90vh] flex flex-col overflow-hidden transform transition-all scale-100 border border-white/70" onClick={e => e.stopPropagation()}>
-                <div className="sticky top-0 z-20 bg-white/90 backdrop-blur border-b border-slate-200 px-4 pt-2 pb-3 md:px-6 md:pt-6 md:pb-4">
+            <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm flex items-end md:items-center justify-center z-50 transition-opacity p-2 md:p-3 xl:p-4" onClick={() => setShowTempWorkerHistory(false)}>
+              <div className="bg-slate-50 rounded-t-3xl md:rounded-3xl shadow-2xl w-[98vw] max-w-[1500px] h-[92svh] md:h-[94svh] lg:h-[92svh] flex flex-col overflow-hidden transform transition-all scale-100 border border-white/70" onClick={e => e.stopPropagation()}>
+                <div className="sticky top-0 z-20 bg-white/90 backdrop-blur border-b border-slate-200 px-4 pt-2 pb-3 md:px-5 md:pt-4 md:pb-4 xl:px-6">
                   <div className="mx-auto mb-1.5 h-1.5 w-12 rounded-full bg-gray-300 md:hidden" />
-                  <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                  <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                     <div className="pr-0 md:pr-4">
                       <div className="inline-flex items-center gap-2 rounded-full bg-indigo-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-indigo-700 mb-2">
                         <History className="h-3.5 w-3.5" /> Журнал выплат
@@ -26333,17 +26705,17 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       <h2 className="text-base md:text-2xl font-bold text-slate-950 leading-tight">История временных сотрудников</h2>
                       <p className="text-[11px] md:text-sm text-slate-500 mt-0.5 md:mt-1 leading-tight">Смены, долги, оплаты и деньги на складе</p>
                     </div>
-                    <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end sm:gap-3 w-full md:w-auto">
+                    <div className="grid w-full grid-cols-2 gap-2 sm:grid-cols-3 lg:flex lg:w-auto lg:flex-wrap lg:justify-end lg:gap-3">
                       <button
                           onClick={() => setShowTempWorkerAddNameModal(true)}
-                          className="h-10 w-full sm:w-auto rounded-2xl border border-slate-200 bg-white px-3.5 text-sm font-semibold text-slate-700 shadow-sm transition-all hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 hover:shadow-md inline-flex items-center justify-center gap-2"
+                          className="h-10 w-full lg:w-auto rounded-2xl border border-slate-200 bg-white px-3.5 text-sm font-semibold text-slate-700 shadow-sm transition-all hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 hover:shadow-md inline-flex items-center justify-center gap-2"
                       >
                           <Plus className="w-4 h-4 shrink-0" />
                           <span className="text-center">Добавить сотрудника</span>
                       </button>
                       <button
                           onClick={() => setShowTempWorkerAddTemplateModal(true)}
-                          className="h-10 w-full sm:w-auto rounded-2xl border border-slate-200 bg-white px-3.5 text-sm font-semibold text-slate-700 shadow-sm transition-all hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 hover:shadow-md inline-flex items-center justify-center gap-2"
+                          className="h-10 w-full lg:w-auto rounded-2xl border border-slate-200 bg-white px-3.5 text-sm font-semibold text-slate-700 shadow-sm transition-all hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 hover:shadow-md inline-flex items-center justify-center gap-2"
                       >
                           <Plus className="w-4 h-4 shrink-0" />
                           <span className="text-center">Шаблон комментария</span>
@@ -26356,7 +26728,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             setTempWorkerQuickPaySelectedIds([]);
                             if (!tempWorkerLogs.length) await fetchTempWorkerLogs();
                           }}
-                          className="h-10 w-full sm:w-auto rounded-2xl border border-emerald-600 bg-emerald-600 px-3.5 text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-emerald-700 hover:shadow-md inline-flex items-center justify-center gap-2"
+                          className="h-10 w-full lg:w-auto rounded-2xl border border-emerald-600 bg-emerald-600 px-3.5 text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-emerald-700 hover:shadow-md inline-flex items-center justify-center gap-2"
                       >
                           <Wallet className="w-4 h-4 shrink-0" />
                           <span className="text-center">Быстрая оплата</span>
@@ -26366,7 +26738,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             setShowTempWorkerReportModal(true);
                             if (!tempWorkerLogs.length) await fetchTempWorkerLogs();
                           }}
-                          className="h-10 w-full sm:w-auto rounded-2xl border border-sky-600 bg-sky-600 px-3.5 text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-sky-700 hover:shadow-md inline-flex items-center justify-center gap-2"
+                          className="h-10 w-full lg:w-auto rounded-2xl border border-sky-600 bg-sky-600 px-3.5 text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-sky-700 hover:shadow-md inline-flex items-center justify-center gap-2"
                       >
                           <FileText className="w-4 h-4 shrink-0" />
                           <span className="text-center">Отчет</span>
@@ -26376,7 +26748,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             setShowDeliveryModal(true);
                             await loadDeliveryData();
                           }}
-                          className="h-10 w-full sm:w-auto rounded-2xl border border-orange-500 bg-orange-500 px-3.5 text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-orange-600 hover:shadow-md inline-flex items-center justify-center gap-2"
+                          className="h-10 w-full lg:w-auto rounded-2xl border border-orange-500 bg-orange-500 px-3.5 text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-orange-600 hover:shadow-md inline-flex items-center justify-center gap-2"
                       >
                           <Truck className="w-4 h-4 shrink-0" />
                           <span className="text-center">Доставка</span>
@@ -26384,7 +26756,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       <button
                           onClick={() => setShowTempWorkerModal(true)}
                           disabled={!hasAssemblyButtonAccess('temp_shift_add')}
-                          className={`h-10 w-full sm:w-auto rounded-2xl bg-indigo-600 px-3.5 text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-indigo-700 hover:shadow-md inline-flex items-center justify-center gap-2 ${!hasAssemblyButtonAccess('temp_shift_add') ? 'opacity-50 cursor-not-allowed' : ''}`}
+                          className={`h-10 w-full lg:w-auto rounded-2xl bg-indigo-600 px-3.5 text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-indigo-700 hover:shadow-md inline-flex items-center justify-center gap-2 ${!hasAssemblyButtonAccess('temp_shift_add') ? 'opacity-50 cursor-not-allowed' : ''}`}
                       >
                           <Plus className="w-4 h-4 shrink-0" />
                           <span className="text-center">Добавить смену</span>
@@ -26508,153 +26880,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 </div>
 
                 <div className="flex-1 overflow-y-auto custom-scrollbar px-3 md:px-6 pb-6">
-                  <div className="mb-4 rounded-2xl border border-emerald-200 bg-white p-4 shadow-sm ring-1 ring-emerald-50">
-                    <div className="flex items-center justify-between mb-2 gap-2">
-                      <div className="font-semibold text-emerald-900">Деньги на складе</div>
-                      <div className="text-lg font-extrabold text-emerald-700">{Math.floor(cwWarehouseMoneyBalance).toLocaleString('ru-RU')} ₽</div>
-                    </div>
-                    <div className="grid grid-cols-1 md:grid-cols-[160px_1fr_120px_120px] gap-2 mb-3">
-                      <input type="number" step="0.01" placeholder="Сумма" value={cwWarehouseMoneyForm.amount} onChange={(e) => setCwWarehouseMoneyForm(prev => ({ ...prev, amount: e.target.value }))} className="oc-select" />
-                      <input type="text" placeholder="Комментарий (необязательно)" value={cwWarehouseMoneyForm.comment} onChange={(e) => setCwWarehouseMoneyForm(prev => ({ ...prev, comment: e.target.value }))} className="oc-select" />
-                      <button onClick={async () => {
-                        const amountRaw = Number(cwWarehouseMoneyForm.amount || 0); const amount = Math.abs(amountRaw);
-                        if (!Number.isFinite(amount) || amount === 0) { showToast('Введите сумму', 'error'); return; }
-                        const { error } = await supabase.from('warehouse_money_log').insert([{ amount, comment: cwWarehouseMoneyForm.comment.trim(), type: 'manual' }]);
-                        if (error) { showToast('Ошибка добавления операции: ' + (error.message || 'неизвестно'), 'error'); return; }
-                        setCwWarehouseMoneyForm({ amount: '', comment: '' }); await fetchCwWarehouseMoneyHistory(); showToast('Операция добавлена', 'success');
-                      }} className="h-10 w-full rounded-xl bg-emerald-600 px-3 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700">Добавить</button>
-                      <button onClick={async () => {
-                        const amountRaw = Number(cwWarehouseMoneyForm.amount || 0); const amount = Math.abs(amountRaw);
-                        if (!Number.isFinite(amount) || amount === 0) { showToast('Введите сумму', 'error'); return; }
-                        if (cwWarehouseMoneyBalance < amount) { showToast('Недостаточно денег на складе', 'error'); return; }
-                        const { error } = await supabase.from('warehouse_money_log').insert([{ amount: -amount, comment: cwWarehouseMoneyForm.comment.trim(), type: 'manual' }]);
-                        if (error) { showToast('Ошибка списания операции: ' + (error.message || 'неизвестно'), 'error'); return; }
-                        setCwWarehouseMoneyForm({ amount: '', comment: '' }); await fetchCwWarehouseMoneyHistory(); showToast('Операция списана', 'success');
-                      }} className="h-10 w-full rounded-xl bg-rose-600 px-3 text-sm font-semibold text-white shadow-sm hover:bg-rose-700">Списать</button>
-                    </div>
-                    <div className="mb-2 flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setCwWarehouseMoneyFilter('all')}
-                        className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${cwWarehouseMoneyFilter === 'all' ? 'bg-slate-900 text-white' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'}`}
-                      >
-                        Все
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setCwWarehouseMoneyFilter('add')}
-                        className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${cwWarehouseMoneyFilter === 'add' ? 'bg-emerald-600 text-white' : 'bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-50'}`}
-                      >
-                        Добавления
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setCwWarehouseMoneyFilter('writeoff')}
-                        className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${cwWarehouseMoneyFilter === 'writeoff' ? 'bg-rose-600 text-white' : 'bg-white border border-rose-200 text-rose-700 hover:bg-rose-50'}`}
-                      >
-                        Списания
-                      </button>
-                    </div>
-                    <div className="max-h-48 overflow-y-auto border rounded-lg bg-white">
-                      {filteredCwWarehouseMoneyHistory.length === 0 ? (
-                        <div className="p-3 text-sm text-gray-500">Пока нет операций.</div>
-                      ) : (
-                        <div className="divide-y">
-                          {filteredCwWarehouseMoneyHistory.map((row) => {
-                            const isEditing = cwWarehouseMoneyEdit?.id === String(row.id);
-                            const isManual = !row.type || row.type === 'manual';
-
-                            return (
-                              <div key={`temp-money-${row.id}`} className="p-3 text-sm">
-                                {isEditing && cwWarehouseMoneyEdit ? (
-                                  <div className="space-y-2">
-                                    <div className="grid grid-cols-1 md:grid-cols-[140px_140px_1fr_auto_auto] gap-2">
-                                      <select
-                                        value={cwWarehouseMoneyEdit.mode}
-                                        onChange={(e) => setCwWarehouseMoneyEdit(prev => prev ? { ...prev, mode: e.target.value as 'add' | 'writeoff' } : prev)}
-                                        className="oc-select"
-                                      >
-                                        <option value="add">Добавить</option>
-                                        <option value="writeoff">Списать</option>
-                                      </select>
-                                      <input
-                                        type="number"
-                                        step="0.01"
-                                        placeholder="Сумма"
-                                        value={cwWarehouseMoneyEdit.amount}
-                                        onChange={(e) => setCwWarehouseMoneyEdit(prev => prev ? { ...prev, amount: e.target.value } : prev)}
-                                        className="oc-select"
-                                      />
-                                      <input
-                                        type="text"
-                                        placeholder="Комментарий"
-                                        value={cwWarehouseMoneyEdit.comment}
-                                        onChange={(e) => setCwWarehouseMoneyEdit(prev => prev ? { ...prev, comment: e.target.value } : prev)}
-                                        className="oc-select"
-                                      />
-                                      <button
-                                        type="button"
-                                        onClick={handleSaveWarehouseMoneyEdit}
-                                        className="inline-flex items-center justify-center rounded-lg bg-emerald-600 px-3 py-2 text-white hover:bg-emerald-700"
-                                        title="Сохранить"
-                                      >
-                                        <Save className="h-4 w-4" />
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={handleCancelEditWarehouseMoney}
-                                        className="inline-flex items-center justify-center rounded-lg border border-gray-200 px-3 py-2 text-gray-600 hover:bg-gray-50"
-                                        title="Отмена"
-                                      >
-                                        <X className="h-4 w-4" />
-                                      </button>
-                                    </div>
-                                    <div className="text-xs text-gray-500">{new Date(row.created_at).toLocaleString('ru-RU')}</div>
-                                  </div>
-                                ) : (
-                                  <div className="flex items-center justify-between gap-3">
-                                    <div>
-                                      <div className="flex items-center gap-2 flex-wrap">
-                                        <div className="font-medium text-gray-900">{row.comment || 'Без комментария'}</div>
-                                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${isManual ? 'bg-slate-100 text-slate-600' : 'bg-violet-100 text-violet-700'}`}>
-                                          {isManual ? 'Ручная' : 'ЗП'}
-                                        </span>
-                                      </div>
-                                      <div className="text-xs text-gray-500">{new Date(row.created_at).toLocaleString('ru-RU')}</div>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                      <div className={`font-bold ${Number(row.amount) >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
-                                        {Number(row.amount) >= 0 ? '+' : ''}{Math.floor(Number(row.amount || 0)).toLocaleString('ru-RU')} ₽
-                                      </div>
-                                      {isManual && (
-                                        <>
-                                          <button
-                                            type="button"
-                                            onClick={() => handleStartEditWarehouseMoney(row)}
-                                            className="inline-flex items-center justify-center rounded-lg border border-blue-200 p-2 text-blue-600 hover:bg-blue-50"
-                                            title="Редактировать"
-                                          >
-                                            <Pencil className="h-4 w-4" />
-                                          </button>
-                                          <button
-                                            type="button"
-                                            onClick={() => handleDeleteWarehouseMoney(row)}
-                                            className="inline-flex items-center justify-center rounded-lg border border-red-200 p-2 text-red-600 hover:bg-red-50"
-                                            title="Удалить"
-                                          >
-                                            <Trash2 className="h-4 w-4" />
-                                          </button>
-                                        </>
-                                      )}
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
+                  <div className="mb-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+                    {WAREHOUSE_MONEY_OWNERS.map(renderWarehouseMoneyCard)}
                   </div>
                     <div className="md:hidden space-y-2">
                       {filteredTempWorkerLogs.map((log) => {
@@ -26741,7 +26968,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       <div className="md:hidden p-10 text-center text-gray-400">История пуста</div>
                     )}
 
-                    <table className="hidden md:table w-full text-left border-collapse">
+                    <div className="hidden md:block overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
+                    <table className="min-w-[1060px] w-full text-left border-collapse text-sm">
                         <thead className="bg-gray-50 sticky top-0 z-10">
                             <tr>
                                 <th className="p-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Дата</th>
@@ -26838,6 +27066,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             )}
                         </tbody>
                     </table>
+                    </div>
                 </div>
               </div>
             </div>

@@ -21,11 +21,13 @@ create table if not exists public.barter_cards (
   barter_prices text[] not null default '{}'::text[],
   barter_views text[] not null default '{}'::text[],
   barter_ratings text[] not null default '{}'::text[],
+  barter_published boolean[] not null default '{}'::boolean[],
   ad_links text[] not null default '{}'::text[],
   ad_dates text[] not null default '{}'::text[],
   ad_prices text[] not null default '{}'::text[],
   ad_views text[] not null default '{}'::text[],
   ad_ratings text[] not null default '{}'::text[],
+  ad_published boolean[] not null default '{}'::boolean[],
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -173,11 +175,13 @@ insert into public.barter_cards (
   barter_prices,
   barter_views,
   barter_ratings,
+  barter_published,
   ad_links,
   ad_dates,
   ad_prices,
   ad_views,
-  ad_ratings
+  ad_ratings,
+  ad_published
 )
 select
   dedupe_key as id,
@@ -202,11 +206,13 @@ select
   array(select jsonb_array_elements_text(case when jsonb_typeof(row -> 'barter_prices') = 'array' then row -> 'barter_prices' else '[]'::jsonb end)) as barter_prices,
   array(select jsonb_array_elements_text(case when jsonb_typeof(row -> 'barter_views') = 'array' then row -> 'barter_views' else '[]'::jsonb end)) as barter_views,
   array(select jsonb_array_elements_text(case when jsonb_typeof(row -> 'barter_ratings') = 'array' then row -> 'barter_ratings' else '[]'::jsonb end)) as barter_ratings,
+  array(select coalesce(nullif(trim(both '"' from value::text), '')::boolean, false) from jsonb_array_elements(case when jsonb_typeof(row -> 'barter_published') = 'array' then row -> 'barter_published' else '[]'::jsonb end)) as barter_published,
   array(select jsonb_array_elements_text(case when jsonb_typeof(row -> 'ad_links') = 'array' then row -> 'ad_links' else '[]'::jsonb end)) as ad_links,
   array(select jsonb_array_elements_text(case when jsonb_typeof(row -> 'ad_dates') = 'array' then row -> 'ad_dates' else '[]'::jsonb end)) as ad_dates,
   array(select jsonb_array_elements_text(case when jsonb_typeof(row -> 'ad_prices') = 'array' then row -> 'ad_prices' else '[]'::jsonb end)) as ad_prices,
   array(select jsonb_array_elements_text(case when jsonb_typeof(row -> 'ad_views') = 'array' then row -> 'ad_views' else '[]'::jsonb end)) as ad_views,
-  array(select jsonb_array_elements_text(case when jsonb_typeof(row -> 'ad_ratings') = 'array' then row -> 'ad_ratings' else '[]'::jsonb end)) as ad_ratings
+  array(select jsonb_array_elements_text(case when jsonb_typeof(row -> 'ad_ratings') = 'array' then row -> 'ad_ratings' else '[]'::jsonb end)) as ad_ratings,
+  array(select coalesce(nullif(trim(both '"' from value::text), '')::boolean, false) from jsonb_array_elements(case when jsonb_typeof(row -> 'ad_published') = 'array' then row -> 'ad_published' else '[]'::jsonb end)) as ad_published
 from ranked
 where rn = 1
 on conflict (id)
@@ -228,9 +234,11 @@ do update set
   barter_prices = excluded.barter_prices,
   barter_views = excluded.barter_views,
   barter_ratings = excluded.barter_ratings,
+  barter_published = excluded.barter_published,
   ad_links = excluded.ad_links,
   ad_dates = excluded.ad_dates,
   ad_prices = excluded.ad_prices,
   ad_views = excluded.ad_views,
   ad_ratings = excluded.ad_ratings,
+  ad_published = excluded.ad_published,
   updated_at = now();

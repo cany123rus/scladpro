@@ -22,15 +22,49 @@ export type WarehouseOfflineSnapshot = {
 
 const OFFLINE_URL_KEY = 'warehouse_offline_server_url_v1';
 const OFFLINE_ENABLED_KEY = 'warehouse_offline_enabled_v1';
+const FALLBACK_OFFLINE_URL = 'http://localhost:8787';
+
+const isLoopbackOfflineUrl = (url: string) => {
+  try {
+    const parsed = new URL(url);
+    return ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname);
+  } catch {
+    return false;
+  }
+};
+
+export const getDefaultWarehouseOfflineUrl = () => {
+  try {
+    if (typeof window === 'undefined') return FALLBACK_OFFLINE_URL;
+
+    const { origin, protocol, hostname, port } = window.location;
+    const isHttp = protocol === 'http:' || protocol === 'https:';
+    const isLoopbackHost = ['localhost', '127.0.0.1', '[::1]'].includes(hostname);
+
+    if (isHttp && port === '8787' && !isLoopbackHost) {
+      return origin;
+    }
+  } catch {
+    // Keep localhost as the safe desktop default.
+  }
+
+  return FALLBACK_OFFLINE_URL;
+};
 
 export const getWarehouseOfflineUrl = () => {
   const saved = String(localStorage.getItem(OFFLINE_URL_KEY) || '').trim();
-  return saved || 'http://localhost:8787';
+  const currentDefault = getDefaultWarehouseOfflineUrl();
+
+  if (currentDefault !== FALLBACK_OFFLINE_URL && (!saved || isLoopbackOfflineUrl(saved))) {
+    return currentDefault;
+  }
+
+  return saved || currentDefault;
 };
 
 export const setWarehouseOfflineUrl = (url: string) => {
   const normalized = String(url || '').trim().replace(/\/+$/, '');
-  localStorage.setItem(OFFLINE_URL_KEY, normalized || 'http://localhost:8787');
+  localStorage.setItem(OFFLINE_URL_KEY, normalized || getDefaultWarehouseOfflineUrl());
 };
 
 export const isWarehouseOfflineEnabled = () => {

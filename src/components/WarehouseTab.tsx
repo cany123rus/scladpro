@@ -261,115 +261,203 @@ export const WarehouseTab = (props: Props) => {
         <p className="text-gray-500 mt-1">Интерактивная карта. Нажми на стеллаж, чтобы открыть его полки.</p>
       </div>
 
-      <div className="mb-5 bg-white border border-slate-200 rounded-2xl p-4 md:p-5 shadow-sm">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-base md:text-lg font-semibold text-slate-900">Загруженность склада</h2>
-          <span className="text-xs md:text-sm text-slate-500">Свободно стеллажей: <span className="font-bold text-emerald-700">{warehouseTotals.freeRacks}</span> из {warehouseTotals.totalRacks}</span>
+      <div className="mb-5 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+        <div className="relative bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 px-4 py-4 text-white md:px-5 md:py-5">
+          <div className="absolute right-0 top-0 h-28 w-28 rounded-full bg-indigo-500/20 blur-2xl" />
+          <div className="relative flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-indigo-100 ring-1 ring-white/15">
+                Сводка склада
+              </div>
+              <h2 className="mt-2 text-lg md:text-xl font-bold">Загруженность склада</h2>
+              <p className="mt-1 text-xs text-slate-300">Полки, стеллажи и свободная ёмкость в одном блоке</p>
+            </div>
+            <div className="grid grid-cols-2 gap-2 md:min-w-[300px]">
+              <div className="rounded-2xl bg-white/10 p-3 ring-1 ring-white/15 backdrop-blur">
+                <div className="text-[11px] text-slate-300">Свободно стеллажей</div>
+                <div className="mt-1 text-2xl font-extrabold text-emerald-300">{warehouseTotals.freeRacks}</div>
+                <div className="text-[11px] text-slate-400">из {warehouseTotals.totalRacks}</div>
+              </div>
+              <div className="rounded-2xl bg-white/10 p-3 ring-1 ring-white/15 backdrop-blur">
+                <div className="text-[11px] text-slate-300">Свободно полок</div>
+                <div className="mt-1 text-2xl font-extrabold text-cyan-300">{warehouseTotals.freeShelves}</div>
+                <div className="text-[11px] text-slate-400">из {warehouseTotals.totalShelves}</div>
+              </div>
+            </div>
+          </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-            <div className="flex items-center justify-between text-sm mb-2">
-              <span className="text-slate-600">Полки заполнены</span>
-              <span className="font-semibold text-slate-900">{warehouseTotals.filledShelves}/{warehouseTotals.totalShelves} ({warehouseTotals.shelvesPercent}%)</span>
+        <div className="grid grid-cols-1 gap-3 p-3 md:grid-cols-2 md:p-4">
+          <div className="rounded-2xl border border-indigo-100 bg-gradient-to-br from-indigo-50 to-white p-4">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <div className="text-sm font-bold text-slate-900">Полки заполнены</div>
+                <div className="mt-0.5 text-xs text-slate-500">{warehouseTotals.filledShelves} занято / {warehouseTotals.totalShelves} всего</div>
+              </div>
+              <div className="rounded-2xl bg-indigo-600 px-3 py-2 text-lg font-extrabold text-white shadow-sm">{warehouseTotals.shelvesPercent}%</div>
             </div>
-            <div className="h-2.5 w-full bg-slate-200 rounded-full overflow-hidden">
-              <div className="h-full bg-gradient-to-r from-indigo-600 to-blue-600" style={{ width: `${warehouseTotals.shelvesPercent}%` }} />
+            <div className="h-3 w-full overflow-hidden rounded-full bg-indigo-100">
+              <div className="h-full rounded-full bg-gradient-to-r from-indigo-500 via-blue-500 to-cyan-500 shadow-sm" style={{ width: `${warehouseTotals.shelvesPercent}%` }} />
             </div>
-            <div className="text-xs text-slate-500 mt-2">Свободных полок: <span className="font-semibold text-emerald-700">{warehouseTotals.freeShelves}</span></div>
+            <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+              <div className="rounded-xl bg-white p-2 text-slate-600 ring-1 ring-indigo-100">Занято: <b className="text-slate-900">{warehouseTotals.filledShelves}</b></div>
+              <div className="rounded-xl bg-white p-2 text-slate-600 ring-1 ring-indigo-100">Свободно: <b className="text-emerald-700">{warehouseTotals.freeShelves}</b></div>
+            </div>
           </div>
 
-          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-            <div className="flex items-center justify-between text-sm mb-2">
-              <span className="text-slate-600">Стеллажи заняты</span>
-              <span className="font-semibold text-slate-900">{warehouseTotals.filledRacks}/{warehouseTotals.totalRacks} ({warehouseTotals.racksPercent}%)</span>
+          <div className="rounded-2xl border border-emerald-100 bg-gradient-to-br from-emerald-50 to-white p-4">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <div className="text-sm font-bold text-slate-900">Стеллажи заняты</div>
+                <div className="mt-0.5 text-xs text-slate-500">{warehouseTotals.filledRacks} занято / {warehouseTotals.totalRacks} всего</div>
+              </div>
+              <div className="rounded-2xl bg-emerald-600 px-3 py-2 text-lg font-extrabold text-white shadow-sm">{warehouseTotals.racksPercent}%</div>
             </div>
-            <div className="h-2.5 w-full bg-slate-200 rounded-full overflow-hidden">
-              <div className="h-full bg-gradient-to-r from-emerald-500 to-emerald-600" style={{ width: `${warehouseTotals.racksPercent}%` }} />
+            <div className="h-3 w-full overflow-hidden rounded-full bg-emerald-100">
+              <div className="h-full rounded-full bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 shadow-sm" style={{ width: `${warehouseTotals.racksPercent}%` }} />
             </div>
-            <div className="text-xs text-slate-500 mt-2">Свободных стеллажей: <span className="font-semibold text-emerald-700">{warehouseTotals.freeRacks}</span></div>
+            <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+              <div className="rounded-xl bg-white p-2 text-slate-600 ring-1 ring-emerald-100">Занято: <b className="text-slate-900">{warehouseTotals.filledRacks}</b></div>
+              <div className="rounded-xl bg-white p-2 text-slate-600 ring-1 ring-emerald-100">Свободно: <b className="text-emerald-700">{warehouseTotals.freeRacks}</b></div>
+            </div>
           </div>
         </div>
       </div>
 
       {supplierInfographics.length > 0 && (
-        <div className="mb-5 bg-white border border-slate-200 rounded-2xl p-4 md:p-5 shadow-sm">
-          <h2 className="text-base md:text-lg font-semibold text-slate-900 mb-3">Загруженность по поставщикам</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-            {supplierInfographics.map((s) => (
-              <div key={`supplier-inf-${s.id}`} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                <div className="font-semibold text-slate-900 mb-2 truncate">{s.name}</div>
+        <div className="mb-5 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex flex-col gap-2 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-white px-4 py-3 md:flex-row md:items-center md:justify-between md:px-5">
+            <div>
+              <h2 className="text-base md:text-lg font-bold text-slate-950">Загруженность по поставщикам</h2>
+              <p className="mt-0.5 text-xs text-slate-500">Компактная сводка по закреплённым стеллажам и полкам</p>
+            </div>
+            <div className="inline-flex w-fit items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
+              <span className="h-2 w-2 rounded-full bg-emerald-500" />
+              {supplierInfographics.length} поставщиков
+            </div>
+          </div>
 
-                <div className="text-xs text-slate-600 mb-1">Полки: {s.filledShelves}/{s.totalShelves} ({s.shelvesPercent}%)</div>
-                <div className="h-2 w-full bg-slate-200 rounded-full overflow-hidden mb-2">
-                  <div className="h-full bg-gradient-to-r from-indigo-600 to-blue-600" style={{ width: `${s.shelvesPercent}%` }} />
-                </div>
+          <div className="overflow-x-auto px-3 py-3 md:px-5 custom-scrollbar">
+            <div className="flex gap-3 pb-1 md:grid md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 md:pb-0">
+              {supplierInfographics.map((s) => {
+                const accent = supplierColorMap[String(s.id)] || 'from-indigo-600 to-blue-700';
+                return (
+                  <div key={`supplier-inf-${s.id}`} className="min-w-[260px] rounded-2xl border border-slate-200 bg-white p-3 shadow-sm ring-1 ring-slate-100 transition-all hover:-translate-y-0.5 hover:shadow-md md:min-w-0">
+                    <div className="mb-3 flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-bold text-slate-950" title={s.name}>{s.name}</div>
+                        <div className="mt-0.5 text-[11px] text-slate-500">Свободно: {s.freeRacks} стелл. / {s.freeShelves} пол.</div>
+                      </div>
+                      <div className={`h-9 w-9 shrink-0 rounded-2xl bg-gradient-to-br ${accent} shadow-sm`} />
+                    </div>
 
-                <div className="text-xs text-slate-600 mb-1">Стеллажи: {s.filledRacks}/{s.totalRacks} ({s.racksPercent}%)</div>
-                <div className="h-2 w-full bg-slate-200 rounded-full overflow-hidden mb-2">
-                  <div className="h-full bg-gradient-to-r from-emerald-500 to-emerald-600" style={{ width: `${s.racksPercent}%` }} />
-                </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="rounded-xl bg-slate-50 p-2">
+                        <div className="flex items-center justify-between gap-2 text-[11px] text-slate-500">
+                          <span>Полки</span>
+                          <span className="font-bold text-slate-800">{s.shelvesPercent}%</span>
+                        </div>
+                        <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-slate-200">
+                          <div className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-blue-600" style={{ width: `${s.shelvesPercent}%` }} />
+                        </div>
+                        <div className="mt-1 text-[11px] font-semibold text-slate-700">{s.filledShelves}/{s.totalShelves}</div>
+                      </div>
 
-                <div className="text-[11px] text-slate-500">Свободно: стеллажей {s.freeRacks}, полок {s.freeShelves}</div>
-              </div>
-            ))}
+                      <div className="rounded-xl bg-slate-50 p-2">
+                        <div className="flex items-center justify-between gap-2 text-[11px] text-slate-500">
+                          <span>Стеллажи</span>
+                          <span className="font-bold text-slate-800">{s.racksPercent}%</span>
+                        </div>
+                        <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-slate-200">
+                          <div className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-600" style={{ width: `${s.racksPercent}%` }} />
+                        </div>
+                        <div className="mt-1 text-[11px] font-semibold text-slate-700">{s.filledRacks}/{s.totalRacks}</div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
       )}
 
-      <div className="bg-white border border-gray-200 rounded-2xl p-4 md:p-6 shadow-sm mb-5">
-        <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-3 items-end">
+      <div className="mb-5 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+        <div className="border-b border-slate-100 bg-gradient-to-r from-slate-50 to-white px-4 py-3 md:px-5">
+          <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+            <div>
+              <h2 className="text-base font-bold text-slate-950">Управление складом</h2>
+              <p className="text-xs text-slate-500">Заполнение полок, импорт и поиск позиций</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="p-4 md:p-5">
+        <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3 md:p-4">
+          <div className="mb-3 flex items-center gap-2 text-sm font-bold text-slate-800">
+            <div className="h-8 w-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center">+</div>
+            Заполнить полку
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-3 items-end">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Заполнить: Стеллаж</label>
-            <select value={warehouseFill.rack} onChange={(e) => { setWarehouseEditTarget(null); setWarehouseFill((p: any) => ({ ...p, rack: e.target.value, shelf: '' })); }} className="px-3 py-2 border border-gray-300 rounded-lg w-full">
+            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Стеллаж</label>
+            <select value={warehouseFill.rack} onChange={(e) => { setWarehouseEditTarget(null); setWarehouseFill((p: any) => ({ ...p, rack: e.target.value, shelf: '' })); }} className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100">
               <option value="">Выберите стеллаж</option>
               {allWarehouseRacks.map((rack) => <option key={rack} value={rack}>{rack}</option>)}
             </select>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Заполнить: Полка</label>
-            <select value={warehouseFill.shelf} onChange={(e) => { setWarehouseEditTarget(null); setWarehouseFill((p: any) => ({ ...p, shelf: e.target.value })); }} className="px-3 py-2 border border-gray-300 rounded-lg w-full">
+            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Полка</label>
+            <select value={warehouseFill.shelf} onChange={(e) => { setWarehouseEditTarget(null); setWarehouseFill((p: any) => ({ ...p, shelf: e.target.value })); }} className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100">
               <option value="">Выберите полку</option>
               {selectedRackShelves.map((shelf) => <option key={shelf} value={shelf}>{shelf}</option>)}
             </select>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Заполнить: Артикул</label>
-            <input value={warehouseFill.article} onChange={(e) => setWarehouseFill((p: any) => ({ ...p, article: e.target.value }))} className="px-3 py-2 border border-gray-300 rounded-lg w-full" placeholder="Артикул" />
+            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Артикул</label>
+            <input value={warehouseFill.article} onChange={(e) => setWarehouseFill((p: any) => ({ ...p, article: e.target.value }))} className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100" placeholder="Артикул" />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Заполнить: Размер</label>
-            <input value={warehouseFill.size} onChange={(e) => setWarehouseFill((p: any) => ({ ...p, size: e.target.value }))} className="px-3 py-2 border border-gray-300 rounded-lg w-full" placeholder="Размер" />
+            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Размер</label>
+            <input value={warehouseFill.size} onChange={(e) => setWarehouseFill((p: any) => ({ ...p, size: e.target.value }))} className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100" placeholder="Размер" />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Заполнить: Цвет</label>
-            <input value={warehouseFill.color} onChange={(e) => setWarehouseFill((p: any) => ({ ...p, color: e.target.value }))} className="px-3 py-2 border border-gray-300 rounded-lg w-full" placeholder="Цвет" />
+            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Цвет</label>
+            <input value={warehouseFill.color} onChange={(e) => setWarehouseFill((p: any) => ({ ...p, color: e.target.value }))} className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100" placeholder="Цвет" />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Заполнить: Поставщик</label>
-            <select value={warehouseFill.supplier || ''} onChange={(e) => setWarehouseFill((p: any) => ({ ...p, supplier: e.target.value }))} className="px-3 py-2 border border-gray-300 rounded-lg w-full">
+            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Поставщик</label>
+            <select value={warehouseFill.supplier || ''} onChange={(e) => setWarehouseFill((p: any) => ({ ...p, supplier: e.target.value }))} className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100">
               <option value="">Выберите поставщика</option>
               {suppliers.map((s) => <option key={s.id} value={s.name}>{s.name}</option>)}
             </select>
           </div>
 
-          <button onClick={handleFillRack} className="px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">{warehouseEditTarget ? 'Сохранить изменения' : 'Заполнить полку'}</button>
+          <button onClick={handleFillRack} className="h-11 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 px-4 font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md">{warehouseEditTarget ? 'Сохранить изменения' : 'Заполнить полку'}</button>
           {warehouseEditTarget && (
-            <button onClick={() => setWarehouseEditTarget(null)} className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50">Отмена редактирования</button>
+            <button onClick={() => setWarehouseEditTarget(null)} className="h-11 rounded-xl border border-slate-200 bg-white px-4 font-semibold text-slate-700 shadow-sm hover:bg-slate-50">Отмена</button>
           )}
         </div>
 
-        <div className="mt-3 pt-3 border-t border-gray-200 flex flex-wrap gap-2 items-center">
-          <button onClick={() => warehouseFileInputRef.current?.click()} className="px-4 py-2 rounded-lg border border-gray-300 hover:bg-gray-50">Выбрать файл</button>
-          <button onClick={handleDownloadWarehouseTemplate} className="px-4 py-2 rounded-lg border border-indigo-300 text-indigo-700 hover:bg-indigo-50">Скачать шаблон</button>
+          </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-3 gap-3 items-end mt-3 pt-3 border-t border-gray-200">
+        <div className="mt-3 flex flex-wrap gap-2 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+          <button onClick={() => warehouseFileInputRef.current?.click()} className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50">Выбрать файл</button>
+          <button onClick={handleDownloadWarehouseTemplate} className="inline-flex h-10 items-center justify-center rounded-xl border border-indigo-200 bg-indigo-50 px-4 text-sm font-semibold text-indigo-700 shadow-sm hover:bg-indigo-100">Скачать шаблон</button>
+        </div>
+
+        <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50/70 p-3 md:p-4">
+          <div className="mb-3 flex items-center gap-2 text-sm font-bold text-slate-800">
+            <div className="h-8 w-8 rounded-xl bg-slate-900 text-white flex items-center justify-center">⌕</div>
+            Поиск по складу
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-3 gap-3 items-end">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Поиск: Артикул</label>
             <div className="flex gap-2">
@@ -445,8 +533,8 @@ export const WarehouseTab = (props: Props) => {
 
         <div className="mt-3">
           <div className="flex flex-wrap items-center gap-2 mb-2">
-            <button onClick={addPendingToSearch} className="px-3 py-1.5 rounded-lg border border-indigo-300 text-indigo-700 hover:bg-indigo-50 text-sm">Добавить в поиск</button>
-            <button onClick={clearSearch} className="px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 text-sm">Очистить поиск</button>
+            <button onClick={addPendingToSearch} className="inline-flex h-9 items-center justify-center rounded-xl bg-slate-900 px-4 text-sm font-semibold text-white shadow-sm hover:bg-slate-800">Добавить в поиск</button>
+            <button onClick={clearSearch} className="inline-flex h-9 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50">Очистить</button>
           </div>
 
           <div className="text-xs text-gray-500 mb-2">Текущий поиск (размер и цвет напротив артикула):</div>
@@ -488,7 +576,7 @@ export const WarehouseTab = (props: Props) => {
           <div className="text-sm font-medium text-slate-700 mb-2">Найденные позиции (стеллаж + полка):</div>
           {warehouseSearchResults.length > 0 && (
             <div className="mb-3 grid grid-cols-1 md:grid-cols-3 gap-2 items-end">
-              <button onClick={handleDownloadWarehouseSearchPdf} disabled={warehousePdfGenerating} className="px-3 py-2 rounded-lg border border-indigo-300 text-indigo-700 hover:bg-indigo-50 text-sm disabled:opacity-50 disabled:cursor-not-allowed">
+              <button onClick={handleDownloadWarehouseSearchPdf} disabled={warehousePdfGenerating} className="h-10 rounded-xl border border-indigo-200 bg-indigo-50 px-3 text-sm font-semibold text-indigo-700 shadow-sm hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50">
                 {warehousePdfGenerating ? 'Подготовка Excel...' : 'Скачать позиции (Excel)'}
               </button>
               <select
@@ -501,7 +589,7 @@ export const WarehouseTab = (props: Props) => {
                   <option key={emp.id} value={emp.id}>{String(emp.full_name || '').trim() || `Сотрудник ${emp.id}`}{emp.telegram_chat_id ? '' : ' (без TG)'}</option>
                 ))}
               </select>
-              <button onClick={handleSendWarehouseSearchToTelegram} disabled={warehousePdfGenerating} className="px-3 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 text-sm disabled:opacity-50 disabled:cursor-not-allowed">
+              <button onClick={handleSendWarehouseSearchToTelegram} disabled={warehousePdfGenerating} className="h-10 rounded-xl bg-emerald-600 px-3 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50">
                 {warehousePdfGenerating ? 'Подготовка файла...' : 'Отправить в Telegram'}
               </button>
             </div>
@@ -533,15 +621,16 @@ export const WarehouseTab = (props: Props) => {
           )}
         </div>
       </div>
+      </div>
 
-      <div className="mb-4 bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
-        <div className="flex flex-wrap gap-2 items-end">
-          <button onClick={() => { setRackFillMode((v) => !v); setSelectedRacksBulk([]); }} className="px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">
+      <div className="mb-4 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-col gap-3 md:flex-row md:items-end">
+          <button onClick={() => { setRackFillMode((v) => !v); setSelectedRacksBulk([]); }} className="h-11 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 px-4 font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md">
             {rackFillMode ? 'Отменить выбор стеллажей' : 'Заполнить стеллажи'}
           </button>
           {rackFillMode && (
             <>
-              <select value={bulkSupplierId} onChange={(e) => setBulkSupplierId(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-lg min-w-[240px]">
+              <select value={bulkSupplierId} onChange={(e) => setBulkSupplierId(e.target.value)} className="h-11 min-w-[240px] rounded-xl border border-slate-200 bg-white px-3 text-sm shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100">
                 <option value="">Выберите поставщика для стеллажей</option>
                 {suppliers.map((s) => <option key={`bulk-${s.id}`} value={s.id}>{s.name}</option>)}
               </select>
@@ -552,7 +641,7 @@ export const WarehouseTab = (props: Props) => {
                   setSelectedRacksBulk([]);
                 }}
                 disabled={!bulkSupplierId || selectedRacksBulk.length === 0}
-                className="px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700"
+                className="h-11 rounded-xl bg-emerald-600 px-4 font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Применить к выбранным ({selectedRacksBulk.length})
               </button>

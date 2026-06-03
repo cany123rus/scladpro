@@ -3,9 +3,10 @@ import ExcelJS from 'exceljs/dist/exceljs.min.js';
 export const MAX_EXCEL_FILE_BYTES = 15 * 1024 * 1024; // 15MB
 export const MAX_EXCEL_ROWS = 100000;
 
-export const ensureExcelFileSize = (file: File): string | null => {
-  if (file.size > MAX_EXCEL_FILE_BYTES) {
-    return 'Файл слишком большой. Максимум 15MB.';
+export const ensureExcelFileSize = (file: File, maxBytes = MAX_EXCEL_FILE_BYTES): string | null => {
+  if (file.size > maxBytes) {
+    const maxMb = Math.round(maxBytes / 1024 / 1024);
+    return `Файл слишком большой. Максимум ${maxMb}MB.`;
   }
   return null;
 };
