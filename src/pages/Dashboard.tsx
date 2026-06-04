@@ -281,6 +281,62 @@ interface Product {
   nm_id?: string;
 }
 
+interface FboPalletSession {
+  id: string;
+  supplier_id: string;
+  status: 'active' | 'closed';
+  created_at: string;
+  deleted_at?: string | null;
+}
+
+interface FboPallet {
+  id: string;
+  session_id: string;
+  supplier_id: string;
+  pallet_number: number;
+  created_at: string;
+  deleted_at?: string | null;
+}
+
+interface FboPalletItem {
+  id: string;
+  pallet_id: string;
+  supplier_id: string;
+  product_id?: string | null;
+  nm_id?: string | null;
+  barcode?: string | null;
+  vendor_code?: string | null;
+  title: string;
+  size?: string | null;
+  color?: string | null;
+  photo_url?: string | null;
+  qty: number;
+  product_json?: any;
+  created_at: string;
+  deleted_at?: string | null;
+}
+
+interface FboPalletProductOption {
+  key: string;
+  nm_id: string;
+  barcode: string;
+  vendor_code: string;
+  title: string;
+  brand: string;
+  category: string;
+  size: string;
+  color: string;
+  photo_url: string;
+  product_json: any;
+}
+
+interface FboPalletHint {
+  pallet_number: number;
+  item_title: string;
+  item_size?: string | null;
+  item_color?: string | null;
+}
+
 interface Supply {
   id: string;
   supplier_id: string;
@@ -5301,7 +5357,32 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [supplyProductsLoading, setSupplyProductsLoading] = useState(false);
   const [supplyProductsPhotoLoading, setSupplyProductsPhotoLoading] = useState(false);
   const [supplyProductsRows, setSupplyProductsRows] = useState<Array<{ key: string; nmId?: string; image?: string; article: string; title: string; sizesText: string; sizeBarcodeLines: string[]; totalQty: number }>>([]);
+  const [fboPalletModalOpen, setFboPalletModalOpen] = useState(false);
+  const [fboPalletHistoryOpen, setFboPalletHistoryOpen] = useState(false);
+  const [fboPalletSupplierId, setFboPalletSupplierId] = useState('');
+  const [fboPalletSessions, setFboPalletSessions] = useState<FboPalletSession[]>([]);
+  const [fboPallets, setFboPallets] = useState<FboPallet[]>([]);
+  const [fboPalletItems, setFboPalletItems] = useState<FboPalletItem[]>([]);
+  const [fboPalletLoading, setFboPalletLoading] = useState(false);
+  const [fboPalletProductPicker, setFboPalletProductPicker] = useState<{ open: boolean; palletId: string }>({ open: false, palletId: '' });
+  const [fboPalletProducts, setFboPalletProducts] = useState<FboPalletProductOption[]>([]);
+  const [fboPalletProductsLoading, setFboPalletProductsLoading] = useState(false);
+  const [fboPalletProductSearch, setFboPalletProductSearch] = useState('');
+  const [fboPalletBrandFilter, setFboPalletBrandFilter] = useState('');
+  const [fboPalletCategoryFilter, setFboPalletCategoryFilter] = useState('');
+  const [fboPalletHint, setFboPalletHint] = useState<FboPalletHint | null>(null);
   const [supplyStats, setSupplyStats] = useState({ boxes: 0, items: 0 });
+  const fboPalletBrands = useMemo(() => Array.from(new Set(fboPalletProducts.map((p) => p.brand).filter(Boolean))).sort(), [fboPalletProducts]);
+  const fboPalletCategories = useMemo(() => Array.from(new Set(fboPalletProducts.map((p) => p.category).filter(Boolean))).sort(), [fboPalletProducts]);
+  const filteredFboPalletProducts = useMemo(() => {
+    const q = fboPalletProductSearch.trim().toLowerCase();
+    return fboPalletProducts.filter((p) => {
+      if (fboPalletBrandFilter && p.brand !== fboPalletBrandFilter) return false;
+      if (fboPalletCategoryFilter && p.category !== fboPalletCategoryFilter) return false;
+      if (!q) return true;
+      return [p.title, p.vendor_code, p.nm_id, p.barcode, p.size, p.color].some((value) => String(value || '').toLowerCase().includes(q));
+    });
+  }, [fboPalletBrandFilter, fboPalletCategoryFilter, fboPalletProductSearch, fboPalletProducts]);
   const [apiBoxCount, setApiBoxCount] = useState('1');
   const [loadingApiBoxes, setLoadingApiBoxes] = useState(false);
   const [fboBoxesExcelFile, setFboBoxesExcelFile] = useState<File | null>(null);
@@ -6860,6 +6941,333 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     }
   };
 
+
+  const getFboPalletImage = (card: any) => {
+    const firstPhoto = (Array.isArray(card?.photos) && card.photos[0]) || (Array.isArray(card?.mediaFiles) && card.mediaFiles[0]) || '';
+    let src = String(card?.photoUrl || card?.image || card?.image_url || firstPhoto?.big || firstPhoto?.c516x688 || firstPhoto?.c246x328 || firstPhoto?.tm || firstPhoto || '').trim();
+    if (src.startsWith('//')) src = 'https:' + src;
+    return /^https?:\/\//i.test(src) ? src : '';
+  };
+
+  const createFboPalletId = (prefix: string) => {
+    const randomId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2);
+    return prefix + '-' + randomId;
+  };
+
+  const parseFboPalletSnapshot = (value: any) => {
+    try {
+      const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+      return {
+        sessions: Array.isArray(parsed?.sessions) ? parsed.sessions as FboPalletSession[] : [],
+        pallets: Array.isArray(parsed?.pallets) ? parsed.pallets as FboPallet[] : [],
+        items: Array.isArray(parsed?.items) ? parsed.items as FboPalletItem[] : [],
+      };
+    } catch {
+      return { sessions: [] as FboPalletSession[], pallets: [] as FboPallet[], items: [] as FboPalletItem[] };
+    }
+  };
+
+  const loadFboPalletSnapshot = async () => {
+    const { data, error } = await supabase
+      .from('app_settings')
+      .select('value')
+      .eq('key', 'fbo_pallet_collection_v1')
+      .maybeSingle();
+    if (error) throw error;
+    return parseFboPalletSnapshot(data?.value);
+  };
+
+  const saveFboPalletSnapshot = async (snapshot: { sessions: FboPalletSession[]; pallets: FboPallet[]; items: FboPalletItem[] }) => {
+    const { error } = await supabase.from('app_settings').upsert([{
+      key: 'fbo_pallet_collection_v1',
+      value: JSON.stringify(snapshot),
+    }], { onConflict: 'key' });
+    if (error) throw error;
+  };
+
+  const applyFboPalletSnapshotToState = (snapshot: { sessions: FboPalletSession[]; pallets: FboPallet[]; items: FboPalletItem[] }, supplierId = '') => {
+    const normalizedSupplierId = String(supplierId || '').trim();
+    const sessions = snapshot.sessions
+      .filter((session) => !session.deleted_at && (!normalizedSupplierId || String(session.supplier_id) === normalizedSupplierId))
+      .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+    const sessionIds = new Set(sessions.map((session) => String(session.id)));
+    const pallets = snapshot.pallets
+      .filter((pallet) => !pallet.deleted_at && (!normalizedSupplierId || String(pallet.supplier_id) === normalizedSupplierId) && sessionIds.has(String(pallet.session_id)))
+      .sort((a, b) => Number(a.pallet_number || 0) - Number(b.pallet_number || 0));
+    const palletIds = new Set(pallets.map((pallet) => String(pallet.id)));
+    const items = snapshot.items
+      .filter((item) => !item.deleted_at && (!normalizedSupplierId || String(item.supplier_id) === normalizedSupplierId) && palletIds.has(String(item.pallet_id)))
+      .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+
+    setFboPalletSessions(sessions);
+    setFboPallets(pallets);
+    setFboPalletItems(items);
+  };
+
+  const getFboPalletActiveSession = async (supplierId: string) => {
+    const snapshot = await loadFboPalletSnapshot();
+    const existing = snapshot.sessions
+      .filter((session) => String(session.supplier_id) === String(supplierId) && session.status === 'active' && !session.deleted_at)
+      .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')))[0];
+    if (existing?.id) return { session: existing, snapshot };
+
+    const now = new Date().toISOString();
+    const session: FboPalletSession = {
+      id: createFboPalletId('fbo-pallet-session'),
+      supplier_id: supplierId,
+      status: 'active',
+      created_by: currentEmployee?.id || null,
+      created_at: now,
+      updated_at: now,
+      deleted_at: null,
+    };
+    const nextSnapshot = { ...snapshot, sessions: [session, ...snapshot.sessions] };
+    await saveFboPalletSnapshot(nextSnapshot);
+    return { session, snapshot: nextSnapshot };
+  };
+
+  const fetchFboPalletData = async (supplierId = fboPalletSupplierId) => {
+    const normalizedSupplierId = String(supplierId || '').trim();
+    setFboPalletLoading(true);
+    try {
+      const snapshot = await loadFboPalletSnapshot();
+      applyFboPalletSnapshotToState(snapshot, normalizedSupplierId);
+    } catch (e: any) {
+      console.error('fetchFboPalletData error', e);
+      showToast('Ошибка загрузки паллет FBO: ' + (e?.message || 'неизвестно'), 'error');
+    } finally {
+      setFboPalletLoading(false);
+    }
+  };
+
+  const loadFboPalletProducts = async (supplierId: string) => {
+    const normalizedSupplierId = String(supplierId || '').trim();
+    if (!normalizedSupplierId) {
+      setFboPalletProducts([]);
+      return;
+    }
+
+    setFboPalletProductsLoading(true);
+    try {
+      const pageSize = 500;
+      const rows: any[] = [];
+      let from = 0;
+      while (true) {
+        const { data, error } = await supabase
+          .from('wb_products_cache')
+          .select('nm_id, product_json')
+          .eq('supplier_id', normalizedSupplierId)
+          .range(from, from + pageSize - 1);
+        if (error) throw error;
+        const chunk = data || [];
+        rows.push(...chunk);
+        if (chunk.length < pageSize) break;
+        from += pageSize;
+      }
+
+      const options: FboPalletProductOption[] = [];
+      rows.forEach((row: any) => {
+        const card = row?.product_json || {};
+        const nmId = String(row?.nm_id || card?.nmID || card?.nmId || '').trim();
+        const title = String(card?.title || card?.name || 'Товар WB').trim();
+        const vendorCode = String(card?.vendorCode || card?.article || '').trim();
+        const brand = String(card?.brand || getWbCharacteristicValue(card, ['бренд']) || '').trim();
+        const category = String(card?.subjectName || card?.subject || card?.category || '').trim();
+        const color = String(getWbCharacteristicValue(card, ['цвет']) || card?.color || '').trim();
+        const photo = getFboPalletImage(card);
+        const sizes = Array.isArray(card?.sizes) && card.sizes.length ? card.sizes : [{ techSize: '', skus: card?.skus || card?.barcodes || [] }];
+
+        sizes.forEach((size: any, index: number) => {
+          const skus = Array.isArray(size?.skus) && size.skus.length ? size.skus : [card?.barcode || card?.skus?.[0] || ''];
+          const barcode = String(skus[0] || '').trim();
+          options.push({
+            key: [nmId, String(size?.techSize || ''), barcode, index].join('__'),
+            nm_id: nmId,
+            barcode,
+            vendor_code: vendorCode,
+            title,
+            brand,
+            category,
+            size: String(size?.techSize || '').trim(),
+            color,
+            photo_url: photo,
+            product_json: { ...card, selectedSize: size, selectedBarcode: barcode },
+          });
+        });
+      });
+
+      setFboPalletProducts(options);
+    } catch (e: any) {
+      console.error('loadFboPalletProducts error', e);
+      setFboPalletProducts([]);
+      showToast('Ошибка загрузки товаров WB для паллет: ' + (e?.message || 'неизвестно'), 'error');
+    } finally {
+      setFboPalletProductsLoading(false);
+    }
+  };
+
+  const openFboPalletCollector = async () => {
+    const supplierId = String(currentSupply?.supplier_id || selectedSupplierId || fboPalletSupplierId || '').trim();
+    if (supplierId) setFboPalletSupplierId(supplierId);
+    setFboPalletModalOpen(true);
+    if (supplierId) {
+      await Promise.all([fetchFboPalletData(supplierId), loadFboPalletProducts(supplierId)]);
+    }
+  };
+
+  const handleChangeFboPalletSupplier = async (supplierId: string) => {
+    setFboPalletSupplierId(supplierId);
+    setFboPalletProductSearch('');
+    setFboPalletBrandFilter('');
+    setFboPalletCategoryFilter('');
+    await Promise.all([fetchFboPalletData(supplierId), loadFboPalletProducts(supplierId)]);
+  };
+
+  const handleAddFboPallet = async () => {
+    const supplierId = String(fboPalletSupplierId || '').trim();
+    if (!supplierId) {
+      showToast('Выберите поставщика для паллет', 'error');
+      return;
+    }
+
+    try {
+      const { session, snapshot } = await getFboPalletActiveSession(supplierId);
+      const currentPallets = snapshot.pallets.filter((p) => String(p.session_id) === String(session.id) && !p.deleted_at);
+      const used = new Set(currentPallets.map((p) => Number(p.pallet_number)).filter((n) => Number.isFinite(n) && n > 0));
+      let nextNumber = 1;
+      while (used.has(nextNumber)) nextNumber += 1;
+
+      const pallet: FboPallet = {
+        id: createFboPalletId('fbo-pallet'),
+        session_id: session.id,
+        supplier_id: supplierId,
+        pallet_number: nextNumber,
+        created_at: new Date().toISOString(),
+        deleted_at: null,
+      };
+      await saveFboPalletSnapshot({ ...snapshot, pallets: [...snapshot.pallets, pallet] });
+      await fetchFboPalletData(supplierId);
+      showToast('Паллета №' + nextNumber + ' добавлена', 'success');
+    } catch (e: any) {
+      showToast('Ошибка добавления паллеты: ' + (e?.message || 'неизвестно'), 'error');
+    }
+  };
+
+  const handleAddProductToFboPallet = async (product: FboPalletProductOption) => {
+    const palletId = String(fboPalletProductPicker.palletId || '').trim();
+    const supplierId = String(fboPalletSupplierId || '').trim();
+    if (!palletId || !supplierId) return;
+
+    try {
+      let productId: string | null = null;
+      if (product.barcode) {
+        const { data } = await supabase
+          .from('products')
+          .select('id')
+          .eq('supplier_id', supplierId)
+          .eq('barcode', product.barcode)
+          .is('deleted_at', null)
+          .limit(1)
+          .maybeSingle();
+        productId = data?.id || null;
+      }
+
+      const snapshot = await loadFboPalletSnapshot();
+      const item: FboPalletItem = {
+        id: createFboPalletId('fbo-pallet-item'),
+        pallet_id: palletId,
+        supplier_id: supplierId,
+        product_id: productId,
+        nm_id: product.nm_id || null,
+        barcode: product.barcode || null,
+        vendor_code: product.vendor_code || null,
+        title: product.title,
+        size: product.size || null,
+        color: product.color || null,
+        photo_url: product.photo_url || null,
+        qty: 1,
+        product_json: product.product_json || null,
+        created_at: new Date().toISOString(),
+        deleted_at: null,
+      };
+      await saveFboPalletSnapshot({ ...snapshot, items: [item, ...snapshot.items] });
+
+      await fetchFboPalletData(supplierId);
+      setFboPalletProductPicker({ open: false, palletId: '' });
+      showToast('Товар добавлен в паллету', 'success');
+    } catch (e: any) {
+      showToast('Ошибка добавления товара в паллету: ' + (e?.message || 'неизвестно'), 'error');
+    }
+  };
+
+  const handleDeleteFboPalletItem = async (itemId: string) => {
+    try {
+      const snapshot = await loadFboPalletSnapshot();
+      const deletedAt = new Date().toISOString();
+      await saveFboPalletSnapshot({
+        ...snapshot,
+        items: snapshot.items.map((item) => String(item.id) === String(itemId) ? { ...item, deleted_at: deletedAt } : item),
+      });
+      await fetchFboPalletData(fboPalletSupplierId);
+    } catch (e: any) {
+      showToast('Ошибка удаления товара из паллеты: ' + (e?.message || 'неизвестно'), 'error');
+    }
+  };
+
+  const handleDeleteFboPallet = async (palletId: string) => {
+    try {
+      const snapshot = await loadFboPalletSnapshot();
+      const deletedAt = new Date().toISOString();
+      await saveFboPalletSnapshot({
+        ...snapshot,
+        pallets: snapshot.pallets.map((pallet) => String(pallet.id) === String(palletId) ? { ...pallet, deleted_at: deletedAt } : pallet),
+        items: snapshot.items.map((item) => String(item.pallet_id) === String(palletId) ? { ...item, deleted_at: deletedAt } : item),
+      });
+      await fetchFboPalletData(fboPalletSupplierId);
+    } catch (e: any) {
+      showToast('Ошибка удаления паллеты: ' + (e?.message || 'неизвестно'), 'error');
+    }
+  };
+
+  const findFboPalletHint = async (product: Product): Promise<FboPalletHint | null> => {
+    const supplierId = String(currentSupply?.supplier_id || product?.supplier_id || '').trim();
+    if (!supplierId) return null;
+
+    try {
+      const productId = String(product?.id || '').trim();
+      const barcode = String(product?.barcode || '').trim();
+      const nmId = String(product?.nm_id || product?.wb_sku || '').trim();
+      if ((!productId || productId.startsWith('offline-product-')) && !barcode && !nmId) return null;
+
+      const snapshot = await loadFboPalletSnapshot();
+      const activeSessionIds = new Set(snapshot.sessions
+        .filter((session) => String(session.supplier_id) === supplierId && session.status === 'active' && !session.deleted_at)
+        .map((session) => String(session.id)));
+      const activePallets = snapshot.pallets.filter((pallet) => activeSessionIds.has(String(pallet.session_id)) && !pallet.deleted_at);
+      const activePalletIds = new Set(activePallets.map((pallet) => String(pallet.id)));
+      const data = snapshot.items
+        .filter((item) => String(item.supplier_id) === supplierId && !item.deleted_at && activePalletIds.has(String(item.pallet_id)))
+        .filter((item) => {
+          if (productId && !productId.startsWith('offline-product-') && item.product_id && String(item.product_id) === productId) return true;
+          if (barcode && item.barcode && String(item.barcode) === barcode) return true;
+          if (nmId && item.nm_id && String(item.nm_id) === nmId) return true;
+          return false;
+        })
+        .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')))[0];
+      const pallet = activePallets.find((p) => String(p.id) === String(data?.pallet_id));
+      if (!data || !pallet?.pallet_number) return null;
+      return {
+        pallet_number: Number(pallet.pallet_number),
+        item_title: String(data.title || product.name || ''),
+        item_size: data.size || product.size || '',
+        item_color: data.color || product.color || '',
+      };
+    } catch (e) {
+      console.warn('findFboPalletHint failed', e);
+      return null;
+    }
+  };
+
   const fetchBoxItems = async (boxId: string) => {
     if (!boxId) {
       setBoxItems([]);
@@ -7147,6 +7555,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     if (!product) {
       showToast('Товар не найден в разделе Товары WB (кэш поставщика). Нажмите «Обновить» в Товары WB.', 'error');
       return;
+    }
+
+    const palletHint = await findFboPalletHint(product);
+    setFboPalletHint(palletHint);
+    if (palletHint) {
+      showToast(`Товар для паллеты №${palletHint.pallet_number}. Поставьте коробку на эту паллету.`, 'info');
     }
 
     setScannedItem(product);
@@ -16814,6 +17228,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             <button onClick={() => setShowGenerateBoxQR(true)} className="inline-flex items-center justify-center rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-slate-800">
                               <QrCode className="h-4 w-4 mr-2" /> <span className="whitespace-nowrap">QR генерация коробки</span>
                             </button>
+                            <button onClick={openFboPalletCollector} className="inline-flex items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-violet-700">
+                              <Box className="h-4 w-4 mr-2" /> <span className="whitespace-nowrap">Собрать паллеты</span>
+                            </button>
                             <button
                               onClick={() => {
                                 const supplierName = suppliers.find(s => String(s.id) === String(currentSupply?.supplier_id || ''))?.name || '';
@@ -17352,6 +17769,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           <ShieldCheck className="mr-1.5 h-3.5 w-3.5" /> Сканируйте Честный Знак
                         </div>
                         <h2 className="mt-3 text-xl font-bold text-gray-900 break-words">{scannedItem.name}</h2>
+                        {fboPalletHint && (
+                          <div className="mt-3 rounded-2xl border border-violet-200 bg-violet-50 px-4 py-3 text-violet-900">
+                            <div className="text-xs font-semibold uppercase tracking-wide text-violet-600">Куда ставить коробку</div>
+                            <div className="mt-1 text-2xl font-black">Паллета №{fboPalletHint.pallet_number}</div>
+                            <div className="mt-1 text-xs text-violet-700">Этот товар заранее добавлен в сбор паллет.</div>
+                          </div>
+                        )}
                         <div className="mt-3 grid gap-2 sm:grid-cols-2">
                           {scannedItem.vendor_code && (
                             <div className="rounded-lg bg-white px-3 py-2 border border-yellow-100">
@@ -17396,6 +17820,203 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <Plus className="h-5 w-5 text-gray-600" />
                       </button>
                     </form>
+                  </div>
+                </div>
+              )}
+
+
+              {fboPalletModalOpen && (
+                <div className="fixed inset-0 z-[72] flex items-end justify-center bg-black/50 p-2 md:items-center md:p-4" onClick={() => setFboPalletModalOpen(false)}>
+                  <div className="max-h-[94svh] w-full max-w-6xl overflow-y-auto rounded-t-3xl bg-slate-50 shadow-2xl md:rounded-2xl" onClick={(e) => e.stopPropagation()}>
+                    <div className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 px-4 py-4 backdrop-blur md:px-6">
+                      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                        <div>
+                          <div className="inline-flex items-center gap-2 rounded-full bg-violet-50 px-3 py-1 text-xs font-semibold text-violet-700">
+                            <Box className="h-4 w-4" /> FBO паллеты
+                          </div>
+                          <h3 className="mt-2 text-xl font-bold text-slate-900">Собрать паллеты</h3>
+                          <p className="mt-1 text-sm text-slate-500">Добавьте товары поставщика в паллеты, чтобы при сканировании коробки видеть нужную паллету.</p>
+                        </div>
+                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                          <button type="button" onClick={handleAddFboPallet} disabled={!fboPalletSupplierId || fboPalletLoading} className="rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700 disabled:opacity-50">Добавить паллету</button>
+                          <button type="button" onClick={() => { setFboPalletHistoryOpen(true); fetchFboPalletData(fboPalletSupplierId); }} className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">История паллет</button>
+                          <button type="button" onClick={() => setFboPalletModalOpen(false)} className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Закрыть</button>
+                        </div>
+                      </div>
+                      <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
+                        <select
+                          value={fboPalletSupplierId}
+                          onChange={(e) => handleChangeFboPalletSupplier(e.target.value)}
+                          className="oc-select"
+                        >
+                          <option value="">Выберите поставщика...</option>
+                          {suppliers.map((supplier) => <option key={'fbo-pallet-supplier-' + supplier.id} value={supplier.id}>{supplier.name}</option>)}
+                        </select>
+                        <button type="button" onClick={() => fetchFboPalletData(fboPalletSupplierId)} disabled={!fboPalletSupplierId || fboPalletLoading} className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+                          {fboPalletLoading ? 'Загрузка...' : 'Обновить'}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="p-4 md:p-6">
+                      {!fboPalletSupplierId ? (
+                        <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-8 text-center text-slate-500">Выберите поставщика, чтобы собрать паллеты.</div>
+                      ) : (
+                        <div className="space-y-4">
+                          {fboPallets.filter((p) => fboPalletSessions.some((s) => s.id === p.session_id && s.status === 'active')).length === 0 ? (
+                            <div className="rounded-2xl border border-dashed border-violet-200 bg-white p-8 text-center">
+                              <div className="text-slate-600">Паллет пока нет.</div>
+                              <button type="button" onClick={handleAddFboPallet} className="mt-4 rounded-xl bg-violet-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-violet-700">Добавить паллету</button>
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                              {fboPallets
+                                .filter((p) => fboPalletSessions.some((s) => s.id === p.session_id && s.status === 'active'))
+                                .map((pallet) => {
+                                  const items = fboPalletItems.filter((item) => String(item.pallet_id) === String(pallet.id));
+                                  return (
+                                    <div key={'fbo-pallet-' + pallet.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                                      <div className="flex items-start justify-between gap-3">
+                                        <div>
+                                          <div className="text-xs font-semibold uppercase tracking-wide text-violet-600">Паллета</div>
+                                          <div className="mt-1 text-3xl font-black text-slate-900">№{pallet.pallet_number}</div>
+                                          <div className="mt-1 text-xs text-slate-500">Товаров: {items.length}</div>
+                                        </div>
+                                        <div className="flex gap-2">
+                                          <button type="button" onClick={() => setFboPalletProductPicker({ open: true, palletId: pallet.id })} className="rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800">Добавить товар</button>
+                                          <button type="button" onClick={() => handleDeleteFboPallet(pallet.id)} className="rounded-xl border border-rose-200 px-3 py-2 text-rose-600 hover:bg-rose-50" title="Удалить паллету"><Trash2 className="h-4 w-4" /></button>
+                                        </div>
+                                      </div>
+                                      <div className="mt-4 space-y-2">
+                                        {items.length === 0 ? (
+                                          <div className="rounded-xl border border-dashed border-slate-200 px-3 py-4 text-sm text-slate-400">В паллете пока нет товаров.</div>
+                                        ) : items.map((item) => (
+                                          <div key={'fbo-pallet-item-' + item.id} className="flex gap-3 rounded-xl border border-slate-100 bg-slate-50 p-2">
+                                            <div className="h-16 w-12 shrink-0 overflow-hidden rounded-lg border bg-white">
+                                              {item.photo_url ? <img src={item.photo_url} alt={item.title} className="h-full w-full object-cover" /> : <div className="flex h-full items-center justify-center"><Package className="h-5 w-5 text-slate-300" /></div>}
+                                            </div>
+                                            <div className="min-w-0 flex-1">
+                                              <div className="line-clamp-2 text-sm font-semibold text-slate-900">{item.title}</div>
+                                              <div className="mt-1 flex flex-wrap gap-1 text-[11px] text-slate-500">
+                                                {item.vendor_code && <span className="rounded bg-white px-1.5 py-0.5">Арт: {item.vendor_code}</span>}
+                                                {item.size && <span className="rounded bg-white px-1.5 py-0.5">Размер: {item.size}</span>}
+                                                {item.color && <span className="rounded bg-white px-1.5 py-0.5">Цвет: {item.color}</span>}
+                                                {item.barcode && <span className="rounded bg-white px-1.5 py-0.5">ШК: {item.barcode}</span>}
+                                              </div>
+                                            </div>
+                                            <button type="button" onClick={() => handleDeleteFboPalletItem(item.id)} className="h-10 w-10 shrink-0 rounded-lg border border-rose-100 text-rose-600 hover:bg-rose-50" title="Удалить товар"><Trash2 className="mx-auto h-4 w-4" /></button>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {fboPalletProductPicker.open && (
+                <div className="fixed inset-0 z-[74] flex items-end justify-center bg-black/50 p-2 md:items-center md:p-4" onClick={() => setFboPalletProductPicker({ open: false, palletId: '' })}>
+                  <div className="max-h-[94svh] w-full max-w-6xl overflow-y-auto rounded-t-3xl bg-white shadow-2xl md:rounded-2xl" onClick={(e) => e.stopPropagation()}>
+                    <div className="sticky top-0 z-10 border-b bg-white/95 px-4 py-4 backdrop-blur">
+                      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                        <div>
+                          <h3 className="text-xl font-bold text-slate-900">Добавить товар в паллету</h3>
+                          <div className="text-sm text-slate-500">Товары берутся из раздела «Товары WB» выбранного поставщика.</div>
+                        </div>
+                        <button type="button" onClick={() => setFboPalletProductPicker({ open: false, palletId: '' })} className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Закрыть</button>
+                      </div>
+                      <div className="mt-4 grid grid-cols-1 gap-2 md:grid-cols-4">
+                        <div className="relative md:col-span-2">
+                          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                          <input value={fboPalletProductSearch} onChange={(e) => setFboPalletProductSearch(e.target.value)} placeholder="Поиск по названию, артикулу, ШК или WB..." className="oc-input pl-9" />
+                        </div>
+                        <select value={fboPalletBrandFilter} onChange={(e) => setFboPalletBrandFilter(e.target.value)} className="oc-select">
+                          <option value="">Все бренды</option>
+                          {fboPalletBrands.map((brand) => <option key={'fbo-pallet-brand-' + brand} value={brand}>{brand}</option>)}
+                        </select>
+                        <select value={fboPalletCategoryFilter} onChange={(e) => setFboPalletCategoryFilter(e.target.value)} className="oc-select">
+                          <option value="">Все категории</option>
+                          {fboPalletCategories.map((category) => <option key={'fbo-pallet-cat-' + category} value={category}>{category}</option>)}
+                        </select>
+                      </div>
+                    </div>
+                    <div className="p-4">
+                      {fboPalletProductsLoading ? (
+                        <div className="p-10 text-center text-slate-500">Загрузка товаров...</div>
+                      ) : filteredFboPalletProducts.length === 0 ? (
+                        <div className="p-10 text-center text-slate-500">Товары не найдены. Нажмите «Обновить» в «Товары WB».</div>
+                      ) : (
+                        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+                          {filteredFboPalletProducts.slice(0, 600).map((product) => (
+                            <button key={'fbo-pallet-product-' + product.key} type="button" onClick={() => handleAddProductToFboPallet(product)} className="flex min-h-[128px] gap-3 rounded-2xl border border-slate-200 bg-white p-3 text-left hover:border-violet-300 hover:bg-violet-50">
+                              <div className="h-24 w-16 shrink-0 overflow-hidden rounded-xl border bg-slate-50">
+                                {product.photo_url ? <img src={product.photo_url} alt={product.title} className="h-full w-full object-cover" /> : <div className="flex h-full items-center justify-center"><Package className="h-6 w-6 text-slate-300" /></div>}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <div className="line-clamp-2 text-sm font-semibold text-slate-900">{product.title}</div>
+                                <div className="mt-1 flex flex-wrap gap-1 text-[11px] text-slate-500">
+                                  {product.vendor_code && <span className="rounded bg-slate-100 px-1.5 py-0.5">Арт: {product.vendor_code}</span>}
+                                  {product.nm_id && <span className="rounded bg-slate-100 px-1.5 py-0.5">WB: {product.nm_id}</span>}
+                                  {product.size && <span className="rounded bg-slate-100 px-1.5 py-0.5">Размер: {product.size}</span>}
+                                  {product.color && <span className="rounded bg-slate-100 px-1.5 py-0.5">Цвет: {product.color}</span>}
+                                </div>
+                                <div className="mt-2 break-all font-mono text-[11px] text-slate-500">{product.barcode || '-'}</div>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {fboPalletHistoryOpen && (
+                <div className="fixed inset-0 z-[73] flex items-end justify-center bg-black/50 p-2 md:items-center md:p-4" onClick={() => setFboPalletHistoryOpen(false)}>
+                  <div className="max-h-[94svh] w-full max-w-5xl overflow-y-auto rounded-t-3xl bg-white shadow-2xl md:rounded-2xl" onClick={(e) => e.stopPropagation()}>
+                    <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b bg-white/95 px-4 py-4 backdrop-blur">
+                      <div>
+                        <h3 className="text-xl font-bold text-slate-900">История паллет</h3>
+                        <div className="text-sm text-slate-500">Все активные сборки и паллеты выбранного поставщика.</div>
+                      </div>
+                      <button type="button" onClick={() => setFboPalletHistoryOpen(false)} className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Закрыть</button>
+                    </div>
+                    <div className="space-y-3 p-4">
+                      {fboPalletSessions.length === 0 ? (
+                        <div className="rounded-2xl border border-dashed border-slate-200 p-8 text-center text-slate-500">История паллет пока пустая.</div>
+                      ) : fboPalletSessions.map((session) => {
+                        const sessionPallets = fboPallets.filter((p) => String(p.session_id) === String(session.id));
+                        return (
+                          <div key={'fbo-pallet-session-' + session.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div className="font-semibold text-slate-900">{new Date(session.created_at).toLocaleString('ru-RU')}</div>
+                              <div className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-600">{session.status === 'active' ? 'Активная' : 'Закрытая'}</div>
+                            </div>
+                            <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
+                              {sessionPallets.map((pallet) => {
+                                const items = fboPalletItems.filter((item) => String(item.pallet_id) === String(pallet.id));
+                                return (
+                                  <div key={'fbo-pallet-history-' + pallet.id} className="rounded-xl border bg-white p-3">
+                                    <div className="font-bold text-violet-800">Паллета №{pallet.pallet_number}</div>
+                                    <div className="mt-1 text-xs text-slate-500">Товаров: {items.length}</div>
+                                    <div className="mt-2 space-y-1">
+                                      {items.slice(0, 6).map((item) => <div key={'fbo-pallet-history-item-' + item.id} className="truncate text-sm text-slate-700">{item.title}{item.size ? ' • ' + item.size : ''}</div>)}
+                                      {items.length > 6 && <div className="text-xs text-slate-400">+ ещё {items.length - 6}</div>}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
               )}
