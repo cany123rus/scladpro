@@ -1415,10 +1415,10 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
   const desktopListHeight = typeof window !== 'undefined'
     ? Math.max(520, Math.min(1200, window.innerHeight - 220))
     : 700;
-  const tabletRowHeight = 214;
+  const tabletRowHeight = 292;
   const tabletListHeight = typeof window !== 'undefined'
-    ? Math.max(520, Math.min(1200, window.innerHeight - 250))
-    : 700;
+    ? Math.max(280, Math.min(1100, window.innerHeight - 360))
+    : 620;
   const tabletRows = useMemo(() => {
     const rows: ProductVariant[][] = [];
     for (let i = 0; i < filteredVariants.length; i += 2) {
@@ -1428,7 +1428,7 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
   }, [filteredVariants]);
 
   const ProductTabletCard = useCallback(({ variant }: { variant: ProductVariant }) => (
-    <div className="h-full rounded-xl border border-gray-200 bg-white p-3 shadow-sm">
+    <div className="h-full overflow-hidden rounded-xl border border-gray-200 bg-white p-3 shadow-sm">
       <div className="flex h-full gap-3">
         <div className="w-20 shrink-0">
           <div className="h-28 w-20 overflow-hidden rounded-lg border border-gray-200 bg-gray-100 shadow-sm">
@@ -1496,7 +1496,7 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
   const TabletVirtualizedRow = useCallback(({ index, style }: ListChildComponentProps) => {
     const row = tabletRows[index] || [];
     return (
-      <div style={style} className="grid grid-cols-2 gap-3 px-3 py-2">
+      <div style={style} className="grid grid-cols-1 lg:grid-cols-2 gap-3 px-3 py-2">
         {row.map((variant) => <ProductTabletCard key={variant.id} variant={variant} />)}
       </div>
     );
