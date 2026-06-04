@@ -285,7 +285,9 @@ interface FboPalletSession {
   id: string;
   supplier_id: string;
   status: 'active' | 'closed';
+  created_by?: string | null;
   created_at: string;
+  updated_at?: string | null;
   deleted_at?: string | null;
 }
 
@@ -335,6 +337,8 @@ interface FboPalletHint {
   item_title: string;
   item_size?: string | null;
   item_color?: string | null;
+  target_qty?: number;
+  scanned_qty?: number;
 }
 
 interface Supply {
@@ -5370,6 +5374,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [fboPalletProductSearch, setFboPalletProductSearch] = useState('');
   const [fboPalletBrandFilter, setFboPalletBrandFilter] = useState('');
   const [fboPalletCategoryFilter, setFboPalletCategoryFilter] = useState('');
+  const [fboPalletSelectedProducts, setFboPalletSelectedProducts] = useState<Record<string, number>>({});
   const [fboPalletHint, setFboPalletHint] = useState<FboPalletHint | null>(null);
   const [supplyStats, setSupplyStats] = useState({ boxes: 0, items: 0 });
   const fboPalletBrands = useMemo(() => Array.from(new Set(fboPalletProducts.map((p) => p.brand).filter(Boolean))).sort(), [fboPalletProducts]);
@@ -7153,50 +7158,88 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     }
   };
 
-  const handleAddProductToFboPallet = async (product: FboPalletProductOption) => {
+  const openFboPalletProductPicker = (palletId: string) => {
+    setFboPalletSelectedProducts({});
+    setFboPalletProductPicker({ open: true, palletId });
+  };
+
+  const closeFboPalletProductPicker = () => {
+    setFboPalletSelectedProducts({});
+    setFboPalletProductPicker({ open: false, palletId: '' });
+  };
+
+  const setFboPalletSelectedProductQty = (productKey: string, qty: number) => {
+    const cleanQty = Math.max(1, Math.min(999, Math.floor(Number(qty) || 1)));
+    setFboPalletSelectedProducts((prev) => ({ ...prev, [productKey]: cleanQty }));
+  };
+
+  const toggleFboPalletSelectedProduct = (productKey: string, checked: boolean) => {
+    setFboPalletSelectedProducts((prev) => {
+      const next = { ...prev };
+      if (checked) next[productKey] = next[productKey] || 1;
+      else delete next[productKey];
+      return next;
+    });
+  };
+
+  const handleAddSelectedProductsToFboPallet = async () => {
     const palletId = String(fboPalletProductPicker.palletId || '').trim();
     const supplierId = String(fboPalletSupplierId || '').trim();
     if (!palletId || !supplierId) return;
 
+    const selectedProducts = fboPalletProducts.filter((product) => fboPalletSelectedProducts[product.key]);
+    if (selectedProducts.length === 0) {
+      showToast('Выберите товары для паллеты', 'error');
+      return;
+    }
+
     try {
-      let productId: string | null = null;
-      if (product.barcode) {
+      const barcodes = Array.from(new Set(selectedProducts.map((product) => String(product.barcode || '').trim()).filter(Boolean)));
+      const productIdsByBarcode = new Map<string, string>();
+      if (barcodes.length > 0) {
         const { data } = await supabase
           .from('products')
-          .select('id')
+          .select('id, barcode')
           .eq('supplier_id', supplierId)
-          .eq('barcode', product.barcode)
+          .in('barcode', barcodes)
           .is('deleted_at', null)
-          .limit(1)
-          .maybeSingle();
-        productId = data?.id || null;
+          .limit(1000);
+        (data || []).forEach((row: any) => {
+          const barcode = String(row?.barcode || '').trim();
+          if (barcode && row?.id) productIdsByBarcode.set(barcode, String(row.id));
+        });
       }
 
       const snapshot = await loadFboPalletSnapshot();
-      const item: FboPalletItem = {
-        id: createFboPalletId('fbo-pallet-item'),
-        pallet_id: palletId,
-        supplier_id: supplierId,
-        product_id: productId,
-        nm_id: product.nm_id || null,
-        barcode: product.barcode || null,
-        vendor_code: product.vendor_code || null,
-        title: product.title,
-        size: product.size || null,
-        color: product.color || null,
-        photo_url: product.photo_url || null,
-        qty: 1,
-        product_json: product.product_json || null,
-        created_at: new Date().toISOString(),
-        deleted_at: null,
-      };
-      await saveFboPalletSnapshot({ ...snapshot, items: [item, ...snapshot.items] });
+      const now = new Date().toISOString();
+      const items = selectedProducts.map((product) => {
+        const barcode = String(product.barcode || '').trim();
+        const qty = Math.max(1, Math.floor(Number(fboPalletSelectedProducts[product.key]) || 1));
+        return {
+          id: createFboPalletId('fbo-pallet-item'),
+          pallet_id: palletId,
+          supplier_id: supplierId,
+          product_id: productIdsByBarcode.get(barcode) || null,
+          nm_id: product.nm_id || null,
+          barcode: product.barcode || null,
+          vendor_code: product.vendor_code || null,
+          title: product.title,
+          size: product.size || null,
+          color: product.color || null,
+          photo_url: product.photo_url || null,
+          qty,
+          product_json: product.product_json || null,
+          created_at: now,
+          deleted_at: null,
+        } as FboPalletItem;
+      });
+      await saveFboPalletSnapshot({ ...snapshot, items: [...items, ...snapshot.items] });
 
       await fetchFboPalletData(supplierId);
-      setFboPalletProductPicker({ open: false, palletId: '' });
-      showToast('Товар добавлен в паллету', 'success');
+      closeFboPalletProductPicker();
+      showToast('Товары добавлены в паллету: ' + items.length, 'success');
     } catch (e: any) {
-      showToast('Ошибка добавления товара в паллету: ' + (e?.message || 'неизвестно'), 'error');
+      showToast('Ошибка добавления товаров в паллету: ' + (e?.message || 'неизвестно'), 'error');
     }
   };
 
@@ -7229,6 +7272,61 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     }
   };
 
+  const getFboPalletScannedCount = async (product: Product) => {
+    if (!currentSupply) return 0;
+    const productId = String(product?.id || '').trim();
+    const barcode = String(product?.barcode || '').trim();
+    const nmId = String(product?.nm_id || product?.wb_sku || '').trim();
+
+    try {
+      if (warehouseOfflineEnabled) {
+        const scans = await warehouseOfflineClient.getFboScans().catch(() => ({ pending: [], synced: [] }));
+        const rows = [...((scans.pending || []) as any[]), ...((scans.synced || []) as any[])];
+        return rows.filter((row: any) => {
+          if (String(row?.supply_id || row?.supplyId || '') !== String(currentSupply.id)) return false;
+          if (productId && String(row?.product_id || row?.productId || '') === productId) return true;
+          if (barcode && String(row?.product_barcode || row?.barcode || '') === barcode) return true;
+          return false;
+        }).length;
+      }
+
+      if (fboOfflineMode) {
+        const session = offlineFboSessionRef.current && offlineFboSessionRef.current.supply_id === currentSupply.id ? offlineFboSessionRef.current : buildEmptyOfflineFboSession(currentSupply);
+        return (session.items || []).filter((item: any) => {
+          const itemProduct = item?.product || {};
+          if (productId && String(item?.product_id || itemProduct?.id || '') === productId) return true;
+          if (barcode && String(itemProduct?.barcode || '') === barcode) return true;
+          if (nmId && String(itemProduct?.nm_id || itemProduct?.wb_sku || '') === nmId) return true;
+          return false;
+        }).length;
+      }
+
+      if (!productId || productId.startsWith('offline-product-')) return 0;
+      const { data: boxes, error: boxesError } = await supabase
+        .from('supply_boxes')
+        .select('id')
+        .eq('supply_id', currentSupply.id)
+        .is('deleted_at', null);
+      if (boxesError) throw boxesError;
+      const boxIds = (boxes || []).map((box: any) => String(box.id)).filter(Boolean);
+      if (boxIds.length === 0) return 0;
+
+      const { count, error } = await supabase
+        .from('supply_items')
+        .select('id', { count: 'exact', head: true })
+        .in('box_id', boxIds)
+        .eq('product_id', productId)
+        .is('deleted_at', null);
+      if (error) throw error;
+
+      const pendingCount = pendingScansRef.current.filter((scan) => String(scan.productId || '') === productId).length;
+      return Number(count || 0) + pendingCount;
+    } catch (e) {
+      console.warn('getFboPalletScannedCount failed', e);
+      return 0;
+    }
+  };
+
   const findFboPalletHint = async (product: Product): Promise<FboPalletHint | null> => {
     const supplierId = String(currentSupply?.supplier_id || product?.supplier_id || '').trim();
     if (!supplierId) return null;
@@ -7244,8 +7342,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         .filter((session) => String(session.supplier_id) === supplierId && session.status === 'active' && !session.deleted_at)
         .map((session) => String(session.id)));
       const activePallets = snapshot.pallets.filter((pallet) => activeSessionIds.has(String(pallet.session_id)) && !pallet.deleted_at);
+      const activePalletById = new Map(activePallets.map((pallet) => [String(pallet.id), pallet]));
       const activePalletIds = new Set(activePallets.map((pallet) => String(pallet.id)));
-      const data = snapshot.items
+      const matchingItems = snapshot.items
         .filter((item) => String(item.supplier_id) === supplierId && !item.deleted_at && activePalletIds.has(String(item.pallet_id)))
         .filter((item) => {
           if (productId && !productId.startsWith('offline-product-') && item.product_id && String(item.product_id) === productId) return true;
@@ -7253,14 +7352,30 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           if (nmId && item.nm_id && String(item.nm_id) === nmId) return true;
           return false;
         })
-        .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')))[0];
-      const pallet = activePallets.find((p) => String(p.id) === String(data?.pallet_id));
+        .sort((a, b) => {
+          const palletA = activePalletById.get(String(a.pallet_id));
+          const palletB = activePalletById.get(String(b.pallet_id));
+          const numberDiff = Number(palletA?.pallet_number || 0) - Number(palletB?.pallet_number || 0);
+          if (numberDiff !== 0) return numberDiff;
+          return String(a.created_at || '').localeCompare(String(b.created_at || ''));
+        });
+      if (matchingItems.length === 0) return null;
+      const scannedQty = await getFboPalletScannedCount(product);
+      let cumulativeQty = 0;
+      const data = matchingItems.find((item) => {
+        cumulativeQty += Math.max(1, Number(item.qty || 1));
+        return scannedQty < cumulativeQty;
+      });
+      const pallet = activePalletById.get(String(data?.pallet_id || ''));
       if (!data || !pallet?.pallet_number) return null;
+      const targetQty = Math.max(1, Number(data.qty || 1));
       return {
         pallet_number: Number(pallet.pallet_number),
         item_title: String(data.title || product.name || ''),
         item_size: data.size || product.size || '',
         item_color: data.color || product.color || '',
+        target_qty: targetQty,
+        scanned_qty: Math.max(0, scannedQty - (cumulativeQty - targetQty)),
       };
     } catch (e) {
       console.warn('findFboPalletHint failed', e);
@@ -7560,7 +7675,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     const palletHint = await findFboPalletHint(product);
     setFboPalletHint(palletHint);
     if (palletHint) {
-      showToast(`Товар для паллеты №${palletHint.pallet_number}. Поставьте коробку на эту паллету.`, 'info');
+      showToast(`Товар для паллеты №${palletHint.pallet_number}: ${Number(palletHint.scanned_qty || 0) + 1}/${palletHint.target_qty || 1}. Поставьте коробку на эту паллету.`, 'info');
     }
 
     setScannedItem(product);
@@ -17035,8 +17150,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       {(warehouseOfflineEnabled ? getWarehouseOfflineSuppliers() : suppliers).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                     </select>
 
-                    <form onSubmit={handleSupplyScan} className="flex gap-2">
-                      <input
+	                    <form onSubmit={handleSupplyScan} className="flex gap-2">
+	                      <input
                         type="text"
                         value={supplyInput}
                         onChange={(e) => setSupplyInput(e.target.value)}
@@ -17044,11 +17159,19 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         className="min-h-[52px] flex-1 rounded-xl border border-gray-200 bg-gray-50 p-3 text-base outline-none focus:ring-2 focus:ring-indigo-500"
                         autoFocus
                       />
-                      <button type="submit" className="min-h-[52px] min-w-[52px] rounded-xl bg-gray-100 p-3 hover:bg-gray-200">
-                        <ArrowLeft className="h-6 w-6 text-gray-600 rotate-180" />
-                      </button>
-                    </form>
-                  </div>
+	                      <button type="submit" className="min-h-[52px] min-w-[52px] rounded-xl bg-gray-100 p-3 hover:bg-gray-200">
+	                        <ArrowLeft className="h-6 w-6 text-gray-600 rotate-180" />
+	                      </button>
+	                    </form>
+	                    <button
+	                      type="button"
+	                      onClick={openFboPalletCollector}
+	                      disabled={!selectedSupplierId}
+	                      className="mt-3 inline-flex min-h-[48px] w-full items-center justify-center rounded-xl bg-violet-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
+	                    >
+	                      <Box className="h-4 w-4 mr-2" /> <span className="whitespace-nowrap">Собрать паллеты</span>
+	                    </button>
+	                  </div>
 
                   <div className="oc-card p-5">
                     <div className="font-medium text-gray-900 mb-2">Коробки (FBO)</div>
@@ -17228,10 +17351,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             <button onClick={() => setShowGenerateBoxQR(true)} className="inline-flex items-center justify-center rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-slate-800">
                               <QrCode className="h-4 w-4 mr-2" /> <span className="whitespace-nowrap">QR генерация коробки</span>
                             </button>
-                            <button onClick={openFboPalletCollector} className="inline-flex items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-violet-700">
-                              <Box className="h-4 w-4 mr-2" /> <span className="whitespace-nowrap">Собрать паллеты</span>
-                            </button>
-                            <button
+	                            <button
                               onClick={() => {
                                 const supplierName = suppliers.find(s => String(s.id) === String(currentSupply?.supplier_id || ''))?.name || '';
                                 setNameSequencePrintForm(prev => ({
@@ -17773,7 +17893,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           <div className="mt-3 rounded-2xl border border-violet-200 bg-violet-50 px-4 py-3 text-violet-900">
                             <div className="text-xs font-semibold uppercase tracking-wide text-violet-600">Куда ставить коробку</div>
                             <div className="mt-1 text-2xl font-black">Паллета №{fboPalletHint.pallet_number}</div>
-                            <div className="mt-1 text-xs text-violet-700">Этот товар заранее добавлен в сбор паллет.</div>
+	                            <div className="mt-1 text-xs text-violet-700">Осталось по плану: {Math.max(0, Number(fboPalletHint.target_qty || 1) - Number(fboPalletHint.scanned_qty || 0))} из {fboPalletHint.target_qty || 1}.</div>
                           </div>
                         )}
                         <div className="mt-3 grid gap-2 sm:grid-cols-2">
@@ -17880,10 +18000,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                         <div>
                                           <div className="text-xs font-semibold uppercase tracking-wide text-violet-600">Паллета</div>
                                           <div className="mt-1 text-3xl font-black text-slate-900">№{pallet.pallet_number}</div>
-                                          <div className="mt-1 text-xs text-slate-500">Товаров: {items.length}</div>
+	                                          <div className="mt-1 text-xs text-slate-500">Товаров: {items.reduce((sum, item) => sum + Math.max(1, Number(item.qty || 1)), 0)}</div>
                                         </div>
                                         <div className="flex gap-2">
-                                          <button type="button" onClick={() => setFboPalletProductPicker({ open: true, palletId: pallet.id })} className="rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800">Добавить товар</button>
+	                                          <button type="button" onClick={() => openFboPalletProductPicker(pallet.id)} className="rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800">Добавить товары</button>
                                           <button type="button" onClick={() => handleDeleteFboPallet(pallet.id)} className="rounded-xl border border-rose-200 px-3 py-2 text-rose-600 hover:bg-rose-50" title="Удалить паллету"><Trash2 className="h-4 w-4" /></button>
                                         </div>
                                       </div>
@@ -17900,9 +18020,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                               <div className="mt-1 flex flex-wrap gap-1 text-[11px] text-slate-500">
                                                 {item.vendor_code && <span className="rounded bg-white px-1.5 py-0.5">Арт: {item.vendor_code}</span>}
                                                 {item.size && <span className="rounded bg-white px-1.5 py-0.5">Размер: {item.size}</span>}
-                                                {item.color && <span className="rounded bg-white px-1.5 py-0.5">Цвет: {item.color}</span>}
-                                                {item.barcode && <span className="rounded bg-white px-1.5 py-0.5">ШК: {item.barcode}</span>}
-                                              </div>
+	                                                {item.color && <span className="rounded bg-white px-1.5 py-0.5">Цвет: {item.color}</span>}
+	                                                {item.barcode && <span className="rounded bg-white px-1.5 py-0.5">ШК: {item.barcode}</span>}
+	                                                <span className="rounded bg-violet-100 px-1.5 py-0.5 font-semibold text-violet-700">Кол-во: {Math.max(1, Number(item.qty || 1))}</span>
+	                                              </div>
                                             </div>
                                             <button type="button" onClick={() => handleDeleteFboPalletItem(item.id)} className="h-10 w-10 shrink-0 rounded-lg border border-rose-100 text-rose-600 hover:bg-rose-50" title="Удалить товар"><Trash2 className="mx-auto h-4 w-4" /></button>
                                           </div>
@@ -17920,17 +18041,22 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 </div>
               )}
 
-              {fboPalletProductPicker.open && (
-                <div className="fixed inset-0 z-[74] flex items-end justify-center bg-black/50 p-2 md:items-center md:p-4" onClick={() => setFboPalletProductPicker({ open: false, palletId: '' })}>
-                  <div className="max-h-[94svh] w-full max-w-6xl overflow-y-auto rounded-t-3xl bg-white shadow-2xl md:rounded-2xl" onClick={(e) => e.stopPropagation()}>
-                    <div className="sticky top-0 z-10 border-b bg-white/95 px-4 py-4 backdrop-blur">
-                      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                        <div>
-                          <h3 className="text-xl font-bold text-slate-900">Добавить товар в паллету</h3>
-                          <div className="text-sm text-slate-500">Товары берутся из раздела «Товары WB» выбранного поставщика.</div>
-                        </div>
-                        <button type="button" onClick={() => setFboPalletProductPicker({ open: false, palletId: '' })} className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Закрыть</button>
-                      </div>
+	              {fboPalletProductPicker.open && (
+	                <div className="fixed inset-0 z-[74] flex items-end justify-center bg-black/50 p-2 md:items-center md:p-4" onClick={closeFboPalletProductPicker}>
+	                  <div className="max-h-[94svh] w-full max-w-6xl overflow-y-auto rounded-t-3xl bg-white shadow-2xl md:rounded-2xl" onClick={(e) => e.stopPropagation()}>
+	                    <div className="sticky top-0 z-10 border-b bg-white/95 px-4 py-4 backdrop-blur">
+	                      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+	                        <div>
+	                          <h3 className="text-xl font-bold text-slate-900">Добавить товары в паллету</h3>
+	                          <div className="text-sm text-slate-500">Отметьте нужные товары и укажите количество для паллеты.</div>
+	                        </div>
+	                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+	                          <button type="button" onClick={handleAddSelectedProductsToFboPallet} disabled={Object.keys(fboPalletSelectedProducts).length === 0} className="rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700 disabled:opacity-50">
+	                            Добавить выбранные ({Object.keys(fboPalletSelectedProducts).length})
+	                          </button>
+	                          <button type="button" onClick={closeFboPalletProductPicker} className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Закрыть</button>
+	                        </div>
+	                      </div>
                       <div className="mt-4 grid grid-cols-1 gap-2 md:grid-cols-4">
                         <div className="relative md:col-span-2">
                           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -17951,27 +18077,52 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <div className="p-10 text-center text-slate-500">Загрузка товаров...</div>
                       ) : filteredFboPalletProducts.length === 0 ? (
                         <div className="p-10 text-center text-slate-500">Товары не найдены. Нажмите «Обновить» в «Товары WB».</div>
-                      ) : (
-                        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-                          {filteredFboPalletProducts.slice(0, 600).map((product) => (
-                            <button key={'fbo-pallet-product-' + product.key} type="button" onClick={() => handleAddProductToFboPallet(product)} className="flex min-h-[128px] gap-3 rounded-2xl border border-slate-200 bg-white p-3 text-left hover:border-violet-300 hover:bg-violet-50">
-                              <div className="h-24 w-16 shrink-0 overflow-hidden rounded-xl border bg-slate-50">
-                                {product.photo_url ? <img src={product.photo_url} alt={product.title} className="h-full w-full object-cover" /> : <div className="flex h-full items-center justify-center"><Package className="h-6 w-6 text-slate-300" /></div>}
-                              </div>
-                              <div className="min-w-0 flex-1">
-                                <div className="line-clamp-2 text-sm font-semibold text-slate-900">{product.title}</div>
-                                <div className="mt-1 flex flex-wrap gap-1 text-[11px] text-slate-500">
-                                  {product.vendor_code && <span className="rounded bg-slate-100 px-1.5 py-0.5">Арт: {product.vendor_code}</span>}
-                                  {product.nm_id && <span className="rounded bg-slate-100 px-1.5 py-0.5">WB: {product.nm_id}</span>}
-                                  {product.size && <span className="rounded bg-slate-100 px-1.5 py-0.5">Размер: {product.size}</span>}
-                                  {product.color && <span className="rounded bg-slate-100 px-1.5 py-0.5">Цвет: {product.color}</span>}
-                                </div>
-                                <div className="mt-2 break-all font-mono text-[11px] text-slate-500">{product.barcode || '-'}</div>
-                              </div>
-                            </button>
-                          ))}
-                        </div>
-                      )}
+	                      ) : (
+	                        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+	                          {filteredFboPalletProducts.slice(0, 600).map((product) => {
+	                            const selectedQty = fboPalletSelectedProducts[product.key] || 0;
+	                            const selected = selectedQty > 0;
+	                            return (
+	                              <div key={'fbo-pallet-product-' + product.key} className={'flex min-h-[150px] gap-3 rounded-2xl border bg-white p-3 text-left transition-colors ' + (selected ? 'border-violet-400 bg-violet-50' : 'border-slate-200 hover:border-violet-300')}>
+	                                <label className="flex shrink-0 items-start pt-1">
+	                                  <input
+	                                    type="checkbox"
+	                                    checked={selected}
+	                                    onChange={(e) => toggleFboPalletSelectedProduct(product.key, e.target.checked)}
+	                                    className="h-5 w-5 rounded border-slate-300 text-violet-600 focus:ring-violet-500"
+	                                  />
+	                                </label>
+	                                <div className="h-24 w-16 shrink-0 overflow-hidden rounded-xl border bg-slate-50">
+	                                  {product.photo_url ? <img src={product.photo_url} alt={product.title} className="h-full w-full object-cover" /> : <div className="flex h-full items-center justify-center"><Package className="h-6 w-6 text-slate-300" /></div>}
+	                                </div>
+	                                <div className="min-w-0 flex-1">
+	                                  <div className="line-clamp-2 text-sm font-semibold text-slate-900">{product.title}</div>
+	                                  <div className="mt-1 flex flex-wrap gap-1 text-[11px] text-slate-500">
+	                                    {product.vendor_code && <span className="rounded bg-slate-100 px-1.5 py-0.5">Арт: {product.vendor_code}</span>}
+	                                    {product.nm_id && <span className="rounded bg-slate-100 px-1.5 py-0.5">WB: {product.nm_id}</span>}
+	                                    {product.size && <span className="rounded bg-slate-100 px-1.5 py-0.5">Размер: {product.size}</span>}
+	                                    {product.color && <span className="rounded bg-slate-100 px-1.5 py-0.5">Цвет: {product.color}</span>}
+	                                  </div>
+	                                  <div className="mt-2 break-all font-mono text-[11px] text-slate-500">{product.barcode || '-'}</div>
+	                                  <label className="mt-3 flex max-w-[150px] items-center gap-2 text-xs font-semibold text-slate-600">
+	                                    Кол-во
+	                                    <input
+	                                      type="number"
+	                                      min={1}
+	                                      max={999}
+	                                      value={selectedQty || 1}
+	                                      disabled={!selected}
+	                                      onChange={(e) => setFboPalletSelectedProductQty(product.key, Number(e.target.value))}
+	                                      onFocus={() => toggleFboPalletSelectedProduct(product.key, true)}
+	                                      className="h-10 w-20 rounded-lg border border-slate-200 bg-white px-2 text-sm font-semibold text-slate-900 disabled:bg-slate-100 disabled:text-slate-400"
+	                                    />
+	                                  </label>
+	                                </div>
+	                              </div>
+	                            );
+	                          })}
+	                        </div>
+	                      )}
                     </div>
                   </div>
                 </div>
@@ -28555,7 +28706,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       <div className="text-lg font-bold text-orange-800">{Math.floor(deliveryReportGrouped.totalBoxes).toLocaleString('ru-RU')}</div>
                     </div>
                     <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 shadow-sm">
-                      <div className="text-[11px] text-emerald-700">Заработано</div>
+	                      <div className="text-[11px] text-emerald-700">Заработано</div>
                       <div className="text-lg font-bold text-emerald-800">{deliveryReportGrouped.totalPaid.toFixed(2)} ₽</div>
                     </div>
                     <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 shadow-sm">
@@ -28835,7 +28986,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       <div className="text-lg font-bold text-slate-900">{generalTempWorkerRows.length}</div>
                     </div>
                     <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 shadow-sm">
-                      <div className="text-[11px] text-emerald-700">Заработано</div>
+	                      <div className="text-[11px] text-emerald-700">ЗП временные</div>
                       <div className="text-lg font-bold text-emerald-800">{generalReportTotals.tempEarned.toFixed(2)} ₽</div>
                     </div>
                     <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 shadow-sm">
@@ -28843,7 +28994,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       <div className="text-lg font-bold text-blue-800">{generalReportTotals.deliveryAmount.toFixed(2)} ₽</div>
                     </div>
                     <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-3 shadow-sm">
-                      <div className="text-[11px] text-indigo-700">Выполненная работа</div>
+	                      <div className="text-[11px] text-indigo-700">Постоянные сотрудники</div>
                       <div className="text-lg font-bold text-indigo-800">{generalReportTotals.cwAmount.toFixed(2)} ₽</div>
                     </div>
                     <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 shadow-sm">
@@ -29109,7 +29260,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       <div className="text-lg font-bold text-blue-800">{tempWorkerReportGrouped.totalHours.toFixed(2)}</div>
                     </div>
                     <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 shadow-sm">
-                      <div className="text-[11px] text-emerald-700">Оплачено</div>
+	                      <div className="text-[11px] text-emerald-700">ЗП</div>
                       <div className="text-lg font-bold text-emerald-800">{tempWorkerReportGrouped.totalEarnings.toFixed(2)} ₽</div>
                     </div>
                     <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 shadow-sm">
