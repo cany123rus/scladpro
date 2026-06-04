@@ -16767,7 +16767,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
               )}
 
               {supplyStep === 'SUPPLY' && currentSupply && (
-                <div className="bg-white border border-gray-200 rounded-xl shadow-sm flex flex-col h-[calc(100vh-6rem)] overflow-hidden">
+                <div className="bg-white border border-gray-200 rounded-xl shadow-sm flex flex-col 2xl:h-[calc(100vh-6rem)] 2xl:overflow-hidden">
                   <div className="p-4 border-b border-gray-200 bg-white z-10 flex flex-col gap-4 oc-filterbar">
                     <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                       <div className="flex items-center">
@@ -16925,7 +16925,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     </div>
                   </div>
 
-                  <div className="flex-1 overflow-y-auto p-4 relative">
+                  <div className="p-4 relative 2xl:flex-1 2xl:overflow-y-auto">
                     {fboOfflineMode && (
                       <div className="mb-6 overflow-hidden rounded-[28px] border border-slate-200 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 text-white shadow-xl">
                         <div className="p-5 md:p-6">
@@ -18079,7 +18079,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
           {/* PRODUCTS TAB */}
           {activeTab === 'products' && (
-            <div className="bg-white border border-gray-200 rounded-xl shadow-sm flex flex-col h-[calc(100vh-6rem)] overflow-hidden">
+            <div className="bg-white border border-gray-200 rounded-xl shadow-sm flex flex-col 2xl:h-[calc(100vh-6rem)] 2xl:overflow-hidden">
               <div className="p-4 border-b border-gray-200 bg-white z-10 flex flex-col gap-4 oc-filterbar">
                 <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
                   <div className="flex items-center">
@@ -18145,7 +18145,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-0 relative">
+              <div className="p-0 relative 2xl:flex-1 2xl:overflow-y-auto">
                 <table className="w-full text-left border-collapse">
                   <thead className="sticky top-0 bg-gray-50 z-10 shadow-sm">
                     <tr className="border-b border-gray-200">
@@ -26739,7 +26739,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
           {showTempWorkerHistory && (
             <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm flex items-end md:items-center justify-center z-50 transition-opacity p-2 md:p-3 xl:p-4" onClick={() => setShowTempWorkerHistory(false)}>
-              <div className="bg-slate-50 rounded-t-3xl md:rounded-3xl shadow-2xl w-[98vw] max-w-[1500px] h-[92svh] md:h-[94svh] lg:h-[92svh] flex flex-col overflow-hidden transform transition-all scale-100 border border-white/70" onClick={e => e.stopPropagation()}>
+              <div className="bg-slate-50 rounded-t-3xl md:rounded-3xl shadow-2xl w-[98vw] max-w-[1500px] max-h-[94svh] 2xl:h-[92svh] flex flex-col overflow-y-auto 2xl:overflow-hidden transform transition-all scale-100 border border-white/70" onClick={e => e.stopPropagation()}>
                 <div className="sticky top-0 z-20 bg-white/90 backdrop-blur border-b border-slate-200 px-4 pt-2 pb-3 md:px-5 md:pt-4 md:pb-4 xl:px-6">
                   <div className="mx-auto mb-1.5 h-1.5 w-12 rounded-full bg-gray-300 md:hidden" />
                   <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -26924,7 +26924,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   </select>
                 </div>
 
-                <div className="flex-1 overflow-y-auto custom-scrollbar px-3 md:px-6 pb-6">
+                <div className="px-3 md:px-6 pb-6 2xl:flex-1 2xl:overflow-y-auto custom-scrollbar">
                   <div className="mb-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
                     {WAREHOUSE_MONEY_OWNERS.map(renderWarehouseMoneyCard)}
                   </div>
@@ -27119,7 +27119,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
           {showTempWorkerQuickPayModal && (
             <div className="fixed inset-0 z-[76] bg-slate-950/60 backdrop-blur-sm flex items-end md:items-center justify-center p-2 md:p-4" onClick={() => setShowTempWorkerQuickPayModal(false)}>
-              <div className="bg-slate-50 rounded-t-3xl md:rounded-3xl shadow-2xl w-[98vw] max-w-5xl h-[82vh] flex flex-col overflow-hidden border border-white/70" onClick={(e) => e.stopPropagation()}>
+              <div className="bg-slate-50 rounded-t-3xl md:rounded-3xl shadow-2xl w-[98vw] max-w-5xl max-h-[92svh] 2xl:h-[82vh] flex flex-col overflow-y-auto 2xl:overflow-hidden border border-white/70" onClick={(e) => e.stopPropagation()}>
                 <div className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b border-slate-200 px-4 py-4 md:px-6">
                   <div className="mx-auto mb-2 h-1.5 w-12 rounded-full bg-gray-300 md:hidden" />
                   <div className="flex items-start justify-between gap-3">
@@ -27192,7 +27192,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   </div>
                 </div>
 
-                <div className="flex-1 overflow-y-auto p-4 md:p-6 custom-scrollbar">
+                <div className="p-4 md:p-6 2xl:flex-1 2xl:overflow-y-auto custom-scrollbar">
                   {tempWorkerQuickPayRows.length === 0 ? (
                     <div className="h-full min-h-[220px] flex flex-col items-center justify-center text-center text-gray-400">
                       <CheckCircle2 className="h-12 w-12 mb-3 text-emerald-300" />
@@ -27256,7 +27256,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
           {showDeliveryQuickPayModal && (
             <div className="fixed inset-0 z-[77] bg-slate-950/60 backdrop-blur-sm flex items-end md:items-center justify-center p-2 md:p-4" onClick={() => setShowDeliveryQuickPayModal(false)}>
-              <div className="bg-slate-50 rounded-t-3xl md:rounded-3xl shadow-2xl w-[98vw] max-w-5xl h-[82vh] flex flex-col overflow-hidden border border-white/70" onClick={(e) => e.stopPropagation()}>
+              <div className="bg-slate-50 rounded-t-3xl md:rounded-3xl shadow-2xl w-[98vw] max-w-5xl max-h-[92svh] 2xl:h-[82vh] flex flex-col overflow-y-auto 2xl:overflow-hidden border border-white/70" onClick={(e) => e.stopPropagation()}>
                 <div className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b border-slate-200 px-4 py-4 md:px-6">
                   <div className="mx-auto mb-2 h-1.5 w-12 rounded-full bg-gray-300 md:hidden" />
                   <div className="flex items-start justify-between gap-3">
@@ -27325,7 +27325,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   </div>
                 </div>
 
-                <div className="flex-1 overflow-y-auto p-4 md:p-6 custom-scrollbar">
+                <div className="p-4 md:p-6 2xl:flex-1 2xl:overflow-y-auto custom-scrollbar">
                   {deliveryQuickPayRows.length === 0 ? (
                     <div className="h-full min-h-[220px] flex flex-col items-center justify-center text-center text-slate-400">
                       <Truck className="h-12 w-12 mb-3 text-emerald-200" />
@@ -27451,7 +27451,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   </div>
                 </div>
 
-                <div className="flex-1 overflow-y-auto p-4 md:p-6 custom-scrollbar space-y-4">
+                <div className="p-4 md:p-6 2xl:flex-1 2xl:overflow-y-auto custom-scrollbar space-y-4">
                   <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
                     <div className="mb-3 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
                       <div>
@@ -27827,7 +27827,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
           {showDeliveryReportModal && (
             <div className="fixed inset-0 z-[94] bg-black/50 flex items-end md:items-center justify-center p-2 md:p-4" onClick={() => setShowDeliveryReportModal(false)}>
-              <div className="bg-white rounded-t-3xl md:rounded-2xl shadow-2xl w-[98vw] max-w-6xl h-[86vh] md:h-[82vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+              <div className="bg-white rounded-t-3xl md:rounded-2xl shadow-2xl w-[98vw] max-w-6xl max-h-[92svh] 2xl:h-[82vh] flex flex-col overflow-y-auto 2xl:overflow-hidden" onClick={(e) => e.stopPropagation()}>
                 <div className="sticky top-0 z-10 bg-white border-b px-4 py-4 md:px-6">
                   <div className="mx-auto mb-2 h-1.5 w-12 rounded-full bg-gray-300 md:hidden" />
                   <div className="flex items-start justify-between gap-3">
@@ -27944,7 +27944,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   </div>
                 </div>
 
-                <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 custom-scrollbar">
+                <div className="p-4 md:p-6 space-y-4 2xl:flex-1 2xl:overflow-y-auto custom-scrollbar">
                   {deliveryReportGrouped.groups.length === 0 ? (
                     <div className="h-full min-h-[220px] flex flex-col items-center justify-center text-center text-gray-400">
                       <Truck className="h-12 w-12 mb-3 text-orange-200" />
@@ -28149,7 +28149,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
           {showGeneralReportModal && (
             <div className="fixed inset-0 z-[76] bg-black/50 flex items-end md:items-center justify-center p-2 md:p-4" onClick={() => setShowGeneralReportModal(false)}>
-              <div className="bg-white rounded-t-3xl md:rounded-2xl shadow-2xl w-[98vw] max-w-6xl h-[86vh] md:h-[82vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+              <div className="bg-white rounded-t-3xl md:rounded-2xl shadow-2xl w-[98vw] max-w-6xl max-h-[92svh] 2xl:h-[82vh] flex flex-col overflow-y-auto 2xl:overflow-hidden" onClick={(e) => e.stopPropagation()}>
                 <div className="sticky top-0 z-10 bg-white border-b px-4 py-4 md:px-6">
                   <div className="mx-auto mb-2 h-1.5 w-12 rounded-full bg-gray-300 md:hidden" />
                   <div className="flex items-start justify-between gap-3">
@@ -28236,7 +28236,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   </div>
                 </div>
 
-                <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 custom-scrollbar">
+                <div className="p-4 md:p-6 space-y-4 2xl:flex-1 2xl:overflow-y-auto custom-scrollbar">
                   <div className="rounded-2xl border border-gray-200 overflow-hidden bg-white">
                     <div className="bg-gray-50 px-4 py-3 font-bold text-gray-900">Отчет по временным сотрудникам</div>
                     {generalTempWorkerRows.length === 0 ? (
@@ -28343,7 +28343,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
           {showTempWorkerReportModal && (
             <div className="fixed inset-0 z-[75] bg-black/50 flex items-end md:items-center justify-center p-2 md:p-4" onClick={() => setShowTempWorkerReportModal(false)}>
-              <div className="bg-white rounded-t-3xl md:rounded-2xl shadow-2xl w-[98vw] max-w-6xl h-[86vh] md:h-[82vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+              <div className="bg-white rounded-t-3xl md:rounded-2xl shadow-2xl w-[98vw] max-w-6xl max-h-[92svh] 2xl:h-[82vh] flex flex-col overflow-y-auto 2xl:overflow-hidden" onClick={(e) => e.stopPropagation()}>
                 <div className="sticky top-0 z-10 bg-white border-b px-4 py-4 md:px-6">
                   <div className="mx-auto mb-2 h-1.5 w-12 rounded-full bg-gray-300 md:hidden" />
                   <div className="flex items-start justify-between gap-3">
@@ -28498,7 +28498,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   </div>
                 </div>
 
-                <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 custom-scrollbar">
+                <div className="p-4 md:p-6 space-y-4 2xl:flex-1 2xl:overflow-y-auto custom-scrollbar">
                   {tempWorkerReportGrouped.groups.length === 0 ? (
                     <div className="h-full min-h-[220px] flex flex-col items-center justify-center text-center text-gray-400">
                       <FileText className="h-12 w-12 mb-3 text-gray-300" />

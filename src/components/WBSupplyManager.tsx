@@ -5084,7 +5084,7 @@ export const WBSupplyManager = ({
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             
             {/* Column 1: Orders */}
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col min-h-[380px] md:h-[calc(100vh-10rem)]">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col min-h-[380px] 2xl:h-[calc(100vh-10rem)]">
                 <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50 rounded-t-xl">
                     <h2 className="font-semibold flex items-center gap-2">
                         <Package className="w-5 h-5 text-blue-500" />
@@ -5111,7 +5111,7 @@ export const WBSupplyManager = ({
                     </span>
                 </div>
 
-                <div className="flex-1 overflow-auto p-0">
+                <div className="2xl:flex-1 2xl:overflow-auto p-0">
                     <table className="w-full text-sm text-left">
                         <thead className="text-xs text-gray-700 uppercase bg-gray-50 sticky top-0">
                             <tr>
@@ -5195,7 +5195,7 @@ export const WBSupplyManager = ({
             </div>
 
             {/* Column 3: Supplies */}
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col min-h-[380px] md:h-[calc(100vh-10rem)]">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col min-h-[380px] 2xl:h-[calc(100vh-10rem)]">
                 <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50 rounded-t-xl">
                     <h2 className="font-semibold flex items-center gap-2">
                         <Truck className="w-5 h-5 text-purple-500" />
@@ -5261,7 +5261,7 @@ export const WBSupplyManager = ({
                     </label>
                 </div>
 
-                <div className="flex-1 overflow-auto p-0">
+                <div className="2xl:flex-1 2xl:overflow-auto p-0">
                     {supplies.length === 0 ? (
                         <div className="p-8 text-center text-gray-500">Нет поставок</div>
                     ) : (
@@ -5669,7 +5669,7 @@ export const WBSupplyManager = ({
 
           {fbsRenameRulesOpen && (
             <div className="fixed inset-0 z-[117] bg-black/50 flex items-end sm:items-center justify-center p-2 sm:p-4" onClick={() => setFbsRenameRulesOpen(false)}>
-              <div className="w-full max-w-2xl max-h-[90vh] sm:max-h-[86vh] overflow-hidden bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl" onClick={(e) => e.stopPropagation()}>
+              <div className="w-full max-w-2xl max-h-[90svh] 2xl:max-h-[86vh] overflow-y-auto 2xl:overflow-hidden bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl" onClick={(e) => e.stopPropagation()}>
                 <div className="p-3 sm:p-4 border-b border-gray-200 flex items-center justify-between gap-3">
                   <div className="font-semibold text-gray-900">Правила названий (Артикул → Название)</div>
                   <button type="button" onClick={() => setFbsRenameRulesOpen(false)} className="px-3 py-1.5 text-sm rounded border border-gray-300 hover:bg-gray-50">Закрыть</button>
@@ -5830,7 +5830,7 @@ export const WBSupplyManager = ({
 
           {fbsOrdersHistoryOpen && (
             <div className="fixed inset-0 z-[118] bg-black/50 flex items-center justify-center p-4" onClick={() => setFbsOrdersHistoryOpen(false)}>
-              <div className="w-full max-w-3xl h-[86vh] overflow-hidden bg-white rounded-2xl shadow-2xl flex flex-col" onClick={(e) => e.stopPropagation()}>
+              <div className="w-full max-w-3xl max-h-[90svh] 2xl:h-[86vh] overflow-y-auto 2xl:overflow-hidden bg-white rounded-2xl shadow-2xl flex flex-col" onClick={(e) => e.stopPropagation()}>
                 <div className="p-4 border-b border-gray-200 space-y-3 shrink-0">
                   <div className="flex items-center justify-between">
                     <div className="font-semibold text-gray-900">{`История ${fbsOrdersTabTitle}`}</div>
@@ -6376,7 +6376,7 @@ export const WBSupplyManager = ({
 
           {calcHistoryOpen && (
             <div className="fixed inset-0 z-[118] bg-black/50 flex items-center justify-center p-4" onClick={() => setCalcHistoryOpen(false)}>
-              <div className="w-full max-w-3xl max-h-[86vh] overflow-hidden bg-white rounded-2xl shadow-2xl" onClick={(e) => e.stopPropagation()}>
+              <div className="w-full max-w-3xl max-h-[90svh] 2xl:max-h-[86vh] overflow-y-auto 2xl:overflow-hidden bg-white rounded-2xl shadow-2xl" onClick={(e) => e.stopPropagation()}>
                 <div className="p-4 border-b border-gray-200 space-y-3">
                   <div className="flex items-center justify-between">
                     <div className="font-semibold text-gray-900">История расчетов</div>
@@ -6480,7 +6480,7 @@ export const WBSupplyManager = ({
 
       {/* Content: Supply Order Tab */}
       {activeTab === 'supply_order' && (
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col min-h-[380px] md:h-[calc(100vh-10rem)]">
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col min-h-[380px] 2xl:h-[calc(100vh-10rem)]">
               <div className="p-4 border-b border-gray-100 bg-gray-50 rounded-t-xl space-y-3">
                   <div>
                       <label className="text-xs text-gray-500">Поставщик</label>
@@ -6557,7 +6557,7 @@ export const WBSupplyManager = ({
                   </div>
               )}
 
-              <div className="flex-1 overflow-auto p-0">
+              <div className="2xl:flex-1 2xl:overflow-auto p-0">
                   <table className="w-full text-sm text-left">
                       <thead className="text-xs text-gray-700 uppercase bg-gray-50 sticky top-0 z-10">
                           <tr>
@@ -6905,8 +6905,6 @@ export const WBSupplyManager = ({
     </div>
   );
 };
-
-
 
 
 
