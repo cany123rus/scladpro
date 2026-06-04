@@ -1576,62 +1576,62 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
       <div className="p-4 border-b border-gray-200 bg-white z-10 flex flex-col gap-4 no-print">
         <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-3">
             <h2 className="text-xl md:text-2xl font-bold text-gray-900">Товары Wildberries <span className="text-gray-500 text-base md:text-lg font-normal">({filteredVariants.length})</span></h2>
-            <div className="grid grid-cols-2 md:grid-cols-4 xl:flex gap-2 w-full xl:w-auto">
+            <div className="grid grid-cols-2 lg:grid-cols-4 xl:flex gap-2 w-full xl:w-auto">
                 <button 
                     onClick={() => setShowFilters(!showFilters)}
-                    className={`flex items-center justify-center px-3 md:px-4 py-2 border rounded-lg transition-colors text-sm xl:text-base ${showFilters ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'}`}
+                    className={`flex min-w-0 items-center justify-center px-3 py-2 min-h-[44px] border rounded-lg transition-colors text-xs sm:text-sm xl:text-base leading-tight text-center whitespace-normal ${showFilters ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'}`}
                 >
-                    <Filter className="h-4 w-4 mr-1 md:mr-2" />
+                    <Filter className="h-4 w-4 mr-1.5 shrink-0" />
                     Фильтры
                 </button>
                 <button 
                     onClick={() => fetchAllProducts(undefined, true)}
                     disabled={loading}
-                    className="flex items-center justify-center px-3 md:px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 text-sm xl:text-base"
+                    className="flex min-w-0 items-center justify-center px-3 py-2 min-h-[44px] bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 text-xs sm:text-sm xl:text-base leading-tight text-center whitespace-normal"
                 >
-                    <RefreshCw className={`h-4 w-4 mr-1 md:mr-2 ${loading ? 'animate-spin' : ''}`} />
+                    <RefreshCw className={`h-4 w-4 mr-1.5 shrink-0 ${loading ? 'animate-spin' : ''}`} />
                     Обновить
                 </button>
                 <button
                     onClick={loadProductsFromWarehouseOffline}
                     disabled={loading}
-                    className="flex items-center justify-center px-3 md:px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 transition-colors disabled:opacity-50 text-sm xl:text-base"
+                    className="flex min-w-0 items-center justify-center px-3 py-2 min-h-[44px] bg-slate-900 text-white rounded-lg hover:bg-slate-800 transition-colors disabled:opacity-50 text-xs sm:text-sm xl:text-base leading-tight text-center whitespace-normal"
                 >
                     Offline-база
                 </button>
                 <button
                     onClick={preparePrintCache}
                     disabled={isPreparingPrintCache}
-                    className="flex items-center justify-center px-3 md:px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors disabled:opacity-50 text-sm xl:text-base"
+                    className="flex min-w-0 items-center justify-center px-3 py-2 min-h-[44px] bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors disabled:opacity-50 text-xs sm:text-sm xl:text-base leading-tight text-center whitespace-normal"
                 >
                     {isPreparingPrintCache ? 'Подготовка кэша...' : 'Подготовить к печати'}
                 </button>
                 <button
                     onClick={checkPrintCacheReady}
                     disabled={isCheckingPrintCache}
-                    className="flex items-center justify-center px-3 md:px-4 py-2 bg-sky-600 text-white rounded-lg hover:bg-sky-700 transition-colors disabled:opacity-50 text-sm xl:text-base"
+                    className="flex min-w-0 items-center justify-center px-3 py-2 min-h-[44px] bg-sky-600 text-white rounded-lg hover:bg-sky-700 transition-colors disabled:opacity-50 text-xs sm:text-sm xl:text-base leading-tight text-center whitespace-normal"
                 >
                     {isCheckingPrintCache ? 'Проверка кэша...' : 'Проверить кэш'}
                 </button>
                 <button
                     onClick={() => handlePrint(true)}
                     disabled={printCount === 0}
-                    className={`flex items-center justify-center px-3 md:px-4 py-2 rounded-lg text-white transition-colors text-sm xl:text-base ${printCount > 0 ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-gray-300 cursor-not-allowed'}`}
+                    className={`flex min-w-0 items-center justify-center px-3 py-2 min-h-[44px] rounded-lg text-white transition-colors text-xs sm:text-sm xl:text-base leading-tight text-center whitespace-normal ${printCount > 0 ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-gray-300 cursor-not-allowed'}`}
                 >
-                    <Printer className="h-4 w-4 mr-1 md:mr-2" />
+                    <Printer className="h-4 w-4 mr-1.5 shrink-0" />
                     Печать из кэша ({printCount})
                 </button>
                 <button 
                     onClick={() => handlePrint(false)}
                     disabled={printCount === 0}
-                    className={`flex items-center justify-center px-3 md:px-4 py-2 rounded-lg text-white transition-colors text-sm xl:text-base ${printCount > 0 ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-gray-300 cursor-not-allowed'}`}
+                    className={`flex min-w-0 items-center justify-center px-3 py-2 min-h-[44px] rounded-lg text-white transition-colors text-xs sm:text-sm xl:text-base leading-tight text-center whitespace-normal ${printCount > 0 ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-gray-300 cursor-not-allowed'}`}
                 >
-                    <Printer className="h-4 w-4 mr-1 md:mr-2" />
+                    <Printer className="h-4 w-4 mr-1.5 shrink-0" />
                     Печать онлайн ({printCount})
                 </button>
                 <button
                     onClick={() => { setQuantities({}); setPrintItems([]); }}
-                    className="flex items-center justify-center px-3 md:px-4 py-2 border border-rose-300 text-rose-700 rounded-lg hover:bg-rose-50 transition-colors text-sm xl:text-base"
+                    className="flex min-w-0 items-center justify-center px-3 py-2 min-h-[44px] border border-rose-300 text-rose-700 rounded-lg hover:bg-rose-50 transition-colors text-xs sm:text-sm xl:text-base leading-tight text-center whitespace-normal"
                 >
                     Очистить выбор
                 </button>
