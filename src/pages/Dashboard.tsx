@@ -295,7 +295,16 @@ interface FboPallet {
   id: string;
   session_id: string;
   supplier_id: string;
+  warehouse_id?: string | null;
   pallet_number: number;
+  created_at: string;
+  deleted_at?: string | null;
+}
+
+interface FboPalletWarehouse {
+  id: string;
+  supplier_id: string;
+  name: string;
   created_at: string;
   deleted_at?: string | null;
 }
@@ -333,12 +342,20 @@ interface FboPalletProductOption {
 }
 
 interface FboPalletHint {
+  warehouse_name?: string | null;
   pallet_number: number;
   item_title: string;
   item_size?: string | null;
   item_color?: string | null;
   target_qty?: number;
   scanned_qty?: number;
+}
+
+interface FboPalletSnapshot {
+  sessions: FboPalletSession[];
+  warehouses: FboPalletWarehouse[];
+  pallets: FboPallet[];
+  items: FboPalletItem[];
 }
 
 interface Supply {
@@ -5365,6 +5382,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [fboPalletHistoryOpen, setFboPalletHistoryOpen] = useState(false);
   const [fboPalletSupplierId, setFboPalletSupplierId] = useState('');
   const [fboPalletSessions, setFboPalletSessions] = useState<FboPalletSession[]>([]);
+  const [fboPalletWarehouses, setFboPalletWarehouses] = useState<FboPalletWarehouse[]>([]);
+  const [fboPalletWarehouseName, setFboPalletWarehouseName] = useState('');
+  const [fboPalletSelectedWarehouseId, setFboPalletSelectedWarehouseId] = useState('');
   const [fboPallets, setFboPallets] = useState<FboPallet[]>([]);
   const [fboPalletItems, setFboPalletItems] = useState<FboPalletItem[]>([]);
   const [fboPalletLoading, setFboPalletLoading] = useState(false);
@@ -6964,11 +6984,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       const parsed = typeof value === 'string' ? JSON.parse(value) : value;
       return {
         sessions: Array.isArray(parsed?.sessions) ? parsed.sessions as FboPalletSession[] : [],
+        warehouses: Array.isArray(parsed?.warehouses) ? parsed.warehouses as FboPalletWarehouse[] : [],
         pallets: Array.isArray(parsed?.pallets) ? parsed.pallets as FboPallet[] : [],
         items: Array.isArray(parsed?.items) ? parsed.items as FboPalletItem[] : [],
       };
     } catch {
-      return { sessions: [] as FboPalletSession[], pallets: [] as FboPallet[], items: [] as FboPalletItem[] };
+      return { sessions: [] as FboPalletSession[], warehouses: [] as FboPalletWarehouse[], pallets: [] as FboPallet[], items: [] as FboPalletItem[] };
     }
   };
 
@@ -6982,7 +7003,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     return parseFboPalletSnapshot(data?.value);
   };
 
-  const saveFboPalletSnapshot = async (snapshot: { sessions: FboPalletSession[]; pallets: FboPallet[]; items: FboPalletItem[] }) => {
+  const saveFboPalletSnapshot = async (snapshot: FboPalletSnapshot) => {
     const { error } = await supabase.from('app_settings').upsert([{
       key: 'fbo_pallet_collection_v1',
       value: JSON.stringify(snapshot),
@@ -6990,7 +7011,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     if (error) throw error;
   };
 
-  const applyFboPalletSnapshotToState = (snapshot: { sessions: FboPalletSession[]; pallets: FboPallet[]; items: FboPalletItem[] }, supplierId = '') => {
+  const applyFboPalletSnapshotToState = (snapshot: FboPalletSnapshot, supplierId = '') => {
     const normalizedSupplierId = String(supplierId || '').trim();
     const sessions = snapshot.sessions
       .filter((session) => !session.deleted_at && (!normalizedSupplierId || String(session.supplier_id) === normalizedSupplierId))
@@ -7005,6 +7026,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
 
     setFboPalletSessions(sessions);
+    const warehouses = snapshot.warehouses
+      .filter((warehouse) => !warehouse.deleted_at && (!normalizedSupplierId || String(warehouse.supplier_id) === normalizedSupplierId))
+      .sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')));
+    setFboPalletWarehouses(warehouses);
+    setFboPalletSelectedWarehouseId((current) => {
+      if (current && warehouses.some((warehouse) => String(warehouse.id) === String(current))) return current;
+      return warehouses[0]?.id || '';
+    });
     setFboPallets(pallets);
     setFboPalletItems(items);
   };
@@ -7122,10 +7151,55 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
   const handleChangeFboPalletSupplier = async (supplierId: string) => {
     setFboPalletSupplierId(supplierId);
+    setFboPalletSelectedWarehouseId('');
+    setFboPalletWarehouseName('');
     setFboPalletProductSearch('');
     setFboPalletBrandFilter('');
     setFboPalletCategoryFilter('');
     await Promise.all([fetchFboPalletData(supplierId), loadFboPalletProducts(supplierId)]);
+  };
+
+  const handleAddFboPalletWarehouse = async () => {
+    const supplierId = String(fboPalletSupplierId || '').trim();
+    const name = String(fboPalletWarehouseName || '').trim();
+    if (!supplierId) {
+      showToast('Выберите поставщика для склада поставки', 'error');
+      return;
+    }
+    if (!name) {
+      showToast('Напишите название склада поставки', 'error');
+      return;
+    }
+
+    try {
+      const snapshot = await loadFboPalletSnapshot();
+      const existing = snapshot.warehouses.find((warehouse) => (
+        String(warehouse.supplier_id) === supplierId &&
+        !warehouse.deleted_at &&
+        String(warehouse.name || '').trim().toLowerCase() === name.toLowerCase()
+      ));
+      if (existing) {
+        setFboPalletSelectedWarehouseId(existing.id);
+        setFboPalletWarehouseName('');
+        showToast('Склад поставки уже есть, открыт: ' + existing.name, 'info');
+        return;
+      }
+
+      const warehouse: FboPalletWarehouse = {
+        id: createFboPalletId('fbo-pallet-warehouse'),
+        supplier_id: supplierId,
+        name,
+        created_at: new Date().toISOString(),
+        deleted_at: null,
+      };
+      await saveFboPalletSnapshot({ ...snapshot, warehouses: [...snapshot.warehouses, warehouse] });
+      await fetchFboPalletData(supplierId);
+      setFboPalletSelectedWarehouseId(warehouse.id);
+      setFboPalletWarehouseName('');
+      showToast('Склад поставки добавлен: ' + name, 'success');
+    } catch (e: any) {
+      showToast('Ошибка добавления склада поставки: ' + (e?.message || 'неизвестно'), 'error');
+    }
   };
 
   const handleAddFboPallet = async () => {
@@ -7134,10 +7208,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       showToast('Выберите поставщика для паллет', 'error');
       return;
     }
+    if (!fboPalletSelectedWarehouseId) {
+      showToast('Сначала выберите или создайте склад поставки', 'error');
+      return;
+    }
 
     try {
       const { session, snapshot } = await getFboPalletActiveSession(supplierId);
-      const currentPallets = snapshot.pallets.filter((p) => String(p.session_id) === String(session.id) && !p.deleted_at);
+      const currentPallets = snapshot.pallets.filter((p) => String(p.session_id) === String(session.id) && String(p.warehouse_id || '') === String(fboPalletSelectedWarehouseId) && !p.deleted_at);
       const used = new Set(currentPallets.map((p) => Number(p.pallet_number)).filter((n) => Number.isFinite(n) && n > 0));
       let nextNumber = 1;
       while (used.has(nextNumber)) nextNumber += 1;
@@ -7146,6 +7224,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         id: createFboPalletId('fbo-pallet'),
         session_id: session.id,
         supplier_id: supplierId,
+        warehouse_id: fboPalletSelectedWarehouseId,
         pallet_number: nextNumber,
         created_at: new Date().toISOString(),
         deleted_at: null,
@@ -7338,6 +7417,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       if ((!productId || productId.startsWith('offline-product-')) && !barcode && !nmId) return null;
 
       const snapshot = await loadFboPalletSnapshot();
+      const warehouseById = new Map(snapshot.warehouses.filter((warehouse) => !warehouse.deleted_at).map((warehouse) => [String(warehouse.id), warehouse]));
       const activeSessionIds = new Set(snapshot.sessions
         .filter((session) => String(session.supplier_id) === supplierId && session.status === 'active' && !session.deleted_at)
         .map((session) => String(session.id)));
@@ -7368,8 +7448,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       });
       const pallet = activePalletById.get(String(data?.pallet_id || ''));
       if (!data || !pallet?.pallet_number) return null;
+      const warehouse = warehouseById.get(String(pallet.warehouse_id || ''));
       const targetQty = Math.max(1, Number(data.qty || 1));
       return {
+        warehouse_name: warehouse?.name || '',
         pallet_number: Number(pallet.pallet_number),
         item_title: String(data.title || product.name || ''),
         item_size: data.size || product.size || '',
@@ -7675,7 +7757,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     const palletHint = await findFboPalletHint(product);
     setFboPalletHint(palletHint);
     if (palletHint) {
-      showToast(`Товар для паллеты №${palletHint.pallet_number}: ${Number(palletHint.scanned_qty || 0) + 1}/${palletHint.target_qty || 1}. Поставьте коробку на эту паллету.`, 'info');
+      showToast(`${palletHint.warehouse_name ? palletHint.warehouse_name + ' • ' : ''}Паллета №${palletHint.pallet_number}: ${Number(palletHint.scanned_qty || 0) + 1}/${palletHint.target_qty || 1}. Поставьте коробку туда.`, 'info');
     }
 
     setScannedItem(product);
@@ -17890,9 +17972,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         </div>
                         <h2 className="mt-3 text-xl font-bold text-gray-900 break-words">{scannedItem.name}</h2>
                         {fboPalletHint && (
-                          <div className="mt-3 rounded-2xl border border-violet-200 bg-violet-50 px-4 py-3 text-violet-900">
-                            <div className="text-xs font-semibold uppercase tracking-wide text-violet-600">Куда ставить коробку</div>
-                            <div className="mt-1 text-2xl font-black">Паллета №{fboPalletHint.pallet_number}</div>
+	                          <div className="mt-3 rounded-2xl border border-violet-200 bg-violet-50 px-4 py-3 text-violet-900">
+	                            <div className="text-xs font-semibold uppercase tracking-wide text-violet-600">Куда ставить коробку</div>
+	                            {fboPalletHint.warehouse_name && <div className="mt-1 text-lg font-bold">Склад: {fboPalletHint.warehouse_name}</div>}
+	                            <div className="mt-1 text-2xl font-black">Паллета №{fboPalletHint.pallet_number}</div>
 	                            <div className="mt-1 text-xs text-violet-700">Осталось по плану: {Math.max(0, Number(fboPalletHint.target_qty || 1) - Number(fboPalletHint.scanned_qty || 0))} из {fboPalletHint.target_qty || 1}.</div>
                           </div>
                         )}
@@ -17957,13 +18040,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           <h3 className="mt-2 text-xl font-bold text-slate-900">Собрать паллеты</h3>
                           <p className="mt-1 text-sm text-slate-500">Добавьте товары поставщика в паллеты, чтобы при сканировании коробки видеть нужную паллету.</p>
                         </div>
-                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-                          <button type="button" onClick={handleAddFboPallet} disabled={!fboPalletSupplierId || fboPalletLoading} className="rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700 disabled:opacity-50">Добавить паллету</button>
+	                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+	                          <button type="button" onClick={handleAddFboPallet} disabled={!fboPalletSupplierId || !fboPalletSelectedWarehouseId || fboPalletLoading} className="rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700 disabled:opacity-50">Добавить паллету</button>
                           <button type="button" onClick={() => { setFboPalletHistoryOpen(true); fetchFboPalletData(fboPalletSupplierId); }} className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">История паллет</button>
                           <button type="button" onClick={() => setFboPalletModalOpen(false)} className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Закрыть</button>
                         </div>
                       </div>
-                      <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
+	                      <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
                         <select
                           value={fboPalletSupplierId}
                           onChange={(e) => handleChangeFboPalletSupplier(e.target.value)}
@@ -17974,31 +18057,65 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         </select>
                         <button type="button" onClick={() => fetchFboPalletData(fboPalletSupplierId)} disabled={!fboPalletSupplierId || fboPalletLoading} className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">
                           {fboPalletLoading ? 'Загрузка...' : 'Обновить'}
-                        </button>
-                      </div>
-                    </div>
+	                        </button>
+	                      </div>
+	                      {fboPalletSupplierId && (
+	                        <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-3">
+	                          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Склад поставки</div>
+	                          <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_auto]">
+	                            <input
+	                              value={fboPalletWarehouseName}
+	                              onChange={(e) => setFboPalletWarehouseName(e.target.value)}
+	                              placeholder="Напишите название склада..."
+	                              className="oc-input"
+	                            />
+	                            <button type="button" onClick={handleAddFboPalletWarehouse} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800">Добавить склад</button>
+	                          </div>
+	                          <div className="mt-3 flex flex-wrap gap-2">
+	                            {fboPalletWarehouses.length === 0 ? (
+	                              <div className="rounded-xl border border-dashed border-slate-200 bg-white px-4 py-3 text-sm text-slate-500">Складов пока нет. Создайте склад поставки, чтобы внутри него собирать паллеты.</div>
+	                            ) : fboPalletWarehouses.map((warehouse) => {
+	                              const selected = String(fboPalletSelectedWarehouseId) === String(warehouse.id);
+	                              return (
+	                                <button
+	                                  key={'fbo-pallet-warehouse-' + warehouse.id}
+	                                  type="button"
+	                                  onClick={() => setFboPalletSelectedWarehouseId(warehouse.id)}
+	                                  className={'rounded-xl border px-4 py-2 text-sm font-semibold ' + (selected ? 'border-violet-600 bg-violet-600 text-white shadow-sm' : 'border-slate-200 bg-white text-slate-700 hover:border-violet-200 hover:bg-violet-50')}
+	                                >
+	                                  {warehouse.name}
+	                                </button>
+	                              );
+	                            })}
+	                          </div>
+	                        </div>
+	                      )}
+	                    </div>
 
                     <div className="p-4 md:p-6">
                       {!fboPalletSupplierId ? (
                         <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-8 text-center text-slate-500">Выберите поставщика, чтобы собрать паллеты.</div>
                       ) : (
                         <div className="space-y-4">
-                          {fboPallets.filter((p) => fboPalletSessions.some((s) => s.id === p.session_id && s.status === 'active')).length === 0 ? (
-                            <div className="rounded-2xl border border-dashed border-violet-200 bg-white p-8 text-center">
-                              <div className="text-slate-600">Паллет пока нет.</div>
-                              <button type="button" onClick={handleAddFboPallet} className="mt-4 rounded-xl bg-violet-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-violet-700">Добавить паллету</button>
-                            </div>
-                          ) : (
-                            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                              {fboPallets
-                                .filter((p) => fboPalletSessions.some((s) => s.id === p.session_id && s.status === 'active'))
+	                          {!fboPalletSelectedWarehouseId ? (
+	                            <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-8 text-center text-slate-500">Выберите или создайте склад поставки.</div>
+	                          ) : fboPallets.filter((p) => String(p.warehouse_id || '') === String(fboPalletSelectedWarehouseId) && fboPalletSessions.some((s) => s.id === p.session_id && s.status === 'active')).length === 0 ? (
+	                            <div className="rounded-2xl border border-dashed border-violet-200 bg-white p-8 text-center">
+	                              <div className="text-slate-600">Паллет в этом складе пока нет.</div>
+	                              <button type="button" onClick={handleAddFboPallet} className="mt-4 rounded-xl bg-violet-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-violet-700">Добавить паллету</button>
+	                            </div>
+	                          ) : (
+	                            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+	                              {fboPallets
+	                                .filter((p) => String(p.warehouse_id || '') === String(fboPalletSelectedWarehouseId) && fboPalletSessions.some((s) => s.id === p.session_id && s.status === 'active'))
                                 .map((pallet) => {
                                   const items = fboPalletItems.filter((item) => String(item.pallet_id) === String(pallet.id));
                                   return (
                                     <div key={'fbo-pallet-' + pallet.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                                      <div className="flex items-start justify-between gap-3">
-                                        <div>
-                                          <div className="text-xs font-semibold uppercase tracking-wide text-violet-600">Паллета</div>
+	                                      <div className="flex items-start justify-between gap-3">
+	                                        <div>
+	                                          <div className="mb-2 inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">{fboPalletWarehouses.find((warehouse) => String(warehouse.id) === String(pallet.warehouse_id || ''))?.name || 'Склад не указан'}</div>
+	                                          <div className="text-xs font-semibold uppercase tracking-wide text-violet-600">Паллета</div>
                                           <div className="mt-1 text-3xl font-black text-slate-900">№{pallet.pallet_number}</div>
 	                                          <div className="mt-1 text-xs text-slate-500">Товаров: {items.reduce((sum, item) => sum + Math.max(1, Number(item.qty || 1)), 0)}</div>
                                         </div>
@@ -18150,11 +18267,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               <div className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-600">{session.status === 'active' ? 'Активная' : 'Закрытая'}</div>
                             </div>
                             <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
-                              {sessionPallets.map((pallet) => {
-                                const items = fboPalletItems.filter((item) => String(item.pallet_id) === String(pallet.id));
-                                return (
-                                  <div key={'fbo-pallet-history-' + pallet.id} className="rounded-xl border bg-white p-3">
-                                    <div className="font-bold text-violet-800">Паллета №{pallet.pallet_number}</div>
+	                              {sessionPallets.map((pallet) => {
+	                                const items = fboPalletItems.filter((item) => String(item.pallet_id) === String(pallet.id));
+	                                const warehouse = fboPalletWarehouses.find((row) => String(row.id) === String(pallet.warehouse_id || ''));
+	                                return (
+	                                  <div key={'fbo-pallet-history-' + pallet.id} className="rounded-xl border bg-white p-3">
+	                                    <div className="mb-1 text-xs font-semibold text-slate-500">{warehouse?.name || 'Склад не указан'}</div>
+	                                    <div className="font-bold text-violet-800">Паллета №{pallet.pallet_number}</div>
                                     <div className="mt-1 text-xs text-slate-500">Товаров: {items.length}</div>
                                     <div className="mt-2 space-y-1">
                                       {items.slice(0, 6).map((item) => <div key={'fbo-pallet-history-item-' + item.id} className="truncate text-sm text-slate-700">{item.title}{item.size ? ' • ' + item.size : ''}</div>)}
