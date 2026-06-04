@@ -232,6 +232,41 @@ label {
   }
 }
 
+@media (min-width: 768px) and (max-width: 1535px) {
+  button,
+  a[role='button'],
+  .btn-primary,
+  .btn-success,
+  .btn-danger,
+  .btn-ghost {
+    min-height: 44px;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    line-height: 1.2;
+    text-align: center;
+  }
+
+  button:hover {
+    transform: none;
+  }
+
+  .oc-filterbar,
+  .oc-card,
+  .oc-card-soft {
+    max-width: 100%;
+  }
+
+  .fixed.inset-0 > div {
+    max-height: 94svh;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .custom-scrollbar {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+  }
+}
+
 .custom-scrollbar {
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
