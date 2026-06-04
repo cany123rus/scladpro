@@ -1415,6 +1415,92 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
   const desktopListHeight = typeof window !== 'undefined'
     ? Math.max(520, Math.min(1200, window.innerHeight - 220))
     : 700;
+  const tabletRowHeight = 214;
+  const tabletListHeight = typeof window !== 'undefined'
+    ? Math.max(520, Math.min(1200, window.innerHeight - 250))
+    : 700;
+  const tabletRows = useMemo(() => {
+    const rows: ProductVariant[][] = [];
+    for (let i = 0; i < filteredVariants.length; i += 2) {
+      rows.push(filteredVariants.slice(i, i + 2));
+    }
+    return rows;
+  }, [filteredVariants]);
+
+  const ProductTabletCard = useCallback(({ variant }: { variant: ProductVariant }) => (
+    <div className="h-full rounded-xl border border-gray-200 bg-white p-3 shadow-sm">
+      <div className="flex h-full gap-3">
+        <div className="w-20 shrink-0">
+          <div className="h-28 w-20 overflow-hidden rounded-lg border border-gray-200 bg-gray-100 shadow-sm">
+            {variant.product.photos?.[0]?.c246x328 ? (
+              <img
+                src={variant.product.photos[0].c246x328}
+                alt={variant.product.title}
+                className="h-full w-full cursor-pointer object-cover transition-opacity hover:opacity-90"
+                onClick={() => setSelectedImage(variant.product.photos[0].big || variant.product.photos[0].c516x688 || variant.product.photos[0].c246x328)}
+              />
+            ) : (
+              <div className="flex h-full items-center justify-center text-gray-400"><ImageIcon className="h-6 w-6" /></div>
+            )}
+          </div>
+          <div className="mt-2 flex justify-center gap-1.5">
+            <button onClick={() => openEditModal(variant)} className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-amber-200 text-amber-700 hover:bg-amber-50" title="Редактировать локально"><Pencil className="h-4 w-4" /></button>
+            <a href={getWbProductUrl(variant.product)} target="_blank" rel="noopener noreferrer" className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-indigo-200 text-indigo-600 hover:bg-indigo-50" title="Открыть на WB"><ExternalLink className="h-4 w-4" /></a>
+          </div>
+        </div>
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div className="line-clamp-2 text-sm font-semibold leading-5 text-gray-900" title={variant.product.title}>{variant.product.title || 'Без названия'}</div>
+          <div className="mt-1 flex flex-wrap gap-1.5">
+            <span className="rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-500">ID: {variant.product.nmID}</span>
+            {variant.product.vendorCode && <span className="rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-500">Арт: {variant.product.vendorCode}</span>}
+          </div>
+          <input
+            type="text"
+            defaultValue={getModelNumber(variant)}
+            onBlur={(e) => commitModelNumber(variant, e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+            }}
+            className="mt-2 w-full rounded-lg border border-indigo-200 px-2 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+            placeholder="Номер модели"
+            title="Номер модели общий для всех размеров этой карточки WB"
+          />
+          <div className="mt-2 grid grid-cols-[1fr_auto] gap-2 text-xs text-gray-600">
+            <div className="min-w-0 truncate">Цвет: {localLabelEdits[variant.id]?.color || getColor(variant.product)}</div>
+            <span className="rounded bg-indigo-50 px-2 py-0.5 font-bold text-indigo-700">{localLabelEdits[variant.id]?.size || variant.size.techSize}</span>
+          </div>
+          <div className="mt-1 truncate font-mono text-xs text-gray-500">{variant.barcode || '-'}</div>
+          <div className="mt-auto flex items-center justify-end gap-2 pt-3">
+            <button onClick={() => updateQuantity(variant.id, -1)} className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-gray-100 text-gray-600"><Minus className="h-5 w-5" /></button>
+            <input
+              type="text"
+              inputMode="numeric"
+              defaultValue={String(quantities[variant.id] || 0)}
+              onChange={(e) => handleQuantityInput(variant.id, e.target.value)}
+              onBlur={(e) => commitQuantityDeferred(variant.id, e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  commitQuantity(variant.id, (e.target as HTMLInputElement).value);
+                  (e.target as HTMLInputElement).blur();
+                }
+              }}
+              className="h-11 w-16 rounded-lg border border-gray-300 p-1 text-center text-base outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+            <button onClick={() => updateQuantity(variant.id, 1)} className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-gray-100 text-gray-600"><Plus className="h-5 w-5" /></button>
+          </div>
+        </div>
+      </div>
+    </div>
+  ), [commitModelNumber, commitQuantity, commitQuantityDeferred, getModelNumber, getWbProductUrl, handleQuantityInput, localLabelEdits, openEditModal, quantities, updateQuantity]);
+
+  const TabletVirtualizedRow = useCallback(({ index, style }: ListChildComponentProps) => {
+    const row = tabletRows[index] || [];
+    return (
+      <div style={style} className="grid grid-cols-2 gap-3 px-3 py-2">
+        {row.map((variant) => <ProductTabletCard key={variant.id} variant={variant} />)}
+      </div>
+    );
+  }, [ProductTabletCard, tabletRows]);
 
   const VirtualizedRow = useCallback(({ index, style }: ListChildComponentProps) => {
     const variant = filteredVariants[index];
@@ -1486,14 +1572,14 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
   }, [filteredVariants, quantities, handleQuantityInput, commitQuantity, updateQuantity, localLabelEdits, openEditModal]);
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl shadow-sm flex flex-col h-[calc(100vh-8rem)]">
+    <div className="bg-white border border-gray-200 rounded-xl shadow-sm flex flex-col h-[calc(100svh-7rem)] md:h-[calc(100svh-6rem)] xl:h-[calc(100vh-8rem)]">
       <div className="p-4 border-b border-gray-200 bg-white z-10 flex flex-col gap-4 no-print">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
+        <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-3">
             <h2 className="text-xl md:text-2xl font-bold text-gray-900">Товары Wildberries <span className="text-gray-500 text-base md:text-lg font-normal">({filteredVariants.length})</span></h2>
-            <div className="grid grid-cols-2 md:flex gap-2 w-full md:w-auto">
+            <div className="grid grid-cols-2 md:grid-cols-4 xl:flex gap-2 w-full xl:w-auto">
                 <button 
                     onClick={() => setShowFilters(!showFilters)}
-                    className={`flex items-center justify-center px-3 md:px-4 py-2 border rounded-lg transition-colors text-sm md:text-base ${showFilters ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'}`}
+                    className={`flex items-center justify-center px-3 md:px-4 py-2 border rounded-lg transition-colors text-sm xl:text-base ${showFilters ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'}`}
                 >
                     <Filter className="h-4 w-4 mr-1 md:mr-2" />
                     Фильтры
@@ -1501,7 +1587,7 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
                 <button 
                     onClick={() => fetchAllProducts(undefined, true)}
                     disabled={loading}
-                    className="flex items-center justify-center px-3 md:px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 text-sm md:text-base"
+                    className="flex items-center justify-center px-3 md:px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 text-sm xl:text-base"
                 >
                     <RefreshCw className={`h-4 w-4 mr-1 md:mr-2 ${loading ? 'animate-spin' : ''}`} />
                     Обновить
@@ -1509,28 +1595,28 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
                 <button
                     onClick={loadProductsFromWarehouseOffline}
                     disabled={loading}
-                    className="col-span-2 md:col-span-1 flex items-center justify-center px-3 md:px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 transition-colors disabled:opacity-50 text-sm md:text-base"
+                    className="flex items-center justify-center px-3 md:px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 transition-colors disabled:opacity-50 text-sm xl:text-base"
                 >
                     Offline-база
                 </button>
                 <button
                     onClick={preparePrintCache}
                     disabled={isPreparingPrintCache}
-                    className="col-span-2 md:col-span-1 flex items-center justify-center px-3 md:px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors disabled:opacity-50 text-sm md:text-base"
+                    className="flex items-center justify-center px-3 md:px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors disabled:opacity-50 text-sm xl:text-base"
                 >
                     {isPreparingPrintCache ? 'Подготовка кэша...' : 'Подготовить к печати'}
                 </button>
                 <button
                     onClick={checkPrintCacheReady}
                     disabled={isCheckingPrintCache}
-                    className="col-span-2 md:col-span-1 flex items-center justify-center px-3 md:px-4 py-2 bg-sky-600 text-white rounded-lg hover:bg-sky-700 transition-colors disabled:opacity-50 text-sm md:text-base"
+                    className="flex items-center justify-center px-3 md:px-4 py-2 bg-sky-600 text-white rounded-lg hover:bg-sky-700 transition-colors disabled:opacity-50 text-sm xl:text-base"
                 >
                     {isCheckingPrintCache ? 'Проверка кэша...' : 'Проверить кэш'}
                 </button>
                 <button
                     onClick={() => handlePrint(true)}
                     disabled={printCount === 0}
-                    className={`col-span-2 md:col-span-1 flex items-center justify-center px-3 md:px-4 py-2 rounded-lg text-white transition-colors text-sm md:text-base ${printCount > 0 ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-gray-300 cursor-not-allowed'}`}
+                    className={`flex items-center justify-center px-3 md:px-4 py-2 rounded-lg text-white transition-colors text-sm xl:text-base ${printCount > 0 ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-gray-300 cursor-not-allowed'}`}
                 >
                     <Printer className="h-4 w-4 mr-1 md:mr-2" />
                     Печать из кэша ({printCount})
@@ -1538,14 +1624,14 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
                 <button 
                     onClick={() => handlePrint(false)}
                     disabled={printCount === 0}
-                    className={`col-span-2 md:col-span-1 flex items-center justify-center px-3 md:px-4 py-2 rounded-lg text-white transition-colors text-sm md:text-base ${printCount > 0 ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-gray-300 cursor-not-allowed'}`}
+                    className={`flex items-center justify-center px-3 md:px-4 py-2 rounded-lg text-white transition-colors text-sm xl:text-base ${printCount > 0 ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-gray-300 cursor-not-allowed'}`}
                 >
                     <Printer className="h-4 w-4 mr-1 md:mr-2" />
                     Печать онлайн ({printCount})
                 </button>
                 <button
                     onClick={() => { setQuantities({}); setPrintItems([]); }}
-                    className="col-span-2 md:col-span-1 flex items-center justify-center px-3 md:px-4 py-2 border border-rose-300 text-rose-700 rounded-lg hover:bg-rose-50 transition-colors text-sm md:text-base"
+                    className="flex items-center justify-center px-3 md:px-4 py-2 border border-rose-300 text-rose-700 rounded-lg hover:bg-rose-50 transition-colors text-sm xl:text-base"
                 >
                     Очистить выбор
                 </button>
@@ -1697,8 +1783,19 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
         )}
       </div>
 
+      {/* Tablet Cards (virtualized) */}
+      <div className="no-print hidden md:block xl:hidden pb-2">
+        {loading && <div className="p-12 text-center text-gray-500"><Loader2 className="h-8 w-8 mx-auto animate-spin text-indigo-600" /><p className="mt-2">Загрузка товаров...</p></div>}
+        {!loading && filteredVariants.length === 0 && <div className="p-12 text-center text-gray-500"><Package className="h-12 w-12 mx-auto mb-4 text-gray-300" /><p className="text-lg font-medium">Товары не найдены</p></div>}
+        {!loading && filteredVariants.length > 0 && (
+          <List height={tabletListHeight} itemCount={tabletRows.length} itemSize={tabletRowHeight} width="100%">
+            {TabletVirtualizedRow}
+          </List>
+        )}
+      </div>
+
       {/* Table View (virtualized) */}
-      <div className="no-print hidden md:block px-2 pb-2">
+      <div className="no-print hidden xl:block px-2 pb-2">
         <div className="grid grid-cols-[64px_1fr_96px_120px_160px_160px_120px] items-center gap-2 bg-gray-50 border-y border-gray-200 px-4 py-3 text-sm font-medium text-gray-500">
           <div>Фото</div><div>Наименование</div><div>Цвет</div><div>Размер</div><div>Баркод</div><div className="text-center">Количество</div><div className="text-center">Действия</div>
         </div>
