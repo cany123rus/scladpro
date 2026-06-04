@@ -33,6 +33,36 @@ const getSafeId = () => (globalThis?.crypto && typeof globalThis.crypto.randomUU
   ? globalThis.crypto.randomUUID()
   : `id_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`);
 
+const getRelationCount = (relation: any) => {
+  if (Array.isArray(relation)) return Number(relation?.[0]?.count || 0) || 0;
+  return Number(relation?.count || 0) || 0;
+};
+
+const getOfflineBoxItemsCount = (box: any) => {
+  const nestedCount = getRelationCount(box?.supply_items);
+  const explicitRaw = box?.total_items ?? box?.totalItems ?? box?.items_count ?? box?.itemsCount;
+  const explicitCount = Number(explicitRaw);
+
+  if (Number.isFinite(explicitCount) && (explicitCount > 0 || nestedCount === 0)) {
+    return explicitCount;
+  }
+
+  return nestedCount;
+};
+
+const getOfflineSupplyItemsCount = (supply: any) => {
+  const boxes = Array.isArray(supply?.boxes) ? supply.boxes : [];
+  const nestedCount = boxes.reduce((sum: number, box: any) => sum + getOfflineBoxItemsCount(box), 0);
+  const explicitRaw = supply?.total_items ?? supply?.totalItems ?? supply?.items_count ?? supply?.itemsCount;
+  const explicitCount = Number(explicitRaw);
+
+  if (Number.isFinite(explicitCount) && (explicitCount > 0 || nestedCount === 0)) {
+    return explicitCount;
+  }
+
+  return nestedCount;
+};
+
 type NotificationType = 'success' | 'error' | 'info' | 'warning';
 type NotificationItem = {
   id: string;
@@ -266,6 +296,7 @@ interface SupplyBox {
   supply_id: string;
   name: string;
   created_at: string;
+  total_items?: number;
 }
 
 interface SupplyItem {
@@ -5051,7 +5082,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     status: String(row?.status || 'active'),
     created_at: String(row?.created_at || row?.createdAt || new Date().toISOString()),
     updated_at: row?.updated_at || row?.updatedAt,
-    total_items: Number(row?.total_items || row?.totalItems || 0),
+    total_items: getOfflineSupplyItemsCount(row),
   });
 
   const normalizeWarehouseOfflineBox = (row: any): SupplyBox => ({
@@ -5059,6 +5090,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     supply_id: String(row?.supply_id || row?.supplyId || ''),
     name: String(row?.name || ''),
     created_at: String(row?.created_at || row?.createdAt || new Date().toISOString()),
+    total_items: getOfflineBoxItemsCount(row),
   });
 
   const loadWarehouseOfflineSnapshot = async (applyToList = true) => {
@@ -5091,8 +5123,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       supabase.from('wb_products_cache').select('supplier_id, nm_id, product_json').limit(20000),
       supabase.from('app_settings').select('value').eq('key', 'wb_model_numbers_v1').maybeSingle(),
       supabase.from('app_settings').select('value').eq('key', 'wb_label_layout_v1').maybeSingle(),
-      supabase.from('supplies').select('*').is('deleted_at', null).order('created_at', { ascending: false }),
-      supabase.from('boxes').select('*').is('deleted_at', null).order('created_at', { ascending: false }),
+      supabase.from('supplies').select('*, boxes(supply_items(count))').is('deleted_at', null).order('created_at', { ascending: false }),
+      supabase.from('boxes').select('*, supply_items(count)').is('deleted_at', null).order('created_at', { ascending: false }),
       supabase.from('unified_honest_sign_codes').select('code').or('file_name.eq.Отсканировано,status.eq.scanned').limit(50000),
     ]);
 
@@ -5104,6 +5136,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     const models = (modelParsed?.models && typeof modelParsed.models === 'object' ? modelParsed.models : modelParsed) || {};
     const layoutRaw: any = layoutRes.data?.value || null;
     const labelLayout = typeof layoutRaw === 'string' ? JSON.parse(layoutRaw || 'null') : layoutRaw;
+    const fboSupplies = (suppliesRes.data || []).map((supply: any) => ({
+      ...supply,
+      total_items: getOfflineSupplyItemsCount(supply),
+    }));
+    const fboBoxes = (boxesRes.data || []).map((box: any) => ({
+      ...box,
+      total_items: getOfflineBoxItemsCount(box),
+    }));
 
     return {
       createdAt: new Date().toISOString(),
@@ -5111,8 +5151,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       wbProducts: (productsRes.data || []).map((row: any) => ({ ...(row?.product_json || {}), supplierId: row?.supplier_id, nmID: row?.product_json?.nmID || Number(row?.nm_id || 0) })),
       modelNumbers: models,
       labelLayout,
-      fboSupplies: suppliesRes.data || [],
-      fboBoxes: boxesRes.data || [],
+      fboSupplies,
+      fboBoxes,
       honestSignSeen: (hsRes.data || []).map((row: any) => String(row?.code || '').trim()).filter(Boolean),
     };
   };
@@ -6116,9 +6156,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         const snapshot = await getWarehouseOfflineSnapshotOrEmpty();
         setWarehouseOfflineSnapshot(snapshot);
         const boxes = getWarehouseOfflineSupplyBoxes(snapshot, supplyId);
+        const snapshotSupply = (snapshot.fboSupplies || []).find((row: any) => String(row?.id || '') === String(supplyId));
+        const savedItemsCount = snapshotSupply
+          ? getOfflineSupplyItemsCount(snapshotSupply)
+          : boxes.reduce((sum, box) => sum + getOfflineBoxItemsCount(box), 0);
         const scans = await warehouseOfflineClient.getFboScans().catch(() => ({ pending: [], synced: [], conflicts: [] }));
         const rows = [...((scans.pending || []) as any[]), ...((scans.synced || []) as any[])];
-        const itemsCount = rows.filter((row) => String(row?.supply_id || row?.supplyId || '') === String(supplyId)).length;
+        const localItemsCount = rows.filter((row) => String(row?.supply_id || row?.supplyId || '') === String(supplyId)).length;
+        const itemsCount = savedItemsCount + localItemsCount;
         setSupplyStats({ boxes: boxes.length, items: itemsCount });
         return;
       } catch (e) {
@@ -6192,7 +6237,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         }, {});
         setBoxesList(getWarehouseOfflineSupplyBoxes(snapshot, supplyId).map((box: any) => ({
           ...box,
-          total_items: countsByBox[String(box.id)] || 0,
+          total_items: getOfflineBoxItemsCount(box) + (countsByBox[String(box.id)] || 0),
         })));
       } catch (e: any) {
         setBoxesList([]);
