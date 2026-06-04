@@ -3937,7 +3937,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           </div>
         </div>
 
-        <div className="mb-3 grid grid-cols-1 gap-2 md:grid-cols-[150px_minmax(220px,1fr)] xl:grid-cols-[150px_minmax(220px,1fr)_116px_116px]">
+        <div className="mb-3 grid grid-cols-1 gap-2 md:grid-cols-[150px_minmax(220px,1fr)] 2xl:grid-cols-[150px_minmax(220px,1fr)_116px_116px]">
           <input
             type="number"
             step="0.01"
@@ -3955,13 +3955,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           />
           <button
             onClick={() => handleCreateWarehouseMoneyOperation(owner, 'add')}
-            className={'h-11 w-full rounded-xl px-3 text-sm font-semibold text-white shadow-sm ' + ownerConfig.addButtonClass}
+            className={'h-11 min-w-0 w-full rounded-xl px-3 text-sm font-semibold text-white shadow-sm ' + ownerConfig.addButtonClass}
           >
             Добавить
           </button>
           <button
             onClick={() => handleCreateWarehouseMoneyOperation(owner, 'writeoff')}
-            className="h-11 w-full rounded-xl bg-rose-600 px-3 text-sm font-semibold text-white shadow-sm hover:bg-rose-700"
+            className="h-11 min-w-0 w-full rounded-xl bg-rose-600 px-3 text-sm font-semibold text-white shadow-sm hover:bg-rose-700"
           >
             Списать
           </button>
@@ -4005,7 +4005,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   <div key={'temp-money-' + owner + '-' + row.id} className="p-3 text-sm">
                     {isEditing && cwWarehouseMoneyEdit ? (
                       <div className="space-y-2">
-                        <div className="grid grid-cols-1 gap-2 md:grid-cols-[130px_130px_1fr_auto_auto]">
+                        <div className="grid grid-cols-1 gap-2 md:grid-cols-2 2xl:grid-cols-[130px_130px_1fr_auto_auto]">
                           <select
                             value={cwWarehouseMoneyEdit.mode}
                             onChange={(e) => setCwWarehouseMoneyEdit(prev => prev ? { ...prev, mode: e.target.value as 'add' | 'writeoff' } : prev)}
@@ -4049,7 +4049,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <div className="text-xs text-gray-500">{new Date(row.created_at).toLocaleString('ru-RU')}</div>
                       </div>
                     ) : (
-                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="flex flex-col gap-3 2xl:flex-row 2xl:items-center 2xl:justify-between">
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
                             <div className="font-medium text-gray-900">{displayComment || 'Без комментария'}</div>
@@ -4059,7 +4059,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           </div>
                           <div className="text-xs text-gray-500">{new Date(row.created_at).toLocaleString('ru-RU')}</div>
                         </div>
-                        <div className="flex shrink-0 items-center justify-between gap-2 sm:justify-end">
+                        <div className="grid shrink-0 grid-cols-[minmax(0,1fr)_44px_44px] items-center gap-2 2xl:flex 2xl:justify-end">
                           <div className={'font-bold ' + (Number(row.amount) >= 0 ? 'text-emerald-700' : 'text-rose-700')}>
                             {Number(row.amount) >= 0 ? '+' : ''}{Math.floor(Number(row.amount || 0)).toLocaleString('ru-RU')} ₽
                           </div>
@@ -23400,11 +23400,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     </button>
                   )}
                 </div>
-                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 bg-white/10 p-1.5 rounded-xl border border-white/15 backdrop-blur-sm">
+                <div className="grid w-full grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:w-auto 2xl:grid-cols-8 gap-2 bg-white/10 p-1.5 rounded-xl border border-white/15 backdrop-blur-sm">
                   {hasAssemblyButtonAccess('cw_tab_calendar') && (
                   <button
                     onClick={() => setCompletedWorkStep('CALENDAR')}
-                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${completedWorkStep === 'CALENDAR' || completedWorkStep === 'FORM' ? 'bg-white shadow-sm text-gray-900' : 'text-indigo-100/90 hover:text-white hover:bg-white/10'}`}
+                    className={`min-h-[44px] min-w-0 px-3 py-2 rounded-lg text-sm font-medium leading-tight text-center transition-all ${completedWorkStep === 'CALENDAR' || completedWorkStep === 'FORM' ? 'bg-white shadow-sm text-gray-900' : 'text-indigo-100/90 hover:text-white hover:bg-white/10'}`}
                   >
                     Календарь
                   </button>
@@ -23416,14 +23416,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       loadDeliveryData();
                       setShowGeneralReportModal(true);
                     }}
-                    className="px-4 py-2 rounded-lg text-sm font-medium transition-all text-indigo-100/90 hover:text-white hover:bg-white/10"
+                    className="min-h-[44px] min-w-0 px-3 py-2 rounded-lg text-sm font-medium leading-tight text-center transition-all text-indigo-100/90 hover:text-white hover:bg-white/10"
                   >
                     Общий отчет
                   </button>
                   {hasAssemblyButtonAccess('cw_tab_rates') && (
                   <button
                     onClick={() => setCompletedWorkStep('RATES')}
-                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${completedWorkStep === 'RATES' ? 'bg-white shadow-sm text-gray-900' : 'text-indigo-100/90 hover:text-white hover:bg-white/10'}`}
+                    className={`min-h-[44px] min-w-0 px-3 py-2 rounded-lg text-sm font-medium leading-tight text-center transition-all ${completedWorkStep === 'RATES' ? 'bg-white shadow-sm text-gray-900' : 'text-indigo-100/90 hover:text-white hover:bg-white/10'}`}
                   >
                     Расценки
                   </button>
@@ -23431,7 +23431,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   {hasAssemblyButtonAccess('cw_tab_packaging') && (
                   <button
                     onClick={() => setCompletedWorkStep('PACKAGING')}
-                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${completedWorkStep === 'PACKAGING' ? 'bg-white shadow-sm text-gray-900' : 'text-indigo-100/90 hover:text-white hover:bg-white/10'}`}
+                    className={`min-h-[44px] min-w-0 px-3 py-2 rounded-lg text-sm font-medium leading-tight text-center transition-all ${completedWorkStep === 'PACKAGING' ? 'bg-white shadow-sm text-gray-900' : 'text-indigo-100/90 hover:text-white hover:bg-white/10'}`}
                   >
                     Упаковка
                   </button>
@@ -23439,7 +23439,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   {hasAssemblyButtonAccess('cw_tab_boxes') && (
                   <button
                     onClick={() => setCompletedWorkStep('BOXES')}
-                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${completedWorkStep === 'BOXES' ? 'bg-white shadow-sm text-gray-900' : 'text-indigo-100/90 hover:text-white hover:bg-white/10'}`}
+                    className={`min-h-[44px] min-w-0 px-3 py-2 rounded-lg text-sm font-medium leading-tight text-center transition-all ${completedWorkStep === 'BOXES' ? 'bg-white shadow-sm text-gray-900' : 'text-indigo-100/90 hover:text-white hover:bg-white/10'}`}
                   >
                     ФБС / Коробки
                   </button>
@@ -23447,7 +23447,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   {hasAssemblyButtonAccess('cw_tab_purchase') && (
                   <button
                     onClick={() => setCompletedWorkStep('PURCHASE')}
-                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${completedWorkStep === 'PURCHASE' ? 'bg-white shadow-sm text-gray-900' : 'text-indigo-100/90 hover:text-white hover:bg-white/10'}`}
+                    className={`min-h-[44px] min-w-0 px-3 py-2 rounded-lg text-sm font-medium leading-tight text-center transition-all ${completedWorkStep === 'PURCHASE' ? 'bg-white shadow-sm text-gray-900' : 'text-indigo-100/90 hover:text-white hover:bg-white/10'}`}
                   >
                     Закуп
                   </button>
@@ -23455,7 +23455,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   {hasAssemblyButtonAccess('cw_send_report') && (
                   <button
                     onClick={handleSendEmployeeReport}
-                    className="px-4 py-2 rounded-lg text-sm font-medium text-emerald-100 hover:text-white hover:bg-emerald-500/20 inline-flex items-center justify-center gap-1.5 leading-none transition-colors"
+                    className="min-h-[44px] min-w-0 px-3 py-2 rounded-lg text-sm font-medium text-emerald-100 hover:text-white hover:bg-emerald-500/20 inline-flex items-center justify-center gap-1.5 leading-tight text-center transition-colors"
                     title="Отправить отчет сотруднику в Telegram"
                   >
                     <Send className="h-4 w-4 shrink-0" />
@@ -23468,7 +23468,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       setCwReportModalOpen(true);
                       setCwReportResult(null);
                     }}
-                    className="px-4 py-2 rounded-lg text-sm font-medium text-indigo-100 hover:text-white hover:bg-white/10 transition-colors"
+                    className="min-h-[44px] min-w-0 px-3 py-2 rounded-lg text-sm font-medium leading-tight text-center text-indigo-100 hover:text-white hover:bg-white/10 transition-colors"
                   >
                     Отчет
                   </button>
@@ -26742,7 +26742,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
               <div className="bg-slate-50 rounded-t-3xl md:rounded-3xl shadow-2xl w-[98vw] max-w-[1500px] max-h-[94svh] 2xl:h-[92svh] flex flex-col overflow-y-auto 2xl:overflow-hidden transform transition-all scale-100 border border-white/70" onClick={e => e.stopPropagation()}>
                 <div className="sticky top-0 z-20 bg-white/90 backdrop-blur border-b border-slate-200 px-4 pt-2 pb-3 md:px-5 md:pt-4 md:pb-4 xl:px-6">
                   <div className="mx-auto mb-1.5 h-1.5 w-12 rounded-full bg-gray-300 md:hidden" />
-                  <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="flex flex-col gap-4 2xl:flex-row 2xl:items-start 2xl:justify-between">
                     <div className="pr-0 md:pr-4">
                       <div className="inline-flex items-center gap-2 rounded-full bg-indigo-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-indigo-700 mb-2">
                         <History className="h-3.5 w-3.5" /> Журнал выплат
@@ -26750,17 +26750,17 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       <h2 className="text-base md:text-2xl font-bold text-slate-950 leading-tight">История временных сотрудников</h2>
                       <p className="text-[11px] md:text-sm text-slate-500 mt-0.5 md:mt-1 leading-tight">Смены, долги, оплаты и деньги на складе</p>
                     </div>
-                    <div className="grid w-full grid-cols-2 gap-2 sm:grid-cols-3 lg:flex lg:w-auto lg:flex-wrap lg:justify-end lg:gap-3">
+                    <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-3 2xl:flex 2xl:w-auto 2xl:flex-wrap 2xl:justify-end 2xl:gap-3">
                       <button
                           onClick={() => setShowTempWorkerAddNameModal(true)}
-                          className="h-10 w-full lg:w-auto rounded-2xl border border-slate-200 bg-white px-3.5 text-sm font-semibold text-slate-700 shadow-sm transition-all hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 hover:shadow-md inline-flex items-center justify-center gap-2"
+                          className="min-h-[44px] w-full 2xl:w-auto rounded-2xl border border-slate-200 bg-white px-3.5 py-2 text-sm font-semibold leading-tight text-slate-700 shadow-sm transition-all hover:border-slate-300 hover:bg-slate-50 hover:shadow-md inline-flex items-center justify-center gap-2"
                       >
                           <Plus className="w-4 h-4 shrink-0" />
                           <span className="text-center">Добавить сотрудника</span>
                       </button>
                       <button
                           onClick={() => setShowTempWorkerAddTemplateModal(true)}
-                          className="h-10 w-full lg:w-auto rounded-2xl border border-slate-200 bg-white px-3.5 text-sm font-semibold text-slate-700 shadow-sm transition-all hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 hover:shadow-md inline-flex items-center justify-center gap-2"
+                          className="min-h-[44px] w-full 2xl:w-auto rounded-2xl border border-slate-200 bg-white px-3.5 py-2 text-sm font-semibold leading-tight text-slate-700 shadow-sm transition-all hover:border-slate-300 hover:bg-slate-50 hover:shadow-md inline-flex items-center justify-center gap-2"
                       >
                           <Plus className="w-4 h-4 shrink-0" />
                           <span className="text-center">Шаблон комментария</span>
@@ -26773,7 +26773,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             setTempWorkerQuickPaySelectedIds([]);
                             if (!tempWorkerLogs.length) await fetchTempWorkerLogs();
                           }}
-                          className="h-10 w-full lg:w-auto rounded-2xl border border-emerald-600 bg-emerald-600 px-3.5 text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-emerald-700 hover:shadow-md inline-flex items-center justify-center gap-2"
+                          className="min-h-[44px] w-full 2xl:w-auto rounded-2xl border border-emerald-600 bg-emerald-600 px-3.5 py-2 text-sm font-semibold leading-tight text-white shadow-sm transition-all hover:bg-emerald-700 hover:shadow-md inline-flex items-center justify-center gap-2"
                       >
                           <Wallet className="w-4 h-4 shrink-0" />
                           <span className="text-center">Быстрая оплата</span>
@@ -26783,7 +26783,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             setShowTempWorkerReportModal(true);
                             if (!tempWorkerLogs.length) await fetchTempWorkerLogs();
                           }}
-                          className="h-10 w-full lg:w-auto rounded-2xl border border-sky-600 bg-sky-600 px-3.5 text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-sky-700 hover:shadow-md inline-flex items-center justify-center gap-2"
+                          className="min-h-[44px] w-full 2xl:w-auto rounded-2xl border border-sky-600 bg-sky-600 px-3.5 py-2 text-sm font-semibold leading-tight text-white shadow-sm transition-all hover:bg-sky-700 hover:shadow-md inline-flex items-center justify-center gap-2"
                       >
                           <FileText className="w-4 h-4 shrink-0" />
                           <span className="text-center">Отчет</span>
@@ -26793,7 +26793,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             setShowDeliveryModal(true);
                             await loadDeliveryData();
                           }}
-                          className="h-10 w-full lg:w-auto rounded-2xl border border-orange-500 bg-orange-500 px-3.5 text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-orange-600 hover:shadow-md inline-flex items-center justify-center gap-2"
+                          className="min-h-[44px] w-full 2xl:w-auto rounded-2xl border border-orange-500 bg-orange-500 px-3.5 py-2 text-sm font-semibold leading-tight text-white shadow-sm transition-all hover:bg-orange-600 hover:shadow-md inline-flex items-center justify-center gap-2"
                       >
                           <Truck className="w-4 h-4 shrink-0" />
                           <span className="text-center">Доставка</span>
@@ -26801,7 +26801,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       <button
                           onClick={() => setShowTempWorkerModal(true)}
                           disabled={!hasAssemblyButtonAccess('temp_shift_add')}
-                          className={`h-10 w-full lg:w-auto rounded-2xl bg-indigo-600 px-3.5 text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-indigo-700 hover:shadow-md inline-flex items-center justify-center gap-2 ${!hasAssemblyButtonAccess('temp_shift_add') ? 'opacity-50 cursor-not-allowed' : ''}`}
+                          className={`min-h-[44px] w-full 2xl:w-auto rounded-2xl bg-indigo-600 px-3.5 py-2 text-sm font-semibold leading-tight text-white shadow-sm transition-all hover:bg-indigo-700 hover:shadow-md inline-flex items-center justify-center gap-2 ${!hasAssemblyButtonAccess('temp_shift_add') ? 'opacity-50 cursor-not-allowed' : ''}`}
                       >
                           <Plus className="w-4 h-4 shrink-0" />
                           <span className="text-center">Добавить смену</span>
@@ -26925,7 +26925,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 </div>
 
                 <div className="px-3 md:px-6 pb-6 2xl:flex-1 2xl:overflow-y-auto custom-scrollbar">
-                  <div className="mb-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+                <div className="mb-4 grid grid-cols-1 gap-4 2xl:grid-cols-2">
                     {WAREHOUSE_MONEY_OWNERS.map(renderWarehouseMoneyCard)}
                   </div>
                     <div className="md:hidden space-y-2">
