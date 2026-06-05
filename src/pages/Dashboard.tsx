@@ -6570,10 +6570,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     if (activeTab === 'supplies') fetchSuppliesList();
   }, [activeTab, selectedSupplierId, warehouseOfflineEnabled]);
 
-  useEffect(() => {
-    if (activeTab === 'products') fetchProducts(selectedSupplierId || '');
-  }, [activeTab, selectedSupplierId]);
-
   const handleSupplyScan = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -10047,7 +10043,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       title: 'Операционные разделы',
       items: [
         { id: 'map', label: 'Конструктор этикеток' },
-        { id: 'products', label: 'Товары' },
         { id: 'wb_products', label: 'Товары WB' },
         { id: 'orders', label: 'Заказ товара' },
         { id: 'reception', label: 'Приемка товара' },
@@ -10077,11 +10072,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       items: [
         { id: 'analytics', label: 'Аналитика' },
         { id: 'advertising', label: 'Реклама' },
-        { id: 'instagram', label: 'Instagram' },
         { id: 'barters', label: 'Бартеры / Внешняя реклама' },
         { id: 'reports', label: 'Отчеты' },
         { id: 'employees', label: 'Сотрудники' },
-        { id: 'trash', label: 'Удаление' },
         { id: 'database', label: 'База данных' },
       ]
     }
@@ -10918,12 +10911,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         fetchSuppliers();
         fetchEmployees();
 
-        if (activeTab === 'products') fetchProducts(selectedSupplierId || '');
         if (activeTab === 'supplies') fetchSuppliesList();
         if (activeTab === 'reception') fetchReceptions(receptionSupplierId);
         if (activeTab === 'barters' && barterSelectedSupplierId) fetchBarterMoneyHistory(barterSelectedSupplierId);
         if (activeTab === 'reports') fetchReportsData();
-        if (activeTab === 'trash') fetchTrashItems();
 
         if (currentSupply?.id) {
           fetchBoxesList(currentSupply.id);
@@ -11249,23 +11240,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     const t = setInterval(check, 60000);
     return () => { mounted = false; clearInterval(t); };
   }, [currentEmployee?.id]);
-
-  useEffect(() => {
-    if (activeTab !== 'instagram') return;
-    const loadInstagramConfig = async () => {
-      try {
-        const [{ data: cfgRow }, { data: tokenRow }] = await Promise.all([
-          supabase.from('app_settings').select('value').eq('key', 'instagram_oauth_config_v1').maybeSingle(),
-          supabase.from('app_settings').select('value').eq('key', 'instagram_access_token_v1').maybeSingle(),
-        ]);
-        let cfg: any = {};
-        try { cfg = cfgRow?.value ? JSON.parse(String(cfgRow.value)) : {}; } catch {}
-        setInstagramConfig({ appId: String(cfg?.appId || ''), redirectUri: String(cfg?.redirectUri || `${window.location.origin}/instagram/callback`) });
-        setInstagramAccessToken(String(tokenRow?.value || ''));
-      } catch {}
-    };
-    loadInstagramConfig();
-  }, [activeTab]);
 
   useEffect(() => {
     const loadExternalAdsBase = async () => {
@@ -15732,7 +15706,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     // Lazy-load data by active tab to reduce startup memory/load spikes.
     if (activeTab === 'reports') fetchReportsData();
     if (activeTab === 'employees' || activeTab === 'warehouse') fetchEmployees();
-    if (activeTab === 'trash') fetchTrashItems();
     if (activeTab === 'reception') fetchReceptions();
     if (activeTab === 'completed') {
       (async () => {
@@ -15915,10 +15888,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       return hay.includes(q);
     });
   }, [trashItems, trashSearch, trashDeletedFrom, trashDeletedTo, trashDeletedByMap]);
-
-  useEffect(() => {
-    if (activeTab === 'trash') fetchTrashItems();
-  }, [activeTab, trashTab]);
 
   const handleRestore = async (id: string) => {
     const table = resolveTrashTable(trashTab);
@@ -16535,7 +16504,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     { id: 'warehouse', icon: Box, label: 'Склад' },
     { id: 'cameras', icon: Camera, label: 'Камеры' },
     { id: 'map', icon: MapIcon, label: 'Конструктор этикеток' },
-    { id: 'products', icon: Package, label: 'Товары' },
     { id: 'wb_products', icon: ShoppingBag, label: 'Товары WB' },
     { id: 'fbs', icon: Truck, label: 'Поставки FBS' },
     { id: 'supplies', icon: Truck, label: 'Поставки FBO' },
@@ -16544,11 +16512,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     { id: 'suppliers', icon: Users, label: 'Поставщики' },
     { id: 'honest_sign', icon: ShieldCheck, label: 'ЧЗ / Печать' },
     { id: 'completed', icon: CheckSquare, label: 'Сборка' },
-    { id: 'trash', icon: Trash2, label: 'Удаление' },
     { id: 'reports', icon: FileText, label: 'Отчеты' },
     { id: 'analytics', icon: BarChart2, label: 'Аналитика' },
     { id: 'advertising', icon: Wallet, label: 'Реклама' },
-    { id: 'instagram', icon: MessageSquare, label: 'Instagram' },
     { id: 'barters', icon: Link, label: 'Бартеры / Внешняя реклама' },
     { id: 'telegram', icon: Send, label: 'Telegram' },
     { id: 'employees', icon: UserCog, label: 'Сотрудники' },
@@ -19631,139 +19597,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
             </div>
           )}
 
-          {/* PRODUCTS TAB */}
-          {activeTab === 'products' && (
-            <div className="bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col 2xl:h-[calc(100vh-6rem)] 2xl:overflow-hidden">
-              <div className="p-4 border-b border-slate-200 bg-white z-10 flex flex-col gap-4 oc-filterbar">
-                <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-                  <div className="flex items-center">
-                    <button onClick={() => switchTab('suppliers')} className="mr-4 text-slate-400 hover:text-slate-600"><ArrowLeft className="h-6 w-6" /></button>
-                    <h1 className="text-2xl font-bold text-slate-900">Товары</h1>
-                  </div>
-                  <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
-                    {lastImportedIds.length > 0 && (
-                      <button
-                        onClick={handleUndoImport}
-                        className="px-4 py-2 rounded-lg font-medium flex items-center justify-center bg-red-100 text-red-700 hover:bg-red-200"
-                      >
-                        <Undo2 className="h-4 w-4 mr-2" /> Отменить импорт
-                      </button>
-                    )}
-                    <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" accept=".xlsx,.xls" />
-                    <button
-                      onClick={handleSyncProductsFromWbCache}
-                      disabled={syncingProductsFromWb}
-                      className={`px-4 py-2 rounded-lg font-medium flex items-center justify-center ${syncingProductsFromWb ? 'bg-amber-200 text-amber-700 cursor-not-allowed' : 'bg-amber-100 text-amber-800 hover:bg-amber-200'}`}
-                    >
-                      <RefreshCw className={`h-4 w-4 mr-2 ${syncingProductsFromWb ? 'animate-spin' : ''}`} />
-                      {syncingProductsFromWb ? 'Синхронизация...' : 'Загрузить из Товары WB'}
-                    </button>
-                    <button
-                      onClick={() => fileInputRef.current?.click()}
-                      disabled={!selectedSupplierId}
-                      className={`px-4 py-2 rounded-lg font-medium flex items-center justify-center ${!selectedSupplierId ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-slate-200 text-slate-700 hover:bg-slate-300'}`}
-                    >
-                      <Upload className="h-4 w-4 mr-2" /> Импорт Excel
-                    </button>
-                    <button
-                      onClick={() => setShowAddProductModal(true)}
-                      disabled={!selectedSupplierId}
-                      className={`px-4 py-2 rounded-lg font-medium flex items-center justify-center ${!selectedSupplierId ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-slate-200 text-slate-700 hover:bg-slate-300'}`}
-                    >
-                      <Plus className="h-4 w-4 mr-2" /> Добавить товар
-                    </button>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <select
-                      value={selectedSupplierId}
-                      onChange={(e) => handleSupplierSelect(e.target.value)}
-                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
-                    >
-                      <option value="">Выбрать поставщика</option>
-                      {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                    </select>
-                  </div>
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-slate-400" />
-                    <input
-                      type="text"
-                      placeholder="Поиск по названию, артикулу, баркоду или WB..."
-                      className="w-full pl-10 p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500"
-                      value={productSearch}
-                      onChange={(e) => setProductSearch(e.target.value)}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div className="p-0 relative 2xl:flex-1 2xl:overflow-y-auto">
-                <table className="w-full text-left border-collapse">
-                  <thead className="sticky top-0 bg-slate-50 z-10 shadow-sm">
-                    <tr className="border-b border-slate-200">
-                      <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase">Наименование</th>
-                      <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase">WB Артикул</th>
-                      <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase">Баркод</th>
-                      <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase">Размер</th>
-                      <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase">Цвет</th>
-                      <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase text-right">Действия</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 bg-white">
-                    {products.length === 0 ? (
-                      <tr>
-                        <td colSpan={6} className="px-6 py-12 text-center text-slate-400">Товары не найдены</td>
-                      </tr>
-                    ) : (
-                      products.filter(p =>
-                        p.name.toLowerCase().includes(productSearch.toLowerCase()) ||
-                        (p.wb_sku && p.wb_sku.toLowerCase().includes(productSearch.toLowerCase())) ||
-                        (p.barcode && p.barcode.toLowerCase().includes(productSearch.toLowerCase()))
-                      ).map(product => (
-                        <tr key={product.id} className="hover:bg-slate-50 transition-colors">
-                          <td className="px-6 py-4 font-medium text-slate-900">{product.name}</td>
-                          <td className="px-6 py-4 text-slate-600">{product.wb_sku}</td>
-                          <td className="px-6 py-4 text-slate-600">{product.barcode}</td>
-                          <td className="px-6 py-4 text-slate-600">{product.size}</td>
-                          <td className="px-6 py-4 text-slate-600">{product.color}</td>
-                          <td className="px-6 py-4 text-right">
-                            <div className="flex justify-end gap-2">
-                              <button onClick={() => handleDeleteProduct(product)} className="text-slate-400 hover:text-red-600" title="Удалить"><Trash2 className="h-4 w-4" /></button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          {/* Add Product Modal */}
-          {showAddProductModal && (
-            <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50">
-              <div className="bg-white rounded-xl p-6 w-full max-w-md">
-                <h2 className="text-xl font-bold mb-4">Добавить товар</h2>
-                <form onSubmit={handleAddProduct} className="space-y-4">
-                  <input type="text" placeholder="Наименование" className="w-full p-2 border rounded" value={newProduct.name} onChange={e => setNewProduct({...newProduct, name: e.target.value})} required />
-                  <input type="text" placeholder="WB Артикул" className="w-full p-2 border rounded" value={newProduct.wb_sku} onChange={e => setNewProduct({...newProduct, wb_sku: e.target.value})} />
-                  <input type="text" placeholder="Баркод" className="w-full p-2 border rounded" value={newProduct.barcode} onChange={e => setNewProduct({...newProduct, barcode: e.target.value})} />
-                  <div className="flex gap-4">
-                    <input type="text" placeholder="Размер" className="w-full p-2 border rounded" value={newProduct.size} onChange={e => setNewProduct({...newProduct, size: e.target.value})} />
-                    <input type="text" placeholder="Цвет" className="w-full p-2 border rounded" value={newProduct.color} onChange={e => setNewProduct({...newProduct, color: e.target.value})} />
-                  </div>
-                  <div className="flex justify-end gap-2 mt-6">
-                    <button type="button" onClick={() => setShowAddProductModal(false)} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded">Отмена</button>
-                    <button type="submit" className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700">Добавить</button>
-                  </div>
-                </form>
-              </div>
-            </div>
-          )}
-
           {/* WAREHOUSE TAB */}
           {activeTab === 'warehouse' && (
             <React.Suspense fallback={<SectionSkeleton />}>
@@ -19844,59 +19677,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
               <AdvertisingInsights />
             </React.Suspense>
           </div>
-
-          {/* INSTAGRAM TAB */}
-          {activeTab === 'instagram' && (
-            <div className="max-w-6xl mx-auto">
-              <div className="oc-card p-5 md:p-6 mb-4">
-                <h2 className="text-2xl font-bold text-slate-900">Instagram CRM</h2>
-                <p className="text-slate-600 mt-1">Подключение Meta OAuth + токен для Direct сообщений.</p>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                <div className="oc-card p-4">
-                  <div className="text-sm font-semibold text-slate-900 mb-2">Настройки подключения</div>
-                  <div className="space-y-2">
-                    <input value={instagramConfig.appId} onChange={(e) => setInstagramConfig(prev => ({ ...prev, appId: e.target.value }))} className="h-11 rounded-xl border-slate-200 bg-slate-50 text-sm" placeholder="Meta App ID" />
-                    <input value={instagramConfig.redirectUri} onChange={(e) => setInstagramConfig(prev => ({ ...prev, redirectUri: e.target.value }))} className="oc-input" placeholder="Redirect URI" />
-                    <textarea value={instagramAccessToken} onChange={(e) => setInstagramAccessToken(e.target.value)} className="oc-input min-h-[84px]" placeholder="Access Token (временный, пока без callback обмена кода)" />
-                  </div>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <button onClick={saveInstagramSettings} disabled={instagramSaving} className="btn-success">{instagramSaving ? 'Сохранение...' : 'Сохранить'}</button>
-                    <button onClick={connectInstagramOAuth} className="btn-primary">Подключить через OAuth</button>
-                    <button onClick={loadInstagramChats} disabled={instagramLoadingChats} className="btn-ghost">{instagramLoadingChats ? 'Загрузка...' : 'Тест: загрузить диалоги'}</button>
-                  </div>
-                </div>
-
-                <div className="oc-card p-4">
-                  <div className="text-sm font-semibold text-slate-900 mb-2">Статус</div>
-                  <div className="space-y-2 text-sm text-slate-600">
-                    <div>App ID: <span className="font-medium text-slate-900">{instagramConfig.appId ? 'задан' : 'не задан'}</span></div>
-                    <div>Redirect URI: <span className="font-medium text-slate-900 break-all">{instagramConfig.redirectUri || 'не задан'}</span></div>
-                    <div>Токен: <span className={`font-medium ${instagramAccessToken ? 'text-emerald-700' : 'text-amber-700'}`}>{instagramAccessToken ? 'сохранён' : 'не задан'}</span></div>
-                    <div>Диалоги: <span className="font-medium text-slate-900">{instagramChats.length}</span></div>
-                  </div>
-                  <div className="mt-4 text-xs text-slate-500">Дальше: добавим callback-обмен code → long-lived token и отправку сообщений в Direct.</div>
-                </div>
-              </div>
-
-              <div className="oc-card p-4">
-                <div className="text-sm font-semibold text-slate-900 mb-2">Входящие диалоги (тест)</div>
-                {instagramChats.length === 0 ? (
-                  <div className="text-sm text-slate-500">Пока пусто. Нажмите «Тест: загрузить диалоги».</div>
-                ) : (
-                  <div className="space-y-2 max-h-[44vh] overflow-y-auto">
-                    {instagramChats.map((c: any) => (
-                      <div key={`ig-chat-${c.id}`} className="border rounded-xl p-3 bg-slate-50">
-                        <div className="text-sm font-medium text-slate-900">Диалог: {c.id}</div>
-                        <div className="text-xs text-slate-500 mt-1">Обновлён: {c.updated_time ? new Date(c.updated_time).toLocaleString('ru-RU') : '-'}</div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
 
           {/* BARTERS TAB */}
           {activeTab === 'barters' && (
@@ -21876,135 +21656,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     </div>
                   )}
                 </>
-              )}
-            </div>
-          )}
-
-          {/* TELEGRAM TAB */}
-          {/* REPORTS TAB */}
-          {activeTab === 'trash' && (
-            <div className="max-w-7xl mx-auto">
-              <div className="mb-8">
-                <h1 className="text-2xl font-bold text-slate-900">Удаленные элементы</h1>
-                <p className="text-slate-500 mt-1">Восстановление или безвозвратное удаление</p>
-              </div>
-
-              {/* Trash Tabs */}
-              <div className="flex space-x-1 bg-slate-100 p-1 rounded-xl mb-6 overflow-x-auto">
-                {[
-                  { id: 'suppliers', label: 'Поставщики' },
-                  { id: 'products', label: 'Товары' },
-                  { id: 'supplies', label: 'Поставки' },
-                  { id: 'receptions', label: 'Приемки' },
-                  { id: 'employees', label: 'Сотрудники' },
-                ].map((tab) => (
-                  <button
-                    key={tab.id}
-                    onClick={() => setTrashTab(tab.id)}
-                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${
-                      trashTab === tab.id
-                        ? 'bg-white text-slate-900 shadow-sm'
-                        : 'text-slate-500 hover:text-slate-900 hover:bg-slate-200'
-                    }`}
-                  >
-                    {tab.label}
-                  </button>
-                ))}
-              </div>
-
-              {loadingTrash ? (
-                <div className="text-center py-12 text-slate-400">Загрузка удаленных элементов...</div>
-              ) : (
-                <div className="space-y-6">
-                  <div className="oc-card p-4">
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                      <input
-                        value={trashSearch}
-                        onChange={(e) => setTrashSearch(e.target.value)}
-                        placeholder="Поиск по названию, поставщику, удалившему..."
-                        className="px-3 py-2 border border-slate-300 rounded-lg"
-                      />
-                      <input type="date" value={trashDeletedFrom} onChange={(e) => setTrashDeletedFrom(e.target.value)} className="px-3 py-2 border border-slate-300 rounded-lg" />
-                      <input type="date" value={trashDeletedTo} onChange={(e) => setTrashDeletedTo(e.target.value)} className="px-3 py-2 border border-slate-300 rounded-lg" />
-                    </div>
-                  </div>
-
-                  <div className="oc-card overflow-hidden">
-                    <div className="px-6 py-4 border-b border-slate-100 bg-slate-50">
-                      <h3 className="font-semibold text-slate-900">
-                        {trashTab === 'suppliers' && 'Поставщики'}
-                        {trashTab === 'products' && 'Товары'}
-                        {trashTab === 'supplies' && 'Поставки'}
-                        {trashTab === 'receptions' && 'Приемки'}
-                        {trashTab === 'employees' && 'Сотрудники'}
-                        {' '}({filteredTrashItems.length})
-                      </h3>
-                    </div>
-
-                    {filteredTrashItems.length === 0 ? (
-                      <div className="text-center py-12 text-slate-400">
-                        Корзина пуста
-                      </div>
-                    ) : (
-                      <div className="divide-y divide-slate-100">
-                        {filteredTrashItems.map((item) => (
-                          <div key={item.id} className="px-6 py-4 flex items-center justify-between">
-                            <div>
-                              {trashTab === 'suppliers' && (
-                                <>
-                                  <div className="font-medium text-slate-900">{item.name}</div>
-                                  <div className="text-sm text-slate-500">ID: {item.id}</div>
-                                </>
-                              )}
-                              {trashTab === 'products' && (
-                                <>
-                                  <div className="font-medium text-slate-900">{item.name || 'Без названия'}</div>
-                                  <div className="text-sm text-slate-500">SKU: {item.wb_sku || '-'} • Поставщик: {item.supplier?.name || '-'}</div>
-                                </>
-                              )}
-                              {trashTab === 'supplies' && (
-                                <>
-                                  <div className="font-medium text-slate-900">{item.name || 'Поставка без названия'}</div>
-                                  <div className="text-sm text-slate-500">Статус: {item.status || '-'} • Поставщик: {item.supplier?.name || '-'}</div>
-                                </>
-                              )}
-                              {trashTab === 'receptions' && (
-                                <>
-                                  <div className="font-medium text-slate-900">Приемка от {item.created_at ? new Date(item.created_at).toLocaleDateString('ru-RU') : '-'}</div>
-                                  <div className="text-sm text-slate-500">Статус: {item.status || '-'} • Поставщик: {item.supplier?.name || '-'}</div>
-                                </>
-                              )}
-                              {trashTab === 'employees' && (
-                                <>
-                                  <div className="font-medium text-slate-900">{item.full_name || item.login || 'Без имени'}</div>
-                                  <div className="text-sm text-slate-500">{item.role || '-'}</div>
-                                </>
-                              )}
-                              <div className="text-xs text-slate-400 mt-1">Удалено: {item.deleted_at ? new Date(item.deleted_at).toLocaleString('ru-RU') : '-'}</div>
-                              <div className="text-xs text-slate-400">Удалил: {trashDeletedByMap[String(item.deleted_by || '')] || '-'}</div>
-                            </div>
-                            <div className="flex gap-2">
-                              <button
-                                onClick={() => handleRestore(item.id)}
-                                className="p-2 text-green-600 hover:bg-green-50 rounded-lg"
-                                title="Восстановить"
-                              >
-                                <Undo2 className="h-5 w-5" />
-                              </button>
-                              <button
-                                onClick={() => handlePermanentDelete(item.id)}
-                                className="p-2 text-red-600 hover:bg-red-50 rounded-lg"
-                                title="Удалить безвозвратно"
-                              >
-                                <Trash2 className="h-5 w-5" />
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
               )}
             </div>
           )}
