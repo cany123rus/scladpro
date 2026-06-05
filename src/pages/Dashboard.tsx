@@ -631,6 +631,19 @@ const buildWarehouseMoneyStoredComment = (owner: WarehouseMoneyOwner, comment: s
   return owner === 'leha' ? WAREHOUSE_MONEY_LEHA_PREFIX + clean : clean;
 };
 
+// Delivery / quick-pay payers are limited to two suppliers, each tied to a
+// "Деньги на складе" owner so that a payment auto-writes-off from that balance.
+const DELIVERY_PAYER_OWNER_RULES: Array<{ match: RegExp; owner: WarehouseMoneyOwner }> = [
+  { match: /власенко/i, owner: 'sasha' },
+  { match: /криштафович/i, owner: 'leha' },
+];
+const getDeliveryPayerOwner = (supplierName: string): WarehouseMoneyOwner | null => {
+  const n = String(supplierName || '');
+  for (const rule of DELIVERY_PAYER_OWNER_RULES) if (rule.match.test(n)) return rule.owner;
+  return null;
+};
+const isDeliveryPayerSupplier = (supplierName: string) => getDeliveryPayerOwner(supplierName) !== null;
+
 const ASSEMBLY_BUTTONS = [
   { id: 'cw_tab_calendar', label: 'Сборка: вкладка Календарь' },
   { id: 'cw_tab_rates', label: 'Сборка: вкладка Расценки' },
@@ -2234,6 +2247,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       .sort((a: any, b: any) => String(a?.date || '').localeCompare(String(b?.date || '')));
   }, [deliveryHistory, deliveryQuickPayCourierFilter]);
 
+  // Only the two ИП payers (each tied to a "Деньги на складе" owner) can pay deliveries.
+  const deliveryPayerSuppliers = useMemo(() => (
+    (suppliers || []).filter((s: any) => isDeliveryPayerSupplier(s?.name))
+  ), [suppliers]);
+
   const deliveryQuickPaySelectedRows = useMemo(() => {
     const selected = new Set(deliveryQuickPaySelectedIds.map(String));
     return (deliveryHistory || []).filter((delivery: any) => selected.has(String(delivery?.id)) && !delivery?.is_paid);
@@ -2426,6 +2444,25 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     }
   };
 
+  // Auto write-off the paid amount from the payer's "Деньги на складе" balance.
+  const deductWarehouseMoneyForDeliveryPayment = async (payerSupplierId: string, total: number, comment: string) => {
+    const payer = suppliers.find((s: any) => String(s.id) === String(payerSupplierId));
+    const owner = getDeliveryPayerOwner(payer?.name || '');
+    if (!owner || !(total > 0)) return;
+    try {
+      const { error } = await supabase.from('warehouse_money_log').insert([{
+        amount: -Math.abs(total),
+        comment: buildWarehouseMoneyStoredComment(owner, comment),
+        type: 'manual',
+      }]);
+      if (error) throw error;
+      await fetchCwWarehouseMoneyHistory();
+    } catch (e: any) {
+      console.warn('warehouse money writeoff failed', e);
+      showToast('Оплата прошла, но списание со склада не удалось: ' + (e?.message || 'неизвестно'), 'warning');
+    }
+  };
+
   const handleToggleDeliveryPaid = async (deliveryId: string, nextPaid: boolean, payerSupplierId?: string) => {
     if (nextPaid && !payerSupplierId) return showToast('Выберите поставщика, который оплатил', 'error');
     const paidAt = nextPaid ? new Date().toISOString() : null;
@@ -2440,6 +2477,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       if (error) throw error;
       setDeliveryHistory(next);
       setDeliveryPayModal({ open: false, deliveryId: '', payerSupplierId: '' });
+      if (nextPaid && payerSupplierId) {
+        const paidDelivery = (deliveryHistory || []).find((d: any) => String(d?.id) === String(deliveryId));
+        const courier = String(paidDelivery?.courier || 'Доставщик');
+        const dateText = paidDelivery?.date ? new Date(String(paidDelivery.date) + 'T12:00:00').toLocaleDateString('ru-RU') : '';
+        await deductWarehouseMoneyForDeliveryPayment(payerSupplierId, Number(paidDelivery?.amount || 0), `Оплата доставки: ${courier}${dateText ? ' от ' + dateText : ''}`);
+      }
       showToast(nextPaid ? 'Доставка отмечена оплаченной' : 'Оплата доставки снята', 'success');
     } catch (error: any) {
       if (isMissingDeliveryStorageError(error)) {
@@ -2486,6 +2529,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       setDeliveryHistory(next);
       setDeliveryQuickPaySelectedIds([]);
       setShowDeliveryQuickPayModal(false);
+      {
+        const couriers = Array.from(new Set(rows.map((d: any) => String(d?.courier || '').trim()).filter(Boolean)));
+        await deductWarehouseMoneyForDeliveryPayment(supplierId, total, `Оплата доставок: ${couriers.join(', ') || 'доставщики'} — ${rows.length} шт.`);
+      }
       showToast(`Оплачено доставок: ${rows.length}`, 'success');
     } catch (error: any) {
       if (isMissingDeliveryStorageError(error)) {
@@ -28499,7 +28546,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       className="oc-input h-11 rounded-xl bg-white text-sm"
                     >
                       <option value="">Кто оплатит доставку</option>
-                      {suppliers.map((s: any) => (
+                      {deliveryPayerSuppliers.map((s: any) => (
                         <option key={`quick-pay-delivery-payer-${s.id}`} value={String(s.id)}>{s.name}</option>
                       ))}
                     </select>
@@ -29435,7 +29482,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           className="oc-input h-11 rounded-xl bg-white text-sm"
                         >
                           <option value="">Выберите поставщика</option>
-                          {suppliers.map((supplier) => (
+                          {deliveryPayerSuppliers.map((supplier) => (
                             <option key={'delivery-pay-supplier-' + supplier.id} value={String(supplier.id)}>{supplier.name}</option>
                           ))}
                         </select>
