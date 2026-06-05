@@ -37,14 +37,16 @@
 - Скелетоны загрузки: `src/components/Skeleton.tsx` (`PageSkeleton`, `SectionSkeleton`).
 - Бэкап дизайна перед переделкой: папка `design-backup/*.bak` + git-коммит `716fac2`.
 
-## ⚠️ Открытые проблемы безопасности (НЕ сделано, критично)
-1. **Пароли сотрудников в открытом виде** — `Login.tsx` сравнивает `.eq('password', ...)`.
-   Нужно хеширование (bcrypt/argon2) на сервере.
-2. **Таблицы `employees` и `app_settings` читаются анонимным ключом** (RLS открыт) — включая
-   пароли. Перенести логин в Edge Function с `service_role`, закрыть RLS.
-3. **Демо-админ захардкожен** в `Login.tsx` (`admin@example.com` / `123456`) — удалить.
-4. **Полный объект сотрудника (с паролем) в localStorage** — хранить только id + токен.
-5. Telegram-токены в `app_settings` / коде; токен старого бота утёк на GitHub (отозвать).
+## ⚠️ Безопасность
+**Этап 1 (СДЕЛАНО, 2026-06):**
+- ✅ Демо-админ `admin@example.com`/`123456` удалён из `Login.tsx` (QR profiles-вход отключён, остался AUTH-токен).
+- ✅ Пароль больше не пишется в localStorage — `src/utils/employeeStorage.ts` (`storeCurrentEmployee`/`sanitizeEmployeeForStorage`) применён во всех точках записи `current_employee` (Login.tsx ×3, Dashboard.tsx ×2). Старые сохранённые пароли затираются при следующей загрузке (Dashboard рефрешит из БД).
+
+**Этап 2 (НЕ сделано, критично):**
+1. **Пароли сотрудников в открытом виде** — `Login.tsx` сравнивает `.eq('password', ...)` (стр. ~236, ~336). Нужно хеширование (bcrypt/argon2) на сервере + Edge Function login на `service_role`.
+2. **Таблицы `employees` и `app_settings` читаются анонимным ключом** (RLS открыт) — включая пароли. Закрыть RLS, перенести логин/чтение секретов в Edge Function.
+3. Telegram-токены в `app_settings` / коде; токен старого бота утёк на GitHub (отозвать).
+   ⚠️ Этап 2 рискованный: ломает прод-вход у всех при ошибке — делать поэтапно с тестом.
 
 ## Telegram-боты
 - `supabase/functions/telegram-bot/` — приём файлов от поставщиков (токен → env `TELEGRAM_BOT_TOKEN`).
