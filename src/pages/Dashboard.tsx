@@ -67,6 +67,27 @@ const getSafeId = () => (globalThis?.crypto && typeof globalThis.crypto.randomUU
   ? globalThis.crypto.randomUUID()
   : `id_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`);
 
+const EMP_AVATAR_GRADIENTS = [
+  'from-indigo-500 to-violet-500',
+  'from-sky-500 to-cyan-500',
+  'from-emerald-500 to-teal-500',
+  'from-amber-500 to-orange-500',
+  'from-rose-500 to-pink-500',
+  'from-fuchsia-500 to-purple-500',
+  'from-blue-500 to-indigo-500',
+];
+const getEmpInitials = (name: string) => {
+  const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return '?';
+  return (parts[0][0] + (parts[1]?.[0] || '')).toUpperCase();
+};
+const getEmpAvatarColor = (key: string) => {
+  const s = String(key || '');
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return EMP_AVATAR_GRADIENTS[h % EMP_AVATAR_GRADIENTS.length];
+};
+
 const getRelationCount = (relation: any) => {
   if (Array.isArray(relation)) return Number(relation?.[0]?.count || 0) || 0;
   return Number(relation?.count || 0) || 0;
@@ -23921,17 +23942,31 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           {activeTab === 'employees' && (
             <EmployeesSection>
             <div className="max-w-6xl mx-auto">
-              <div className="flex justify-between items-center mb-8">
-                <div>
-                  <h1 className="text-2xl font-bold text-slate-900">Сотрудники</h1>
-                  <p className="text-slate-500 mt-1">Управление персоналом</p>
+              <div className="mb-6 overflow-hidden rounded-3xl bg-gradient-to-r from-slate-900 via-indigo-900 to-slate-900 p-5 sm:p-6 shadow-xl ring-1 ring-white/10">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-white/10 ring-1 ring-white/15">
+                      <Users className="h-7 w-7 text-white" />
+                    </div>
+                    <div>
+                      <h1 className="text-2xl font-extrabold tracking-tight text-white">Сотрудники</h1>
+                      <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-indigo-100/80">
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-2.5 py-0.5 font-medium">
+                          <Users className="h-3.5 w-3.5" /> Всего: {employees.length}
+                        </span>
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/20 px-2.5 py-0.5 font-medium text-emerald-200">
+                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> Онлайн: {employees.filter((e: any) => e.is_online).length}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setShowAddEmployeeModal(true)}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-slate-900 shadow-lg transition-all hover:bg-indigo-50 active:scale-[0.97]"
+                  >
+                    <Plus className="h-4 w-4" /> Добавить сотрудника
+                  </button>
                 </div>
-                <button
-                  onClick={() => setShowAddEmployeeModal(true)}
-                  className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center"
-                >
-                  <Plus className="h-4 w-4 mr-2" /> Добавить сотрудника
-                </button>
               </div>
 
               <div className="oc-card overflow-hidden">
@@ -23940,15 +23975,20 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     <div className="py-10 text-center text-slate-400">Сотрудники не найдены</div>
                   ) : (
                     employees.map(emp => (
-                      <div key={`emp-mobile-${emp.id}`} className="border border-slate-200 rounded-xl p-3 bg-white">
+                      <div key={`emp-mobile-${emp.id}`} className="border border-slate-200 rounded-2xl p-3 bg-white shadow-sm">
                         <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0">
-                            <div className="flex items-center">
-                              <div className={`w-2.5 h-2.5 rounded-full mr-2 ${emp.is_online ? 'bg-green-500' : 'bg-red-500'}`}></div>
-                              <div className="font-semibold text-slate-900 truncate">{emp.full_name}</div>
+                          <div className="flex min-w-0 items-start gap-3">
+                            <div className="relative shrink-0">
+                              <div className={`flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br ${getEmpAvatarColor(emp.id || emp.full_name)} text-sm font-bold text-white shadow-sm`}>
+                                {getEmpInitials(emp.full_name)}
+                              </div>
+                              <span className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full ring-2 ring-white ${emp.is_online ? 'bg-emerald-500' : 'bg-slate-300'}`} />
                             </div>
-                            <div className="mt-1 text-xs text-slate-500">{emp.role || 'Сборщик'} • {emp.login}</div>
-                            <div className="mt-1 text-xs text-slate-500">Chat ID: {emp.telegram_chat_id || '-'}</div>
+                            <div className="min-w-0">
+                              <div className="font-semibold text-slate-900 truncate">{emp.full_name}</div>
+                              <div className="mt-0.5 text-xs text-slate-500">{emp.role || 'Сборщик'} • {emp.login}</div>
+                              <div className="mt-0.5 text-xs text-slate-400">Chat ID: {emp.telegram_chat_id || '-'}</div>
+                            </div>
                           </div>
                           <div className="text-right">
                             <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500" title="Пароли хранятся в виде хэша и не отображаются. Изменить можно в редактировании сотрудника.">
@@ -24002,9 +24042,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       employees.map(emp => (
                         <tr key={emp.id} className="hover:bg-slate-50">
                           <td className="px-6 py-4 font-medium text-slate-900">
-                            <div className="flex items-center">
-                                <div className={`w-2.5 h-2.5 rounded-full mr-2 ${emp.is_online ? 'bg-green-500' : 'bg-red-500'}`}></div>
-                                {emp.full_name}
+                            <div className="flex items-center gap-3">
+                                <div className="relative shrink-0">
+                                  <div className={`flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br ${getEmpAvatarColor(emp.id || emp.full_name)} text-sm font-bold text-white shadow-sm`}>
+                                    {getEmpInitials(emp.full_name)}
+                                  </div>
+                                  <span className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full ring-2 ring-white ${emp.is_online ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                                </div>
+                                <span className="truncate">{emp.full_name}</span>
                             </div>
                           </td>
                           <td className="px-6 py-4">
@@ -24102,17 +24147,25 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
           {/* Add Employee Modal */}
           {showAddEmployeeModal && (
-            <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50">
-              <div className="bg-white rounded-xl p-6 w-full max-w-md">
-                <h2 className="text-xl font-bold mb-4">Добавить сотрудника</h2>
-                <form onSubmit={handleAddEmployee} className="space-y-4">
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/55 p-4 backdrop-blur-sm">
+              <div className="flex max-h-[92vh] w-full max-w-md flex-col overflow-hidden rounded-3xl bg-white shadow-2xl ring-1 ring-black/5">
+                <div className="flex items-center gap-3 bg-gradient-to-r from-indigo-600 to-violet-600 px-6 py-5 text-white">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white/20"><UserCog className="h-5 w-5" /></div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[11px] font-semibold uppercase tracking-wider text-white/70">Персонал</div>
+                    <h2 className="truncate text-lg font-bold leading-tight">Добавить сотрудника</h2>
+                  </div>
+                  <button type="button" onClick={() => setShowAddEmployeeModal(false)} className="rounded-xl p-1.5 text-white/80 transition-colors hover:bg-white/20 hover:text-white"><X className="h-5 w-5" /></button>
+                </div>
+                <form onSubmit={handleAddEmployee} className="flex min-h-0 flex-1 flex-col">
+                  <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-6">
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">ФИО</label>
                     <input
                       type="text"
                       value={newEmployee.fullName}
                       onChange={e => setNewEmployee({...newEmployee, fullName: e.target.value})}
-                      className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-indigo-500"
+                      className="oc-input"
                       required
                     />
                   </div>
@@ -24121,20 +24174,21 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     <select
                       value={newEmployee.role}
                       onChange={e => setNewEmployee({...newEmployee, role: e.target.value})}
-                      className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-indigo-500"
+                      className="oc-select"
                     >
                       <option value="Сборщик">Сборщик</option>
                       <option value="Менеджер">Менеджер</option>
                       <option value="Управляющий">Управляющий</option>
                     </select>
                   </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">Логин</label>
                     <input
                       type="text"
                       value={newEmployee.login}
                       onChange={e => setNewEmployee({...newEmployee, login: e.target.value})}
-                      className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-indigo-500"
+                      className="oc-input"
                       required
                     />
                   </div>
@@ -24144,9 +24198,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       type="text"
                       value={newEmployee.password}
                       onChange={e => setNewEmployee({...newEmployee, password: e.target.value})}
-                      className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-indigo-500"
+                      className="oc-input"
                       required
                     />
+                  </div>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">Telegram Chat ID</label>
@@ -24154,20 +24209,20 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       type="text"
                       value={newEmployee.chatId}
                       onChange={e => setNewEmployee({...newEmployee, chatId: e.target.value})}
-                      className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-indigo-500"
+                      className="oc-input"
                       required
                     />
                   </div>
 
-                  <div className="border-t pt-4 mt-4">
+                  <div className="border-t border-slate-100 pt-4">
                     <label className="block text-sm font-medium text-slate-700 mb-3">Доступ к разделам</label>
-                    <div className="space-y-3 max-h-[40vh] overflow-y-auto pr-1">
+                    <div className="space-y-3">
                       {EMPLOYEE_PERMISSION_SECTIONS.map(section => (
-                        <div key={section.title} className="border border-slate-200 rounded-lg p-3 bg-slate-50/50">
+                        <div key={section.title} className="border border-slate-200 rounded-2xl p-3 bg-slate-50/50">
                           <div className="text-xs font-semibold text-slate-700 uppercase tracking-wide mb-2">{section.title}</div>
                           <div className="grid grid-cols-1 gap-2">
                             {section.items.map(item => (
-                              <div key={item.id} className="flex items-center justify-between p-2 bg-white rounded-lg border border-slate-100">
+                              <div key={item.id} className="flex items-center justify-between p-2 bg-white rounded-xl border border-slate-100">
                                 <span className="text-sm text-slate-700">{item.label}</span>
                                 <button
                                   type="button"
@@ -24186,11 +24241,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       ))}
                     </div>
                   </div>
+                  </div>
 
-                  <div className="flex justify-end gap-2 mt-6">
-                    <button type="button" onClick={() => setShowAddEmployeeModal(false)} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg">Отмена</button>
-                    <button type="submit" disabled={addingEmployee} className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center">
-                      {addingEmployee ? 'Добавление...' : 'Добавить'}
+                  <div className="flex justify-end gap-2 border-t border-slate-100 px-6 py-4">
+                    <button type="button" onClick={() => setShowAddEmployeeModal(false)} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50">Отмена</button>
+                    <button type="submit" disabled={addingEmployee} className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 active:scale-[0.98] disabled:opacity-50">
+                      {addingEmployee ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}{addingEmployee ? 'Добавление...' : 'Добавить'}
                     </button>
                   </div>
                 </form>
@@ -24200,10 +24256,18 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
           {/* Edit Employee Modal */}
           {editingEmployee && (
-            <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50">
-              <div className="bg-white rounded-xl p-6 w-full max-w-md">
-                <h2 className="text-xl font-bold mb-4">Редактировать сотрудника</h2>
-                <form onSubmit={handleUpdateEmployee} className="space-y-3">
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/55 p-4 backdrop-blur-sm">
+              <div className="flex max-h-[92vh] w-full max-w-md flex-col overflow-hidden rounded-3xl bg-white shadow-2xl ring-1 ring-black/5">
+                <div className="flex items-center gap-3 bg-gradient-to-r from-sky-600 to-indigo-600 px-6 py-5 text-white">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white/20"><Pencil className="h-5 w-5" /></div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[11px] font-semibold uppercase tracking-wider text-white/70">Персонал</div>
+                    <h2 className="truncate text-lg font-bold leading-tight">Редактировать сотрудника</h2>
+                  </div>
+                  <button type="button" onClick={() => setEditingEmployee(null)} className="rounded-xl p-1.5 text-white/80 transition-colors hover:bg-white/20 hover:text-white"><X className="h-5 w-5" /></button>
+                </div>
+                <form onSubmit={handleUpdateEmployee} className="flex min-h-0 flex-1 flex-col">
+                  <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-6">
                   <div className="grid grid-cols-2 gap-3">
                     <div className="col-span-2">
                         <label className="block text-sm font-medium text-slate-700 mb-1">ФИО</label>
@@ -24260,11 +24324,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     </div>
                   </div>
 
-                  <div className="border-t pt-3 mt-3">
+                  <div className="border-t border-slate-100 pt-3">
                     <label className="block text-sm font-medium text-slate-700 mb-2">Доступ к разделам</label>
-                    <div className="space-y-3 max-h-[38vh] overflow-y-auto pr-1">
+                    <div className="space-y-3">
                       {EMPLOYEE_PERMISSION_SECTIONS.map(section => (
-                        <div key={section.title} className="border border-slate-200 rounded-lg p-3 bg-slate-50/50">
+                        <div key={section.title} className="border border-slate-200 rounded-2xl p-3 bg-slate-50/50">
                           <div className="text-xs font-semibold text-slate-700 uppercase tracking-wide mb-2">{section.title}</div>
                           <div className="grid grid-cols-1 gap-2">
                             {section.items.map(item => (
@@ -24291,10 +24355,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     </div>
                   </div>
 
-                  <div className="flex justify-end gap-2 mt-6">
-                    <button type="button" onClick={() => setEditingEmployee(null)} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg">Отмена</button>
-                    <button type="submit" disabled={addingEmployee} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center">
-                      {addingEmployee ? 'Сохранение...' : 'Сохранить'}
+                  </div>
+
+                  <div className="flex justify-end gap-2 border-t border-slate-100 px-6 py-4">
+                    <button type="button" onClick={() => setEditingEmployee(null)} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50">Отмена</button>
+                    <button type="submit" disabled={addingEmployee} className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 active:scale-[0.98] disabled:opacity-50">
+                      {addingEmployee ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}{addingEmployee ? 'Сохранение...' : 'Сохранить'}
                     </button>
                   </div>
                 </form>
