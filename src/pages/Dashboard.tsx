@@ -29085,28 +29085,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-[150px_1fr_180px] gap-3">
-                      <label className="block">
-                        <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Дата</span>
-                        <input
-                          type="date"
-                          value={deliveryForm.date}
-                          onChange={(e) => setDeliveryForm(prev => ({ ...prev, date: e.target.value }))}
-                          className="oc-input h-11 rounded-xl bg-white text-sm"
-                        />
-                      </label>
-                      <label className="block">
-                        <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Сумма</span>
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          value={deliveryForm.amount}
-                          onChange={(e) => setDeliveryForm(prev => ({ ...prev, amount: e.target.value }))}
-                          placeholder="0"
-                          className="oc-input h-11 rounded-xl bg-white text-sm"
-                        />
-                      </label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
                       <label className="block">
                         <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Доставщик</span>
                         <select
@@ -29126,7 +29105,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           <select
                             value={deliveryForm.supply_type}
                             onChange={(e) => setDeliveryForm(prev => ({ ...prev, supply_type: e.target.value }))}
-                            className="oc-input h-11 rounded-xl bg-white text-sm flex-1"
+                            className="oc-input h-11 rounded-xl bg-white text-sm flex-1 min-w-0"
                           >
                             <option value="">Не указан</option>
                             {deliverySupplyTypes.map((t) => (
@@ -29142,6 +29121,31 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             <Plus className="h-4 w-4" />
                           </button>
                         </div>
+                      </label>
+                      <label className="block">
+                        <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Дата</span>
+                        <input
+                          type="date"
+                          value={deliveryForm.date}
+                          onChange={(e) => setDeliveryForm(prev => ({ ...prev, date: e.target.value }))}
+                          className="oc-input h-11 rounded-xl bg-white text-sm"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Сумма</span>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={deliveryForm.amount}
+                          onChange={(e) => {
+                            let v = e.target.value.replace(/[^\d.,]/g, '').replace(',', '.');
+                            const parts = v.split('.');
+                            if (parts.length > 2) v = parts[0] + '.' + parts.slice(1).join('');
+                            setDeliveryForm(prev => ({ ...prev, amount: v }));
+                          }}
+                          placeholder="0"
+                          className="oc-input h-11 rounded-xl bg-white text-sm"
+                        />
                       </label>
                     </div>
 
