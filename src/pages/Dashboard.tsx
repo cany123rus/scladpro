@@ -28555,7 +28555,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       <div className="relative flex items-start justify-between gap-3">
                         <div>
                           <div className="text-xs font-semibold uppercase tracking-wide text-rose-500">Не оплачено всего</div>
-                          <div className="mt-2 text-2xl font-black text-slate-950 md:text-3xl">{tempUnpaidBySupplier.total.toFixed(2)} ₽</div>
+                          {tempWorkerMetaLoaded ? (
+                            <div className="mt-2 text-2xl font-black text-slate-950 md:text-3xl">{tempUnpaidBySupplier.total.toFixed(2)} ₽</div>
+                          ) : (
+                            <div className="mt-2 h-8 w-28 animate-pulse rounded-lg bg-rose-100 md:h-9" />
+                          )}
                           <div className="mt-1 text-xs text-slate-500">Суммарный остаток по сменам</div>
                         </div>
                         <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-rose-50 text-rose-600 ring-1 ring-rose-100">
@@ -28569,7 +28573,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       <div className="relative flex items-start justify-between gap-3">
                         <div>
                           <div className="text-xs font-semibold uppercase tracking-wide text-amber-600">Не оплаченных смен</div>
-                          <div className="mt-2 text-2xl font-black text-slate-950 md:text-3xl">{tempUnpaidBySupplier.shifts}</div>
+                          {tempWorkerMetaLoaded ? (
+                            <div className="mt-2 text-2xl font-black text-slate-950 md:text-3xl">{tempUnpaidBySupplier.shifts}</div>
+                          ) : (
+                            <div className="mt-2 h-8 w-16 animate-pulse rounded-lg bg-amber-100 md:h-9" />
+                          )}
                           <div className="mt-1 text-xs text-slate-500">Записи, ожидающие оплаты</div>
                         </div>
                         <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-amber-50 text-amber-600 ring-1 ring-amber-100">
@@ -28583,7 +28591,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       <div className="relative flex items-start justify-between gap-3">
                         <div>
                           <div className="text-xs font-semibold uppercase tracking-wide text-indigo-600">Поставщиков с долгом</div>
-                          <div className="mt-2 text-2xl font-black text-slate-950 md:text-3xl">{tempUnpaidBySupplier.rows.length}</div>
+                          {tempWorkerMetaLoaded ? (
+                            <div className="mt-2 text-2xl font-black text-slate-950 md:text-3xl">{tempUnpaidBySupplier.rows.length}</div>
+                          ) : (
+                            <div className="mt-2 h-8 w-12 animate-pulse rounded-lg bg-indigo-100 md:h-9" />
+                          )}
                           <div className="mt-1 text-xs text-slate-500">Контрагенты с открытым остатком</div>
                         </div>
                         <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600 ring-1 ring-indigo-100">
@@ -28594,7 +28606,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   </div>
                 </div>
 
-                {tempUnpaidBySupplier.rows.length > 0 && (
+                {tempWorkerMetaLoaded && tempUnpaidBySupplier.rows.length > 0 && (
                   <div className="md:hidden my-3 px-3 overflow-x-auto">
                     <div className="flex gap-2 min-w-max pb-1">
                       {tempUnpaidBySupplier.rows.map((r) => (
@@ -28608,7 +28620,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   </div>
                 )}
 
-                {tempUnpaidBySupplier.rows.length > 0 && (
+                {tempWorkerMetaLoaded && tempUnpaidBySupplier.rows.length > 0 && (
                   <div className="mx-3 my-4 hidden rounded-3xl border border-slate-200 bg-white p-4 shadow-sm md:mx-6 md:block">
                     <div className="text-sm font-semibold text-slate-800 mb-2">Не оплачено по поставщикам</div>
                     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
