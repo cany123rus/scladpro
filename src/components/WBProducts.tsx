@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 // WB Products Component (Updated Layout v11 - Multi-supplier fetch, Enhanced UI)
-import { Loader2, AlertCircle, Image as ImageIcon, ExternalLink, RefreshCw, Printer, Minus, Plus, Search, Filter, X, Package, Pencil } from 'lucide-react';
+import { Loader2, AlertCircle, Image as ImageIcon, ExternalLink, RefreshCw, Printer, Minus, Plus, Search, Filter, X, Package, Pencil, Database, CheckCircle2, Trash2 } from 'lucide-react';
 import JsBarcode from 'jsbarcode';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
@@ -1564,62 +1564,66 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
               </div>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 2xl:flex gap-2 w-full 2xl:w-auto">
-                <button 
+                <button
                     onClick={() => setShowFilters(!showFilters)}
-                    className={`flex min-w-0 items-center justify-center px-3 py-2 min-h-[44px] border rounded-lg transition-colors text-xs sm:text-sm 2xl:text-base leading-tight text-center whitespace-normal ${showFilters ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'}`}
+                    className={`inline-flex min-w-0 items-center justify-center gap-1.5 min-h-[44px] rounded-xl border px-3 py-2 text-xs sm:text-sm 2xl:text-base font-medium leading-tight text-center whitespace-normal shadow-sm transition-all active:scale-[0.97] ${showFilters ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-slate-300'}`}
                 >
-                    <Filter className="h-4 w-4 mr-1.5 shrink-0" />
+                    <Filter className="h-4 w-4 shrink-0" />
                     Фильтры
                 </button>
-                <button 
+                <button
                     onClick={() => fetchAllProducts(undefined, true)}
                     disabled={loading}
-                    className="flex min-w-0 items-center justify-center px-3 py-2 min-h-[44px] bg-white border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors disabled:opacity-50 text-xs sm:text-sm 2xl:text-base leading-tight text-center whitespace-normal"
+                    className="inline-flex min-w-0 items-center justify-center gap-1.5 min-h-[44px] rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs sm:text-sm 2xl:text-base font-medium leading-tight text-center whitespace-normal text-slate-700 shadow-sm transition-all hover:bg-slate-50 hover:border-slate-300 active:scale-[0.97] disabled:opacity-50"
                 >
-                    <RefreshCw className={`h-4 w-4 mr-1.5 shrink-0 ${loading ? 'animate-spin' : ''}`} />
+                    <RefreshCw className={`h-4 w-4 shrink-0 ${loading ? 'animate-spin' : ''}`} />
                     Обновить
                 </button>
                 <button
                     onClick={loadProductsFromWarehouseOffline}
                     disabled={loading}
-                    className="flex min-w-0 items-center justify-center px-3 py-2 min-h-[44px] bg-slate-900 text-white rounded-lg hover:bg-slate-800 transition-colors disabled:opacity-50 text-xs sm:text-sm 2xl:text-base leading-tight text-center whitespace-normal"
+                    className="inline-flex min-w-0 items-center justify-center gap-1.5 min-h-[44px] rounded-xl bg-slate-900 px-3 py-2 text-xs sm:text-sm 2xl:text-base font-medium leading-tight text-center whitespace-normal text-white shadow-sm transition-all hover:bg-slate-800 active:scale-[0.97] disabled:opacity-50"
                 >
+                    <Database className="h-4 w-4 shrink-0" />
                     Offline-база
                 </button>
                 <button
                     onClick={preparePrintCache}
                     disabled={isPreparingPrintCache}
-                    className="flex min-w-0 items-center justify-center px-3 py-2 min-h-[44px] bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors disabled:opacity-50 text-xs sm:text-sm 2xl:text-base leading-tight text-center whitespace-normal"
+                    className="inline-flex min-w-0 items-center justify-center gap-1.5 min-h-[44px] rounded-xl bg-amber-600 px-3 py-2 text-xs sm:text-sm 2xl:text-base font-medium leading-tight text-center whitespace-normal text-white shadow-sm shadow-amber-600/20 transition-all hover:bg-amber-700 active:scale-[0.97] disabled:opacity-50"
                 >
-                    {isPreparingPrintCache ? 'Подготовка кэша...' : 'Подготовить к печати'}
+                    {isPreparingPrintCache ? <RefreshCw className="h-4 w-4 shrink-0 animate-spin" /> : <Database className="h-4 w-4 shrink-0" />}
+                    {isPreparingPrintCache ? 'Подготовка...' : 'Подготовить к печати'}
                 </button>
                 <button
                     onClick={checkPrintCacheReady}
                     disabled={isCheckingPrintCache}
-                    className="flex min-w-0 items-center justify-center px-3 py-2 min-h-[44px] bg-sky-600 text-white rounded-lg hover:bg-sky-700 transition-colors disabled:opacity-50 text-xs sm:text-sm 2xl:text-base leading-tight text-center whitespace-normal"
+                    className="inline-flex min-w-0 items-center justify-center gap-1.5 min-h-[44px] rounded-xl bg-sky-600 px-3 py-2 text-xs sm:text-sm 2xl:text-base font-medium leading-tight text-center whitespace-normal text-white shadow-sm shadow-sky-600/20 transition-all hover:bg-sky-700 active:scale-[0.97] disabled:opacity-50"
                 >
-                    {isCheckingPrintCache ? 'Проверка кэша...' : 'Проверить кэш'}
+                    {isCheckingPrintCache ? <RefreshCw className="h-4 w-4 shrink-0 animate-spin" /> : <CheckCircle2 className="h-4 w-4 shrink-0" />}
+                    {isCheckingPrintCache ? 'Проверка...' : 'Проверить кэш'}
                 </button>
                 <button
                     onClick={() => handlePrint(true)}
                     disabled={printCount === 0}
-                    className={`flex min-w-0 items-center justify-center px-3 py-2 min-h-[44px] rounded-lg text-white transition-colors text-xs sm:text-sm 2xl:text-base leading-tight text-center whitespace-normal ${printCount > 0 ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-slate-300 cursor-not-allowed'}`}
+                    className={`inline-flex min-w-0 items-center justify-center gap-1.5 min-h-[44px] rounded-xl px-3 py-2 text-xs sm:text-sm 2xl:text-base font-medium leading-tight text-center whitespace-normal text-white shadow-sm transition-all active:scale-[0.97] ${printCount > 0 ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/20' : 'bg-slate-300 cursor-not-allowed'}`}
                 >
-                    <Printer className="h-4 w-4 mr-1.5 shrink-0" />
+                    <Printer className="h-4 w-4 shrink-0" />
                     Печать из кэша ({printCount})
                 </button>
-                <button 
+                <button
                     onClick={() => handlePrint(false)}
                     disabled={printCount === 0}
-                    className={`flex min-w-0 items-center justify-center px-3 py-2 min-h-[44px] rounded-lg text-white transition-colors text-xs sm:text-sm 2xl:text-base leading-tight text-center whitespace-normal ${printCount > 0 ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-slate-300 cursor-not-allowed'}`}
+                    className={`inline-flex min-w-0 items-center justify-center gap-1.5 min-h-[44px] rounded-xl px-3 py-2 text-xs sm:text-sm 2xl:text-base font-medium leading-tight text-center whitespace-normal text-white shadow-sm transition-all active:scale-[0.97] ${printCount > 0 ? 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-600/20' : 'bg-slate-300 cursor-not-allowed'}`}
                 >
-                    <Printer className="h-4 w-4 mr-1.5 shrink-0" />
+                    <Printer className="h-4 w-4 shrink-0" />
                     Печать онлайн ({printCount})
                 </button>
                 <button
                     onClick={() => { setQuantities({}); setPrintItems([]); }}
-                    className="flex min-w-0 items-center justify-center px-3 py-2 min-h-[44px] border border-rose-300 text-rose-700 rounded-lg hover:bg-rose-50 transition-colors text-xs sm:text-sm 2xl:text-base leading-tight text-center whitespace-normal"
+                    className="inline-flex min-w-0 items-center justify-center gap-1.5 min-h-[44px] rounded-xl border border-rose-200 bg-white px-3 py-2 text-xs sm:text-sm 2xl:text-base font-medium leading-tight text-center whitespace-normal text-rose-700 shadow-sm transition-all hover:bg-rose-50 hover:border-rose-300 active:scale-[0.97]"
                 >
+                    <Trash2 className="h-4 w-4 shrink-0" />
                     Очистить выбор
                 </button>
             </div>
@@ -1636,35 +1640,35 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
 
         {/* Filters Panel */}
         {showFilters && (
-            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 rounded-2xl border border-indigo-100 bg-indigo-50/40 p-4 shadow-sm">
                 <div>
-                    <label className="block text-xs font-medium text-slate-500 mb-1.5 uppercase tracking-wide">Поставщик</label>
-                    <select 
+                    <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Поставщик</label>
+                    <select
                         value={selectedSupplierId}
                         onChange={(e) => setSelectedSupplierId(e.target.value)}
-                        className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                        className="w-full min-h-[44px] rounded-xl border border-slate-200 bg-white px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-500"
                     >
                         <option value="">Все поставщики</option>
                         {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                     </select>
                 </div>
                 <div>
-                    <label className="block text-xs font-medium text-slate-500 mb-1.5 uppercase tracking-wide">Бренд</label>
-                    <select 
+                    <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Бренд</label>
+                    <select
                         value={selectedBrand}
                         onChange={(e) => setSelectedBrand(e.target.value)}
-                        className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                        className="w-full min-h-[44px] rounded-xl border border-slate-200 bg-white px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-500"
                     >
                         <option value="">Все бренды</option>
                         {brands.map(b => <option key={b} value={b}>{b}</option>)}
                     </select>
                 </div>
                 <div>
-                    <label className="block text-xs font-medium text-slate-500 mb-1.5 uppercase tracking-wide">Категория</label>
-                    <select 
+                    <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Категория</label>
+                    <select
                         value={selectedCategory}
                         onChange={(e) => setSelectedCategory(e.target.value)}
-                        className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                        className="w-full min-h-[44px] rounded-xl border border-slate-200 bg-white px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-500"
                     >
                         <option value="">Все категории</option>
                         {categories.map(c => <option key={c} value={c}>{c}</option>)}
@@ -1675,14 +1679,19 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
 
         {/* Search Bar - Full Width */}
         <div className="relative w-full">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400" />
-            <input 
-              type="text" 
-              placeholder="Поиск по названию, артикулу, баркоду или ID..." 
+            <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Поиск по названию, артикулу, баркоду или ID..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm"
+              className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-11 pr-10 shadow-sm outline-none focus:border-indigo-300 focus:bg-white focus:ring-2 focus:ring-indigo-500"
             />
+            {searchQuery && (
+              <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600" aria-label="Очистить поиск">
+                <X className="h-4 w-4" />
+              </button>
+            )}
         </div>
       </div>
 
