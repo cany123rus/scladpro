@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react';
+import React, { useEffect, useState, useRef, useMemo, useCallback, useDeferredValue } from 'react';
 // WB Products Component (Updated Layout v11 - Multi-supplier fetch, Enhanced UI)
 import { Loader2, AlertCircle, Image as ImageIcon, ExternalLink, RefreshCw, Printer, Minus, Plus, Search, Filter, X, Package, Pencil, Database, CheckCircle2, Trash2 } from 'lucide-react';
 import JsBarcode from 'jsbarcode';
@@ -1301,18 +1301,7 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
     ''
   );
 
-  const allVariants: ProductVariant[] = useMemo(() => (
-    products.flatMap(p =>
-      (p.sizes || []).map(s => ({
-        id: `${p.nmID}-${s.techSize}`,
-        product: p,
-        size: s,
-        barcode: s.skus?.[0] || ''
-      }))
-    )
-  ), [products]);
-
-  const normalizeSearchText = (value: unknown) => String(value || '')
+  const normalizeSearchText = useCallback((value: unknown) => String(value || '')
     .toLowerCase()
     .replace(/[\s_]+/g, '')
     .replace(/[а]/g, 'a')
@@ -1326,31 +1315,58 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
     .replace(/[с]/g, 'c')
     .replace(/[т]/g, 't')
     .replace(/[у]/g, 'y')
-    .replace(/[х]/g, 'x');
+    .replace(/[х]/g, 'x'), []);
+
+  // Precompute the searchable strings once per products change (heavy regex work),
+  // so each keystroke only does cheap substring checks instead of re-normalizing
+  // every field of every variant.
+  const allVariants = useMemo(() => (
+    products.flatMap(p => {
+      const brandValue = p.brand || (p.characteristics?.find((c: any) => c.name === 'Бренд')?.value as string | undefined);
+      return (p.sizes || []).map(s => {
+        const barcode = s.skus?.[0] || '';
+        const searchRaw = `${p.title || ''}\n${p.vendorCode || ''}\n${p.nmID || ''}\n${barcode}`.toLowerCase();
+        return {
+          id: `${p.nmID}-${s.techSize}`,
+          product: p,
+          size: s,
+          barcode,
+          brandValue,
+          searchRaw,
+          searchNorm: normalizeSearchText(searchRaw),
+        };
+      });
+    })
+  ), [products, normalizeSearchText]);
+
+  // Defer the heavy filtering off the keystroke path so typing stays responsive.
+  const deferredSearchQuery = useDeferredValue(searchQuery);
 
   const filteredVariants = useMemo(() => {
-    const rawQ = searchQuery.toLowerCase();
-    const q = normalizeSearchText(searchQuery);
+    const rawQ = deferredSearchQuery.toLowerCase();
+    const q = normalizeSearchText(deferredSearchQuery);
     return allVariants.filter(v => {
-      const searchable = [
-        v.product.title,
-        v.product.vendorCode,
-        v.product.nmID,
-        getModelNumber(v),
-        v.barcode,
-      ];
-      const matchesSearch = !q || searchable.some(value => {
-        const raw = String(value || '').toLowerCase();
-        return raw.includes(rawQ) || normalizeSearchText(value).includes(q);
-      });
+      if (q) {
+        let matchesSearch = v.searchRaw.includes(rawQ) || v.searchNorm.includes(q);
+        if (!matchesSearch) {
+          // Model number is the only field that can change live (local edits).
+          const model = getModelNumber(v);
+          if (model) {
+            const mRaw = model.toLowerCase();
+            matchesSearch = mRaw.includes(rawQ) || normalizeSearchText(model).includes(q);
+          }
+        }
+        if (!matchesSearch) return false;
+      }
 
-      const matchesBrand = !selectedBrand || (v.product.brand === selectedBrand || v.product.characteristics?.find((c: any) => c.name === 'Бренд')?.value === selectedBrand);
+      const matchesBrand = !selectedBrand || v.brandValue === selectedBrand;
       const matchesCategory = !selectedCategory || v.product.subjectName === selectedCategory;
       const matchesSupplier = !selectedSupplierId || v.product.supplierId === selectedSupplierId;
 
-      return matchesSearch && matchesBrand && matchesCategory && matchesSupplier;
+      return matchesBrand && matchesCategory && matchesSupplier;
     });
-  }, [allVariants, searchQuery, selectedBrand, selectedCategory, selectedSupplierId, localLabelEdits]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allVariants, deferredSearchQuery, normalizeSearchText, selectedBrand, selectedCategory, selectedSupplierId, localLabelEdits]);
 
   const printCount = useMemo(() => {
     let total = 0;
