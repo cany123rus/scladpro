@@ -25,8 +25,10 @@
   (типы `FboPallet*` в Dashboard.tsx). Удаление складов/поставок — физическое (вырезаются из JSON).
 - **Ленивая загрузка / чанкинг** (`vite.config.ts`): `manualChunks` выносит только
   `vendor-react` и `vendor-supabase`. Тяжёлые либы (jspdf, exceljs) грузятся динамически
-  через `ensurePdfLibs()` / `ensureExcel()` в Dashboard и через `loadExcel()` в utils —
-  НЕ возвращать их в статические импорты. `bwip-js` отложить НЕЛЬЗЯ (синхронный рендер в ref).
+  через `ensurePdfLibs()` / `ensureExcel()` / `ensureBwip()` в Dashboard и через `loadExcel()` в utils —
+  НЕ возвращать их в статические импорты. `bwip-js` тоже ленив (`ensureBwip`): все вызовы в
+  async-функциях/effect'ах ждут загрузку; единственный рендер-ref печати ЧЗ — мёртвый код
+  (`setIsPrintingCodes`/`setCodesToPrint` нигде не вызываются).
 - **sourcemap отключён** в проде (`vite.config.ts`).
 
 ## Дизайн-система
@@ -67,7 +69,9 @@
   `work_logs(temp_employee_id)`, `products(supplier_id)`, `print_files(supplier_id)`,
   `temporary_workers_logs(supplier_id)`, `temporary_workers_logs(created_by)`, `warehouse_money_log(employee_id)`.
   Убран дубль-индекс `idx_supply_items_box`.
-- Осталось: дробление `Dashboard.tsx` (бандл ~1.86MB), виртуализация прочих списков, чистка `SELECT *`.
+- bwip-js вынесен в ленивый чанк (`ensureBwip`): Dashboard-чанк 1.86MB→991KB (gzip 453→207KB),
+  bwip-js (245KB gzip) грузится только при печати.
+- Осталось: дальнейшее дробление `Dashboard.tsx` по вкладкам, виртуализация прочих списков, чистка `SELECT *`.
 
 ## Прочее
 - Бэкап БД при ручных правках через MCP: ключ-копия в `app_settings`
