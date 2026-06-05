@@ -1554,7 +1554,15 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
     <div className="bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col 2xl:h-[calc(100vh-8rem)]">
       <div className="p-4 border-b border-slate-200 bg-white z-10 flex flex-col gap-4 no-print">
         <div className="flex flex-col 2xl:flex-row justify-between items-start 2xl:items-center gap-3">
-            <h2 className="text-xl md:text-2xl font-bold text-slate-900">Товары Wildberries <span className="text-slate-500 text-base md:text-lg font-normal">({filteredVariants.length})</span></h2>
+            <div className="flex items-center gap-3">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-600 to-indigo-600 text-white shadow-sm">
+                <Package className="h-6 w-6" />
+              </div>
+              <div>
+                <h2 className="text-xl md:text-2xl font-bold text-slate-900 leading-tight">Товары Wildberries</h2>
+                <div className="mt-0.5 text-sm text-slate-500">Найдено вариантов: <span className="font-semibold text-slate-700">{filteredVariants.length}</span></div>
+              </div>
+            </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 2xl:flex gap-2 w-full 2xl:w-auto">
                 <button 
                     onClick={() => setShowFilters(!showFilters)}
@@ -1795,20 +1803,38 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
       </div>
 
       {editingVariant && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4" onClick={() => setEditingVariant(null)}>
-          <div className="bg-white rounded-xl p-5 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-lg font-bold mb-3">Локальное редактирование</h3>
-            <p className="text-xs text-slate-500 mb-3">Изменения только на этом устройстве, без записи в БД.</p>
-            <div className="space-y-3">
-              <input type="text" value={editDraft.article} onChange={(e) => setEditDraft(prev => ({ ...prev, article: e.target.value }))} className="w-full p-2 border rounded" placeholder="Артикул" />
-              <div className="grid grid-cols-2 gap-2">
-                <input type="text" value={editDraft.size} onChange={(e) => setEditDraft(prev => ({ ...prev, size: e.target.value }))} className="w-full p-2 border rounded" placeholder="Размер" />
-                <input type="text" value={editDraft.color} onChange={(e) => setEditDraft(prev => ({ ...prev, color: e.target.value }))} className="w-full p-2 border rounded" placeholder="Цвет" />
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/55 backdrop-blur-sm p-4" onClick={() => setEditingVariant(null)}>
+          <div className="w-full max-w-md overflow-hidden rounded-3xl bg-white shadow-2xl ring-1 ring-black/5" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-3 bg-gradient-to-r from-amber-500 to-orange-500 px-6 py-5 text-white">
+              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white/20"><Pencil className="h-5 w-5" /></div>
+              <div className="min-w-0 flex-1">
+                <div className="text-[11px] font-semibold uppercase tracking-wider text-white/70">Этикетка</div>
+                <h3 className="truncate text-lg font-bold leading-tight">Локальное редактирование</h3>
+              </div>
+              <button onClick={() => setEditingVariant(null)} className="rounded-xl p-1.5 text-white/80 transition-colors hover:bg-white/20 hover:text-white"><X className="h-5 w-5" /></button>
+            </div>
+            <div className="p-6">
+              <p className="mb-4 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-700">Изменения сохраняются только на этом устройстве, без записи в базу данных.</p>
+              <div className="space-y-3">
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-slate-500">Артикул</label>
+                  <input type="text" value={editDraft.article} onChange={(e) => setEditDraft(prev => ({ ...prev, article: e.target.value }))} className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 outline-none focus:ring-2 focus:ring-amber-500" placeholder="Артикул" />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-500">Размер</label>
+                    <input type="text" value={editDraft.size} onChange={(e) => setEditDraft(prev => ({ ...prev, size: e.target.value }))} className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 outline-none focus:ring-2 focus:ring-amber-500" placeholder="Размер" />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-500">Цвет</label>
+                    <input type="text" value={editDraft.color} onChange={(e) => setEditDraft(prev => ({ ...prev, color: e.target.value }))} className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 outline-none focus:ring-2 focus:ring-amber-500" placeholder="Цвет" />
+                  </div>
+                </div>
               </div>
             </div>
-            <div className="flex justify-end gap-2 mt-4">
-              <button onClick={() => setEditingVariant(null)} className="px-3 py-2 rounded border">Отмена</button>
-              <button onClick={saveLocalEdit} className="px-3 py-2 rounded bg-amber-600 text-white">Сохранить</button>
+            <div className="flex justify-end gap-2 border-t border-slate-100 px-6 py-4">
+              <button onClick={() => setEditingVariant(null)} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50">Отмена</button>
+              <button onClick={saveLocalEdit} className="rounded-xl bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-amber-700">Сохранить</button>
             </div>
           </div>
         </div>
@@ -1817,7 +1843,7 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
       {/* Image Modal */}
       {selectedImage && (
         <div 
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/85 p-4 backdrop-blur-sm"
           onClick={() => setSelectedImage(null)}
         >
           <div className="relative max-w-4xl max-h-[90vh] w-full h-full flex items-center justify-center">

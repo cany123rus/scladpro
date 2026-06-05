@@ -100,6 +100,17 @@ const getNotificationToneClass = (type: NotificationType) => {
   return 'bg-blue-600';
 };
 
+type ToastStyle = { bar: string; iconWrap: string; ring: string; title: string };
+const getNotificationStyle = (type: NotificationType): ToastStyle => {
+  if (type === 'error')
+    return { bar: 'bg-rose-500', iconWrap: 'bg-rose-100 text-rose-600', ring: 'ring-rose-100', title: 'Ошибка' };
+  if (type === 'warning')
+    return { bar: 'bg-amber-500', iconWrap: 'bg-amber-100 text-amber-600', ring: 'ring-amber-100', title: 'Внимание' };
+  if (type === 'info')
+    return { bar: 'bg-sky-500', iconWrap: 'bg-sky-100 text-sky-600', ring: 'ring-sky-100', title: 'Информация' };
+  return { bar: 'bg-emerald-500', iconWrap: 'bg-emerald-100 text-emerald-600', ring: 'ring-emerald-100', title: 'Готово' };
+};
+
 const getNotificationHistoryTextClass = (type: NotificationType) => {
   if (type === 'error') return 'text-red-600';
   if (type === 'success') return 'text-green-600';
@@ -17134,14 +17145,27 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       </div>
 
       {/* Toast Notification */}
-      {notification && (
-        <div className={`fixed bottom-4 right-4 z-[10000] max-w-[min(92vw,32rem)] px-6 py-4 rounded-lg shadow-2xl flex items-start text-white animate-fade-in-up ${
-          getNotificationToneClass(notification.type)
-        }`}>
-          {notification.type === 'error' || notification.type === 'warning' ? <AlertCircle className="h-5 w-5 mr-3 mt-0.5 shrink-0" /> : <CheckCircle2 className="h-5 w-5 mr-3 mt-0.5 shrink-0" />}
-          <span className="break-words leading-snug">{notification.message}</span>
-        </div>
-      )}
+      {notification && (() => {
+        const ts = getNotificationStyle(notification.type);
+        return (
+          <div className="fixed bottom-20 right-4 z-[10000] max-w-[min(92vw,26rem)] animate-fade-in-up">
+            <div className={`relative flex items-start gap-3 overflow-hidden rounded-2xl bg-white/95 py-4 pl-5 pr-5 shadow-2xl ring-1 backdrop-blur-md ${ts.ring}`}>
+              <span className={`absolute inset-y-0 left-0 w-1.5 ${ts.bar}`} />
+              <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${ts.iconWrap}`}>
+                {notification.type === 'error' || notification.type === 'warning'
+                  ? <AlertCircle className="h-5 w-5" />
+                  : notification.type === 'info'
+                    ? <Database className="h-5 w-5" />
+                    : <CheckCircle2 className="h-5 w-5" />}
+              </div>
+              <div className="min-w-0 flex-1 pt-0.5">
+                <div className="text-[13px] font-bold text-slate-900">{ts.title}</div>
+                <div className="mt-0.5 break-words text-sm leading-snug text-slate-600">{notification.message}</div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Notification History Button */}
       <button
@@ -17657,31 +17681,42 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       .slice()
                       .sort((a, b) => new Date(String(b?.created_at || '')).getTime() - new Date(String(a?.created_at || '')).getTime())
                       .map(supply => (
-                      <div key={supply.id} className={`bg-white p-4 rounded-xl border flex flex-col justify-between gap-4 ${supply.status === 'closed' ? 'border-green-200 bg-green-50' : 'border-slate-100'}`}>
-                        <div onClick={() => { setCurrentSupply(supply); fetchBoxesList(supply.id); fetchSupplyStats(supply.id); setSupplyStep('SUPPLY'); }} className="cursor-pointer flex-1 w-full sm:w-auto">
-                          <div className="font-bold text-slate-900">{supply.name}</div>
-                          <div className="text-sm text-slate-500 flex items-center gap-2">
-                            <span className="bg-white px-2 py-0.5 rounded text-xs font-medium text-slate-600 border border-slate-200">
-                              {supply.total_items || 0} шт.
-                            </span>
-                            {supply.status === 'closed' ? (
-                              <>
-                                <span className="text-green-600 font-medium">Поставка отгружена</span>
-                                <span>{new Date(supply.updated_at || supply.created_at).toLocaleDateString()}</span>
-                              </>
-                            ) : (
-                              <span>{new Date(supply.created_at).toLocaleDateString()}</span>
-                            )}
+                      <div key={supply.id} className={`group relative flex flex-col justify-between gap-4 overflow-hidden rounded-2xl border bg-white p-4 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md ${supply.status === 'closed' ? 'border-emerald-200' : 'border-slate-200 hover:border-indigo-200'}`}>
+                        <span className={`absolute inset-y-0 left-0 w-1.5 ${supply.status === 'closed' ? 'bg-emerald-500' : 'bg-indigo-500'}`} />
+                        <div onClick={() => { setCurrentSupply(supply); fetchBoxesList(supply.id); fetchSupplyStats(supply.id); setSupplyStep('SUPPLY'); }} className="flex-1 w-full cursor-pointer pl-2">
+                          <div className="flex items-start gap-3">
+                            <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${supply.status === 'closed' ? 'bg-emerald-100 text-emerald-600' : 'bg-indigo-100 text-indigo-600'}`}>
+                              <Truck className="h-5 w-5" />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="truncate font-bold text-slate-900">{supply.name}</div>
+                              <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                                <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 font-semibold text-slate-700">
+                                  {supply.total_items || 0} шт.
+                                </span>
+                                {supply.status === 'closed' ? (
+                                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-0.5 font-semibold text-emerald-700">
+                                    <CheckCircle2 className="h-3 w-3" /> Отгружена
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 font-semibold text-amber-700">
+                                    В работе
+                                  </span>
+                                )}
+                                <span className="text-slate-400">{new Date(supply.status === 'closed' ? (supply.updated_at || supply.created_at) : supply.created_at).toLocaleDateString()}</span>
+                              </div>
+                            </div>
                           </div>
                         </div>
-                        <div className="flex gap-2 w-full sm:w-auto justify-end">
+                        <div className="flex w-full justify-end gap-2 pl-2">
                           <button
                             onClick={(e) => { e.stopPropagation(); handleToggleSupplyLockList(supply); }}
-                            className={`p-2 rounded-lg border ${supply.status === 'closed' ? 'text-slate-500 border-slate-200 bg-white' : 'text-slate-400 border-slate-100 hover:border-slate-300 bg-white'}`}
+                            className={`rounded-xl border p-2 transition-colors ${supply.status === 'closed' ? 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50' : 'border-slate-200 bg-white text-slate-400 hover:border-indigo-200 hover:text-indigo-600'}`}
+                            title={supply.status === 'closed' ? 'Разблокировать' : 'Заблокировать'}
                           >
                             {supply.status === 'closed' ? <Lock className="h-5 w-5" /> : <LockOpen className="h-5 w-5" />}
                           </button>
-                          <button onClick={(e) => { e.stopPropagation(); handleDeleteSupply(supply.id); }} className="p-2 rounded-lg border border-slate-100 text-slate-400 hover:text-red-600 hover:border-red-100 bg-white">
+                          <button onClick={(e) => { e.stopPropagation(); handleDeleteSupply(supply.id); }} className="rounded-xl border border-slate-200 bg-white p-2 text-slate-400 transition-colors hover:border-rose-200 hover:text-rose-600" title="Удалить">
                             <Trash2 className="h-5 w-5" />
                           </button>
                         </div>
