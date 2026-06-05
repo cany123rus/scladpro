@@ -26932,7 +26932,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
               {cwReportModalOpen && (
                 <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm backdrop-blur-sm flex items-center justify-center z-50 overflow-y-auto py-4 px-2">
                   <div className={`bg-white p-4 md:p-6 rounded-2xl shadow-2xl w-full transition-all max-h-[94vh] overflow-auto ${cwReportResult ? 'max-w-6xl' : 'max-w-2xl'}`}>
-                    <h3 className="text-xl font-bold mb-4 text-slate-900">Отчет по выполненной работе</h3>
+                    <div className="-mx-4 md:-mx-6 -mt-4 md:-mt-6 mb-5 flex items-center gap-3 rounded-t-2xl bg-gradient-to-r from-violet-600 to-indigo-600 px-6 py-5 text-white">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white/20"><FileSpreadsheet className="h-5 w-5" /></div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[11px] font-semibold uppercase tracking-wider text-white/70">Сборка</div>
+                        <h3 className="truncate text-lg font-bold leading-tight">Отчет по выполненной работе</h3>
+                      </div>
+                      <button onClick={() => setCwReportModalOpen(false)} className="rounded-xl p-1.5 text-white/80 transition-colors hover:bg-white/20 hover:text-white"><X className="h-5 w-5" /></button>
+                    </div>
 
                     <div className={`grid gap-4 mb-6 items-start ${cwReportResult ? 'grid-cols-1 xl:grid-cols-[1.3fr_0.85fr_0.85fr]' : 'grid-cols-1'}`}>
                       <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-slate-50 to-white p-4 shadow-sm">
@@ -29489,9 +29496,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 <div className="sticky top-0 z-10 bg-white border-b px-4 py-4 md:px-6">
                   <div className="mx-auto mb-2 h-1.5 w-12 rounded-full bg-slate-300 md:hidden" />
                   <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <h2 className="text-lg md:text-2xl font-bold text-slate-900">Общий отчет</h2>
-                      <p className="text-xs md:text-sm text-slate-500 mt-1">Временные сотрудники, доставки и выполненная работа в одном отчете.</p>
+                    <div className="flex items-center gap-3">
+                      <div className="hidden h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-600 to-indigo-600 text-white shadow-sm md:flex">
+                        <FileSpreadsheet className="h-6 w-6" />
+                      </div>
+                      <div>
+                        <h2 className="text-lg md:text-2xl font-bold text-slate-900">Общий отчет</h2>
+                        <p className="text-xs md:text-sm text-slate-500 mt-1">Временные сотрудники, доставки и выполненная работа в одном отчете.</p>
+                      </div>
                     </div>
                     <button onClick={() => setShowGeneralReportModal(false)} className="p-2 rounded-lg hover:bg-slate-100" aria-label="Закрыть общий отчет">
                       <X className="h-5 w-5 text-slate-500" />
