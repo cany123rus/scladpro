@@ -2459,15 +2459,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       await loadDeliveryData();
       showToast('Доставка добавлена', 'success');
     } catch (error: any) {
+      // Do NOT silently fall back to local app_settings storage: that created
+      // "phantom" deliveries that were never written to delivery_logs but could
+      // still be marked paid (deducting money for a non-existent delivery).
+      console.error('Error adding delivery:', error);
       if (isMissingDeliveryStorageError(error)) {
-        const next = [newDelivery, ...(deliveryHistory || [])];
-        await saveDeliveryHistory(next);
-        await saveDeliveryPersons([...(deliveryPersons || []), courier]);
-        setDeliveryForm({ date: new Date().toISOString().split('T')[0], courier: '', supply_type: '', amount: '', rows: [{ supplier_id: '', boxes: '', pallets: '' }] });
-        showToast('Доставка добавлена. После применения миграции будет отдельная таблица БД.', 'info');
+        showToast('БД ещё обновляет схему. Подождите пару секунд и нажмите «Создать доставку» снова.', 'warning');
         return;
       }
-      console.error('Error adding delivery:', error);
       showToast('Ошибка добавления доставки: ' + (error?.message || 'неизвестно'), 'error');
     }
   };
@@ -2487,6 +2486,19 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       setPaymentReports([]);
     } finally {
       setPaymentReportsLoading(false);
+    }
+  };
+
+  const handleDeletePaymentReport = async (report: any) => {
+    if (!report?.id) return;
+    if (!window.confirm('Удалить отчёт «' + (report?.title || 'Отчёт') + '»? Действие нельзя отменить.')) return;
+    try {
+      const { error } = await supabase.from('payment_reports').delete().eq('id', report.id);
+      if (error) throw error;
+      setPaymentReports((prev) => prev.filter((r: any) => String(r?.id) !== String(report.id)));
+      showToast('Отчёт удалён', 'success');
+    } catch (e: any) {
+      showToast('Ошибка удаления отчёта: ' + (e?.message || 'неизвестно'), 'error');
     }
   };
 
@@ -2606,11 +2618,17 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       ? { ...delivery, is_paid: nextPaid, paid_by_supplier_id: nextPaid ? payerSupplierId : null, paid_at: paidAt }
       : delivery);
     try {
-      const { error } = await supabase
+      const { data: updatedRows, error } = await supabase
         .from('delivery_logs')
         .update({ is_paid: nextPaid, paid_by_supplier_id: nextPaid ? payerSupplierId : null, paid_at: paidAt })
-        .eq('id', deliveryId);
+        .eq('id', deliveryId)
+        .select('id');
       if (error) throw error;
+      // Guard against phantom deliveries that exist only in local state.
+      if (nextPaid && (!updatedRows || updatedRows.length === 0)) {
+        showToast('Доставка не найдена в базе данных. Пересоздайте её — деньги не списаны.', 'error');
+        return;
+      }
       setDeliveryHistory(next);
       setDeliveryPayModal({ open: false, deliveryId: '', payerSupplierId: '' });
       if (nextPaid && payerSupplierId) {
@@ -2632,6 +2650,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
               courier,
               amount: Number(paidDelivery?.amount || 0),
               date: paidDelivery?.date || '',
+              boxes: sumDeliveryUnits(paidDelivery?.rows, 'boxes'),
+              pallets: sumDeliveryUnits(paidDelivery?.rows, 'pallets'),
             }],
           },
         });
@@ -2673,11 +2693,19 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
     setDeliveryQuickPaySaving(true);
     try {
-      const { error } = await supabase
+      const { data: updatedRows, error } = await supabase
         .from('delivery_logs')
         .update({ is_paid: true, paid_by_supplier_id: supplierId, paid_at: paidAt })
-        .in('id', ids);
+        .in('id', ids)
+        .select('id');
       if (error) throw error;
+      // Only deduct money for deliveries that actually exist in the DB.
+      const updatedCount = updatedRows?.length || 0;
+      if (updatedCount === 0) {
+        showToast('Выбранные доставки не найдены в базе данных. Деньги не списаны.', 'error');
+        setDeliveryQuickPaySaving(false);
+        return;
+      }
 
       setDeliveryHistory(next);
       setDeliveryQuickPaySelectedIds([]);
@@ -2699,6 +2727,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
               courier: d?.courier || 'Доставщик',
               amount: Number(d?.amount || 0),
               date: d?.date || '',
+              boxes: sumDeliveryUnits(d?.rows, 'boxes'),
+              pallets: sumDeliveryUnits(d?.rows, 'pallets'),
             })),
           },
         });
@@ -24208,7 +24238,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                 {r?.payload?.employee_name && <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 font-medium text-slate-600">Сотрудник: {r.payload.employee_name}</span>}
                               </div>
                             </div>
-                            <div className="text-lg font-black text-emerald-700">{Number(r.amount || 0).toLocaleString('ru-RU')} ₽</div>
+                            <div className="flex items-center gap-2">
+                              <div className="text-lg font-black text-emerald-700">{Number(r.amount || 0).toLocaleString('ru-RU')} ₽</div>
+                              <button onClick={() => handleDeletePaymentReport(r)} className="rounded-lg border border-slate-200 p-1.5 text-slate-400 transition-colors hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600" title="Удалить отчёт">
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </div>
                           </div>
                           {paymentReportsTab === 'delivery' && items.length > 0 && (
                             <div className="mt-3 overflow-x-auto">
@@ -24217,6 +24252,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                   <tr className="text-slate-400">
                                     <th className="py-1 pr-3 font-medium">Тип поставки</th>
                                     <th className="py-1 pr-3 font-medium">Кто вёз</th>
+                                    <th className="py-1 pr-3 font-medium">Кол-во</th>
                                     <th className="py-1 pr-3 font-medium">Дата</th>
                                     <th className="py-1 font-medium text-right">Сумма</th>
                                   </tr>
@@ -24226,6 +24262,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                     <tr key={'pr-item-' + r.id + '-' + idx}>
                                       <td className="py-1.5 pr-3 text-slate-700">{it?.supply_type || '—'}</td>
                                       <td className="py-1.5 pr-3 text-slate-700">{it?.courier || '—'}</td>
+                                      <td className="py-1.5 pr-3 text-slate-700">{formatDeliveryUnits(Number(it?.boxes || 0), Number(it?.pallets || 0))}</td>
                                       <td className="py-1.5 pr-3 text-slate-500">{it?.date ? new Date(String(it.date) + 'T12:00:00').toLocaleDateString('ru-RU') : '—'}</td>
                                       <td className="py-1.5 text-right font-semibold text-slate-900">{Number(it?.amount || 0).toLocaleString('ru-RU')} ₽</td>
                                     </tr>
@@ -29356,9 +29393,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           <div className="mt-3 flex flex-wrap gap-2">
                             {rows.map((row: any, rowIndex: number) => {
                               const supplier = suppliers.find((s: any) => String(s.id) === String(row?.supplier_id));
+                              const unitsText = formatDeliveryUnits(Number(row?.boxes || 0), Number(row?.pallets || 0));
                               return (
                                 <span key={'delivery-history-row-' + delivery.id + '-' + rowIndex} className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-700">
-                                  {supplier?.name || 'Поставщик'}: <b>{Math.floor(Number(row?.boxes || 0)).toLocaleString('ru-RU')}</b> коробок
+                                  {supplier?.name || 'Поставщик'}: <b>{unitsText}</b>
                                 </span>
                               );
                             })}
