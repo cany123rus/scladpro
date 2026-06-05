@@ -2058,8 +2058,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   };
 
   const isMissingDeliveryStorageError = (error: any) => {
+    // Only treat genuine "table/column not found in schema cache" errors as a
+    // schema-still-updating situation. Previously this matched ANY message that
+    // merely mentioned the table name (e.g. RLS / FK / constraint errors), which
+    // masked real failures behind a misleading "БД обновляет схему" toast.
     const message = String(error?.message || error?.details || error?.hint || error?.code || error || '');
-    return /delivery_(logs|items|persons)|schema cache|does not exist|could not find the table|PGRST205|42P01/i.test(message);
+    const code = String(error?.code || '');
+    if (code === 'PGRST205' || code === '42P01' || code === 'PGRST204') return true;
+    return /schema cache|could not find the (table|column)|relation .* does not exist|column .* does not exist/i.test(message);
   };
 
   const loadLegacyDeliveryData = async () => {
@@ -2226,11 +2232,20 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     return supplier?.name || 'Поставщик';
   };
 
-  // Show the real composition: boxes only, pallets only, or both.
+  // 1 паллета = 16 коробок. Количество коробок для вывода всегда включает паллеты*16,
+  // а паллеты показываются отдельно. Напр.: 1 паллета → «коробок: 16 • паллет: 1»;
+  // 10 коробок + 1 паллета → «коробок: 26 • паллет: 1».
+  const BOXES_PER_PALLET = 16;
+  const palletsToBoxes = (boxes: number, pallets: number) =>
+    Math.floor(Number(boxes) || 0) + Math.floor(Number(pallets) || 0) * BOXES_PER_PALLET;
+
+  // Show the real composition: boxes only, pallets only, or both (pallets converted to boxes).
   const formatDeliveryUnits = (boxes: number, pallets: number) => {
     const parts: string[] = [];
-    if (Number(boxes) > 0) parts.push('коробок: ' + Math.floor(Number(boxes)).toLocaleString('ru-RU'));
-    if (Number(pallets) > 0) parts.push('паллет: ' + Math.floor(Number(pallets)).toLocaleString('ru-RU'));
+    const totalBoxes = palletsToBoxes(boxes, pallets);
+    const p = Math.floor(Number(pallets) || 0);
+    if (totalBoxes > 0) parts.push('коробок: ' + totalBoxes.toLocaleString('ru-RU'));
+    if (p > 0) parts.push('паллет: ' + p.toLocaleString('ru-RU'));
     return parts.length ? parts.join(' • ') : '—';
   };
   const sumDeliveryUnits = (rows: any[], key: 'boxes' | 'pallets') => (Array.isArray(rows) ? rows : []).reduce((sum: number, row: any) => sum + Number(row?.[key] || 0), 0);
@@ -2295,7 +2310,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         const supplierName = suppliers.find((s: any) => String(s.id) === supplierId)?.name || 'Без поставщика';
         const item = bySupplier.get(supplierId) || { supplierId, supplierName, boxes: 0, pallets: 0, amount: 0, unpaidAmount: 0, deliveries: 0 };
         const allocatedAmount = Number(delivery?.amount || 0) * (units / totalUnits);
-        item.boxes += boxes;
+        item.boxes += boxes + pallets * BOXES_PER_PALLET; // 1 паллета = 16 коробок (для отображения)
         item.pallets += pallets;
         item.amount += allocatedAmount;
         if (!delivery?.is_paid) item.unpaidAmount += allocatedAmount;
@@ -2354,7 +2369,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
               courier: courier || 'Доставщик',
               supplierId,
               supplierName,
-              boxes,
+              boxes: boxes + pallets * BOXES_PER_PALLET, // 1 паллета = 16 коробок (для отображения)
               pallets,
               amount: allocatedAmount,
               totalDeliveryAmount: Number(delivery?.amount || 0),
@@ -3240,7 +3255,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           date,
           courier: courier || 'Доставщик',
           supplierName,
-          boxes,
+          boxes: boxes + pallets * BOXES_PER_PALLET, // 1 паллета = 16 коробок (для отображения)
           pallets,
           amount: Number(delivery?.amount || 0) * (units / totalUnits),
           is_paid: isPaid,
