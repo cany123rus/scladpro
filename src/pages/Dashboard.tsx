@@ -3897,6 +3897,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [salaryPaySelectedIds, setSalaryPaySelectedIds] = useState<string[]>([]);
   const [salaryPayLoading, setSalaryPayLoading] = useState(false);
   const [salaryPaySaving, setSalaryPaySaving] = useState(false);
+  const [salaryPayExpanded, setSalaryPayExpanded] = useState<string[]>([]);
+  const [salaryPayExpandedDates, setSalaryPayExpandedDates] = useState<string[]>([]);
   const [boxStats, setBoxStats] = useState({ totalAdded: 0, totalUsed: 0, currentStock: 0, avgPrice: 0 });
   const [editBoxLogModal, setEditBoxLogModal] = useState<{
     isOpen: boolean;
@@ -4754,6 +4756,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     const key = salaryPayPeriodKey || (cwSalaryPeriods[0]?.key || '');
     setSalaryPayPeriodKey(key);
     setSalaryPaySelectedIds([]);
+    setSalaryPayExpanded([]);
+    setSalaryPayExpandedDates([]);
     setShowSalaryPayModal(true);
     await loadSalaryPayRows(key);
   };
@@ -29474,7 +29478,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Период</span>
                       <select
                         value={salaryPayPeriodKey}
-                        onChange={async (e) => { setSalaryPayPeriodKey(e.target.value); setSalaryPaySelectedIds([]); await loadSalaryPayRows(e.target.value); }}
+                        onChange={async (e) => { setSalaryPayPeriodKey(e.target.value); setSalaryPaySelectedIds([]); setSalaryPayExpanded([]); setSalaryPayExpandedDates([]); await loadSalaryPayRows(e.target.value); }}
                         className="oc-input h-11 rounded-xl bg-white text-sm"
                       >
                         {cwSalaryPeriods.map((p) => (<option key={'salary-period-' + p.key} value={p.key}>{p.label}</option>))}
@@ -29499,21 +29503,87 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     <div className="rounded-2xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-400">Нет сотрудников с неоплаченной ЗП за этот период</div>
                   ) : salaryPayRows.map((r) => {
                     const checked = salaryPaySelectedIds.includes(r.employee_id);
+                    const empExpanded = salaryPayExpanded.includes(r.employee_id);
+                    const byDate = new Map<string, { date: string; lines: any[]; amount: number; qty: number }>();
+                    (r.lines || []).forEach((l: any) => {
+                      const d = String(l?.date || '');
+                      if (!byDate.has(d)) byDate.set(d, { date: d, lines: [], amount: 0, qty: 0 });
+                      const g = byDate.get(d)!;
+                      g.lines.push(l);
+                      g.amount += Number(l?.amount || 0);
+                      g.qty += Number(l?.quantity || 0);
+                    });
+                    const dateGroups = Array.from(byDate.values()).sort((a, b) => String(a.date).localeCompare(String(b.date)));
                     return (
-                      <label key={'salary-row-' + r.employee_id} className={`flex items-center gap-3 rounded-2xl border p-3 cursor-pointer transition-all ${checked ? 'border-emerald-300 bg-emerald-50/50' : 'border-slate-200 bg-white hover:border-emerald-200'}`}>
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={(e) => setSalaryPaySelectedIds((prev) => e.target.checked ? [...prev, r.employee_id] : prev.filter((x) => x !== r.employee_id))}
-                          className="h-5 w-5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
-                        />
-                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-teal-500 text-xs font-bold text-white">{getEmpInitials(r.employee_name)}</div>
-                        <div className="min-w-0 flex-1">
-                          <div className="font-semibold text-slate-900 truncate">{r.employee_name}</div>
-                          <div className="text-xs text-slate-500">записей: {r.lines.length}</div>
+                      <div key={'salary-row-' + r.employee_id} className={`rounded-2xl border transition-all ${checked ? 'border-emerald-300 bg-emerald-50/50' : 'border-slate-200 bg-white hover:border-emerald-200'}`}>
+                        <div className="flex items-center gap-3 p-3">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(e) => setSalaryPaySelectedIds((prev) => e.target.checked ? [...prev, r.employee_id] : prev.filter((x) => x !== r.employee_id))}
+                            className="h-5 w-5 shrink-0 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                          />
+                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-teal-500 text-xs font-bold text-white">{getEmpInitials(r.employee_name)}</div>
+                          <div className="min-w-0 flex-1">
+                            <div className="font-semibold text-slate-900 truncate">{r.employee_name}</div>
+                            <div className="text-xs text-slate-500">записей: {r.lines.length} • дней: {dateGroups.length}</div>
+                          </div>
+                          <div className="text-base font-black text-emerald-700">{r.amount.toLocaleString('ru-RU')} ₽</div>
+                          <button
+                            type="button"
+                            onClick={() => setSalaryPayExpanded((prev) => prev.includes(r.employee_id) ? prev.filter((x) => x !== r.employee_id) : [...prev, r.employee_id])}
+                            className="inline-flex h-9 items-center gap-1 rounded-xl border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                          >
+                            {empExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                            <span className="hidden sm:inline">{empExpanded ? 'Свернуть' : 'Развернуть'}</span>
+                          </button>
                         </div>
-                        <div className="text-base font-black text-emerald-700">{r.amount.toLocaleString('ru-RU')} ₽</div>
-                      </label>
+                        {empExpanded && (
+                          <div className="border-t border-slate-100 p-2 space-y-1.5">
+                            {dateGroups.map((g) => {
+                              const dateKey = r.employee_id + '__' + g.date;
+                              const dateExpanded = salaryPayExpandedDates.includes(dateKey);
+                              return (
+                                <div key={'salary-date-' + dateKey} className="rounded-xl border border-slate-200 bg-slate-50/70">
+                                  <button
+                                    type="button"
+                                    onClick={() => setSalaryPayExpandedDates((prev) => prev.includes(dateKey) ? prev.filter((x) => x !== dateKey) : [...prev, dateKey])}
+                                    className="flex w-full items-center gap-2 px-3 py-2 text-left"
+                                  >
+                                    {dateExpanded ? <ChevronDown className="h-4 w-4 shrink-0 text-slate-400" /> : <ChevronRight className="h-4 w-4 shrink-0 text-slate-400" />}
+                                    <Calendar className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                                    <span className="text-sm font-medium text-slate-800">{g.date ? new Date(g.date + 'T12:00:00').toLocaleDateString('ru-RU') : 'Без даты'}</span>
+                                    <span className="ml-auto text-xs text-slate-500">записей: {g.lines.length}</span>
+                                    <span className="text-sm font-bold text-emerald-700">{Number(g.amount).toLocaleString('ru-RU')} ₽</span>
+                                  </button>
+                                  {dateExpanded && (
+                                    <div className="border-t border-slate-200 px-3 py-2">
+                                      <table className="w-full text-left text-xs">
+                                        <thead>
+                                          <tr className="text-slate-400">
+                                            <th className="py-1 pr-2 font-medium">Работа</th>
+                                            <th className="py-1 pr-2 font-medium text-right">Кол-во</th>
+                                            <th className="py-1 font-medium text-right">Сумма</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-100">
+                                          {g.lines.map((l: any, li: number) => (
+                                            <tr key={'salary-line-' + dateKey + '-' + li}>
+                                              <td className="py-1.5 pr-2 text-slate-700">{l?.comment || l?.work || '—'}</td>
+                                              <td className="py-1.5 pr-2 text-right text-slate-700">{Number(l?.quantity ?? 0).toLocaleString('ru-RU')}</td>
+                                              <td className="py-1.5 text-right font-semibold text-slate-900">{Number(l?.amount || 0).toLocaleString('ru-RU')} ₽</td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
                     );
                   })}
                 </div>
