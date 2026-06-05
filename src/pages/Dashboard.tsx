@@ -18893,15 +18893,18 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
               {/* QR Modal */}
               {showSupplyProductsModal && (
                 <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => setShowSupplyProductsModal(false)}>
-                  <div className="bg-white rounded-xl w-[95vw] max-w-5xl max-h-[85vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
-                    <div className="p-4 border-b flex items-center justify-between gap-3">
-                      <div>
-                        <h3 className="text-xl font-bold">Товары в поставке</h3>
-                        <div className="text-sm text-slate-500">{currentSupply?.name || ''}</div>
+                  <div className="bg-white rounded-3xl ring-1 ring-black/5 shadow-2xl w-[95vw] max-w-5xl max-h-[85vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+                    <div className="flex items-center justify-between gap-3 bg-gradient-to-r from-sky-600 to-cyan-600 px-6 py-5 text-white">
+                      <div className="flex min-w-0 items-center gap-3">
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white/20"><Package className="h-5 w-5" /></div>
+                        <div className="min-w-0">
+                          <h3 className="truncate text-lg font-bold leading-tight">Товары в поставке</h3>
+                          <div className="truncate text-sm text-white/80">{currentSupply?.name || ''}</div>
+                        </div>
                       </div>
                       <div className="flex items-center gap-2">
-                        <button onClick={refreshSupplyProductsPhotos} disabled={supplyProductsPhotoLoading || supplyProductsLoading} className="px-4 py-2 bg-sky-100 text-sky-800 rounded-lg hover:bg-sky-200 disabled:opacity-50">{supplyProductsPhotoLoading ? 'Обновляю...' : 'Обновить фото'}</button>
-                        <button onClick={() => setShowSupplyProductsModal(false)} className="px-4 py-2 bg-slate-100 rounded-lg hover:bg-slate-200">Закрыть</button>
+                        <button onClick={refreshSupplyProductsPhotos} disabled={supplyProductsPhotoLoading || supplyProductsLoading} className="inline-flex items-center gap-1.5 rounded-xl bg-white/15 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-white/25 disabled:opacity-50"><RefreshCw className={`h-4 w-4 ${supplyProductsPhotoLoading ? 'animate-spin' : ''}`} />{supplyProductsPhotoLoading ? 'Обновляю...' : 'Обновить фото'}</button>
+                        <button onClick={() => setShowSupplyProductsModal(false)} className="rounded-xl p-1.5 text-white/80 transition-colors hover:bg-white/20 hover:text-white"><X className="h-5 w-5" /></button>
                       </div>
                     </div>
                     <div className="p-4 overflow-auto">
@@ -18940,19 +18943,28 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
               {supplySyncOpen && (
                 <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => setSupplySyncOpen(false)}>
-                  <div className="bg-white p-8 rounded-xl text-center w-full max-w-lg" onClick={e => e.stopPropagation()}>
-                    <h3 className="text-xl font-bold mb-4">Синхронизировать коробки</h3>
-                    <p className="text-slate-500 mb-4 text-sm">Загрузите Excel файл как в разделе «Коробки (FBO)». Номера коробок в текущей поставке будут заменены по порядку на реальные коды из файла.</p>
-                    <label className="inline-flex items-center gap-2 px-4 py-3 bg-slate-100 hover:bg-slate-200 rounded-lg cursor-pointer mb-4">
-                      <FileSpreadsheet className="h-4 w-4" />
-                      <span>{supplySyncExcelFile ? supplySyncExcelFile.name : 'Выбрать Excel файл'}</span>
+                  <div className="w-full max-w-lg overflow-hidden rounded-3xl bg-white shadow-2xl ring-1 ring-black/5" onClick={e => e.stopPropagation()}>
+                    <div className="flex items-center gap-3 bg-gradient-to-r from-amber-500 to-orange-500 px-6 py-5 text-white">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white/20"><RefreshCw className="h-5 w-5" /></div>
+                      <div className="min-w-0 flex-1">
+                        <h3 className="truncate text-lg font-bold leading-tight">Синхронизировать коробки</h3>
+                      </div>
+                      <button onClick={() => setSupplySyncOpen(false)} className="rounded-xl p-1.5 text-white/80 transition-colors hover:bg-white/20 hover:text-white"><X className="h-5 w-5" /></button>
+                    </div>
+                    <div className="p-6">
+                    <p className="mb-4 rounded-xl bg-amber-50 px-3 py-2 text-sm leading-relaxed text-amber-700">Загрузите Excel файл как в разделе «Коробки (FBO)». Номера коробок в текущей поставке будут заменены по порядку на реальные коды из файла.</p>
+                    <label className="group mb-4 flex cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center transition-colors hover:border-amber-300 hover:bg-amber-50">
+                      <FileSpreadsheet className="h-7 w-7 text-slate-400 group-hover:text-amber-500" />
+                      <span className="text-sm font-medium text-slate-700">{supplySyncExcelFile ? supplySyncExcelFile.name : 'Нажмите, чтобы выбрать Excel файл'}</span>
+                      <span className="text-[11px] text-slate-400">.xlsx или .xls</span>
                       <input type="file" accept=".xlsx,.xls" className="hidden" onChange={(e) => setSupplySyncExcelFile(e.target.files?.[0] || null)} />
                     </label>
-                    <div className="flex justify-center gap-3 mt-2">
-                      <button onClick={handleSyncSupplyBoxesFromExcel} disabled={!supplySyncExcelFile || supplySyncLoading} className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium disabled:opacity-50">
-                        {supplySyncLoading ? 'Синхронизация...' : 'Синхронизировать'}
+                    <div className="flex justify-end gap-2">
+                      <button onClick={() => setSupplySyncOpen(false)} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50">Закрыть</button>
+                      <button onClick={handleSyncSupplyBoxesFromExcel} disabled={!supplySyncExcelFile || supplySyncLoading} className="inline-flex items-center gap-1.5 rounded-xl bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-amber-700 disabled:opacity-50">
+                        {supplySyncLoading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}{supplySyncLoading ? 'Синхронизация...' : 'Синхронизировать'}
                       </button>
-                      <button onClick={() => setSupplySyncOpen(false)} className="px-6 py-2 bg-slate-100 rounded-lg hover:bg-slate-200 font-medium">Закрыть</button>
+                    </div>
                     </div>
                   </div>
                 </div>
@@ -18960,7 +18972,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
               {showGenerateBoxQR && (
                 <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => setShowGenerateBoxQR(false)}>
-                  <div className="bg-white p-8 rounded-xl text-center" onClick={e => e.stopPropagation()}>
+                  <div className="overflow-hidden rounded-3xl bg-white text-center shadow-2xl ring-1 ring-black/5" onClick={e => e.stopPropagation()}>
                     <form onSubmit={async (e) => {
                       e.preventDefault();
                       if (modalScanInput.trim() === 'ACTION:GENERATE_BOX' || modalScanInput.includes('GENERATE_BOX')) {
@@ -18977,7 +18989,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         onBlur={e => setTimeout(() => e.target.focus(), 10)}
                       />
                     </form>
-                    <h3 className="text-xl font-bold mb-4">QR генерация коробки</h3>
+                    <div className="flex items-center gap-3 bg-gradient-to-r from-slate-800 to-slate-900 px-6 py-5 text-left text-white">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white/20"><QrCode className="h-5 w-5" /></div>
+                      <h3 className="flex-1 text-lg font-bold leading-tight">QR генерация коробки</h3>
+                      <button type="button" onClick={() => setShowGenerateBoxQR(false)} className="rounded-xl p-1.5 text-white/80 transition-colors hover:bg-white/20 hover:text-white"><X className="h-5 w-5" /></button>
+                    </div>
+                    <div className="p-8 pt-6">
                     <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-100 inline-block" id="generate-box-qr">
                       <QRCodeSVG value="ACTION:GENERATE_BOX" size={200} />
                     </div>
@@ -19007,10 +19024,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           `);
                           win.document.close();
                         }
-                      }} className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium flex items-center">
-                        <Printer className="h-4 w-4 mr-2" /> Печать
+                      }} className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 active:scale-[0.98]">
+                        <Printer className="h-4 w-4" /> Печать
                       </button>
-                      <button onClick={() => setShowGenerateBoxQR(false)} className="px-6 py-2 bg-slate-100 rounded-lg hover:bg-slate-200 font-medium">Закрыть</button>
+                      <button onClick={() => setShowGenerateBoxQR(false)} className="rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50">Закрыть</button>
+                    </div>
                     </div>
                   </div>
                 </div>
@@ -19018,18 +19036,18 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
               {showNameSequencePrintModal && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4" onClick={() => !nameSequencePrintLoading && setShowNameSequencePrintModal(false)}>
-                  <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <h3 className="text-xl font-bold text-slate-900">Печать этикеток 58x40</h3>
-                        <p className="mt-1 text-sm text-slate-500">Сверху будет номер по порядку, внизу имя. Если введёшь 100, создастся 100 этикеток: 1, 2, 3 и так далее.</p>
-                      </div>
-                      <button onClick={() => !nameSequencePrintLoading && setShowNameSequencePrintModal(false)} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-600">
+                  <div className="w-full max-w-md overflow-hidden rounded-3xl bg-white shadow-2xl ring-1 ring-black/5" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-center gap-3 bg-gradient-to-r from-fuchsia-600 to-pink-600 px-6 py-5 text-white">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white/20"><Printer className="h-5 w-5" /></div>
+                      <h3 className="flex-1 text-lg font-bold leading-tight">Печать этикеток 58×40</h3>
+                      <button onClick={() => !nameSequencePrintLoading && setShowNameSequencePrintModal(false)} className="rounded-xl p-1.5 text-white/80 transition-colors hover:bg-white/20 hover:text-white">
                         <X className="h-5 w-5" />
                       </button>
                     </div>
+                    <div className="p-6">
+                    <p className="mb-4 rounded-xl bg-fuchsia-50 px-3 py-2 text-sm text-fuchsia-700">Сверху будет номер по порядку, внизу имя. Если введёшь 100, создастся 100 этикеток: 1, 2, 3 и так далее.</p>
 
-                    <div className="mt-5 space-y-4">
+                    <div className="space-y-4">
                       <div>
                         <label className="mb-1 block text-sm font-medium text-slate-700">Имя</label>
                         <input
@@ -19057,9 +19075,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                     <div className="mt-6 flex justify-end gap-3">
                       <button onClick={() => setShowNameSequencePrintModal(false)} disabled={nameSequencePrintLoading} className="rounded-xl bg-slate-100 px-5 py-2.5 font-medium text-slate-700 hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50">Отмена</button>
-                      <button onClick={handlePrintNameSequenceLabels} disabled={nameSequencePrintLoading} className="rounded-xl bg-fuchsia-600 px-5 py-2.5 font-medium text-white hover:bg-fuchsia-700 disabled:cursor-not-allowed disabled:opacity-50">
-                        {nameSequencePrintLoading ? 'Генерация...' : 'Печать'}
+                      <button onClick={handlePrintNameSequenceLabels} disabled={nameSequencePrintLoading} className="inline-flex items-center gap-1.5 rounded-xl bg-fuchsia-600 px-5 py-2.5 font-medium text-white shadow-sm hover:bg-fuchsia-700 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50">
+                        {nameSequencePrintLoading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}{nameSequencePrintLoading ? 'Генерация...' : 'Печать'}
                       </button>
+                    </div>
                     </div>
                   </div>
                 </div>
@@ -19067,7 +19086,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
               {showNewBoxQR && (
                 <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => setShowNewBoxQR(false)}>
-                  <div className="bg-white p-8 rounded-xl text-center" onClick={e => e.stopPropagation()}>
+                  <div className="overflow-hidden rounded-3xl bg-white text-center shadow-2xl ring-1 ring-black/5" onClick={e => e.stopPropagation()}>
                     <form onSubmit={(e) => {
                       e.preventDefault();
                       if (modalScanInput.trim() === 'ACTION:NEW_BOX' || modalScanInput.includes('NEW_BOX')) {
@@ -19084,7 +19103,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         onBlur={e => setTimeout(() => e.target.focus(), 10)}
                       />
                     </form>
-                    <h3 className="text-xl font-bold mb-4">QR для новой коробки</h3>
+                    <div className="flex items-center gap-3 bg-gradient-to-r from-slate-800 to-slate-900 px-6 py-5 text-left text-white">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white/20"><QrCode className="h-5 w-5" /></div>
+                      <h3 className="flex-1 text-lg font-bold leading-tight">QR для новой коробки</h3>
+                      <button type="button" onClick={() => setShowNewBoxQR(false)} className="rounded-xl p-1.5 text-white/80 transition-colors hover:bg-white/20 hover:text-white"><X className="h-5 w-5" /></button>
+                    </div>
+                    <div className="p-8 pt-6">
                     <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-100 inline-block" id="new-box-qr">
                       <QRCodeSVG value="ACTION:NEW_BOX" size={200} />
                     </div>
@@ -19139,10 +19163,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           `);
                           win.document.close();
                         }
-                      }} className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium flex items-center">
-                        <Printer className="h-4 w-4 mr-2" /> Печать
+                      }} className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 active:scale-[0.98]">
+                        <Printer className="h-4 w-4" /> Печать
                       </button>
-                      <button onClick={() => setShowNewBoxQR(false)} className="px-6 py-2 bg-slate-100 rounded-lg hover:bg-slate-200 font-medium">Закрыть</button>
+                      <button onClick={() => setShowNewBoxQR(false)} className="rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50">Закрыть</button>
+                    </div>
                     </div>
                   </div>
                 </div>
