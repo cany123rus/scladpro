@@ -3824,6 +3824,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [cwSalaryIssueForm, setCwSalaryIssueForm] = useState({ employee_id: '', period_key: '' });
   const [cwSalaryIssuePreview, setCwSalaryIssuePreview] = useState<{ amount: number; logsCount: number; periodLabel: string; periodStart: string; periodEnd: string } | null>(null);
   const [cwSalaryIssueLoading, setCwSalaryIssueLoading] = useState(false);
+  const [showSalaryPayModal, setShowSalaryPayModal] = useState(false);
+  const [salaryPayPeriodKey, setSalaryPayPeriodKey] = useState('');
+  const [salaryPayOwner, setSalaryPayOwner] = useState<WarehouseMoneyOwner>('sasha');
+  const [salaryPayRows, setSalaryPayRows] = useState<Array<{ employee_id: string; employee_name: string; amount: number; lines: any[] }>>([]);
+  const [salaryPaySelectedIds, setSalaryPaySelectedIds] = useState<string[]>([]);
+  const [salaryPayLoading, setSalaryPayLoading] = useState(false);
+  const [salaryPaySaving, setSalaryPaySaving] = useState(false);
   const [boxStats, setBoxStats] = useState({ totalAdded: 0, totalUsed: 0, currentStock: 0, avgPrice: 0 });
   const [editBoxLogModal, setEditBoxLogModal] = useState<{
     isOpen: boolean;
@@ -4627,6 +4634,104 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       showToast('Ошибка расчета ЗП: ' + (e?.message || 'неизвестно'), 'error');
     } finally {
       setCwSalaryIssueLoading(false);
+    }
+  };
+
+  const loadSalaryPayRows = async (periodKey: string) => {
+    const period = cwSalaryPeriods.find((p) => p.key === periodKey);
+    if (!period) { setSalaryPayRows([]); return; }
+    setSalaryPayLoading(true);
+    try {
+      const [logsRes, reportsRes] = await Promise.all([
+        supabase.from('work_logs')
+          .select('id, employee_id, date, quantity, work_rate_id, work_rates(price, name)')
+          .gte('date', period.start).lte('date', period.end).is('deleted_at', null),
+        supabase.from('payment_reports').select('payload').eq('kind', 'salary'),
+      ]);
+      if (logsRes.error) throw logsRes.error;
+      const paidSet = new Set((reportsRes.data || [])
+        .filter((r: any) => String(r?.payload?.period_key || '') === periodKey)
+        .map((r: any) => String(r?.payload?.employee_id || '')));
+
+      const byEmp = new Map<string, { lines: any[]; amount: number }>();
+      (logsRes.data || []).forEach((row: any) => {
+        const eid = String(row?.employee_id || '');
+        if (!eid) return;
+        const qty = Number(row?.quantity || 0);
+        const price = Number(getWorkLogSnapshotPrice(row) || 0);
+        const amount = qty * price;
+        if (!byEmp.has(eid)) byEmp.set(eid, { lines: [], amount: 0 });
+        const e = byEmp.get(eid)!;
+        e.amount += amount;
+        e.lines.push({ date: row?.date, comment: row?.work_rates?.name || '', quantity: qty, amount: Number(amount.toFixed(2)) });
+      });
+
+      const rows = Array.from(byEmp.entries())
+        .filter(([eid, v]) => v.amount > 0 && !paidSet.has(eid))
+        .map(([eid, v]) => ({
+          employee_id: eid,
+          employee_name: (employees.find((e: any) => String(e.id) === eid)?.full_name) || 'Сотрудник',
+          amount: Number(v.amount.toFixed(2)),
+          lines: v.lines,
+        }))
+        .sort((a, b) => b.amount - a.amount);
+      setSalaryPayRows(rows);
+    } catch (e: any) {
+      showToast('Ошибка загрузки ЗП: ' + (e?.message || 'неизвестно'), 'error');
+      setSalaryPayRows([]);
+    } finally {
+      setSalaryPayLoading(false);
+    }
+  };
+
+  const openSalaryPayModal = async () => {
+    const key = salaryPayPeriodKey || (cwSalaryPeriods[0]?.key || '');
+    setSalaryPayPeriodKey(key);
+    setSalaryPaySelectedIds([]);
+    setShowSalaryPayModal(true);
+    await loadSalaryPayRows(key);
+  };
+
+  const handleConfirmSalaryPay = async () => {
+    const selected = salaryPayRows.filter((r) => salaryPaySelectedIds.includes(r.employee_id));
+    if (!selected.length) { showToast('Выберите сотрудников для оплаты', 'error'); return; }
+    const period = cwSalaryPeriods.find((p) => p.key === salaryPayPeriodKey);
+    const ownerTitle = WAREHOUSE_MONEY_OWNERS.find((o) => o.id === salaryPayOwner)?.title || '';
+    const total = selected.reduce((s, r) => s + r.amount, 0);
+    if (!window.confirm(`Оплатить ЗП?\nСотрудников: ${selected.length}\nСумма: ${total.toFixed(2)} ₽\nИсточник: ${ownerTitle}`)) return;
+    setSalaryPaySaving(true);
+    try {
+      for (const r of selected) {
+        await savePaymentReport({
+          kind: 'salary',
+          title: `ЗП: ${r.employee_name}${period ? ` (${period.label})` : ''}`,
+          amount: r.amount,
+          period_start: period?.start || null,
+          period_end: period?.end || null,
+          payload: {
+            employee_id: r.employee_id,
+            employee_name: r.employee_name,
+            period_key: salaryPayPeriodKey,
+            paid_by: ownerTitle,
+            pdf_available: true,
+            lines: r.lines,
+          },
+        });
+        await supabase.from('warehouse_money_log').insert([{
+          amount: -Math.abs(r.amount),
+          comment: buildWarehouseMoneyStoredComment(salaryPayOwner, `Оплата ЗП: ${r.employee_name}${period ? ` (${period.label})` : ''}`),
+          type: 'manual',
+        }]);
+      }
+      await fetchCwWarehouseMoneyHistory();
+      await loadPaymentReports();
+      showToast(`Оплачено ЗП: ${selected.length}`, 'success');
+      setShowSalaryPayModal(false);
+      setSalaryPaySelectedIds([]);
+    } catch (e: any) {
+      showToast('Ошибка оплаты ЗП: ' + (e?.message || 'неизвестно'), 'error');
+    } finally {
+      setSalaryPaySaving(false);
     }
   };
 
@@ -26635,6 +26740,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                         >
                                             Временные сотрудники
                                         </button>
+                                        {(!currentEmployee || ['admin', 'Менеджер', 'Управляющий'].includes(currentEmployee.role)) && (
+                                          <button
+                                            onClick={openSalaryPayModal}
+                                            className="bg-emerald-50 px-3 py-2 rounded-lg border border-emerald-100 text-emerald-700 font-bold hover:bg-emerald-100 transition-colors text-xs sm:text-sm inline-flex items-center gap-1.5"
+                                          >
+                                            <Wallet className="h-4 w-4" /> Оплата
+                                          </button>
+                                        )}
                                         {(currentEmployee) && (
                                           <button
                                             onClick={async () => {
@@ -29216,6 +29329,85 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         </div>
                       );
                     })}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {showSalaryPayModal && (
+            <div className="fixed inset-0 z-[94] flex items-end md:items-center justify-center bg-slate-900/55 p-2 md:p-4 backdrop-blur-sm" onClick={() => setShowSalaryPayModal(false)}>
+              <div className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-t-3xl md:rounded-3xl bg-white shadow-2xl ring-1 ring-black/5" onClick={(e) => e.stopPropagation()}>
+                <div className="flex items-center gap-3 bg-gradient-to-r from-emerald-600 to-teal-600 px-6 py-5 text-white">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white/20"><Wallet className="h-5 w-5" /></div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[11px] font-semibold uppercase tracking-wider text-white/70">Сборка</div>
+                    <h3 className="truncate text-lg font-bold leading-tight">Оплата ЗП сотрудникам</h3>
+                  </div>
+                  <button type="button" onClick={() => setShowSalaryPayModal(false)} className="rounded-xl p-1.5 text-white/80 transition-colors hover:bg-white/20 hover:text-white"><X className="h-5 w-5" /></button>
+                </div>
+                <div className="border-b border-slate-100 p-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <label className="block">
+                      <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Период</span>
+                      <select
+                        value={salaryPayPeriodKey}
+                        onChange={async (e) => { setSalaryPayPeriodKey(e.target.value); setSalaryPaySelectedIds([]); await loadSalaryPayRows(e.target.value); }}
+                        className="oc-input h-11 rounded-xl bg-white text-sm"
+                      >
+                        {cwSalaryPeriods.map((p) => (<option key={'salary-period-' + p.key} value={p.key}>{p.label}</option>))}
+                      </select>
+                    </label>
+                    <label className="block">
+                      <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Источник денег</span>
+                      <select
+                        value={salaryPayOwner}
+                        onChange={(e) => setSalaryPayOwner(e.target.value as WarehouseMoneyOwner)}
+                        className="oc-input h-11 rounded-xl bg-white text-sm"
+                      >
+                        {WAREHOUSE_MONEY_OWNERS.map((o) => (<option key={'salary-owner-' + o.id} value={o.id}>{o.title}</option>))}
+                      </select>
+                    </label>
+                  </div>
+                </div>
+                <div className="min-h-0 flex-1 overflow-y-auto p-4 space-y-2">
+                  {salaryPayLoading ? (
+                    <div className="py-8 text-center text-sm text-slate-400">Загрузка…</div>
+                  ) : salaryPayRows.length === 0 ? (
+                    <div className="rounded-2xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-400">Нет сотрудников с неоплаченной ЗП за этот период</div>
+                  ) : salaryPayRows.map((r) => {
+                    const checked = salaryPaySelectedIds.includes(r.employee_id);
+                    return (
+                      <label key={'salary-row-' + r.employee_id} className={`flex items-center gap-3 rounded-2xl border p-3 cursor-pointer transition-all ${checked ? 'border-emerald-300 bg-emerald-50/50' : 'border-slate-200 bg-white hover:border-emerald-200'}`}>
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(e) => setSalaryPaySelectedIds((prev) => e.target.checked ? [...prev, r.employee_id] : prev.filter((x) => x !== r.employee_id))}
+                          className="h-5 w-5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                        />
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-teal-500 text-xs font-bold text-white">{getEmpInitials(r.employee_name)}</div>
+                        <div className="min-w-0 flex-1">
+                          <div className="font-semibold text-slate-900 truncate">{r.employee_name}</div>
+                          <div className="text-xs text-slate-500">записей: {r.lines.length}</div>
+                        </div>
+                        <div className="text-base font-black text-emerald-700">{r.amount.toLocaleString('ru-RU')} ₽</div>
+                      </label>
+                    );
+                  })}
+                </div>
+                <div className="flex items-center justify-between gap-2 border-t border-slate-100 p-4">
+                  <div className="text-sm text-slate-600">Выбрано: <span className="font-bold text-slate-900">{salaryPaySelectedIds.length}</span> • Сумма: <span className="font-bold text-emerald-700">{salaryPayRows.filter((r) => salaryPaySelectedIds.includes(r.employee_id)).reduce((s, r) => s + r.amount, 0).toLocaleString('ru-RU')} ₽</span></div>
+                  <div className="flex gap-2">
+                    <button type="button" onClick={() => setShowSalaryPayModal(false)} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50">Отмена</button>
+                    <button
+                      type="button"
+                      onClick={handleConfirmSalaryPay}
+                      disabled={salaryPaySaving || salaryPaySelectedIds.length === 0}
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 active:scale-95 disabled:opacity-50"
+                    >
+                      {salaryPaySaving ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Wallet className="h-4 w-4" />}
+                      {salaryPaySaving ? 'Оплата…' : 'Оплатить и сформировать отчёт'}
+                    </button>
                   </div>
                 </div>
               </div>
