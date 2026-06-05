@@ -15,6 +15,7 @@ const WarehouseTab = React.lazy(() => import('../components/WarehouseTab').then(
 const AdvertisingInsights = React.lazy(() => import('../components/AdvertisingInsights').then((m) => ({ default: m.AdvertisingInsights })));
 const CamerasTab = React.lazy(() => import('../components/CamerasTab').then((m) => ({ default: m.CamerasTab })));
 import { SectionSkeleton } from '../components/Skeleton';
+import { storeCurrentEmployee } from '../utils/employeeStorage';
 import { createWorkbookBlob, downloadAoaWorkbook, downloadWorkbook } from '../utils/excelExport';
 import { QRCodeSVG } from 'qrcode.react';
 import bwipjs from 'bwip-js';
@@ -9956,7 +9957,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           .then(({ data, error }) => {
             if (data && !error) {
               setCurrentEmployee(data);
-              localStorage.setItem('current_employee', JSON.stringify(data));
+              storeCurrentEmployee(data);
             } else {
               console.error('Error refreshing employee data:', error);
             }
@@ -9972,7 +9973,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           .then(({ data, error }) => {
             if (data && !error) {
               setCurrentEmployee(data);
-              localStorage.setItem('current_employee', JSON.stringify(data));
+              storeCurrentEmployee(data);
             }
           });
     }

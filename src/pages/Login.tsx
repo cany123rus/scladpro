@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { QrCode, User, Lock, Loader2, Camera, X, Eye, EyeOff } from 'lucide-react';
 import jsQR from 'jsqr';
 import { telegramService } from '../services/telegram.service';
+import { storeCurrentEmployee } from '../utils/employeeStorage';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -42,7 +43,7 @@ export default function Login() {
             setLoading(false);
             return;
           }
-          localStorage.setItem('current_employee', JSON.stringify(employee));
+          storeCurrentEmployee(employee);
           void sendLoginReport(employee);
 
           // Clean URL from token after successful login
@@ -247,7 +248,7 @@ export default function Login() {
         if (await isEmployeeBlocked(String(employee.id))) {
           throw new Error('Сотрудник заблокирован');
         }
-        localStorage.setItem('current_employee', JSON.stringify(employee));
+        storeCurrentEmployee(employee);
         void sendLoginReport(employee);
         navigate('/');
         return;
@@ -265,7 +266,7 @@ export default function Login() {
   const completeEmployeeLogin = async (employee: any) => {
     if (!employee) throw new Error('Сотрудник не найден');
     if (await isEmployeeBlocked(String(employee.id))) throw new Error('Сотрудник заблокирован');
-    localStorage.setItem('current_employee', JSON.stringify(employee));
+    storeCurrentEmployee(employee);
     void sendLoginReport(employee);
     navigate('/');
   };
@@ -400,17 +401,10 @@ export default function Login() {
         throw new Error(`Неверный QR-код (${normalized})`);
       }
 
-      // For demo purposes, if admin QR is scanned, log in as admin
-      if (profile.username === 'admin') {
-        const { error: signInError } = await supabase.auth.signInWithPassword({
-          email: 'admin@example.com',
-          password: '123456', // Demo password
-        });
-        if (signInError) throw signInError;
-        navigate('/');
-      } else {
-        throw new Error('Вход по QR доступен только для администратора в демо-режиме');
-      }
+      // Admin/profile QR codes must authenticate against Supabase Auth without any
+      // hardcoded credentials. The QR payload is expected to carry an auth token
+      // (AUTH:<token>) handled above; bare profile QR codes are no longer accepted.
+      throw new Error('Этот QR-код больше не поддерживается. Используйте персональный QR сотрудника (AUTH-токен).');
     } catch (err: any) {
       setError(err.message);
       setQrDebug((prev) => `${prev}${prev ? ' • ' : ''}Ошибка: ${String(err?.message || 'неизвестно')}`);
