@@ -9412,23 +9412,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     setReceptionMetaRefreshing(true);
     try {
       const patch: Record<string, { count: number; quantity: number; preview?: string }> = {};
-      const results = await Promise.allSettled(
-        ids.map(async (id) => {
-          const { data } = await supabase.from('receptions').select('id, photos').eq('id', id).maybeSingle();
-          const photos = Array.isArray((data as any)?.photos) ? (data as any).photos : [];
-          const quantity = photos.reduce((sum: number, p: any) => sum + (parseInt(String(p?.quantity || '0'), 10) || 0), 0);
-          return { id, count: photos.length, quantity, preview: photos[0]?.url || '' };
-        })
-      );
-
-      results.forEach((res) => {
-        if (res.status === 'fulfilled' && res.value?.id) {
-          patch[res.value.id] = {
-            count: res.value.count,
-            quantity: res.value.quantity,
-            preview: res.value.preview,
-          };
-        }
+      // Single query for all visible receptions instead of one request per id (N+1).
+      const { data: rows } = await supabase.from('receptions').select('id, photos').in('id', ids);
+      (rows || []).forEach((row: any) => {
+        const id = String(row?.id || '');
+        if (!id) return;
+        const photos = Array.isArray(row?.photos) ? row.photos : [];
+        const quantity = photos.reduce((sum: number, p: any) => sum + (parseInt(String(p?.quantity || '0'), 10) || 0), 0);
+        patch[id] = { count: photos.length, quantity, preview: photos[0]?.url || '' };
       });
 
       if (Object.keys(patch).length > 0) {
@@ -9708,17 +9699,16 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       const { data } = await supabase.from('supplies').select('*').eq('supplier_id', supplier.id).order('created_at', { ascending: false });
 
       if (data) {
-        const suppliesWithCounts = await Promise.all(data.map(async (s) => {
-          const { data: boxes } = await supabase.from('boxes').select('id').eq('supply_id', s.id);
-          const boxIds = boxes?.map(b => b.id) || [];
-          let count = 0;
-          if (boxIds.length > 0) {
-            const { count: c } = await supabase.from('supply_items').select('*', { count: 'exact', head: true }).in('box_id', boxIds);
-            count = c || 0;
+        // Single server-side aggregation instead of an N+1 (boxes + supply_items per supply).
+        const countsBySupply = new Map<string, number>();
+        const { data: counts, error: countsError } = await supabase
+          .rpc('supplier_supply_item_counts', { p_supplier_id: supplier.id });
+        if (!countsError && Array.isArray(counts)) {
+          for (const row of counts as Array<{ supply_id: string; total_items: number }>) {
+            countsBySupply.set(String(row.supply_id), Number(row.total_items) || 0);
           }
-          return { ...s, total_items: count };
-        }));
-        setHistorySupplies(suppliesWithCounts);
+        }
+        setHistorySupplies(data.map((s) => ({ ...s, total_items: countsBySupply.get(String(s.id)) || 0 })));
       } else {
         setHistorySupplies([]);
       }
