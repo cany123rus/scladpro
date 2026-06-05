@@ -59,6 +59,16 @@
 - `supabase/functions/telegram-bot/` — приём файлов от поставщиков (токен → env `TELEGRAM_BOT_TOKEN`).
 - `supabase/functions/claude-chat/` — бот-ассистент на Claude API (новый, см. его README).
 
+## Оптимизация (СДЕЛАНО, 2026-06)
+- N+1 устранены: история поставщика (`handleOpenSupplierHistory`) → RPC `supplier_supply_item_counts`;
+  мета приёмок (`refreshVisibleReceptionMeta`) → один `.in('id', ids)`.
+- `fetchCodesBySuppliers` (WBProducts) распараллелен через `Promise.all`.
+- Индексы добавлены: `unified_honest_sign_codes(supplier_id, created_at)`, `work_logs(employee_id, date)`,
+  `work_logs(temp_employee_id)`, `products(supplier_id)`, `print_files(supplier_id)`,
+  `temporary_workers_logs(supplier_id)`, `temporary_workers_logs(created_by)`, `warehouse_money_log(employee_id)`.
+  Убран дубль-индекс `idx_supply_items_box`.
+- Осталось: дробление `Dashboard.tsx` (бандл ~1.86MB), виртуализация прочих списков, чистка `SELECT *`.
+
 ## Прочее
 - Бэкап БД при ручных правках через MCP: ключ-копия в `app_settings`
   (пример: `fbo_pallet_collection_v1__backup_20260605`).
