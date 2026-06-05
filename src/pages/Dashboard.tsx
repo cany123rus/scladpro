@@ -1945,25 +1945,30 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [deliveryHistory, setDeliveryHistory] = useState<any[]>([]);
   const [deliveryPersons, setDeliveryPersons] = useState<string[]>([]);
   const [deliveryPersonNewName, setDeliveryPersonNewName] = useState('');
+  const [deliverySupplyTypes, setDeliverySupplyTypes] = useState<string[]>([]);
+  const [deliverySupplyTypeNewName, setDeliverySupplyTypeNewName] = useState('');
+  const [showDeliverySupplyTypeModal, setShowDeliverySupplyTypeModal] = useState(false);
   const [deliverySupplierFilter, setDeliverySupplierFilter] = useState('all');
   const [deliveryForm, setDeliveryForm] = useState({
     date: new Date().toISOString().split('T')[0],
     courier: '',
+    supply_type: '',
     amount: '',
-    rows: [{ supplier_id: '', boxes: '' }],
+    rows: [{ supplier_id: '', boxes: '', pallets: '' }],
   });
   const [deliveryReportForm, setDeliveryReportForm] = useState(() => {
     const today = new Date();
     const start = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
     return { supplier_id: 'all', courier: 'all', paid_by_supplier_id: 'all', paid_status: 'all', start_date: start, end_date: today.toISOString().split('T')[0] };
   });
-  const [deliveryEditModal, setDeliveryEditModal] = useState<{ open: boolean; id: string; date: string; courier: string; amount: string; rows: Array<{ supplier_id: string; boxes: string }> }>({
+  const [deliveryEditModal, setDeliveryEditModal] = useState<{ open: boolean; id: string; date: string; courier: string; supply_type: string; amount: string; rows: Array<{ supplier_id: string; boxes: string; pallets: string }> }>({
     open: false,
     id: '',
     date: new Date().toISOString().split('T')[0],
     courier: '',
+    supply_type: '',
     amount: '',
-    rows: [{ supplier_id: '', boxes: '' }],
+    rows: [{ supplier_id: '', boxes: '', pallets: '' }],
   });
   const [deliveryPayModal, setDeliveryPayModal] = useState<{ open: boolean; deliveryId: string; payerSupplierId: string }>({ open: false, deliveryId: '', payerSupplierId: '' });
   const [showDeliveryQuickPayModal, setShowDeliveryQuickPayModal] = useState(false);
@@ -2066,7 +2071,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       if (deliveryIds.length > 0) {
         const { data: itemsData, error: itemsError } = await supabase
           .from('delivery_items')
-          .select('id, delivery_id, supplier_id, boxes')
+          .select('id, delivery_id, supplier_id, boxes, pallets')
           .in('delivery_id', deliveryIds);
         if (itemsError) throw itemsError;
         itemRows = Array.isArray(itemsData) ? itemsData : [];
@@ -2080,9 +2085,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           id: item?.id,
           supplier_id: item?.supplier_id,
           boxes: Number(item?.boxes || 0),
+          pallets: Number(item?.pallets || 0),
         });
       });
 
+      await loadDeliverySupplyTypes();
       setDeliveryPersons(
         Array.from(new Set((personsResult.data || []).map((row: any) => String(row?.name || '').trim()).filter(Boolean)))
           .sort((a, b) => a.localeCompare(b, 'ru'))
@@ -2091,6 +2098,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         id: delivery?.id,
         date: String(delivery?.date || '').slice(0, 10),
         courier: delivery?.courier_name || delivery?.courier || '',
+        supply_type: delivery?.supply_type || '',
         amount: Number(delivery?.amount || 0),
         rows: itemsByDelivery.get(String(delivery?.id || '')) || [],
         is_paid: Boolean(delivery?.is_paid),
@@ -2136,6 +2144,39 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     }
   };
 
+  const loadDeliverySupplyTypes = async () => {
+    try {
+      const { data } = await supabase.from('app_settings').select('value').eq('key', 'delivery_supply_types_v1').maybeSingle();
+      const raw = data?.value;
+      const list = Array.isArray(raw) ? raw : (typeof raw === 'string' ? JSON.parse(raw || '[]') : []);
+      setDeliverySupplyTypes(Array.from(new Set((list || []).map((x: any) => String(x || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'ru')));
+    } catch {
+      setDeliverySupplyTypes([]);
+    }
+  };
+
+  const saveDeliverySupplyTypes = async (items: string[]) => {
+    const clean = Array.from(new Set((items || []).map((x) => String(x || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'ru'));
+    setDeliverySupplyTypes(clean);
+    await supabase.from('app_settings').upsert([{ key: 'delivery_supply_types_v1', value: JSON.stringify(clean) }], { onConflict: 'key' });
+  };
+
+  const handleAddDeliverySupplyType = async () => {
+    const name = String(deliverySupplyTypeNewName || '').trim();
+    if (!name) return;
+    if (deliverySupplyTypes.some((t) => t.toLowerCase() === name.toLowerCase())) {
+      showToast('Такой тип уже есть', 'info');
+      return;
+    }
+    await saveDeliverySupplyTypes([...(deliverySupplyTypes || []), name]);
+    setDeliverySupplyTypeNewName('');
+    showToast('Тип поставки добавлен', 'success');
+  };
+
+  const handleDeleteDeliverySupplyType = async (name: string) => {
+    await saveDeliverySupplyTypes((deliverySupplyTypes || []).filter((t) => t !== name));
+  };
+
   const getTempWorkerPaidAmount = (log: any) => {
     const payments = tempWorkerPaymentsMap[String(log?.id || '')] || [];
     const partialPaid = (payments || []).reduce((sum: number, p: any) => sum + Number(p?.amount || 0), 0);
@@ -2168,8 +2209,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   };
 
   const normalizeDeliveryRows = (rows: any[]) => (Array.isArray(rows) ? rows : [])
-    .map((row: any) => ({ supplier_id: String(row?.supplier_id || '').trim(), boxes: Number(row?.boxes || 0) }))
-    .filter((row: any) => row.supplier_id && row.boxes > 0);
+    .map((row: any) => ({ supplier_id: String(row?.supplier_id || '').trim(), boxes: Number(row?.boxes || 0), pallets: Number(row?.pallets || 0) }))
+    .filter((row: any) => row.supplier_id && (row.boxes > 0 || row.pallets > 0));
 
   const deliveryCourierOptions = useMemo(() => (
     Array.from(new Set([
@@ -2318,10 +2359,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     if (!Number.isFinite(amount) || amount <= 0) return showToast('Введите сумму доставки', 'error');
     if (!rows.length) return showToast('Добавьте хотя бы одного поставщика и коробки', 'error');
 
+    const supplyType = String(deliveryForm.supply_type || '').trim();
     const newDelivery = {
       id: getSafeId(),
       date: deliveryForm.date || new Date().toISOString().split('T')[0],
       courier,
+      supply_type: supplyType,
       amount,
       rows,
       is_paid: false,
@@ -2334,6 +2377,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       const payload: any = {
         date: newDelivery.date,
         courier_name: courier,
+        supply_type: supplyType || null,
         amount,
         is_paid: false,
       };
@@ -2356,6 +2400,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           delivery_id: deliveryId,
           supplier_id: row.supplier_id,
           boxes: row.boxes,
+          pallets: row.pallets,
         }))
       );
       if (itemsError) {
@@ -2364,7 +2409,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       }
 
       await saveDeliveryPersons([...(deliveryPersons || []), courier]);
-      setDeliveryForm({ date: new Date().toISOString().split('T')[0], courier: '', amount: '', rows: [{ supplier_id: '', boxes: '' }] });
+      setDeliveryForm({ date: new Date().toISOString().split('T')[0], courier: '', supply_type: '', amount: '', rows: [{ supplier_id: '', boxes: '', pallets: '' }] });
       await loadDeliveryData();
       showToast('Доставка добавлена', 'success');
     } catch (error: any) {
@@ -2372,7 +2417,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         const next = [newDelivery, ...(deliveryHistory || [])];
         await saveDeliveryHistory(next);
         await saveDeliveryPersons([...(deliveryPersons || []), courier]);
-        setDeliveryForm({ date: new Date().toISOString().split('T')[0], courier: '', amount: '', rows: [{ supplier_id: '', boxes: '' }] });
+        setDeliveryForm({ date: new Date().toISOString().split('T')[0], courier: '', supply_type: '', amount: '', rows: [{ supplier_id: '', boxes: '', pallets: '' }] });
         showToast('Доставка добавлена. После применения миграции будет отдельная таблица БД.', 'info');
         return;
       }
@@ -2462,13 +2507,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       ? delivery.rows.map((row: any) => ({
         supplier_id: String(row?.supplier_id || ''),
         boxes: String(row?.boxes ?? ''),
+        pallets: String(row?.pallets ?? ''),
       }))
-      : [{ supplier_id: '', boxes: '' }];
+      : [{ supplier_id: '', boxes: '', pallets: '' }];
     setDeliveryEditModal({
       open: true,
       id: String(delivery?.id || ''),
       date: String(delivery?.date || new Date().toISOString().split('T')[0]).slice(0, 10),
       courier: String(delivery?.courier || ''),
+      supply_type: String(delivery?.supply_type || ''),
       amount: String(delivery?.amount ?? ''),
       rows,
     });
@@ -2480,8 +2527,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       id: '',
       date: new Date().toISOString().split('T')[0],
       courier: '',
+      supply_type: '',
       amount: '',
-      rows: [{ supplier_id: '', boxes: '' }],
+      rows: [{ supplier_id: '', boxes: '', pallets: '' }],
     });
   };
 
@@ -2495,8 +2543,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     if (!Number.isFinite(amount) || amount <= 0) return showToast('Введите сумму доставки', 'error');
     if (!rows.length) return showToast('Добавьте хотя бы одного поставщика и коробки', 'error');
 
+    const supplyType = String(deliveryEditModal.supply_type || '').trim();
     const next = (deliveryHistory || []).map((delivery: any) => String(delivery?.id) === deliveryId
-      ? { ...delivery, date: deliveryEditModal.date || new Date().toISOString().split('T')[0], courier, amount, rows }
+      ? { ...delivery, date: deliveryEditModal.date || new Date().toISOString().split('T')[0], courier, supply_type: supplyType, amount, rows }
       : delivery);
 
     try {
@@ -2505,6 +2554,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         .update({
           date: deliveryEditModal.date || new Date().toISOString().split('T')[0],
           courier_name: courier,
+          supply_type: supplyType || null,
           amount,
         })
         .eq('id', deliveryId);
@@ -2521,6 +2571,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           delivery_id: deliveryId,
           supplier_id: row.supplier_id,
           boxes: row.boxes,
+          pallets: row.pallets,
         }))
       );
       if (insertItemsError) throw insertItemsError;
@@ -28653,6 +28704,29 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         </select>
                       </label>
                       <label className="block">
+                        <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Тип поставки</span>
+                        <div className="flex gap-2">
+                          <select
+                            value={deliveryForm.supply_type}
+                            onChange={(e) => setDeliveryForm(prev => ({ ...prev, supply_type: e.target.value }))}
+                            className="oc-input h-11 rounded-xl bg-white text-sm flex-1"
+                          >
+                            <option value="">Не указан</option>
+                            {deliverySupplyTypes.map((t) => (
+                              <option key={'delivery-supply-type-' + t} value={t}>{t}</option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            onClick={() => setShowDeliverySupplyTypeModal(true)}
+                            className="h-11 w-11 shrink-0 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-600 inline-flex items-center justify-center hover:bg-indigo-100"
+                            title="Управление типами поставки"
+                          >
+                            <Plus className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </label>
+                      <label className="block">
                         <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Сумма</span>
                         <input
                           type="number"
@@ -28668,14 +28742,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                     <div className="mt-4 space-y-2">
                       {deliveryForm.rows.map((row, index) => (
-                        <div key={'delivery-form-row-' + index} className="grid grid-cols-1 md:grid-cols-[1fr_150px_44px] gap-2">
+                        <div key={'delivery-form-row-' + index} className="grid grid-cols-2 md:grid-cols-[1fr_120px_120px_44px] gap-2">
                           <select
                             value={row.supplier_id}
                             onChange={(e) => setDeliveryForm(prev => ({
                               ...prev,
                               rows: prev.rows.map((item, itemIndex) => itemIndex === index ? { ...item, supplier_id: e.target.value } : item),
                             }))}
-                            className="oc-input h-11 rounded-xl bg-white text-sm"
+                            className="oc-input h-11 rounded-xl bg-white text-sm col-span-2 md:col-span-1"
                           >
                             <option value="">Поставщик</option>
                             {suppliers.map((supplier) => (
@@ -28694,11 +28768,23 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             placeholder="Коробки"
                             className="oc-input h-11 rounded-xl bg-white text-sm"
                           />
+                          <input
+                            type="number"
+                            min="0"
+                            step="1"
+                            value={row.pallets}
+                            onChange={(e) => setDeliveryForm(prev => ({
+                              ...prev,
+                              rows: prev.rows.map((item, itemIndex) => itemIndex === index ? { ...item, pallets: e.target.value } : item),
+                            }))}
+                            placeholder="Паллеты"
+                            className="oc-input h-11 rounded-xl bg-white text-sm"
+                          />
                           <button
                             type="button"
                             disabled={deliveryForm.rows.length === 1}
                             onClick={() => setDeliveryForm(prev => ({ ...prev, rows: prev.rows.filter((_, itemIndex) => itemIndex !== index) }))}
-                            className={'h-11 rounded-xl border border-rose-200 bg-white text-rose-600 inline-flex items-center justify-center ' + (deliveryForm.rows.length === 1 ? 'opacity-40 cursor-not-allowed' : 'hover:bg-rose-50')}
+                            className={'h-11 rounded-xl border border-rose-200 bg-white text-rose-600 inline-flex items-center justify-center col-span-2 md:col-span-1 ' + (deliveryForm.rows.length === 1 ? 'opacity-40 cursor-not-allowed' : 'hover:bg-rose-50')}
                             title="Удалить поле"
                           >
                             <Trash2 className="h-4 w-4" />
@@ -28710,7 +28796,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     <div className="mt-3 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
                       <button
                         type="button"
-                        onClick={() => setDeliveryForm(prev => ({ ...prev, rows: [...prev.rows, { supplier_id: '', boxes: '' }] }))}
+                        onClick={() => setDeliveryForm(prev => ({ ...prev, rows: [...prev.rows, { supplier_id: '', boxes: '', pallets: '' }] }))}
                         className="h-10 rounded-xl border border-orange-200 bg-orange-50 px-4 text-sm font-semibold text-orange-700 hover:bg-orange-100 inline-flex items-center justify-center gap-2"
                       >
                         <Plus className="h-4 w-4" />
@@ -28782,6 +28868,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     ) : filteredDeliveryHistory.map((delivery: any) => {
                       const rows = Array.isArray(delivery?.rows) ? delivery.rows : [];
                       const totalBoxes = rows.reduce((sum: number, row: any) => sum + Number(row?.boxes || 0), 0);
+                      const totalPallets = rows.reduce((sum: number, row: any) => sum + Number(row?.pallets || 0), 0);
                       const paidBySupplier = suppliers.find((s: any) => String(s.id) === String(delivery?.paid_by_supplier_id));
                       return (
                         <div key={'delivery-history-' + delivery.id} className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -28789,12 +28876,17 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             <div className="min-w-0">
                               <div className="flex flex-wrap items-center gap-2">
                                 <div className="font-bold text-slate-950">{delivery.courier || 'Доставщик'}</div>
+                                {delivery.supply_type && (
+                                  <span className="inline-flex items-center gap-1 rounded-full bg-indigo-100 px-2.5 py-1 text-[11px] font-semibold text-indigo-700">
+                                    <Truck className="h-3 w-3" /> {delivery.supply_type}
+                                  </span>
+                                )}
                                 <span className={'rounded-full px-2.5 py-1 text-[11px] font-semibold ' + (delivery.is_paid ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700')}>
                                   {delivery.is_paid ? 'Оплачено' : 'Не оплачено'}
                                 </span>
                               </div>
                               <div className="mt-1 text-xs text-slate-500">
-                                {delivery?.date ? new Date(String(delivery.date) + 'T12:00:00').toLocaleDateString('ru-RU') : '—'} • коробок: {Math.floor(totalBoxes).toLocaleString('ru-RU')}
+                                {delivery?.date ? new Date(String(delivery.date) + 'T12:00:00').toLocaleDateString('ru-RU') : '—'} • коробок: {Math.floor(totalBoxes).toLocaleString('ru-RU')}{totalPallets > 0 ? ' • паллет: ' + Math.floor(totalPallets).toLocaleString('ru-RU') : ''}
                               </div>
                               {delivery.is_paid && (
                                 <div className="mt-1 text-xs text-emerald-700">
@@ -28861,6 +28953,41 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
             </div>
           )}
 
+          {showDeliverySupplyTypeModal && (
+            <div className="fixed inset-0 z-[94] flex items-center justify-center bg-slate-900/55 p-4 backdrop-blur-sm" onClick={() => setShowDeliverySupplyTypeModal(false)}>
+              <div className="w-full max-w-md overflow-hidden rounded-3xl bg-white shadow-2xl ring-1 ring-black/5" onClick={(e) => e.stopPropagation()}>
+                <div className="flex items-center gap-3 bg-gradient-to-r from-indigo-600 to-violet-600 px-6 py-5 text-white">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white/20"><Truck className="h-5 w-5" /></div>
+                  <h3 className="flex-1 text-lg font-bold leading-tight">Типы поставки</h3>
+                  <button type="button" onClick={() => setShowDeliverySupplyTypeModal(false)} className="rounded-xl p-1.5 text-white/80 transition-colors hover:bg-white/20 hover:text-white"><X className="h-5 w-5" /></button>
+                </div>
+                <div className="p-6">
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={deliverySupplyTypeNewName}
+                      onChange={(e) => setDeliverySupplyTypeNewName(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddDeliverySupplyType(); } }}
+                      placeholder="Новый тип поставки"
+                      className="oc-input flex-1"
+                    />
+                    <button type="button" onClick={handleAddDeliverySupplyType} className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 active:scale-95"><Plus className="h-4 w-4" /> Добавить</button>
+                  </div>
+                  <div className="mt-4 space-y-2 max-h-[50vh] overflow-y-auto">
+                    {deliverySupplyTypes.length === 0 ? (
+                      <div className="rounded-xl border border-dashed border-slate-200 p-4 text-center text-sm text-slate-400">Типов пока нет</div>
+                    ) : deliverySupplyTypes.map((t) => (
+                      <div key={'supply-type-row-' + t} className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                        <span className="text-sm font-medium text-slate-700">{t}</span>
+                        <button type="button" onClick={() => handleDeleteDeliverySupplyType(t)} className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600" title="Удалить тип"><Trash2 className="h-4 w-4" /></button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {deliveryEditModal.open && (
             <div className="fixed inset-0 z-[93] bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={closeDeliveryEditModal}>
               <div className="w-full max-w-2xl rounded-2xl bg-white p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
@@ -28898,6 +29025,29 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     </select>
                   </label>
                   <label className="block">
+                    <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Тип поставки</span>
+                    <div className="flex gap-2">
+                      <select
+                        value={deliveryEditModal.supply_type}
+                        onChange={(e) => setDeliveryEditModal(prev => ({ ...prev, supply_type: e.target.value }))}
+                        className="oc-input h-11 rounded-xl bg-white text-sm flex-1"
+                      >
+                        <option value="">Не указан</option>
+                        {deliverySupplyTypes.map((t) => (
+                          <option key={'delivery-edit-supply-type-' + t} value={t}>{t}</option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => setShowDeliverySupplyTypeModal(true)}
+                        className="h-11 w-11 shrink-0 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-600 inline-flex items-center justify-center hover:bg-indigo-100"
+                        title="Управление типами поставки"
+                      >
+                        <Plus className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </label>
+                  <label className="block">
                     <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Сумма</span>
                     <input
                       type="number"
@@ -28912,14 +29062,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                 <div className="mt-4 space-y-2">
                   {deliveryEditModal.rows.map((row, index) => (
-                    <div key={'delivery-edit-row-' + index} className="grid grid-cols-1 md:grid-cols-[1fr_150px_44px] gap-2">
+                    <div key={'delivery-edit-row-' + index} className="grid grid-cols-2 md:grid-cols-[1fr_120px_120px_44px] gap-2">
                       <select
                         value={row.supplier_id}
                         onChange={(e) => setDeliveryEditModal(prev => ({
                           ...prev,
                           rows: prev.rows.map((item, itemIndex) => itemIndex === index ? { ...item, supplier_id: e.target.value } : item),
                         }))}
-                        className="oc-input h-11 rounded-xl bg-white text-sm"
+                        className="oc-input h-11 rounded-xl bg-white text-sm col-span-2 md:col-span-1"
                       >
                         <option value="">Поставщик</option>
                         {suppliers.map((supplier) => (
@@ -28938,11 +29088,23 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         placeholder="Коробки"
                         className="oc-input h-11 rounded-xl bg-white text-sm"
                       />
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={row.pallets}
+                        onChange={(e) => setDeliveryEditModal(prev => ({
+                          ...prev,
+                          rows: prev.rows.map((item, itemIndex) => itemIndex === index ? { ...item, pallets: e.target.value } : item),
+                        }))}
+                        placeholder="Паллеты"
+                        className="oc-input h-11 rounded-xl bg-white text-sm"
+                      />
                       <button
                         type="button"
                         disabled={deliveryEditModal.rows.length === 1}
                         onClick={() => setDeliveryEditModal(prev => ({ ...prev, rows: prev.rows.filter((_, itemIndex) => itemIndex !== index) }))}
-                        className={'h-11 rounded-xl border border-rose-200 bg-white text-rose-600 inline-flex items-center justify-center ' + (deliveryEditModal.rows.length === 1 ? 'opacity-40 cursor-not-allowed' : 'hover:bg-rose-50')}
+                        className={'h-11 rounded-xl border border-rose-200 bg-white text-rose-600 inline-flex items-center justify-center col-span-2 md:col-span-1 ' + (deliveryEditModal.rows.length === 1 ? 'opacity-40 cursor-not-allowed' : 'hover:bg-rose-50')}
                         title="Удалить поле"
                       >
                         <Trash2 className="h-4 w-4" />
@@ -28954,7 +29116,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 <div className="mt-4 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
                   <button
                     type="button"
-                    onClick={() => setDeliveryEditModal(prev => ({ ...prev, rows: [...prev.rows, { supplier_id: '', boxes: '' }] }))}
+                    onClick={() => setDeliveryEditModal(prev => ({ ...prev, rows: [...prev.rows, { supplier_id: '', boxes: '', pallets: '' }] }))}
                     className="h-10 rounded-xl border border-orange-200 bg-orange-50 px-4 text-sm font-semibold text-orange-700 hover:bg-orange-100 inline-flex items-center justify-center gap-2"
                   >
                     <Plus className="h-4 w-4" />
