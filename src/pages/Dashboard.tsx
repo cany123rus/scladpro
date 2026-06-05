@@ -1964,6 +1964,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [paymentReports, setPaymentReports] = useState<any[]>([]);
   const [paymentReportsTab, setPaymentReportsTab] = useState<'delivery' | 'salary'>('delivery');
   const [paymentReportsLoading, setPaymentReportsLoading] = useState(false);
+  const [paymentReportToDelete, setPaymentReportToDelete] = useState<any | null>(null);
+  const [paymentReportDeleting, setPaymentReportDeleting] = useState(false);
   const [deliverySupplierFilter, setDeliverySupplierFilter] = useState('all');
   const [deliveryForm, setDeliveryForm] = useState({
     date: new Date().toISOString().split('T')[0],
@@ -2489,16 +2491,20 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     }
   };
 
-  const handleDeletePaymentReport = async (report: any) => {
+  const confirmDeletePaymentReport = async () => {
+    const report = paymentReportToDelete;
     if (!report?.id) return;
-    if (!window.confirm('Удалить отчёт «' + (report?.title || 'Отчёт') + '»? Действие нельзя отменить.')) return;
+    setPaymentReportDeleting(true);
     try {
       const { error } = await supabase.from('payment_reports').delete().eq('id', report.id);
       if (error) throw error;
       setPaymentReports((prev) => prev.filter((r: any) => String(r?.id) !== String(report.id)));
       showToast('Отчёт удалён', 'success');
+      setPaymentReportToDelete(null);
     } catch (e: any) {
       showToast('Ошибка удаления отчёта: ' + (e?.message || 'неизвестно'), 'error');
+    } finally {
+      setPaymentReportDeleting(false);
     }
   };
 
@@ -24240,7 +24246,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             </div>
                             <div className="flex items-center gap-2">
                               <div className="text-lg font-black text-emerald-700">{Number(r.amount || 0).toLocaleString('ru-RU')} ₽</div>
-                              <button onClick={() => handleDeletePaymentReport(r)} className="rounded-lg border border-slate-200 p-1.5 text-slate-400 transition-colors hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600" title="Удалить отчёт">
+                              <button onClick={() => setPaymentReportToDelete(r)} className="rounded-lg border border-slate-200 p-1.5 text-slate-400 transition-colors hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600" title="Удалить отчёт">
                                 <Trash2 className="h-4 w-4" />
                               </button>
                             </div>
@@ -24286,6 +24292,47 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
               </div>
             </div>
             </EmployeesSection>
+          )}
+
+          {/* Delete payment report confirmation */}
+          {paymentReportToDelete && (
+            <div className="fixed inset-0 z-[95] flex items-center justify-center bg-slate-900/55 p-4 backdrop-blur-sm" onClick={() => !paymentReportDeleting && setPaymentReportToDelete(null)}>
+              <div className="w-full max-w-md overflow-hidden rounded-3xl bg-white shadow-2xl ring-1 ring-black/5" onClick={(e) => e.stopPropagation()}>
+                <div className="flex items-center gap-3 bg-gradient-to-r from-rose-600 to-pink-600 px-6 py-5 text-white">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white/20"><Trash2 className="h-5 w-5" /></div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[11px] font-semibold uppercase tracking-wider text-white/70">Удаление отчёта</div>
+                    <h3 className="truncate text-lg font-bold leading-tight">Удалить отчёт?</h3>
+                  </div>
+                  <button type="button" onClick={() => !paymentReportDeleting && setPaymentReportToDelete(null)} className="rounded-xl p-1.5 text-white/80 transition-colors hover:bg-white/20 hover:text-white"><X className="h-5 w-5" /></button>
+                </div>
+                <div className="p-6">
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="flex items-start gap-3">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-100 text-emerald-600"><FileText className="h-5 w-5" /></div>
+                      <div className="min-w-0">
+                        <div className="font-semibold text-slate-900">{paymentReportToDelete?.title || 'Отчёт'}</div>
+                        <div className="mt-0.5 text-sm text-slate-500">
+                          {Number(paymentReportToDelete?.amount || 0).toLocaleString('ru-RU')} ₽
+                          {paymentReportToDelete?.created_at ? ' • ' + new Date(paymentReportToDelete.created_at).toLocaleString('ru-RU') : ''}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <p className="mt-4 flex items-start gap-2 rounded-xl bg-rose-50 px-3 py-2.5 text-sm text-rose-700">
+                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                    Отчёт будет удалён без возможности восстановления. Деньги, списанные при оплате, при этом не возвращаются.
+                  </p>
+                </div>
+                <div className="flex justify-end gap-2 border-t border-slate-100 px-6 py-4">
+                  <button type="button" onClick={() => setPaymentReportToDelete(null)} disabled={paymentReportDeleting} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">Отмена</button>
+                  <button type="button" onClick={confirmDeletePaymentReport} disabled={paymentReportDeleting} className="inline-flex items-center gap-1.5 rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-rose-700 active:scale-95 disabled:opacity-50">
+                    {paymentReportDeleting ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                    {paymentReportDeleting ? 'Удаление…' : 'Удалить'}
+                  </button>
+                </div>
+              </div>
+            </div>
           )}
 
           {/* Add Employee Modal */}
