@@ -580,7 +580,8 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
   const fetchCodesBySuppliers = async (supplierIds: string[]) => {
     const bySupplier: Record<string, Array<{ code: string; category?: string | null }>> = {};
 
-    for (const supplierId of supplierIds) {
+    // Fetch all suppliers' codes concurrently instead of one-by-one.
+    await Promise.all(supplierIds.map(async (supplierId) => {
       try {
         const { data: codes } = await supabase
           .from('unified_honest_sign_codes')
@@ -594,7 +595,7 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
       } catch {
         bySupplier[supplierId] = [];
       }
-    }
+    }));
 
     return bySupplier;
   };
