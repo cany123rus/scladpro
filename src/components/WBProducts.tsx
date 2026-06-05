@@ -218,6 +218,23 @@ const Sticker = ({ variant, honestSignCode, supplierName }: { variant: ProductVa
   );
 };
 
+const useMediaQuery = (query: string) => {
+  const [matches, setMatches] = useState<boolean>(() =>
+    typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+      ? window.matchMedia(query).matches
+      : false
+  );
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    const mql = window.matchMedia(query);
+    const handler = () => setMatches(mql.matches);
+    handler();
+    mql.addEventListener('change', handler);
+    return () => mql.removeEventListener('change', handler);
+  }, [query]);
+  return matches;
+};
+
 const WB_PRODUCTS_BROWSER_CACHE_KEY = 'wb_products_browser_cache_v1';
 const WB_PRINT_CODES_CACHE_KEY = 'wb_print_codes_cache_v1';
 const WB_PRINT_PENDING_SYNC_KEY = 'wb_print_pending_codes_sync_v1';
@@ -1412,6 +1429,13 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
     setEditingVariant(null);
   };
 
+  // Tailwind breakpoints: md = 768px, 2xl = 1536px. Render only the layout that is
+  // actually visible — otherwise React rebuilds the thousands of DOM nodes for the
+  // CSS-hidden mobile & tablet lists on every keystroke/quantity change (huge INP).
+  const isTabletView = useMediaQuery('(min-width: 768px) and (max-width: 1535px)');
+  const isDesktopView = useMediaQuery('(min-width: 1536px)');
+  const isMobileView = !isTabletView && !isDesktopView;
+
   const desktopRowHeight = 118;
   const desktopListHeight = typeof window !== 'undefined'
     ? Math.max(520, Math.min(1200, window.innerHeight - 220))
@@ -1716,6 +1740,7 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
       )}
 
       {/* Mobile Cards */}
+      {isMobileView && (
       <div className="no-print md:hidden p-3 space-y-3">
         {filteredVariants.map((variant) => {
           const mQty = quantities[variant.id] || 0;
@@ -1802,8 +1827,10 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
           <div className="p-8 text-center text-slate-500"><Loader2 className="h-7 w-7 mx-auto animate-spin text-indigo-600" /></div>
         )}
       </div>
+      )}
 
-      {/* Tablet Cards (virtualized) */}
+      {/* Tablet Cards */}
+      {isTabletView && (
       <div className="no-print hidden md:grid md:grid-cols-1 lg:grid-cols-2 2xl:hidden gap-3 p-3">
         {loading && <div className="p-12 text-center text-slate-500"><Loader2 className="h-8 w-8 mx-auto animate-spin text-indigo-600" /><p className="mt-2">Загрузка товаров...</p></div>}
         {!loading && filteredVariants.length === 0 && <div className="p-12 text-center text-slate-500"><Package className="h-12 w-12 mx-auto mb-4 text-slate-300" /><p className="text-lg font-medium">Товары не найдены</p></div>}
@@ -1813,8 +1840,10 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
           </div>
         ))}
       </div>
+      )}
 
       {/* Table View (virtualized) */}
+      {isDesktopView && (
       <div className="no-print hidden 2xl:block px-2 pb-2">
         <div className="grid grid-cols-[64px_1fr_96px_120px_160px_160px_120px] items-center gap-2 bg-slate-50 border-y border-slate-200 px-4 py-3 text-sm font-medium text-slate-500">
           <div>Фото</div><div>Наименование</div><div>Цвет</div><div>Размер</div><div>Баркод</div><div className="text-center">Количество</div><div className="text-center">Действия</div>
@@ -1827,6 +1856,7 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
           </List>
         )}
       </div>
+      )}
 
       {/* Print Area (Hidden on screen, used for PDF generation) */}
       <div className={`print-only ${isPrinting ? 'fixed left-0 top-0 z-[-1000]' : 'hidden'}`}>
