@@ -2999,7 +2999,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       const bt = new Date(String(b?.work_date || b?.created_at || '')).getTime();
       return tempWorkerDateSort === 'asc' ? at - bt : bt - at;
     });
-  }, [tempWorkerLogs, tempWorkerSupplierFilter, tempWorkerPaidFilter, tempWorkerDateSort]);
+    // tempWorkerPaymentsMap is read via getTempWorkerRemainingAmount (paid filter) —
+    // must be a dependency or the list shows stale paid/unpaid state on first load.
+  }, [tempWorkerLogs, tempWorkerSupplierFilter, tempWorkerPaidFilter, tempWorkerDateSort, tempWorkerPaymentsMap]);
 
   const tempUnpaidBySupplier = useMemo(() => {
     const grouped = new Map<string, { supplierId: string; supplierName: string; amount: number; shifts: number }>();
@@ -3018,7 +3020,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     const total = rows.reduce((s, r) => s + r.amount, 0);
     const shifts = rows.reduce((s, r) => s + r.shifts, 0);
     return { rows, total, shifts };
-  }, [filteredTempWorkerLogs, suppliers]);
+    // tempWorkerPaymentsMap is read via getTempWorkerRemainingAmount — must be a
+    // dependency, otherwise "Не оплачено всего" stays wrong until the payments map
+    // (loaded async after logs) arrives and something else forces a recompute.
+  }, [filteredTempWorkerLogs, suppliers, tempWorkerPaymentsMap]);
 
   const tempWorkerReportWorkerOptions = useMemo(() => (
     Array.from(new Set([...(tempWorkersList || []), ...(tempWorkerLogs || []).map((log: any) => String(log?.worker_name || log?.worker || '').trim())].filter(Boolean)))
