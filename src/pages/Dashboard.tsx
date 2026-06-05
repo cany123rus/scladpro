@@ -15,6 +15,7 @@ const WarehouseTab = React.lazy(() => import('../components/WarehouseTab').then(
 const AdvertisingInsights = React.lazy(() => import('../components/AdvertisingInsights').then((m) => ({ default: m.AdvertisingInsights })));
 const CamerasTab = React.lazy(() => import('../components/CamerasTab').then((m) => ({ default: m.CamerasTab })));
 import { SectionSkeleton } from '../components/Skeleton';
+import { confirmDialog } from '../components/ConfirmDialog';
 import { storeCurrentEmployee } from '../utils/employeeStorage';
 import { createWorkbookBlob, downloadAoaWorkbook, downloadWorkbook } from '../utils/excelExport';
 import { QRCodeSVG } from 'qrcode.react';
@@ -1370,7 +1371,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   }, [honestSignSupplierId, suppliers]);
 
   const handleDeleteHonestSignHistory = async (fileName: string, date: string) => {
-    if (!confirm('Вы уверены, что хотите удалить эту историю загрузки? Это действие нельзя отменить.')) return;
+    if (!(await confirmDialog('Вы уверены, что хотите удалить эту историю загрузки? Это действие нельзя отменить.'))) return;
 
     try {
         const targetDate = new Date(date);
@@ -2703,7 +2704,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
     const payerSupplier = suppliers.find((s: any) => String(s.id) === String(deliveryQuickPayPayerSupplierId));
     const total = rows.reduce((sum: number, delivery: any) => sum + Number(delivery?.amount || 0), 0);
-    if (!window.confirm(`Подтвердить оплату выбранных доставок?\nКто оплатит: ${payerSupplier?.name || 'Поставщик'}\nДоставок: ${rows.length}\nСумма: ${total.toFixed(2)} ₽`)) return;
+    if (!(await confirmDialog({ title: 'Подтверждение оплаты', tone: 'primary', confirmText: 'Оплатить', message: `Подтвердить оплату выбранных доставок?\nКто оплатит: ${payerSupplier?.name || 'Поставщик'}\nДоставок: ${rows.length}\nСумма: ${total.toFixed(2)} ₽` }))) return;
 
     const ids = rows.map((delivery: any) => String(delivery?.id || '')).filter(Boolean);
     const paidAt = new Date().toISOString();
@@ -2864,7 +2865,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const handleDeleteDelivery = async (deliveryId: string) => {
     const delivery = (deliveryHistory || []).find((item: any) => String(item?.id) === String(deliveryId));
     const label = delivery ? ((delivery.courier || 'Доставка') + ' за ' + (delivery?.date ? new Date(String(delivery.date) + 'T12:00:00').toLocaleDateString('ru-RU') : 'дату без даты')) : 'эту доставку';
-    if (!window.confirm('Удалить ' + label + '? Действие нельзя отменить.')) return;
+    if (!await confirmDialog('Удалить ' + label + '? Действие нельзя отменить.')) return;
     const next = (deliveryHistory || []).filter((item: any) => String(item?.id) !== String(deliveryId));
     try {
       const { error } = await supabase
@@ -3061,7 +3062,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     }
     const payerSupplier = suppliers.find((s: any) => String(s.id) === String(tempWorkerQuickPayPayerSupplierId));
     const total = rows.reduce((sum: number, log: any) => sum + getTempWorkerRemainingAmount(log), 0);
-    if (!window.confirm(`Подтвердить оплату выбранных смен?\nКто оплатит: ${payerSupplier?.name || 'Поставщик'}\nСмен: ${rows.length}\nСумма: ${total.toFixed(2)} ₽`)) return;
+    if (!(await confirmDialog({ title: 'Подтверждение оплаты', tone: 'primary', confirmText: 'Оплатить', message: `Подтвердить оплату выбранных смен?\nКто оплатит: ${payerSupplier?.name || 'Поставщик'}\nСмен: ${rows.length}\nСумма: ${total.toFixed(2)} ₽` }))) return;
 
     setTempWorkerQuickPaySaving(true);
     try {
@@ -3765,7 +3766,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   };
 
   const handleDeleteTempWorkerLog = async (logId: string) => {
-    if (!window.confirm('Удалить запись из истории временных сотрудников?')) return;
+    if (!await confirmDialog('Удалить запись из истории временных сотрудников?')) return;
     try {
       // Требование: удалять физически из БД (не soft-delete)
       const { data, error } = await supabase
@@ -4786,7 +4787,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     const period = cwSalaryPeriods.find((p) => p.key === salaryPayPeriodKey);
     const ownerTitle = getSupplierNameForOwner(salaryPayOwner);
     const total = selected.reduce((s, r) => s + r.amount, 0);
-    if (!window.confirm(`Оплатить ЗП?\nСотрудников: ${selected.length}\nСумма: ${total.toFixed(2)} ₽\nОплата: ${ownerTitle}`)) return;
+    if (!(await confirmDialog({ title: 'Выплата ЗП', tone: 'primary', confirmText: 'Оплатить', message: `Оплатить ЗП?\nСотрудников: ${selected.length}\nСумма: ${total.toFixed(2)} ₽\nОплата: ${ownerTitle}` }))) return;
     setSalaryPaySaving(true);
     try {
       for (const r of selected) {
@@ -6156,7 +6157,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   };
 
   const handleDeleteOfflineHistorySession = async (session: OfflineFboSession) => {
-    if (!window.confirm(`Удалить оффлайн-сессию ${session.supply_name || session.supply_id}?`)) return;
+    if (!await confirmDialog(`Удалить оффлайн-сессию ${session.supply_name || session.supply_id}?`)) return;
     await clearOfflineFboSessionFromDevice(session.supply_id);
     if (currentSupply?.id === session.supply_id) {
       offlineFboSessionRef.current = null;
@@ -7299,7 +7300,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
   const handleDeleteSupplyItem = async (itemId: string) => {
     if (!itemId) return;
-    if (!window.confirm('Удалить этот скан из коробки?')) return;
+    if (!await confirmDialog('Удалить этот скан из коробки?')) return;
 
     try {
       if (fboOfflineMode && currentSupply) {
@@ -7821,7 +7822,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         snapshot.pallets.filter((p) => String(p.supply_id || '') === id).map((p) => String(p.id))
       );
       const activePallets = snapshot.pallets.filter((p) => palletIds.has(String(p.id)) && !p.deleted_at).length;
-      const confirmed = window.confirm(
+      const confirmed = await confirmDialog(
         activePallets > 0
           ? `Удалить поставку «${supply?.name || id}»? Вместе с ней будут полностью удалены паллеты (${activePallets}) и их товары.`
           : `Удалить поставку «${supply?.name || id}»?`
@@ -8092,7 +8093,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           .map((p) => String(p.id))
       );
       const activePallets = snapshot.pallets.filter((p) => palletIds.has(String(p.id)) && !p.deleted_at).length;
-      const confirmed = window.confirm(
+      const confirmed = await confirmDialog(
         activePallets > 0
           ? `Удалить склад «${warehouse?.name || id}»? Вместе с ним будут полностью удалены поставки, паллеты (${activePallets}) и их товары.`
           : `Удалить склад «${warehouse?.name || id}»?`
@@ -8820,7 +8821,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   }, [flushPendingScans]);
 
   const handleDeleteBox = async (boxId: string) => {
-    if (!window.confirm('Вы уверены, что хотите удалить эту коробку?')) return;
+    if (!await confirmDialog('Вы уверены, что хотите удалить эту коробку?')) return;
     try {
       if (warehouseOfflineEnabled) {
         const snapshot = await getWarehouseOfflineSnapshotOrEmpty();
@@ -8873,7 +8874,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   };
 
   const handleDeleteWarehouseCost = async (id: string) => {
-    if (!window.confirm('Удалить запись?')) return;
+    if (!await confirmDialog('Удалить запись?')) return;
     const { error } = await supabase.from('supplier_warehouse_costs').delete().eq('id', id);
     if (error) showToast('Ошибка удаления: ' + error.message, 'error');
     else {
@@ -9117,7 +9118,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     if (!currentSupply) return;
     const newStatus = currentSupply.status === 'closed' ? 'active' : 'closed';
 
-    if (newStatus === 'active' && !window.confirm('Открыть поставку для редактирования?')) return;
+    if (newStatus === 'active' && !(await confirmDialog({ title: 'Открыть поставку', tone: 'primary', confirmText: 'Открыть', message: 'Открыть поставку для редактирования?' }))) return;
 
     const { error } = await supabase
       .from('supplies')
@@ -9390,7 +9391,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   };
 
   const handleDeleteSupplier = async (id: string) => {
-    if (!window.confirm('Вы уверены?')) return;
+    if (!await confirmDialog('Вы уверены?')) return;
     await softDeleteWithActor('suppliers', id);
   };
 
@@ -9649,7 +9650,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
   const handleUndoImport = async () => {
     if (lastImportedIds.length === 0) return;
-    if (!window.confirm('Отменить последний импорт? Это удалит все добавленные товары.')) return;
+    if (!(await confirmDialog({ title: 'Отмена импорта', tone: 'warning', confirmText: 'Отменить импорт', message: 'Отменить последний импорт? Это удалит все добавленные товары.' }))) return;
 
     const batchSize = 100;
     let hasError = false;
@@ -10982,7 +10983,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   };
 
   const handleDisconnectEmployee = async (employeeId: string) => {
-    if (!window.confirm('Отключить сотрудника?')) return;
+    if (!(await confirmDialog({ title: 'Отключение сотрудника', tone: 'warning', confirmText: 'Отключить', message: 'Отключить сотрудника?' }))) return;
 
     // Optimistic update
     setEmployees(prev => prev.map(emp => emp.id === employeeId ? { ...emp, is_online: false } : emp));
@@ -13121,7 +13122,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   };
 
   const handleDeletePrintFile = async (id: string) => {
-    if (!window.confirm('Удалить файл?')) return;
+    if (!await confirmDialog('Удалить файл?')) return;
 
     try {
         const file = printFiles.find(f => f.id === id);
@@ -14666,7 +14667,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const deleteUploadedRawHistoryItem = async (id: string, fileName?: string) => {
     if (!id) return;
     const label = String(fileName || 'этот WB отчёт');
-    const ok = window.confirm(`Удалить из истории WB: ${label}?`);
+    const ok = await confirmDialog(`Удалить из истории WB: ${label}?`);
     if (!ok) return;
     try {
       const { error } = await supabase.from('analytics_upload_reports_raw').delete().eq('id', id);
@@ -15023,7 +15024,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const deleteUploadedHistoryItem = async (id: string, fileName?: string) => {
     if (!id) return;
     const label = String(fileName || 'этот отчёт');
-    const ok = window.confirm(`Удалить из истории: ${label}?`);
+    const ok = await confirmDialog(`Удалить из истории: ${label}?`);
     if (!ok) return;
     try {
       const { error } = await supabase.from('analytics_upload_history').delete().eq('id', id);
@@ -15417,7 +15418,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const disableUploadedShareLink = async (id: string, token?: string) => {
     if (!id && !token) return;
     const label = token ? `${window.location.origin}/shared/${token}` : 'эту ссылку';
-    const ok = window.confirm(`Отключить ссылку?\n${label}`);
+    const ok = await confirmDialog({ title: 'Отключить ссылку', tone: 'warning', confirmText: 'Отключить', message: label });
     if (!ok) return;
     try {
       const nowIso = new Date().toISOString();
@@ -15452,7 +15453,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const deleteUploadedShareLink = async (id: string, token?: string) => {
     if (!id && !token) return;
     const label = token ? `${window.location.origin}/shared/${token}` : 'эту ссылку';
-    const ok = window.confirm(`Удалить ссылку?\n${label}`);
+    const ok = await confirmDialog(`Удалить ссылку?\n${label}`);
     if (!ok) return;
     try {
       setUploadedShareHiddenKeys((prev) => ({
@@ -15677,7 +15678,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
   const deleteWbApiHistoryItem = async (id: string, fileName?: string) => {
     if (!id) return;
-    const ok = window.confirm(`Удалить из хранилища WB API: ${String(fileName || 'файл')}?`);
+    const ok = await confirmDialog(`Удалить из хранилища WB API: ${String(fileName || 'файл')}?`);
     if (!ok) return;
     try {
       const { error } = await supabase.from('analytics_wb_api_reports').delete().eq('id', id);
@@ -16342,7 +16343,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   };
 
   const handlePermanentDelete = async (id: string) => {
-    if (!window.confirm('Удалить безвозвратно? Это действие нельзя отменить.')) return;
+    if (!await confirmDialog('Удалить безвозвратно? Это действие нельзя отменить.')) return;
     const table = resolveTrashTable(trashTab);
 
     // Handle dependencies manually since we don't have CASCADE set up in DB
@@ -26505,7 +26506,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                 <button
                                   onClick={async () => {
                                     if (!hasAssemblyButtonAccess('cw_boxes_delete')) return;
-                                    if (!window.confirm('Удалить запись?')) return;
+                                    if (!await confirmDialog('Удалить запись?')) return;
                                     await supabase.from('box_inventory_log').update({ deleted_at: new Date().toISOString() }).eq('id', log.id);
                                     fetchBoxStats();
                                     fetchBoxHistory();
@@ -26640,7 +26641,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                                 <button
                                                     onClick={async () => {
                                                         if (!hasAssemblyButtonAccess('cw_boxes_delete')) return;
-                                                        if(!window.confirm('Удалить запись?')) return;
+                                                        if(!await confirmDialog('Удалить запись?')) return;
                                                         await supabase.from('box_inventory_log').update({ deleted_at: new Date().toISOString() }).eq('id', log.id);
                                                         fetchBoxStats();
                                                         fetchBoxHistory();
@@ -26770,7 +26771,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                             <button
                                                 onClick={async () => {
                                                     if (!hasAssemblyButtonAccess('cw_purchase_delete')) return;
-                                                    if(!window.confirm('Удалить запись?')) return;
+                                                    if(!await confirmDialog('Удалить запись?')) return;
                                                     const { error } = await supabase
                                                       .from('packaging_purchase_log')
                                                       .update({ deleted_at: new Date().toISOString() })

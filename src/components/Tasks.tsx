@@ -17,6 +17,7 @@ import { supabase } from '../lib/supabase';
 import { Plus, Trash2, Calendar, X, Pencil } from 'lucide-react';
 import { createTask, fetchActiveTasks, softDeleteTask, updateTask } from '../services/tasks.service';
 import { buildTaskColumnUpdate, ColumnId, getTaskColumn, resolveDropColumn } from '../utils/tasks';
+import { confirmDialog } from './ConfirmDialog';
 
 interface Task {
   id: string;
@@ -593,7 +594,7 @@ export const Tasks = () => {
   }, [canAccept, currentEmployee, persistTaskAcceptances, taskAssignments]);
 
   const deleteTask = async (id: string) => {
-    if (!confirm('Удалить задачу?')) return;
+    if (!(await confirmDialog({ title: 'Удаление задачи', message: 'Удалить задачу?', tone: 'danger' }))) return;
     try {
       const { error } = await softDeleteTask(id);
       if (error) throw error;

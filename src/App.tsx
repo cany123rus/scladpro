@@ -9,6 +9,7 @@ const SharedAnalytics = lazy(() => import('./pages/SharedAnalytics'));
 const TasksPage = lazy(() => import('./pages/TasksPage'));
 import { DASHBOARD_TAB_IDS, DEFAULT_DASHBOARD_TAB, isDashboardTabId } from './constants/dashboardTabs';
 import { PageSkeleton } from './components/Skeleton';
+import { ConfirmHost } from './components/ConfirmDialog';
 
 const PageFallback = () => <PageSkeleton />;
 
@@ -74,6 +75,7 @@ function App() {
         <Suspense fallback={<PageFallback />}>
           <AppRoutes />
         </Suspense>
+        <ConfirmHost />
       </AuthProvider>
     </BrowserRouter>
   );
