@@ -17557,9 +17557,35 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     </div>
                   </div>
 
+                  {/* Standalone «Собрать паллеты» action banner */}
+                  <button
+                    type="button"
+                    onClick={openFboPalletCollector}
+                    className="group mb-6 flex w-full items-center gap-4 overflow-hidden rounded-2xl bg-gradient-to-r from-violet-600 to-indigo-600 p-5 text-left text-white shadow-lg shadow-violet-600/25 transition-all hover:shadow-xl hover:shadow-violet-600/30 active:scale-[0.99]"
+                  >
+                    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-white/20 transition-transform group-hover:scale-105">
+                      <Box className="h-7 w-7" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-lg font-bold leading-tight">Собрать паллеты</div>
+                      <div className="text-sm text-white/80">Открыть сборщик паллет: склады, поставки и товары</div>
+                    </div>
+                    <ChevronRight className="h-6 w-6 shrink-0 text-white/80 transition-transform group-hover:translate-x-1" />
+                  </button>
+
                   <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(340px,420px)]">
-                  <div className="oc-card p-5 md:p-6">
-                    <div className="text-xs text-slate-600 mb-2">Поставщик для ШК поставки</div>
+                  <div className="oc-card overflow-hidden p-0">
+                    <div className="flex items-center gap-3 border-b border-slate-100 bg-gradient-to-r from-indigo-50 to-violet-50 px-5 py-4">
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-500 text-white shadow-sm">
+                        <QrCode className="h-6 w-6" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="font-bold text-slate-900 leading-tight">Приёмка по ШК</div>
+                        <div className="text-xs text-slate-500">Сканирование штрихкода поставки</div>
+                      </div>
+                    </div>
+                    <div className="p-5 md:p-6">
+                    <label className="mb-1 block text-xs font-medium text-slate-500">Поставщик для ШК поставки</label>
                     <select
                       value={selectedSupplierId}
                       onChange={(e) => setSelectedSupplierId(e.target.value)}
@@ -17578,17 +17604,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         className="min-h-[52px] flex-1 rounded-xl border border-slate-200 bg-slate-50 p-3 text-base outline-none focus:ring-2 focus:ring-indigo-500"
                         autoFocus
                       />
-	                      <button type="submit" className="min-h-[52px] min-w-[52px] rounded-xl bg-slate-100 p-3 hover:bg-slate-200">
-	                        <ArrowLeft className="h-6 w-6 text-slate-600 rotate-180" />
+	                      <button type="submit" className="inline-flex min-h-[52px] min-w-[52px] items-center justify-center rounded-xl bg-indigo-600 p-3 text-white shadow-sm transition-all hover:bg-indigo-700 active:scale-[0.97]">
+	                        <ArrowLeft className="h-6 w-6 rotate-180" />
 	                      </button>
 	                    </form>
-	                    <button
-	                      type="button"
-	                      onClick={openFboPalletCollector}
-	                      className="mt-3 inline-flex min-h-[48px] w-full items-center justify-center rounded-xl bg-violet-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-violet-700"
-	                    >
-	                      <Box className="h-4 w-4 mr-2" /> <span className="whitespace-nowrap">Собрать паллеты</span>
-	                    </button>
+	                    </div>
 	                  </div>
 
                   <div className="oc-card overflow-hidden p-0">
@@ -24761,7 +24781,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   {hasAssemblyButtonAccess('cw_tab_calendar') && (
                   <button
                     onClick={() => setCompletedWorkStep('CALENDAR')}
-                    className={`inline-flex min-h-[44px] min-w-0 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium leading-tight transition-all active:scale-[0.97] ${completedWorkStep === 'CALENDAR' || completedWorkStep === 'FORM' ? 'bg-white text-slate-900 shadow-md' : 'text-indigo-100/90 hover:text-white hover:bg-white/10'}`}
+                    className={`inline-flex min-h-[44px] min-w-0 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-center text-sm font-medium leading-tight transition-all active:scale-[0.97] ${completedWorkStep === 'CALENDAR' || completedWorkStep === 'FORM' ? 'bg-white text-slate-900 shadow-md' : 'text-indigo-100/90 hover:text-white hover:bg-white/10'}`}
                   >
                     <Calendar className="h-4 w-4 shrink-0" /> Календарь
                   </button>
@@ -24773,14 +24793,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       loadDeliveryData();
                       setShowGeneralReportModal(true);
                     }}
-                    className="inline-flex min-h-[44px] min-w-0 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium leading-tight transition-all active:scale-[0.97] text-indigo-100/90 hover:text-white hover:bg-white/10"
+                    className="inline-flex min-h-[44px] min-w-0 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-center text-sm font-medium leading-tight transition-all active:scale-[0.97] text-indigo-100/90 hover:text-white hover:bg-white/10"
                   >
                     <FileSpreadsheet className="h-4 w-4 shrink-0" /> Общий отчет
                   </button>
                   {hasAssemblyButtonAccess('cw_tab_rates') && (
                   <button
                     onClick={() => setCompletedWorkStep('RATES')}
-                    className={`inline-flex min-h-[44px] min-w-0 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium leading-tight transition-all active:scale-[0.97] ${completedWorkStep === 'RATES' ? 'bg-white text-slate-900 shadow-md' : 'text-indigo-100/90 hover:text-white hover:bg-white/10'}`}
+                    className={`inline-flex min-h-[44px] min-w-0 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-center text-sm font-medium leading-tight transition-all active:scale-[0.97] ${completedWorkStep === 'RATES' ? 'bg-white text-slate-900 shadow-md' : 'text-indigo-100/90 hover:text-white hover:bg-white/10'}`}
                   >
                     <Wallet className="h-4 w-4 shrink-0" /> Расценки
                   </button>
@@ -24788,7 +24808,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   {hasAssemblyButtonAccess('cw_tab_packaging') && (
                   <button
                     onClick={() => setCompletedWorkStep('PACKAGING')}
-                    className={`inline-flex min-h-[44px] min-w-0 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium leading-tight transition-all active:scale-[0.97] ${completedWorkStep === 'PACKAGING' ? 'bg-white text-slate-900 shadow-md' : 'text-indigo-100/90 hover:text-white hover:bg-white/10'}`}
+                    className={`inline-flex min-h-[44px] min-w-0 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-center text-sm font-medium leading-tight transition-all active:scale-[0.97] ${completedWorkStep === 'PACKAGING' ? 'bg-white text-slate-900 shadow-md' : 'text-indigo-100/90 hover:text-white hover:bg-white/10'}`}
                   >
                     <Package className="h-4 w-4 shrink-0" /> Упаковка
                   </button>
@@ -24796,7 +24816,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   {hasAssemblyButtonAccess('cw_tab_boxes') && (
                   <button
                     onClick={() => setCompletedWorkStep('BOXES')}
-                    className={`inline-flex min-h-[44px] min-w-0 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium leading-tight transition-all active:scale-[0.97] ${completedWorkStep === 'BOXES' ? 'bg-white text-slate-900 shadow-md' : 'text-indigo-100/90 hover:text-white hover:bg-white/10'}`}
+                    className={`inline-flex min-h-[44px] min-w-0 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-center text-sm font-medium leading-tight transition-all active:scale-[0.97] ${completedWorkStep === 'BOXES' ? 'bg-white text-slate-900 shadow-md' : 'text-indigo-100/90 hover:text-white hover:bg-white/10'}`}
                   >
                     <Box className="h-4 w-4 shrink-0" /> ФБС / Коробки
                   </button>
@@ -24804,7 +24824,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   {hasAssemblyButtonAccess('cw_tab_purchase') && (
                   <button
                     onClick={() => setCompletedWorkStep('PURCHASE')}
-                    className={`inline-flex min-h-[44px] min-w-0 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium leading-tight transition-all active:scale-[0.97] ${completedWorkStep === 'PURCHASE' ? 'bg-white text-slate-900 shadow-md' : 'text-indigo-100/90 hover:text-white hover:bg-white/10'}`}
+                    className={`inline-flex min-h-[44px] min-w-0 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-center text-sm font-medium leading-tight transition-all active:scale-[0.97] ${completedWorkStep === 'PURCHASE' ? 'bg-white text-slate-900 shadow-md' : 'text-indigo-100/90 hover:text-white hover:bg-white/10'}`}
                   >
                     <ShoppingCart className="h-4 w-4 shrink-0" /> Закуп
                   </button>
