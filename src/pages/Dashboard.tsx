@@ -1961,6 +1961,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [deliverySupplyTypes, setDeliverySupplyTypes] = useState<string[]>([]);
   const [deliverySupplyTypeNewName, setDeliverySupplyTypeNewName] = useState('');
   const [showDeliverySupplyTypeModal, setShowDeliverySupplyTypeModal] = useState(false);
+  const [paymentReports, setPaymentReports] = useState<any[]>([]);
+  const [paymentReportsTab, setPaymentReportsTab] = useState<'delivery' | 'salary'>('delivery');
+  const [paymentReportsLoading, setPaymentReportsLoading] = useState(false);
   const [deliverySupplierFilter, setDeliverySupplierFilter] = useState('all');
   const [deliveryForm, setDeliveryForm] = useState({
     date: new Date().toISOString().split('T')[0],
@@ -2444,6 +2447,114 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     }
   };
 
+  const loadPaymentReports = async () => {
+    setPaymentReportsLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('payment_reports')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(500);
+      if (error) throw error;
+      setPaymentReports(Array.isArray(data) ? data : []);
+    } catch (e) {
+      console.warn('loadPaymentReports failed', e);
+      setPaymentReports([]);
+    } finally {
+      setPaymentReportsLoading(false);
+    }
+  };
+
+  const savePaymentReport = async (report: { kind: 'delivery' | 'salary'; title: string; amount: number; period_start?: string | null; period_end?: string | null; payload: any }) => {
+    try {
+      const createdBy = String(user?.id || currentEmployee?.id || '').trim();
+      const row: any = {
+        kind: report.kind,
+        title: report.title,
+        amount: Number(report.amount || 0),
+        period_start: report.period_start || null,
+        period_end: report.period_end || null,
+        payload: report.payload || {},
+      };
+      if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(createdBy)) row.created_by = createdBy;
+      const { error } = await supabase.from('payment_reports').insert([row]);
+      if (error) throw error;
+      await loadPaymentReports();
+    } catch (e: any) {
+      console.warn('savePaymentReport failed', e);
+      showToast('Оплата прошла, но отчёт не сохранился: ' + (e?.message || 'неизвестно'), 'warning');
+    }
+  };
+
+  const generateSalaryReportPdf = async (report: any) => {
+    await ensurePdfLibs();
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    const money = (v: any) => `${Number(v || 0).toFixed(2)} руб.`;
+    try {
+      if (!tempWorkerReportPdfFontRef.current) {
+        const response = await fetch('https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.66/fonts/Roboto/Roboto-Regular.ttf');
+        if (response.ok) {
+          const blob = await response.blob();
+          tempWorkerReportPdfFontRef.current = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result || '').split(',')[1] || '');
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          });
+        }
+      }
+      if (tempWorkerReportPdfFontRef.current) {
+        doc.addFileToVFS('Roboto-Regular.ttf', tempWorkerReportPdfFontRef.current);
+        doc.addFont('Roboto-Regular.ttf', 'Roboto', 'normal');
+        doc.setFont('Roboto', 'normal');
+      }
+    } catch (fontError) {
+      console.warn('Salary report PDF font load failed', fontError);
+    }
+
+    const p = report?.payload || {};
+    const lines = Array.isArray(p.lines) ? p.lines : [];
+    doc.setFontSize(14);
+    doc.text('Отчет о выплате ЗП', 14, 14);
+    doc.setFontSize(9);
+    doc.text(`Сотрудник: ${p.employee_name || '-'}`, 14, 21);
+    doc.text(`Период: ${report.period_start || '-'} — ${report.period_end || '-'}`, 14, 27);
+    doc.text(`Дата выплаты: ${report.created_at ? new Date(report.created_at).toLocaleString('ru-RU') : '-'}`, 14, 33);
+    doc.text(`Кто оплатил: ${p.paid_by || '-'}`, 14, 39);
+    doc.text(`Итого выплачено: ${money(report.amount)}`, 14, 45);
+
+    const body = lines.map((l: any) => [
+      l?.date ? new Date(`${l.date}T12:00:00`).toLocaleDateString('ru-RU') : '-',
+      l?.comment || l?.work || '-',
+      String(l?.quantity ?? l?.hours ?? '-'),
+      money(l?.amount),
+    ]);
+
+    (autoTable as any)(doc, {
+      startY: 51,
+      head: [['Дата', 'Работа', 'Кол-во / Часы', 'Сумма']],
+      body,
+      styles: { font: 'Roboto', fontSize: 9, cellPadding: 2, overflow: 'linebreak' },
+      headStyles: { font: 'Roboto', fillColor: [15, 23, 42], textColor: 255, fontStyle: 'normal' },
+      bodyStyles: { font: 'Roboto', fontStyle: 'normal' },
+      alternateRowStyles: { fillColor: [250, 250, 250] },
+      margin: { left: 10, right: 10 },
+      columnStyles: { 0: { cellWidth: 30 }, 2: { cellWidth: 40, halign: 'right' }, 3: { cellWidth: 40, halign: 'right' } },
+    });
+
+    const safeName = `otchet_zp_${String(p.employee_name || 'sotrudnik')}`.replace(/[^a-zA-Z0-9_\-.]+/g, '_');
+    doc.save(`${safeName}.pdf`);
+  };
+
+  const handleDownloadSalaryReportPdf = async (report: any) => {
+    showToast('Формирую PDF отчёта…', 'info');
+    try {
+      await generateSalaryReportPdf(report);
+    } catch (e: any) {
+      showToast('Не удалось сформировать PDF: ' + (e?.message || 'неизвестно'), 'error');
+    }
+  };
+
   // Auto write-off the paid amount from the payer's "Деньги на складе" balance.
   const deductWarehouseMoneyForDeliveryPayment = async (payerSupplierId: string, total: number, comment: string) => {
     const payer = suppliers.find((s: any) => String(s.id) === String(payerSupplierId));
@@ -2481,7 +2592,24 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         const paidDelivery = (deliveryHistory || []).find((d: any) => String(d?.id) === String(deliveryId));
         const courier = String(paidDelivery?.courier || 'Доставщик');
         const dateText = paidDelivery?.date ? new Date(String(paidDelivery.date) + 'T12:00:00').toLocaleDateString('ru-RU') : '';
+        const payerName = suppliers.find((s: any) => String(s.id) === String(payerSupplierId))?.name || 'Поставщик';
         await deductWarehouseMoneyForDeliveryPayment(payerSupplierId, Number(paidDelivery?.amount || 0), `Оплата доставки: ${courier}${dateText ? ' от ' + dateText : ''}`);
+        await savePaymentReport({
+          kind: 'delivery',
+          title: `Оплата доставки: ${courier}${dateText ? ' от ' + dateText : ''}`,
+          amount: Number(paidDelivery?.amount || 0),
+          period_start: paidDelivery?.date || null,
+          period_end: paidDelivery?.date || null,
+          payload: {
+            paid_by: payerName,
+            items: [{
+              supply_type: paidDelivery?.supply_type || '',
+              courier,
+              amount: Number(paidDelivery?.amount || 0),
+              date: paidDelivery?.date || '',
+            }],
+          },
+        });
       }
       showToast(nextPaid ? 'Доставка отмечена оплаченной' : 'Оплата доставки снята', 'success');
     } catch (error: any) {
@@ -2532,6 +2660,23 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       {
         const couriers = Array.from(new Set(rows.map((d: any) => String(d?.courier || '').trim()).filter(Boolean)));
         await deductWarehouseMoneyForDeliveryPayment(supplierId, total, `Оплата доставок: ${couriers.join(', ') || 'доставщики'} — ${rows.length} шт.`);
+        const dates = rows.map((d: any) => String(d?.date || '')).filter(Boolean).sort();
+        await savePaymentReport({
+          kind: 'delivery',
+          title: `Быстрая оплата доставок — ${rows.length} шт.`,
+          amount: total,
+          period_start: dates[0] || null,
+          period_end: dates[dates.length - 1] || null,
+          payload: {
+            paid_by: payerSupplier?.name || 'Поставщик',
+            items: rows.map((d: any) => ({
+              supply_type: d?.supply_type || '',
+              courier: d?.courier || 'Доставщик',
+              amount: Number(d?.amount || 0),
+              date: d?.date || '',
+            })),
+          },
+        });
       }
       showToast(`Оплачено доставок: ${rows.length}`, 'success');
     } catch (error: any) {
@@ -15804,6 +15949,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     // Lazy-load data by active tab to reduce startup memory/load spikes.
     if (activeTab === 'reports') fetchReportsData();
     if (activeTab === 'employees' || activeTab === 'warehouse') fetchEmployees();
+    if (activeTab === 'employees') loadPaymentReports();
     if (activeTab === 'reception') fetchReceptions();
     if (activeTab === 'completed') {
       (async () => {
@@ -23889,6 +24035,82 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     )}
                   </tbody>
                 </table>
+              </div>
+
+              {/* Payment reports history */}
+              <div className="mt-6 oc-card overflow-hidden">
+                <div className="flex flex-col gap-3 border-b border-slate-100 p-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-500 text-white shadow-sm">
+                      <FileText className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <div className="font-bold text-slate-900 leading-tight">Отчёты об оплатах</div>
+                      <div className="text-xs text-slate-500">Сохранённые отчёты по оплатам</div>
+                    </div>
+                  </div>
+                  <div className="inline-flex rounded-xl bg-slate-100 p-1">
+                    <button onClick={() => setPaymentReportsTab('delivery')} className={`rounded-lg px-4 py-1.5 text-sm font-semibold transition-all ${paymentReportsTab === 'delivery' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Доставка</button>
+                    <button onClick={() => setPaymentReportsTab('salary')} className={`rounded-lg px-4 py-1.5 text-sm font-semibold transition-all ${paymentReportsTab === 'salary' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>ЗП</button>
+                  </div>
+                </div>
+                <div className="p-4 space-y-2">
+                  {paymentReportsLoading ? (
+                    <div className="py-8 text-center text-sm text-slate-400">Загрузка отчётов…</div>
+                  ) : (() => {
+                    const list = (paymentReports || []).filter((r: any) => r?.kind === paymentReportsTab);
+                    if (!list.length) return <div className="rounded-2xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-400">Отчётов пока нет</div>;
+                    return list.map((r: any) => {
+                      const items = Array.isArray(r?.payload?.items) ? r.payload.items : [];
+                      return (
+                        <div key={'pay-report-' + r.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="font-semibold text-slate-900">{r.title || 'Отчёт'}</div>
+                              <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                                <span>{r?.created_at ? new Date(r.created_at).toLocaleString('ru-RU') : ''}</span>
+                                {r?.payload?.paid_by && <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 font-medium text-slate-600">Оплатил: {r.payload.paid_by}</span>}
+                                {r?.payload?.employee_name && <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 font-medium text-slate-600">Сотрудник: {r.payload.employee_name}</span>}
+                              </div>
+                            </div>
+                            <div className="text-lg font-black text-emerald-700">{Number(r.amount || 0).toLocaleString('ru-RU')} ₽</div>
+                          </div>
+                          {paymentReportsTab === 'delivery' && items.length > 0 && (
+                            <div className="mt-3 overflow-x-auto">
+                              <table className="w-full text-left text-xs">
+                                <thead>
+                                  <tr className="text-slate-400">
+                                    <th className="py-1 pr-3 font-medium">Тип поставки</th>
+                                    <th className="py-1 pr-3 font-medium">Кто вёз</th>
+                                    <th className="py-1 pr-3 font-medium">Дата</th>
+                                    <th className="py-1 font-medium text-right">Сумма</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100">
+                                  {items.map((it: any, idx: number) => (
+                                    <tr key={'pr-item-' + r.id + '-' + idx}>
+                                      <td className="py-1.5 pr-3 text-slate-700">{it?.supply_type || '—'}</td>
+                                      <td className="py-1.5 pr-3 text-slate-700">{it?.courier || '—'}</td>
+                                      <td className="py-1.5 pr-3 text-slate-500">{it?.date ? new Date(String(it.date) + 'T12:00:00').toLocaleDateString('ru-RU') : '—'}</td>
+                                      <td className="py-1.5 text-right font-semibold text-slate-900">{Number(it?.amount || 0).toLocaleString('ru-RU')} ₽</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                          {paymentReportsTab === 'salary' && r?.payload?.pdf_available && (
+                            <div className="mt-3">
+                              <button onClick={() => handleDownloadSalaryReportPdf(r)} className="inline-flex items-center gap-1.5 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100">
+                                <Download className="h-3.5 w-3.5" /> Скачать PDF
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    });
+                  })()}
+                </div>
               </div>
             </div>
             </EmployeesSection>
