@@ -1,4 +1,10 @@
-import ExcelJS from 'exceljs/dist/exceljs.min.js';
+// ExcelJS is heavy (~900KB) — load it lazily so it only enters the bundle
+// when an export actually runs, not on initial page load.
+let _ExcelJS: any = null;
+const loadExcel = async () => {
+  if (!_ExcelJS) _ExcelJS = (await import('exceljs/dist/exceljs.min.js')).default;
+  return _ExcelJS;
+};
 
 type JsonRow = Record<string, unknown>;
 
@@ -22,6 +28,7 @@ const normalizeRows = (rows: JsonRow[], headers: string[]) =>
   rows.map((row) => headers.map((h) => row[h] ?? ''));
 
 export const createWorkbookBlob = async (sheets: SheetSpec[]) => {
+  const ExcelJS = await loadExcel();
   const wb = new ExcelJS.Workbook();
 
   sheets.forEach((sheet) => {
@@ -55,6 +62,7 @@ export const downloadAoaWorkbook = async (
   sheetName: string,
   rows: Array<Array<string | number | null | undefined>>
 ) => {
+  const ExcelJS = await loadExcel();
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet(sheetName || 'Sheet1');
   rows.forEach((r) => ws.addRow(r));

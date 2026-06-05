@@ -38,6 +38,10 @@ create table if not exists market_product_snapshots (
 );
 create index if not exists idx_mps_nm_date on market_product_snapshots(wb_nm_id, snapshot_date);
 create index if not exists idx_mps_query_date on market_product_snapshots(query_id, snapshot_date);
+-- covers the LATERAL subquery ORDER BY snapshot_at DESC in the /market/products route
+create index if not exists idx_mps_nm_snapshot_at on market_product_snapshots(wb_nm_id, snapshot_at desc);
+-- covers the market_niche_daily max(day) subquery
+create index if not exists idx_mnd_day on market_niche_daily(day desc);
 
 create table if not exists market_niche_daily (
   id bigserial primary key,

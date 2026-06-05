@@ -1,6 +1,16 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
-const BOT_TOKEN = '8507409009:AAEyHiINhdM8el6Zld2devdlqxheF-X2LXA';
+const BOT_TOKEN = Deno.env.get('TELEGRAM_BOT_TOKEN') ?? '';
+
+const ALLOWED_MIME_TYPES = new Set([
+  'application/pdf',
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-excel',
+]);
+const MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024; // 20 MB
 
 Deno.serve(async (req) => {
   try {
@@ -52,6 +62,12 @@ Deno.serve(async (req) => {
       }
 
       if (fileId) {
+        // Validate MIME type against allowlist
+        if (mimeType && !ALLOWED_MIME_TYPES.has(mimeType)) {
+          await sendTelegramMessage(chatId, `Файл отклонён: тип "${mimeType}" не разрешён. Принимаются только PDF, JPG, PNG, WEBP, XLSX.`);
+          return new Response('ok');
+        }
+
         // 1. Identify Supplier
         const { data: supplier, error: supplierError } = await supabase
             .from('suppliers')
@@ -74,13 +90,27 @@ Deno.serve(async (req) => {
         // 3. Download File
         const fileUrl = `https://api.telegram.org/file/bot${BOT_TOKEN}/${fileInfo.file_path}`;
         const fileResponse = await fetch(fileUrl);
+
+        // Validate file size from Content-Length before buffering
+        const contentLength = Number(fileResponse.headers.get('content-length') || 0);
+        if (contentLength > MAX_FILE_SIZE_BYTES) {
+          await sendTelegramMessage(chatId, `Файл слишком большой (${Math.round(contentLength / 1024 / 1024)} МБ). Максимум — 20 МБ.`);
+          return new Response('ok');
+        }
+
         const fileBlob = await fileResponse.blob();
 
-        // 4. Upload to Supabase Storage
-        // Ensure bucket exists
+        // Double-check actual size after download
+        if (fileBlob.size > MAX_FILE_SIZE_BYTES) {
+          await sendTelegramMessage(chatId, `Файл слишком большой. Максимум — 20 МБ.`);
+          return new Response('ok');
+        }
+
+        // 4. Upload to Supabase Storage (bucket must be private — created manually)
         const { data: buckets } = await supabase.storage.listBuckets();
         if (!buckets?.find(b => b.name === 'print_files')) {
-            await supabase.storage.createBucket('print_files', { public: true });
+            // private: no public access, files served via signed URLs only
+            await supabase.storage.createBucket('print_files', { public: false });
         }
 
         const storagePath = `${supplier.id}/${Date.now()}_${fileName}`;

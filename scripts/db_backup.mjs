@@ -240,15 +240,39 @@ const summary = {
   tables: {},
 };
 
-for (const table of DATABASE_BACKUP_TABLES) {
-  try {
-    const rows = await dumpTable(supabase, table);
-    fs.writeFileSync(path.join(backupDir, `${table}.json`), JSON.stringify(rows, null, 2));
-    summary.tables[table] = { ok: true, count: rows.length };
+const DUMP_CONCURRENCY = 5;
+
+async function dumpAllTables(tables) {
+  const results = new Array(tables.length);
+  let idx = 0;
+
+  async function worker() {
+    while (idx < tables.length) {
+      const i = idx++;
+      const table = tables[i];
+      try {
+        const rows = await dumpTable(supabase, table);
+        fs.writeFileSync(path.join(backupDir, `${table}.json`), JSON.stringify(rows, null, 2));
+        results[i] = { ok: true, count: rows.length };
+      } catch (error) {
+        results[i] = { ok: false, error: String(error?.message || error) };
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: DUMP_CONCURRENCY }, worker));
+  return results;
+}
+
+const dumpResults = await dumpAllTables(DATABASE_BACKUP_TABLES);
+for (let i = 0; i < DATABASE_BACKUP_TABLES.length; i++) {
+  const table = DATABASE_BACKUP_TABLES[i];
+  const result = dumpResults[i];
+  summary.tables[table] = result;
+  if (result.ok) {
     summary.okTables += 1;
-    summary.totalRows += rows.length;
-  } catch (error) {
-    summary.tables[table] = { ok: false, error: String(error?.message || error) };
+    summary.totalRows += result.count;
+  } else {
     summary.failedTables += 1;
   }
 }

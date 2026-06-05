@@ -13,18 +13,39 @@ const WBSupplyManager = React.lazy(() => import('../components/WBSupplyManager')
 const Tasks = React.lazy(() => import('../components/Tasks').then((m) => ({ default: m.Tasks })));
 const WarehouseTab = React.lazy(() => import('../components/WarehouseTab').then((m) => ({ default: m.WarehouseTab })));
 const AdvertisingInsights = React.lazy(() => import('../components/AdvertisingInsights').then((m) => ({ default: m.AdvertisingInsights })));
+const CamerasTab = React.lazy(() => import('../components/CamerasTab').then((m) => ({ default: m.CamerasTab })));
 import { createWorkbookBlob, downloadAoaWorkbook, downloadWorkbook } from '../utils/excelExport';
 import { QRCodeSVG } from 'qrcode.react';
-import { jsPDF } from "jspdf";
-import autoTable from 'jspdf-autotable';
 import bwipjs from 'bwip-js';
 import { telegramService } from '../services/telegram.service';
 import { useWarehousePersistence } from '../hooks/useWarehousePersistence';
-import { BrowserMultiFormatReader, IScannerControls } from '@zxing/browser';
-import { BarcodeFormat, DecodeHintType } from '@zxing/library';
 import { downloadJsonRowsAsExcel, ensureExcelFileSize, ensureExcelRowLimit, ensureRequiredColumns, readFirstSheetAsJson } from '../utils/safeExcel';
-import ExcelJS from 'exceljs/dist/exceljs.min.js';
 import { mergeWarehouseUpdates, removeWarehouseShelfItem, upsertWarehouseShelfItem } from '../utils/warehouseActions';
+
+// Lazy-loaded heavy libraries — pulled in only when a PDF/Excel action runs,
+// keeping them out of the initial dashboard chunk.
+let jsPDF: any = null;
+let autoTable: any = null;
+let ExcelJS: any = null;
+let _pdfLibsPromise: Promise<void> | null = null;
+let _excelPromise: Promise<void> | null = null;
+const ensurePdfLibs = () => {
+  if (!_pdfLibsPromise) {
+    _pdfLibsPromise = Promise.all([import('jspdf'), import('jspdf-autotable')]).then(([p, a]) => {
+      jsPDF = (p as any).jsPDF;
+      autoTable = (a as any).default;
+    });
+  }
+  return _pdfLibsPromise;
+};
+const ensureExcel = () => {
+  if (!_excelPromise) {
+    _excelPromise = import('exceljs/dist/exceljs.min.js').then((m) => {
+      ExcelJS = (m as any).default;
+    });
+  }
+  return _excelPromise;
+};
 import { DASHBOARD_TAB_IDS, isDashboardTabId } from '../constants/dashboardTabs';
 import { getDefaultWarehouseOfflineUrl, getWarehouseOfflineUrl, isWarehouseOfflineEnabled, setWarehouseOfflineEnabled, setWarehouseOfflineUrl, warehouseOfflineClient, WarehouseOfflineSnapshot, WarehouseOfflineStatus } from '../lib/warehouseOffline';
 
@@ -296,6 +317,7 @@ interface FboPallet {
   session_id: string;
   supplier_id: string;
   warehouse_id?: string | null;
+  supply_id?: string | null;
   pallet_number: number;
   created_at: string;
   deleted_at?: string | null;
@@ -305,6 +327,16 @@ interface FboPalletWarehouse {
   id: string;
   supplier_id: string;
   name: string;
+  created_at: string;
+  deleted_at?: string | null;
+}
+
+interface FboPalletSupply {
+  id: string;
+  supplier_id: string;
+  warehouse_id: string;
+  name: string;
+  date?: string | null;
   created_at: string;
   deleted_at?: string | null;
 }
@@ -343,6 +375,8 @@ interface FboPalletProductOption {
 
 interface FboPalletHint {
   warehouse_name?: string | null;
+  supply_name?: string | null;
+  supply_date?: string | null;
   pallet_number: number;
   item_title: string;
   item_size?: string | null;
@@ -354,6 +388,7 @@ interface FboPalletHint {
 interface FboPalletSnapshot {
   sessions: FboPalletSession[];
   warehouses: FboPalletWarehouse[];
+  supplies: FboPalletSupply[];
   pallets: FboPallet[];
   items: FboPalletItem[];
 }
@@ -1301,6 +1336,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   };
 
   const handlePrintHonestSignHistory = async (fileName: string, date: string) => {
+    await ensurePdfLibs();
     try {
         const targetDate = new Date(date);
         const start = new Date(targetDate.getTime() - 3600000).toISOString();
@@ -2484,6 +2520,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   };
 
   const handleDownloadDeliveryReportPdf = async () => {
+    await ensurePdfLibs();
     try {
       showToast('Создаю PDF отчёт по доставкам...', 'success');
       const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
@@ -2918,6 +2955,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   }), [generalTempWorkerRows, generalDeliveryRows, generalReportCwRows]);
 
   const handleDownloadGeneralReportPdf = async () => {
+    await ensurePdfLibs();
     try {
       showToast('Создаю общий PDF отчёт...', 'success');
       const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
@@ -3030,6 +3068,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   };
 
   const handleDownloadCwReportPdf = async () => {
+    await ensurePdfLibs();
     if (!cwReportResult || cwReportResult.length === 0) {
       showToast('Сначала сформируйте отчет', 'error');
       return;
@@ -3130,6 +3169,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   };
 
   const handleDownloadTempWorkerReportPdf = async () => {
+    await ensurePdfLibs();
     try {
       showToast('Создаю PDF отчёт...', 'success');
       const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
@@ -5385,6 +5425,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [fboPalletWarehouses, setFboPalletWarehouses] = useState<FboPalletWarehouse[]>([]);
   const [fboPalletWarehouseName, setFboPalletWarehouseName] = useState('');
   const [fboPalletSelectedWarehouseId, setFboPalletSelectedWarehouseId] = useState('');
+  const [fboPalletSupplies, setFboPalletSupplies] = useState<FboPalletSupply[]>([]);
+  const [fboPalletSupplyName, setFboPalletSupplyName] = useState('');
+  const [fboPalletSupplyDate, setFboPalletSupplyDate] = useState('');
+  const [fboPalletSelectedSupplyId, setFboPalletSelectedSupplyId] = useState('');
+  const [fboPalletSupplyEdit, setFboPalletSupplyEdit] = useState<{ id: string; name: string; date: string } | null>(null);
+  const [fboPalletWarehouseEdit, setFboPalletWarehouseEdit] = useState<{ id: string; name: string } | null>(null);
+  const [fboPalletItemQtyEdit, setFboPalletItemQtyEdit] = useState<{ id: string; title: string; qty: string } | null>(null);
   const [fboPallets, setFboPallets] = useState<FboPallet[]>([]);
   const [fboPalletItems, setFboPalletItems] = useState<FboPalletItem[]>([]);
   const [fboPalletLoading, setFboPalletLoading] = useState(false);
@@ -6162,6 +6209,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   };
 
   const handleGenerateFboBoxesLabelsFromExcel = async () => {
+    await ensurePdfLibs();
     try {
       if (!fboBoxesSupplierId) return showToast('Сначала выберите поставщика для коробок FBO', 'error');
       if (!fboBoxesExcelFile) return showToast('Загрузите Excel файл', 'error');
@@ -6422,6 +6470,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   };
 
   const printCurrentSupplyBoxes58x40 = async () => {
+    await ensurePdfLibs();
     if (!currentSupply) return;
     const { data: boxes } = await supabase
       .from('boxes')
@@ -6985,11 +7034,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       return {
         sessions: Array.isArray(parsed?.sessions) ? parsed.sessions as FboPalletSession[] : [],
         warehouses: Array.isArray(parsed?.warehouses) ? parsed.warehouses as FboPalletWarehouse[] : [],
+        supplies: Array.isArray(parsed?.supplies) ? parsed.supplies as FboPalletSupply[] : [],
         pallets: Array.isArray(parsed?.pallets) ? parsed.pallets as FboPallet[] : [],
         items: Array.isArray(parsed?.items) ? parsed.items as FboPalletItem[] : [],
       };
     } catch {
-      return { sessions: [] as FboPalletSession[], warehouses: [] as FboPalletWarehouse[], pallets: [] as FboPallet[], items: [] as FboPalletItem[] };
+      return { sessions: [] as FboPalletSession[], warehouses: [] as FboPalletWarehouse[], supplies: [] as FboPalletSupply[], pallets: [] as FboPallet[], items: [] as FboPalletItem[] };
     }
   };
 
@@ -7030,10 +7080,26 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       .filter((warehouse) => !warehouse.deleted_at && (!normalizedSupplierId || String(warehouse.supplier_id) === normalizedSupplierId))
       .sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')));
     setFboPalletWarehouses(warehouses);
+    const supplies = snapshot.supplies
+      .filter((supply) => !supply.deleted_at && (!normalizedSupplierId || String(supply.supplier_id) === normalizedSupplierId))
+      .sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')));
+    setFboPalletSupplies(supplies);
+
+    // Resolve the selected warehouse via a functional updater (reads latest state),
+    // capture the resolved id, then pick a supply that belongs to that warehouse.
+    let resolvedWarehouseId = '';
     setFboPalletSelectedWarehouseId((current) => {
-      if (current && warehouses.some((warehouse) => String(warehouse.id) === String(current))) return current;
-      return warehouses[0]?.id || '';
+      resolvedWarehouseId = current && warehouses.some((warehouse) => String(warehouse.id) === String(current))
+        ? current
+        : (warehouses[0]?.id || '');
+      return resolvedWarehouseId;
     });
+    setFboPalletSelectedSupplyId((current) => {
+      const inWarehouse = supplies.filter((supply) => String(supply.warehouse_id) === String(resolvedWarehouseId));
+      if (current && inWarehouse.some((supply) => String(supply.id) === String(current))) return current;
+      return inWarehouse[0]?.id || '';
+    });
+
     setFboPallets(pallets);
     setFboPalletItems(items);
   };
@@ -7153,6 +7219,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     setFboPalletSupplierId(supplierId);
     setFboPalletSelectedWarehouseId('');
     setFboPalletWarehouseName('');
+    setFboPalletSelectedSupplyId('');
+    setFboPalletSupplyName('');
     setFboPalletProductSearch('');
     setFboPalletBrandFilter('');
     setFboPalletCategoryFilter('');
@@ -7195,10 +7263,180 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       await saveFboPalletSnapshot({ ...snapshot, warehouses: [...snapshot.warehouses, warehouse] });
       await fetchFboPalletData(supplierId);
       setFboPalletSelectedWarehouseId(warehouse.id);
+      setFboPalletSelectedSupplyId('');
       setFboPalletWarehouseName('');
       showToast('Склад поставки добавлен: ' + name, 'success');
     } catch (e: any) {
       showToast('Ошибка добавления склада поставки: ' + (e?.message || 'неизвестно'), 'error');
+    }
+  };
+
+  const selectFboPalletWarehouse = (warehouseId: string) => {
+    setFboPalletSelectedWarehouseId(warehouseId);
+    const firstSupply = fboPalletSupplies.find((supply) => String(supply.warehouse_id) === String(warehouseId));
+    setFboPalletSelectedSupplyId(firstSupply?.id || '');
+  };
+
+  const handleAddFboPalletSupply = async () => {
+    const supplierId = String(fboPalletSupplierId || '').trim();
+    const warehouseId = String(fboPalletSelectedWarehouseId || '').trim();
+    const name = String(fboPalletSupplyName || '').trim();
+    if (!supplierId) {
+      showToast('Выберите поставщика', 'error');
+      return;
+    }
+    if (!warehouseId) {
+      showToast('Сначала выберите склад поставки', 'error');
+      return;
+    }
+    if (!name) {
+      showToast('Напишите название поставки', 'error');
+      return;
+    }
+
+    try {
+      const snapshot = await loadFboPalletSnapshot();
+      const existing = snapshot.supplies.find((supply) => (
+        String(supply.warehouse_id) === warehouseId &&
+        !supply.deleted_at &&
+        String(supply.name || '').trim().toLowerCase() === name.toLowerCase()
+      ));
+      if (existing) {
+        setFboPalletSelectedSupplyId(existing.id);
+        setFboPalletSupplyName('');
+        showToast('Поставка уже есть, открыта: ' + existing.name, 'info');
+        return;
+      }
+
+      const supply: FboPalletSupply = {
+        id: createFboPalletId('fbo-pallet-supply'),
+        supplier_id: supplierId,
+        warehouse_id: warehouseId,
+        name,
+        date: String(fboPalletSupplyDate || '').trim() || null,
+        created_at: new Date().toISOString(),
+        deleted_at: null,
+      };
+      await saveFboPalletSnapshot({ ...snapshot, supplies: [...snapshot.supplies, supply] });
+      await fetchFboPalletData(supplierId);
+      setFboPalletSelectedSupplyId(supply.id);
+      setFboPalletSupplyName('');
+      setFboPalletSupplyDate('');
+      showToast('Поставка добавлена: ' + name, 'success');
+    } catch (e: any) {
+      showToast('Ошибка добавления поставки: ' + (e?.message || 'неизвестно'), 'error');
+    }
+  };
+
+  const handleDeleteFboPalletSupply = async (supplyId: string) => {
+    const id = String(supplyId || '').trim();
+    if (!id) return;
+    try {
+      const snapshot = await loadFboPalletSnapshot();
+      const supply = snapshot.supplies.find((s) => String(s.id) === id);
+      const palletIds = new Set(
+        snapshot.pallets.filter((p) => String(p.supply_id || '') === id).map((p) => String(p.id))
+      );
+      const activePallets = snapshot.pallets.filter((p) => palletIds.has(String(p.id)) && !p.deleted_at).length;
+      const confirmed = window.confirm(
+        activePallets > 0
+          ? `Удалить поставку «${supply?.name || id}»? Вместе с ней будут полностью удалены паллеты (${activePallets}) и их товары.`
+          : `Удалить поставку «${supply?.name || id}»?`
+      );
+      if (!confirmed) return;
+
+      // Физическое удаление: убираем поставку, её паллеты и товары из снапшота
+      await saveFboPalletSnapshot({
+        ...snapshot,
+        supplies: snapshot.supplies.filter((s) => String(s.id) !== id),
+        pallets: snapshot.pallets.filter((p) => !palletIds.has(String(p.id))),
+        items: snapshot.items.filter((item) => !palletIds.has(String(item.pallet_id))),
+      });
+      setFboPalletSelectedSupplyId((current) => String(current) === id ? '' : current);
+      await fetchFboPalletData(fboPalletSupplierId);
+      showToast('Поставка удалена', 'success');
+    } catch (e: any) {
+      showToast('Ошибка удаления поставки: ' + (e?.message || 'неизвестно'), 'error');
+    }
+  };
+
+  const openFboPalletWarehouseEdit = (warehouse: FboPalletWarehouse) => {
+    setFboPalletWarehouseEdit({ id: warehouse.id, name: warehouse.name || '' });
+  };
+
+  const handleSaveFboPalletWarehouseEdit = async () => {
+    const edit = fboPalletWarehouseEdit;
+    if (!edit) return;
+    const name = String(edit.name || '').trim();
+    if (!name) {
+      showToast('Название склада не может быть пустым', 'error');
+      return;
+    }
+    try {
+      const snapshot = await loadFboPalletSnapshot();
+      await saveFboPalletSnapshot({
+        ...snapshot,
+        warehouses: snapshot.warehouses.map((w) => String(w.id) === String(edit.id) ? { ...w, name } : w),
+      });
+      setFboPalletWarehouseEdit(null);
+      await fetchFboPalletData(fboPalletSupplierId);
+      showToast('Склад переименован', 'success');
+    } catch (e: any) {
+      showToast('Ошибка редактирования склада: ' + (e?.message || 'неизвестно'), 'error');
+    }
+  };
+
+  const openFboPalletSupplyEdit = (supply: FboPalletSupply) => {
+    setFboPalletSupplyEdit({ id: supply.id, name: supply.name || '', date: supply.date || '' });
+  };
+
+  const handleSaveFboPalletSupplyEdit = async () => {
+    const edit = fboPalletSupplyEdit;
+    if (!edit) return;
+    const name = String(edit.name || '').trim();
+    if (!name) {
+      showToast('Название поставки не может быть пустым', 'error');
+      return;
+    }
+    try {
+      const snapshot = await loadFboPalletSnapshot();
+      await saveFboPalletSnapshot({
+        ...snapshot,
+        supplies: snapshot.supplies.map((s) => String(s.id) === String(edit.id)
+          ? { ...s, name, date: String(edit.date || '').trim() || null }
+          : s),
+      });
+      setFboPalletSupplyEdit(null);
+      await fetchFboPalletData(fboPalletSupplierId);
+      showToast('Поставка обновлена', 'success');
+    } catch (e: any) {
+      showToast('Ошибка редактирования поставки: ' + (e?.message || 'неизвестно'), 'error');
+    }
+  };
+
+  const openFboPalletItemQtyEdit = (item: FboPalletItem) => {
+    setFboPalletItemQtyEdit({ id: item.id, title: item.title || '', qty: String(Math.max(1, Number(item.qty || 1))) });
+  };
+
+  const handleSaveFboPalletItemQtyEdit = async () => {
+    const edit = fboPalletItemQtyEdit;
+    if (!edit) return;
+    const qty = Math.floor(Number(edit.qty));
+    if (!Number.isFinite(qty) || qty < 1) {
+      showToast('Введите целое число больше 0', 'error');
+      return;
+    }
+    try {
+      const snapshot = await loadFboPalletSnapshot();
+      await saveFboPalletSnapshot({
+        ...snapshot,
+        items: snapshot.items.map((it) => String(it.id) === String(edit.id) ? { ...it, qty } : it),
+      });
+      setFboPalletItemQtyEdit(null);
+      await fetchFboPalletData(fboPalletSupplierId);
+      showToast('Количество обновлено', 'success');
+    } catch (e: any) {
+      showToast('Ошибка изменения количества: ' + (e?.message || 'неизвестно'), 'error');
     }
   };
 
@@ -7212,10 +7450,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       showToast('Сначала выберите или создайте склад поставки', 'error');
       return;
     }
+    if (!fboPalletSelectedSupplyId) {
+      showToast('Сначала выберите или создайте поставку', 'error');
+      return;
+    }
 
     try {
       const { session, snapshot } = await getFboPalletActiveSession(supplierId);
-      const currentPallets = snapshot.pallets.filter((p) => String(p.session_id) === String(session.id) && String(p.warehouse_id || '') === String(fboPalletSelectedWarehouseId) && !p.deleted_at);
+      const currentPallets = snapshot.pallets.filter((p) => String(p.session_id) === String(session.id) && String(p.supply_id || '') === String(fboPalletSelectedSupplyId) && !p.deleted_at);
       const used = new Set(currentPallets.map((p) => Number(p.pallet_number)).filter((n) => Number.isFinite(n) && n > 0));
       let nextNumber = 1;
       while (used.has(nextNumber)) nextNumber += 1;
@@ -7225,6 +7467,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         session_id: session.id,
         supplier_id: supplierId,
         warehouse_id: fboPalletSelectedWarehouseId,
+        supply_id: fboPalletSelectedSupplyId,
         pallet_number: nextNumber,
         created_at: new Date().toISOString(),
         deleted_at: null,
@@ -7351,6 +7594,47 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     }
   };
 
+  const handleDeleteFboPalletWarehouse = async (warehouseId: string) => {
+    const id = String(warehouseId || '').trim();
+    if (!id) return;
+    try {
+      const snapshot = await loadFboPalletSnapshot();
+      const warehouse = snapshot.warehouses.find((w) => String(w.id) === id);
+      const supplyIds = new Set(
+        snapshot.supplies.filter((s) => String(s.warehouse_id) === id).map((s) => String(s.id))
+      );
+      const palletIds = new Set(
+        snapshot.pallets
+          .filter((p) => String(p.warehouse_id || '') === id || supplyIds.has(String(p.supply_id || '')))
+          .map((p) => String(p.id))
+      );
+      const activePallets = snapshot.pallets.filter((p) => palletIds.has(String(p.id)) && !p.deleted_at).length;
+      const confirmed = window.confirm(
+        activePallets > 0
+          ? `Удалить склад «${warehouse?.name || id}»? Вместе с ним будут полностью удалены поставки, паллеты (${activePallets}) и их товары.`
+          : `Удалить склад «${warehouse?.name || id}»?`
+      );
+      if (!confirmed) return;
+
+      // Физическое удаление: убираем склад, его поставки, паллеты и товары из снапшота
+      await saveFboPalletSnapshot({
+        ...snapshot,
+        warehouses: snapshot.warehouses.filter((w) => String(w.id) !== id),
+        supplies: snapshot.supplies.filter((s) => !supplyIds.has(String(s.id))),
+        pallets: snapshot.pallets.filter((p) => !palletIds.has(String(p.id))),
+        items: snapshot.items.filter((item) => !palletIds.has(String(item.pallet_id))),
+      });
+      if (String(fboPalletSelectedWarehouseId) === id) {
+        setFboPalletSelectedWarehouseId('');
+        setFboPalletSelectedSupplyId('');
+      }
+      await fetchFboPalletData(fboPalletSupplierId);
+      showToast('Склад удалён', 'success');
+    } catch (e: any) {
+      showToast('Ошибка удаления склада: ' + (e?.message || 'неизвестно'), 'error');
+    }
+  };
+
   const getFboPalletScannedCount = async (product: Product) => {
     if (!currentSupply) return 0;
     const productId = String(product?.id || '').trim();
@@ -7417,7 +7701,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       if ((!productId || productId.startsWith('offline-product-')) && !barcode && !nmId) return null;
 
       const snapshot = await loadFboPalletSnapshot();
-      const warehouseById = new Map(snapshot.warehouses.filter((warehouse) => !warehouse.deleted_at).map((warehouse) => [String(warehouse.id), warehouse]));
+      // Include deleted warehouses/supplies too: a pallet may still reference a
+      // soft-deleted one, and we still want to show its name in the scan hint.
+      const warehouseById = new Map(snapshot.warehouses.map((warehouse) => [String(warehouse.id), warehouse]));
+      const supplyById = new Map((snapshot.supplies || []).map((supply) => [String(supply.id), supply]));
       const activeSessionIds = new Set(snapshot.sessions
         .filter((session) => String(session.supplier_id) === supplierId && session.status === 'active' && !session.deleted_at)
         .map((session) => String(session.id)));
@@ -7440,18 +7727,34 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           return String(a.created_at || '').localeCompare(String(b.created_at || ''));
         });
       if (matchingItems.length === 0) return null;
+
+      // Prefer items on pallets that belong to a real (non-deleted) warehouse.
+      // Orphaned legacy pallets without a warehouse_id must not win the hint when
+      // a properly-assigned pallet holds the same product — otherwise the worker
+      // sees "Склад: не указан" even though the product is on a named pallet.
+      const palletHasWarehouse = (palletId?: string | null) => {
+        const pal = activePalletById.get(String(palletId || ''));
+        const wh = pal ? warehouseById.get(String(pal.warehouse_id || '')) : null;
+        return !!(wh && !wh.deleted_at);
+      };
+      const warehouseBacked = matchingItems.filter((item) => palletHasWarehouse(item.pallet_id));
+      const effectiveItems = warehouseBacked.length > 0 ? warehouseBacked : matchingItems;
+
       const scannedQty = await getFboPalletScannedCount(product);
       let cumulativeQty = 0;
-      const data = matchingItems.find((item) => {
+      const data = effectiveItems.find((item) => {
         cumulativeQty += Math.max(1, Number(item.qty || 1));
         return scannedQty < cumulativeQty;
       });
       const pallet = activePalletById.get(String(data?.pallet_id || ''));
       if (!data || !pallet?.pallet_number) return null;
       const warehouse = warehouseById.get(String(pallet.warehouse_id || ''));
+      const supply = supplyById.get(String(pallet.supply_id || ''));
       const targetQty = Math.max(1, Number(data.qty || 1));
       return {
         warehouse_name: warehouse?.name || '',
+        supply_name: supply?.name || '',
+        supply_date: supply?.date || '',
         pallet_number: Number(pallet.pallet_number),
         item_title: String(data.title || product.name || ''),
         item_size: data.size || product.size || '',
@@ -7757,7 +8060,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     const palletHint = await findFboPalletHint(product);
     setFboPalletHint(palletHint);
     if (palletHint) {
-      showToast(`${palletHint.warehouse_name ? palletHint.warehouse_name + ' • ' : ''}Паллета №${palletHint.pallet_number}: ${Number(palletHint.scanned_qty || 0) + 1}/${palletHint.target_qty || 1}. Поставьте коробку туда.`, 'info');
+      showToast(`${(palletHint.warehouse_name || 'Склад не указан') + ' • '}${(palletHint.supply_name || 'Поставка не указана') + ' • '}Паллета №${palletHint.pallet_number}: ${Number(palletHint.scanned_qty || 0) + 1}/${palletHint.target_qty || 1}. Поставьте коробку туда.`, 'info');
     }
 
     setScannedItem(product);
@@ -12146,6 +12449,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   };
 
   const generateAndSendQR = async (employee: any, isNew = false) => {
+    await ensurePdfLibs();
       let authToken = employee.auth_token;
       if (!authToken) {
           authToken = createPermanentAuthToken();
@@ -15183,6 +15487,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   }, [adsUnified]);
 
   const handleAdsExcelUpload = async (file: File) => {
+    await ensureExcel();
     try {
       const sizeError = ensureExcelFileSize(file);
       if (sizeError) {
@@ -15948,6 +16253,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   };
 
   const handleTestPrintWbLayout = async (template: 'withChz' | 'withoutChz' | 'fboBoxes' | 'nameSequence') => {
+    await ensurePdfLibs();
     try {
       const layout = getWbLayoutPayloadFromEditor();
       const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: [58, 40] });
@@ -16053,6 +16359,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   };
 
   const handlePrintNameSequenceLabels = async () => {
+    await ensurePdfLibs();
     try {
       const rawName = String(nameSequencePrintForm.name || '').trim();
       const qty = Math.min(500, Math.max(1, parseInt(nameSequencePrintForm.quantity || '1', 10) || 1));
@@ -16101,6 +16408,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   };
 
   const handleGenerateLabelsPdf = async () => {
+    await ensurePdfLibs();
     try {
       const qty = Math.min(200, Math.max(1, parseInt(labelBuilder.quantity || '1')));
       const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: [58, 40] }); // XPrinter 420B: 58x40
@@ -17248,8 +17556,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 	                    <button
 	                      type="button"
 	                      onClick={openFboPalletCollector}
-	                      disabled={!selectedSupplierId}
-	                      className="mt-3 inline-flex min-h-[48px] w-full items-center justify-center rounded-xl bg-violet-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
+	                      className="mt-3 inline-flex min-h-[48px] w-full items-center justify-center rounded-xl bg-violet-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-violet-700"
 	                    >
 	                      <Box className="h-4 w-4 mr-2" /> <span className="whitespace-nowrap">Собрать паллеты</span>
 	                    </button>
@@ -17974,7 +18281,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         {fboPalletHint && (
 	                          <div className="mt-3 rounded-2xl border border-violet-200 bg-violet-50 px-4 py-3 text-violet-900">
 	                            <div className="text-xs font-semibold uppercase tracking-wide text-violet-600">Куда ставить коробку</div>
-	                            {fboPalletHint.warehouse_name && <div className="mt-1 text-lg font-bold">Склад: {fboPalletHint.warehouse_name}</div>}
+	                            <div className="mt-1 text-lg font-bold">Склад: {fboPalletHint.warehouse_name || 'не указан'}</div>
+	                            <div className="mt-1 text-lg font-bold">Поставка: {fboPalletHint.supply_name || 'не указана'}{fboPalletHint.supply_date ? ` (${new Date(`${fboPalletHint.supply_date}T12:00:00`).toLocaleDateString('ru-RU')})` : ''}</div>
 	                            <div className="mt-1 text-2xl font-black">Паллета №{fboPalletHint.pallet_number}</div>
 	                            <div className="mt-1 text-xs text-violet-700">Осталось по плану: {Math.max(0, Number(fboPalletHint.target_qty || 1) - Number(fboPalletHint.scanned_qty || 0))} из {fboPalletHint.target_qty || 1}.</div>
                           </div>
@@ -18041,7 +18349,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           <p className="mt-1 text-sm text-slate-500">Добавьте товары поставщика в паллеты, чтобы при сканировании коробки видеть нужную паллету.</p>
                         </div>
 	                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-	                          <button type="button" onClick={handleAddFboPallet} disabled={!fboPalletSupplierId || !fboPalletSelectedWarehouseId || fboPalletLoading} className="rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700 disabled:opacity-50">Добавить паллету</button>
+	                          <button type="button" onClick={handleAddFboPallet} disabled={!fboPalletSupplierId || !fboPalletSelectedWarehouseId || !fboPalletSelectedSupplyId || fboPalletLoading} className="rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700 disabled:opacity-50">Добавить паллету</button>
                           <button type="button" onClick={() => { setFboPalletHistoryOpen(true); fetchFboPalletData(fboPalletSupplierId); }} className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">История паллет</button>
                           <button type="button" onClick={() => setFboPalletModalOpen(false)} className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Закрыть</button>
                         </div>
@@ -18077,14 +18385,92 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 	                            ) : fboPalletWarehouses.map((warehouse) => {
 	                              const selected = String(fboPalletSelectedWarehouseId) === String(warehouse.id);
 	                              return (
-	                                <button
+	                                <div
 	                                  key={'fbo-pallet-warehouse-' + warehouse.id}
-	                                  type="button"
-	                                  onClick={() => setFboPalletSelectedWarehouseId(warehouse.id)}
-	                                  className={'rounded-xl border px-4 py-2 text-sm font-semibold ' + (selected ? 'border-violet-600 bg-violet-600 text-white shadow-sm' : 'border-slate-200 bg-white text-slate-700 hover:border-violet-200 hover:bg-violet-50')}
+	                                  className={'inline-flex items-center gap-1 rounded-xl border text-sm font-semibold ' + (selected ? 'border-violet-600 bg-violet-600 text-white shadow-sm' : 'border-slate-200 bg-white text-slate-700 hover:border-violet-200 hover:bg-violet-50')}
 	                                >
-	                                  {warehouse.name}
-	                                </button>
+	                                  <button
+	                                    type="button"
+	                                    onClick={() => selectFboPalletWarehouse(warehouse.id)}
+	                                    className="py-2 pl-4 pr-1"
+	                                  >
+	                                    {warehouse.name}
+	                                  </button>
+	                                  <button
+	                                    type="button"
+	                                    onClick={() => openFboPalletWarehouseEdit(warehouse)}
+	                                    title="Переименовать склад"
+	                                    className={'rounded-lg p-1 transition-colors ' + (selected ? 'text-white/80 hover:bg-white/20 hover:text-white' : 'text-slate-400 hover:bg-slate-100 hover:text-slate-700')}
+	                                  >
+	                                    <Pencil className="h-4 w-4" />
+	                                  </button>
+	                                  <button
+	                                    type="button"
+	                                    onClick={() => handleDeleteFboPalletWarehouse(warehouse.id)}
+	                                    title="Удалить склад"
+	                                    className={'mr-1.5 rounded-lg p-1 transition-colors ' + (selected ? 'text-white/80 hover:bg-white/20 hover:text-white' : 'text-slate-400 hover:bg-rose-50 hover:text-rose-600')}
+	                                  >
+	                                    <Trash2 className="h-4 w-4" />
+	                                  </button>
+	                                </div>
+	                              );
+	                            })}
+	                          </div>
+	                        </div>
+	                      )}
+	                      {fboPalletSupplierId && fboPalletSelectedWarehouseId && (
+	                        <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 p-3">
+	                          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Поставка</div>
+	                          <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_auto_auto]">
+	                            <input
+	                              value={fboPalletSupplyName}
+	                              onChange={(e) => setFboPalletSupplyName(e.target.value)}
+	                              placeholder="Напишите название поставки..."
+	                              className="oc-input"
+	                            />
+	                            <input
+	                              type="date"
+	                              value={fboPalletSupplyDate}
+	                              onChange={(e) => setFboPalletSupplyDate(e.target.value)}
+	                              title="Дата поставки (необязательно)"
+	                              className="oc-input"
+	                            />
+	                            <button type="button" onClick={handleAddFboPalletSupply} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800">Добавить поставку</button>
+	                          </div>
+	                          <div className="mt-3 flex flex-wrap gap-2">
+	                            {fboPalletSupplies.filter((supply) => String(supply.warehouse_id) === String(fboPalletSelectedWarehouseId)).length === 0 ? (
+	                              <div className="rounded-xl border border-dashed border-slate-200 bg-white px-4 py-3 text-sm text-slate-500">Поставок в этом складе пока нет. Создайте поставку, чтобы внутри неё собирать паллеты.</div>
+	                            ) : fboPalletSupplies.filter((supply) => String(supply.warehouse_id) === String(fboPalletSelectedWarehouseId)).map((supply) => {
+	                              const selected = String(fboPalletSelectedSupplyId) === String(supply.id);
+	                              return (
+	                                <div
+	                                  key={'fbo-pallet-supply-' + supply.id}
+	                                  className={'inline-flex items-center gap-1 rounded-xl border text-sm font-semibold ' + (selected ? 'border-emerald-600 bg-emerald-600 text-white shadow-sm' : 'border-slate-200 bg-white text-slate-700 hover:border-emerald-200 hover:bg-emerald-50')}
+	                                >
+	                                  <button
+	                                    type="button"
+	                                    onClick={() => setFboPalletSelectedSupplyId(supply.id)}
+	                                    className="py-2 pl-4 pr-1"
+	                                  >
+	                                    {supply.name}
+	                                  </button>
+	                                  <button
+	                                    type="button"
+	                                    onClick={() => openFboPalletSupplyEdit(supply)}
+	                                    title="Редактировать поставку"
+	                                    className={'rounded-lg p-1 transition-colors ' + (selected ? 'text-white/80 hover:bg-white/20 hover:text-white' : 'text-slate-400 hover:bg-slate-100 hover:text-slate-700')}
+	                                  >
+	                                    <Pencil className="h-4 w-4" />
+	                                  </button>
+	                                  <button
+	                                    type="button"
+	                                    onClick={() => handleDeleteFboPalletSupply(supply.id)}
+	                                    title="Удалить поставку"
+	                                    className={'mr-1.5 rounded-lg p-1 transition-colors ' + (selected ? 'text-white/80 hover:bg-white/20 hover:text-white' : 'text-slate-400 hover:bg-rose-50 hover:text-rose-600')}
+	                                  >
+	                                    <Trash2 className="h-4 w-4" />
+	                                  </button>
+	                                </div>
 	                              );
 	                            })}
 	                          </div>
@@ -18099,22 +18485,44 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <div className="space-y-4">
 	                          {!fboPalletSelectedWarehouseId ? (
 	                            <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-8 text-center text-slate-500">Выберите или создайте склад поставки.</div>
-	                          ) : fboPallets.filter((p) => String(p.warehouse_id || '') === String(fboPalletSelectedWarehouseId) && fboPalletSessions.some((s) => s.id === p.session_id && s.status === 'active')).length === 0 ? (
+	                          ) : !fboPalletSelectedSupplyId ? (
+	                            <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-8 text-center text-slate-500">Выберите или создайте поставку, чтобы собирать в ней паллеты.</div>
+	                          ) : fboPallets.filter((p) => String(p.supply_id || '') === String(fboPalletSelectedSupplyId) && fboPalletSessions.some((s) => s.id === p.session_id && s.status === 'active')).length === 0 ? (
 	                            <div className="rounded-2xl border border-dashed border-violet-200 bg-white p-8 text-center">
-	                              <div className="text-slate-600">Паллет в этом складе пока нет.</div>
+	                              <div className="text-slate-600">Паллет в этой поставке пока нет.</div>
 	                              <button type="button" onClick={handleAddFboPallet} className="mt-4 rounded-xl bg-violet-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-violet-700">Добавить паллету</button>
 	                            </div>
 	                          ) : (
+	                            <>
+	                              {(() => {
+	                                const sup = fboPalletSupplies.find((s) => String(s.id) === String(fboPalletSelectedSupplyId));
+	                                const wh = fboPalletWarehouses.find((w) => String(w.id) === String(fboPalletSelectedWarehouseId));
+	                                return (
+	                                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+	                                    <div>
+	                                      <div className="text-xs font-semibold uppercase tracking-wide text-emerald-600">Поставка</div>
+	                                      <div className="text-lg font-bold text-emerald-900">{sup?.name || '—'}{wh?.name ? ` · ${wh.name}` : ''}</div>
+	                                    </div>
+	                                    <div className="flex items-center gap-2 rounded-xl bg-white px-3 py-1.5 text-sm font-semibold text-emerald-800 shadow-sm">
+	                                      <Clock className="h-4 w-4 text-emerald-500" />
+	                                      {sup?.date ? new Date(`${sup.date}T12:00:00`).toLocaleDateString('ru-RU', { day: '2-digit', month: 'long', year: 'numeric' }) : 'Дата не указана'}
+	                                    </div>
+	                                  </div>
+	                                );
+	                              })()}
 	                            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
 	                              {fboPallets
-	                                .filter((p) => String(p.warehouse_id || '') === String(fboPalletSelectedWarehouseId) && fboPalletSessions.some((s) => s.id === p.session_id && s.status === 'active'))
+	                                .filter((p) => String(p.supply_id || '') === String(fboPalletSelectedSupplyId) && fboPalletSessions.some((s) => s.id === p.session_id && s.status === 'active'))
                                 .map((pallet) => {
                                   const items = fboPalletItems.filter((item) => String(item.pallet_id) === String(pallet.id));
                                   return (
                                     <div key={'fbo-pallet-' + pallet.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
 	                                      <div className="flex items-start justify-between gap-3">
 	                                        <div>
-	                                          <div className="mb-2 inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">{fboPalletWarehouses.find((warehouse) => String(warehouse.id) === String(pallet.warehouse_id || ''))?.name || 'Склад не указан'}</div>
+	                                          <div className="mb-2 flex flex-wrap gap-1">
+	                                            <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">{fboPalletWarehouses.find((warehouse) => String(warehouse.id) === String(pallet.warehouse_id || ''))?.name || 'Склад не указан'}</span>
+	                                            <span className="inline-flex rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700">{fboPalletSupplies.find((supply) => String(supply.id) === String(pallet.supply_id || ''))?.name || 'Поставка не указана'}</span>
+	                                          </div>
 	                                          <div className="text-xs font-semibold uppercase tracking-wide text-violet-600">Паллета</div>
                                           <div className="mt-1 text-3xl font-black text-slate-900">№{pallet.pallet_number}</div>
 	                                          <div className="mt-1 text-xs text-slate-500">Товаров: {items.reduce((sum, item) => sum + Math.max(1, Number(item.qty || 1)), 0)}</div>
@@ -18142,6 +18550,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 	                                                <span className="rounded bg-violet-100 px-1.5 py-0.5 font-semibold text-violet-700">Кол-во: {Math.max(1, Number(item.qty || 1))}</span>
 	                                              </div>
                                             </div>
+                                            <button type="button" onClick={() => openFboPalletItemQtyEdit(item)} className="h-10 w-10 shrink-0 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-100 hover:text-slate-700" title="Изменить количество"><Pencil className="mx-auto h-4 w-4" /></button>
                                             <button type="button" onClick={() => handleDeleteFboPalletItem(item.id)} className="h-10 w-10 shrink-0 rounded-lg border border-rose-100 text-rose-600 hover:bg-rose-50" title="Удалить товар"><Trash2 className="mx-auto h-4 w-4" /></button>
                                           </div>
                                         ))}
@@ -18150,6 +18559,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                   );
                                 })}
                             </div>
+                            </>
                           )}
                         </div>
                       )}
@@ -18157,6 +18567,109 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   </div>
                 </div>
               )}
+
+	              {fboPalletWarehouseEdit && (
+	                <div className="fixed inset-0 z-[76] flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm" onClick={() => setFboPalletWarehouseEdit(null)}>
+	                  <div className="w-full max-w-md overflow-hidden rounded-3xl bg-white shadow-2xl ring-1 ring-black/5" onClick={(e) => e.stopPropagation()}>
+	                    <div className="flex items-center gap-3 bg-gradient-to-r from-violet-600 to-indigo-600 px-6 py-5 text-white">
+	                      <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white/20"><Box className="h-5 w-5" /></div>
+	                      <div>
+	                        <div className="text-[11px] font-semibold uppercase tracking-wider text-white/70">Склад</div>
+	                        <h3 className="text-lg font-bold leading-tight">Переименовать склад</h3>
+	                      </div>
+	                    </div>
+	                    <div className="p-6">
+	                      <label className="block text-sm font-semibold text-slate-700">Название склада</label>
+	                      <input
+	                        value={fboPalletWarehouseEdit.name}
+	                        onChange={(e) => setFboPalletWarehouseEdit((prev) => prev ? { ...prev, name: e.target.value } : prev)}
+	                        onKeyDown={(e) => { if (e.key === 'Enter') handleSaveFboPalletWarehouseEdit(); }}
+	                        placeholder="Например: Коледино"
+	                        className="oc-input mt-2 w-full"
+	                        autoFocus
+	                      />
+	                      <div className="mt-6 flex justify-end gap-2">
+	                        <button type="button" onClick={() => setFboPalletWarehouseEdit(null)} className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50">Отмена</button>
+	                        <button type="button" onClick={handleSaveFboPalletWarehouseEdit} className="rounded-xl bg-violet-600 px-5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-violet-700">Сохранить</button>
+	                      </div>
+	                    </div>
+	                  </div>
+	                </div>
+	              )}
+
+	              {fboPalletSupplyEdit && (
+	                <div className="fixed inset-0 z-[76] flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm" onClick={() => setFboPalletSupplyEdit(null)}>
+	                  <div className="w-full max-w-md overflow-hidden rounded-3xl bg-white shadow-2xl ring-1 ring-black/5" onClick={(e) => e.stopPropagation()}>
+	                    <div className="flex items-center gap-3 bg-gradient-to-r from-emerald-600 to-teal-600 px-6 py-5 text-white">
+	                      <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white/20"><Package className="h-5 w-5" /></div>
+	                      <div>
+	                        <div className="text-[11px] font-semibold uppercase tracking-wider text-white/70">Поставка</div>
+	                        <h3 className="text-lg font-bold leading-tight">Редактировать поставку</h3>
+	                      </div>
+	                    </div>
+	                    <div className="p-6">
+	                      <label className="block text-sm font-semibold text-slate-700">Название поставки</label>
+	                      <input
+	                        value={fboPalletSupplyEdit.name}
+	                        onChange={(e) => setFboPalletSupplyEdit((prev) => prev ? { ...prev, name: e.target.value } : prev)}
+	                        placeholder="Название поставки"
+	                        className="oc-input mt-2 w-full"
+	                        autoFocus
+	                      />
+	                      <label className="mt-4 block text-sm font-semibold text-slate-700">Дата поставки <span className="font-normal text-slate-400">(необязательно)</span></label>
+	                      <div className="mt-2 flex gap-2">
+	                        <input
+	                          type="date"
+	                          value={fboPalletSupplyEdit.date}
+	                          onChange={(e) => setFboPalletSupplyEdit((prev) => prev ? { ...prev, date: e.target.value } : prev)}
+	                          className="oc-input w-full"
+	                        />
+	                        {fboPalletSupplyEdit.date && (
+	                          <button type="button" onClick={() => setFboPalletSupplyEdit((prev) => prev ? { ...prev, date: '' } : prev)} className="shrink-0 rounded-xl border border-slate-200 px-3 text-sm font-semibold text-slate-600 hover:bg-slate-50">Очистить</button>
+	                        )}
+	                      </div>
+	                      <div className="mt-6 flex justify-end gap-2">
+	                        <button type="button" onClick={() => setFboPalletSupplyEdit(null)} className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50">Отмена</button>
+	                        <button type="button" onClick={handleSaveFboPalletSupplyEdit} className="rounded-xl bg-emerald-600 px-5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700">Сохранить</button>
+	                      </div>
+	                    </div>
+	                  </div>
+	                </div>
+	              )}
+
+	              {fboPalletItemQtyEdit && (
+	                <div className="fixed inset-0 z-[76] flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm" onClick={() => setFboPalletItemQtyEdit(null)}>
+	                  <div className="w-full max-w-sm overflow-hidden rounded-3xl bg-white shadow-2xl ring-1 ring-black/5" onClick={(e) => e.stopPropagation()}>
+	                    <div className="flex items-center gap-3 bg-gradient-to-r from-amber-500 to-orange-500 px-6 py-5 text-white">
+	                      <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white/20"><Box className="h-5 w-5" /></div>
+	                      <div>
+	                        <div className="text-[11px] font-semibold uppercase tracking-wider text-white/70">Количество</div>
+	                        <h3 className="text-lg font-bold leading-tight">Изменить количество</h3>
+	                      </div>
+	                    </div>
+	                    <div className="p-6">
+	                      <div className="line-clamp-2 text-sm font-medium text-slate-500">{fboPalletItemQtyEdit.title}</div>
+	                      <div className="mt-4 flex items-center justify-center gap-3">
+	                        <button type="button" onClick={() => setFboPalletItemQtyEdit((prev) => prev ? { ...prev, qty: String(Math.max(1, Math.floor(Number(prev.qty) || 1) - 1)) } : prev)} className="flex h-12 w-12 items-center justify-center rounded-2xl border border-slate-200 text-xl font-bold text-slate-600 hover:bg-slate-50">−</button>
+	                        <input
+	                          type="number"
+	                          min={1}
+	                          value={fboPalletItemQtyEdit.qty}
+	                          onChange={(e) => setFboPalletItemQtyEdit((prev) => prev ? { ...prev, qty: e.target.value } : prev)}
+	                          onKeyDown={(e) => { if (e.key === 'Enter') handleSaveFboPalletItemQtyEdit(); }}
+	                          className="h-12 w-24 rounded-2xl border border-slate-200 text-center text-2xl font-black text-slate-900 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200"
+	                          autoFocus
+	                        />
+	                        <button type="button" onClick={() => setFboPalletItemQtyEdit((prev) => prev ? { ...prev, qty: String(Math.max(1, Math.floor(Number(prev.qty) || 1) + 1)) } : prev)} className="flex h-12 w-12 items-center justify-center rounded-2xl border border-slate-200 text-xl font-bold text-slate-600 hover:bg-slate-50">+</button>
+	                      </div>
+	                      <div className="mt-6 flex justify-end gap-2">
+	                        <button type="button" onClick={() => setFboPalletItemQtyEdit(null)} className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50">Отмена</button>
+	                        <button type="button" onClick={handleSaveFboPalletItemQtyEdit} className="rounded-xl bg-amber-500 px-5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-amber-600">Сохранить</button>
+	                      </div>
+	                    </div>
+	                  </div>
+	                </div>
+	              )}
 
 	              {fboPalletProductPicker.open && (
 	                <div className="fixed inset-0 z-[74] flex items-end justify-center bg-black/50 p-2 md:items-center md:p-4" onClick={closeFboPalletProductPicker}>
@@ -18270,9 +18783,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 	                              {sessionPallets.map((pallet) => {
 	                                const items = fboPalletItems.filter((item) => String(item.pallet_id) === String(pallet.id));
 	                                const warehouse = fboPalletWarehouses.find((row) => String(row.id) === String(pallet.warehouse_id || ''));
+	                                const supply = fboPalletSupplies.find((row) => String(row.id) === String(pallet.supply_id || ''));
 	                                return (
 	                                  <div key={'fbo-pallet-history-' + pallet.id} className="rounded-xl border bg-white p-3">
-	                                    <div className="mb-1 text-xs font-semibold text-slate-500">{warehouse?.name || 'Склад не указан'}</div>
+	                                    <div className="mb-1 text-xs font-semibold text-slate-500">{warehouse?.name || 'Склад не указан'} • {supply?.name || 'Поставка не указана'}</div>
 	                                    <div className="font-bold text-violet-800">Паллета №{pallet.pallet_number}</div>
                                     <div className="mt-1 text-xs text-slate-500">Товаров: {items.length}</div>
                                     <div className="mt-2 space-y-1">
@@ -19147,119 +19661,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
           {/* CAMERAS TAB */}
           {activeTab === 'cameras' && (
-            <div className="max-w-full mx-auto px-4">
-              <div className="mb-6">
-                <h1 className="text-2xl font-bold text-gray-900">Камеры</h1>
-                <p className="text-gray-500 mt-1">Потоки в реальном времени. Для вывода в браузере используй HTTP/HLS/WebRTC URL. RTSP можно открыть во внешнем плеере.</p>
-              </div>
-
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                {cameraStreams.map((cam, idx) => {
-                  const isHttp = /^https?:\/\//i.test(cam.url);
-                  const isRtsp = /^rtsp:\/\//i.test(cam.url);
-                  return (
-                    <div key={`cam-${idx}`} className="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm">
-                      <div className="grid grid-cols-1 gap-2 mb-3">
-                        <input
-                          value={cam.name}
-                          onChange={(e) => setCameraStreams((prev) => prev.map((x, i) => i === idx ? { ...x, name: e.target.value } : x))}
-                          className="px-3 py-2 border border-gray-300 rounded-lg w-full"
-                          placeholder={`Камера ${idx + 1}`}
-                        />
-                        <input
-                          value={cam.url}
-                          onChange={(e) => setCameraStreams((prev) => prev.map((x, i) => i === idx ? { ...x, url: e.target.value } : x))}
-                          className="px-3 py-2 border border-gray-300 rounded-lg w-full"
-                          placeholder="rtsp://... или https://..."
-                        />
-                      </div>
-
-                      <div className="rounded-xl border border-gray-200 bg-gray-50 overflow-hidden min-h-[220px] flex items-center justify-center">
-                        {isHttp && cam.url.includes('/stream.html') ? (
-                          (() => {
-                            const m = /[?&]src=([^&]+)/i.exec(cam.url);
-                            const srcName = m ? decodeURIComponent(m[1]) : '';
-                            const mp4Url = srcName ? `https://cam.scladpro.ru/api/stream.mp4?src=${encodeURIComponent(srcName)}` : cam.url;
-                            return (
-                              <video
-                                src={mp4Url}
-                                controls
-                                autoPlay
-                                muted
-                                playsInline
-                                className="w-full h-[260px] object-contain bg-black"
-                              />
-                            );
-                          })()
-                        ) : isHttp ? (
-                          <video src={cam.url} controls autoPlay muted playsInline className="w-full h-[260px] object-cover bg-black" />
-                        ) : isRtsp ? (
-                          <div className="p-4 text-sm text-gray-600 text-center">
-                            RTSP-поток в браузере не воспроизводится напрямую.<br />
-                            Нажми кнопку ниже, чтобы открыть в VLC/ffplay.
-                          </div>
-                        ) : (
-                          <div className="p-4 text-sm text-gray-500 text-center">Укажи URL потока, чтобы увидеть видео.</div>
-                        )}
-                      </div>
-
-                      {(normalizeRoleKey(currentEmployee?.role || currentEmployee?.login) === 'admin') && (
-                        <div className="mt-3 flex gap-2">
-                          <button
-                            onClick={() => {
-                              if (!cam.url) return;
-                              navigator.clipboard?.writeText(cam.url);
-                              showToast('Ссылка камеры скопирована', 'success');
-                            }}
-                            className="px-3 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 text-sm"
-                          >
-                            Копировать URL
-                          </button>
-                          <button
-                            onClick={() => {
-                              if (!cam.url) return;
-                              window.open(cam.url, '_blank');
-                            }}
-                            className="px-3 py-2 rounded-lg border border-indigo-300 text-indigo-700 hover:bg-indigo-50 text-sm"
-                          >
-                            Открыть поток
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-
-              {(normalizeRoleKey(currentEmployee?.role || currentEmployee?.login) === 'admin') && (
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <button
-                    onClick={() => setCameraStreams((prev) => [...prev, { name: `Камера ${prev.length + 1}`, url: '' }].slice(0, 8))}
-                    className="px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700"
-                  >
-                    Добавить камеру
-                  </button>
-                  <button
-                    onClick={() => setCameraStreams([
-                      { name: 'Камера 1', url: 'https://cam.scladpro.ru/stream.html?src=cam161&mode=mse' },
-                      { name: 'Камера 2', url: 'https://cam.scladpro.ru/stream.html?src=cam120&mode=mse' },
-                      { name: 'Камера 3', url: 'https://cam.scladpro.ru/stream.html?src=cam239&mode=mse' },
-                      { name: 'Камера 176', url: 'https://cam.scladpro.ru/stream.html?src=cam176&mode=mse' },
-                      { name: 'Камера 160', url: 'https://cam.scladpro.ru/stream.html?src=cam160&mode=mse' },
-                    ])}
-                    className="px-4 py-2 rounded-lg border border-indigo-300 text-indigo-700 hover:bg-indigo-50"
-                  >
-                    Заполнить 5 камер (WebRTC)
-                  </button>
-                  <button
-                    onClick={() => window.open('http://10.241.166.161/doc/page/preview.asp', '_blank')}
-                    className="px-4 py-2 rounded-lg border border-emerald-300 text-emerald-700 hover:bg-emerald-50"
-                  >
-                    Открыть web-preview (Windows)
-                  </button>
-                </div>
-              )}
-            </div>
+            <React.Suspense fallback={<div className="p-4 text-sm text-gray-500">Загрузка камер...</div>}>
+              <CamerasTab
+                cameraStreams={cameraStreams}
+                setCameraStreams={setCameraStreams}
+                currentEmployee={currentEmployee}
+                showToast={showToast}
+              />
+            </React.Suspense>
           )}
 
           {/* TASKS TAB */}

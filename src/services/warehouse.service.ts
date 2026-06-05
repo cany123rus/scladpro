@@ -21,21 +21,11 @@ export const loadWarehouseAssignmentsFromDb = async (): Promise<WarehouseAssignm
 export const persistWarehouseAssignmentsToDb = async (assignments: WarehouseAssignments) => {
   const raw = JSON.stringify(assignments);
 
-  const { data: updatedRows, error: updateError } = await supabase
+  const { error } = await supabase
     .from('app_settings')
-    .update({ value: raw })
-    .eq('key', WAREHOUSE_SETTINGS_KEY)
-    .select('key');
+    .upsert({ key: WAREHOUSE_SETTINGS_KEY, value: raw }, { onConflict: 'key' });
 
-  if (updateError) throw updateError;
-
-  if (!updatedRows || updatedRows.length === 0) {
-    const { error: insertError } = await supabase
-      .from('app_settings')
-      .insert({ key: WAREHOUSE_SETTINGS_KEY, value: raw });
-
-    if (insertError) throw insertError;
-  }
+  if (error) throw error;
 
   localStorage.setItem(WAREHOUSE_SETTINGS_KEY, raw);
 };

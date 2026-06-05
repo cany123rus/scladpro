@@ -1,4 +1,9 @@
-import ExcelJS from 'exceljs/dist/exceljs.min.js';
+// ExcelJS loaded lazily — see excelExport.ts for rationale.
+let _ExcelJS: any = null;
+const loadExcel = async () => {
+  if (!_ExcelJS) _ExcelJS = (await import('exceljs/dist/exceljs.min.js')).default;
+  return _ExcelJS;
+};
 
 export const MAX_EXCEL_FILE_BYTES = 15 * 1024 * 1024; // 15MB
 export const MAX_EXCEL_ROWS = 100000;
@@ -39,6 +44,7 @@ export const readFirstSheetAsJson = async <T = Record<string, unknown>>(
   fileBuffer: ArrayBuffer,
   options: ReadOptions = { defval: '' }
 ): Promise<T[]> => {
+  const ExcelJS = await loadExcel();
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(fileBuffer);
   const ws = wb.worksheets[0];
@@ -106,6 +112,7 @@ export const downloadJsonRowsAsExcel = async (
   fileName = 'report.xlsx',
   sheetName = 'Sheet1'
 ): Promise<void> => {
+  const ExcelJS = await loadExcel();
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet(sheetName || 'Sheet1');
 
