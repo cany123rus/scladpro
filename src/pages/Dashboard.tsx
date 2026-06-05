@@ -18,7 +18,6 @@ import { SectionSkeleton } from '../components/Skeleton';
 import { storeCurrentEmployee } from '../utils/employeeStorage';
 import { createWorkbookBlob, downloadAoaWorkbook, downloadWorkbook } from '../utils/excelExport';
 import { QRCodeSVG } from 'qrcode.react';
-import bwipjs from 'bwip-js';
 import { telegramService } from '../services/telegram.service';
 import { useWarehousePersistence } from '../hooks/useWarehousePersistence';
 import { downloadJsonRowsAsExcel, ensureExcelFileSize, ensureExcelRowLimit, ensureRequiredColumns, readFirstSheetAsJson } from '../utils/safeExcel';
@@ -47,6 +46,18 @@ const ensureExcel = () => {
     });
   }
   return _excelPromise;
+};
+// bwip-js (DataMatrix/barcode renderer) is heavy; load it on demand instead of
+// bundling it into the initial dashboard chunk.
+let bwipjs: any = null;
+let _bwipPromise: Promise<void> | null = null;
+const ensureBwip = () => {
+  if (!_bwipPromise) {
+    _bwipPromise = import('bwip-js').then((m) => {
+      bwipjs = (m as any).default || m;
+    });
+  }
+  return _bwipPromise;
 };
 import { DASHBOARD_TAB_IDS, isDashboardTabId } from '../constants/dashboardTabs';
 import { getDefaultWarehouseOfflineUrl, getWarehouseOfflineUrl, isWarehouseOfflineEnabled, setWarehouseOfflineEnabled, setWarehouseOfflineUrl, warehouseOfflineClient, WarehouseOfflineSnapshot, WarehouseOfflineStatus } from '../lib/warehouseOffline';
@@ -730,7 +741,9 @@ const DatamatrixCode = ({ code }: { code: string }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
-    if (canvasRef.current) {
+    let cancelled = false;
+    ensureBwip().then(() => {
+      if (cancelled || !canvasRef.current) return;
       try {
         bwipjs.toCanvas(canvasRef.current, {
             bcid: 'datamatrix',
@@ -743,7 +756,8 @@ const DatamatrixCode = ({ code }: { code: string }) => {
       } catch (e) {
         console.error(e);
       }
-    }
+    });
+    return () => { cancelled = true; };
   }, [code]);
 
   return (
@@ -1350,6 +1364,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
   const handlePrintHonestSignHistory = async (fileName: string, date: string) => {
     await ensurePdfLibs();
+    await ensureBwip();
     try {
         const targetDate = new Date(date);
         const start = new Date(targetDate.getTime() - 3600000).toISOString();
@@ -6223,6 +6238,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
   const handleGenerateFboBoxesLabelsFromExcel = async () => {
     await ensurePdfLibs();
+    await ensureBwip();
     try {
       if (!fboBoxesSupplierId) return showToast('Сначала выберите поставщика для коробок FBO', 'error');
       if (!fboBoxesExcelFile) return showToast('Загрузите Excel файл', 'error');
@@ -6484,6 +6500,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
   const printCurrentSupplyBoxes58x40 = async () => {
     await ensurePdfLibs();
+    await ensureBwip();
     if (!currentSupply) return;
     const { data: boxes } = await supabase
       .from('boxes')
@@ -16265,6 +16282,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
   const handleTestPrintWbLayout = async (template: 'withChz' | 'withoutChz' | 'fboBoxes' | 'nameSequence') => {
     await ensurePdfLibs();
+    await ensureBwip();
     try {
       const layout = getWbLayoutPayloadFromEditor();
       const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: [58, 40] });
@@ -16420,6 +16438,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
   const handleGenerateLabelsPdf = async () => {
     await ensurePdfLibs();
+    await ensureBwip();
     try {
       const qty = Math.min(200, Math.max(1, parseInt(labelBuilder.quantity || '1')));
       const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: [58, 40] }); // XPrinter 420B: 58x40
@@ -21707,6 +21726,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                         className="max-w-full max-h-[30mm]"
                                         ref={(canvas) => {
                                             if (canvas) {
+                                                ensureBwip().then(() => { if (!bwipjs) return;
                                                 try {
                                                     bwipjs.toCanvas(canvas, {
                                                         bcid: 'datamatrix',
@@ -21719,6 +21739,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                                 } catch (e) {
                                                     console.error(e);
                                                 }
+                                                });
                                             }
                                         }}
                                     />
