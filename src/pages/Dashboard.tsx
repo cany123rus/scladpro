@@ -2329,15 +2329,17 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         if (selectedPaidStatus === 'unpaid' && isPaid) return [];
 
         const rows = Array.isArray(delivery?.rows) ? delivery.rows : [];
-        const totalBoxes = rows.reduce((sum: number, row: any) => sum + Number(row?.boxes || 0), 0) || 1;
+        const totalUnits = rows.reduce((sum: number, row: any) => sum + Number(row?.boxes || 0) + Number(row?.pallets || 0), 0) || 1;
         return rows
           .map((row: any) => {
             const supplierId = String(row?.supplier_id || '');
             const boxes = Number(row?.boxes || 0);
-            if (!supplierId || boxes <= 0) return null;
+            const pallets = Number(row?.pallets || 0);
+            const units = boxes + pallets;
+            if (!supplierId || units <= 0) return null;
             if (selectedSupplier !== 'all' && supplierId !== selectedSupplier) return null;
             const supplierName = suppliers.find((s: any) => String(s.id) === supplierId)?.name || 'Без поставщика';
-            const allocatedAmount = Number(delivery?.amount || 0) * (boxes / totalBoxes);
+            const allocatedAmount = Number(delivery?.amount || 0) * (units / totalUnits);
             return {
               deliveryId: String(delivery?.id || ''),
               date,
@@ -2345,6 +2347,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
               supplierId,
               supplierName,
               boxes,
+              pallets,
               amount: allocatedAmount,
               totalDeliveryAmount: Number(delivery?.amount || 0),
               is_paid: isPaid,
@@ -2362,13 +2365,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   }, [deliveryHistory, deliveryReportForm, suppliers]);
 
   const deliveryReportGrouped = useMemo(() => {
-    const grouped = new Map<string, { supplierId: string; supplierName: string; rows: any[]; boxes: number; amount: number; paid: number; unpaid: number }>();
+    const grouped = new Map<string, { supplierId: string; supplierName: string; rows: any[]; boxes: number; pallets: number; amount: number; paid: number; unpaid: number }>();
     (deliveryReportRows || []).forEach((row: any) => {
       const supplierId = String(row?.supplierId || 'none');
       const supplierName = row?.supplierName || 'Без поставщика';
-      const item = grouped.get(supplierId) || { supplierId, supplierName, rows: [], boxes: 0, amount: 0, paid: 0, unpaid: 0 };
+      const item = grouped.get(supplierId) || { supplierId, supplierName, rows: [], boxes: 0, pallets: 0, amount: 0, paid: 0, unpaid: 0 };
       item.rows.push(row);
       item.boxes += Number(row?.boxes || 0);
+      item.pallets += Number(row?.pallets || 0);
       item.amount += Number(row?.amount || 0);
       if (row?.is_paid) item.paid += Number(row?.amount || 0);
       else item.unpaid += Number(row?.amount || 0);
@@ -2380,6 +2384,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       totalRows: deliveryReportRows.length,
       totalDeliveries: new Set((deliveryReportRows || []).map((row: any) => row.deliveryId)).size,
       totalBoxes: groups.reduce((sum, group) => sum + group.boxes, 0),
+      totalPallets: groups.reduce((sum, group) => sum + group.pallets, 0),
       totalAmount: groups.reduce((sum, group) => sum + group.amount, 0),
       totalPaid: groups.reduce((sum, group) => sum + group.paid, 0),
       totalUnpaid: groups.reduce((sum, group) => sum + group.unpaid, 0),
@@ -2874,17 +2879,18 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       doc.text('Доставщик: ' + courierLabel, 14, 33);
       doc.text('Кто оплатил: ' + paidByLabel, 14, 39);
       doc.text('Статус оплаты: ' + paidStatusLabel, 14, 45);
-      doc.text('Доставок: ' + deliveryReportGrouped.totalDeliveries + ' • Коробок: ' + deliveryReportGrouped.totalBoxes.toFixed(0) + ' • Сумма: ' + money(deliveryReportGrouped.totalAmount) + ' • Не оплачено: ' + money(deliveryReportGrouped.totalUnpaid), 14, 51);
+      doc.text('Доставок: ' + deliveryReportGrouped.totalDeliveries + ' • Коробок: ' + deliveryReportGrouped.totalBoxes.toFixed(0) + ' • Паллет: ' + deliveryReportGrouped.totalPallets.toFixed(0) + ' • Сумма: ' + money(deliveryReportGrouped.totalAmount) + ' • Не оплачено: ' + money(deliveryReportGrouped.totalUnpaid), 14, 51);
 
       const body: any[] = [];
       deliveryReportGrouped.groups.forEach((group) => {
         const deliveriesCount = new Set(group.rows.map((row: any) => row.deliveryId)).size;
-        body.push([{ content: group.supplierName + ' — доставок: ' + deliveriesCount + ', коробок: ' + group.boxes.toFixed(0) + ', сумма: ' + money(group.amount) + ', долг: ' + money(group.unpaid), colSpan: 7, styles: { fillColor: [241, 245, 249], fontStyle: 'normal', textColor: [15, 23, 42] } }]);
+        body.push([{ content: group.supplierName + ' — доставок: ' + deliveriesCount + ', коробок: ' + group.boxes.toFixed(0) + ', паллет: ' + group.pallets.toFixed(0) + ', сумма: ' + money(group.amount) + ', долг: ' + money(group.unpaid), colSpan: 8, styles: { fillColor: [241, 245, 249], fontStyle: 'normal', textColor: [15, 23, 42] } }]);
         group.rows.forEach((row: any) => {
           body.push([
             row?.date ? new Date(String(row.date) + 'T12:00:00').toLocaleDateString('ru-RU') : '-',
             row.courier || '-',
             Number(row.boxes || 0).toFixed(0),
+            Number(row.pallets || 0).toFixed(0),
             money(row.amount),
             money(row.totalDeliveryAmount),
             row.is_paid ? 'Оплачено' : 'Не оплачено',
@@ -2895,7 +2901,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
       (autoTable as any)(doc, {
         startY: 57,
-        head: [['Дата', 'Доставщик', 'Коробки', 'Сумма поставщика', 'Сумма доставки', 'Статус', 'Кто оплатил']],
+        head: [['Дата', 'Доставщик', 'Коробки', 'Паллеты', 'Сумма поставщика', 'Сумма доставки', 'Статус', 'Кто оплатил']],
         body,
         styles: { font: 'Roboto', fontSize: 8, cellPadding: 1.8, overflow: 'linebreak' },
         headStyles: { font: 'Roboto', fillColor: [15, 23, 42], textColor: 255, fontStyle: 'normal' },
@@ -2904,12 +2910,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         margin: { left: 10, right: 10 },
         columnStyles: {
           0: { cellWidth: 22 },
-          1: { cellWidth: 42 },
-          2: { cellWidth: 20, halign: 'right' },
-          3: { cellWidth: 32, halign: 'right' },
-          4: { cellWidth: 32, halign: 'right' },
-          5: { cellWidth: 30 },
-          6: { cellWidth: 96 },
+          1: { cellWidth: 38 },
+          2: { cellWidth: 18, halign: 'right' },
+          3: { cellWidth: 18, halign: 'right' },
+          4: { cellWidth: 30, halign: 'right' },
+          5: { cellWidth: 30, halign: 'right' },
+          6: { cellWidth: 26 },
+          7: { cellWidth: 80 },
         },
       });
 
@@ -3177,11 +3184,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       if (selectedPaidStatus === 'unpaid' && isPaid) return [];
 
       const rows = Array.isArray(delivery?.rows) ? delivery.rows : [];
-      const totalBoxes = rows.reduce((sum: number, row: any) => sum + Number(row?.boxes || 0), 0) || 1;
+      const totalUnits = rows.reduce((sum: number, row: any) => sum + Number(row?.boxes || 0) + Number(row?.pallets || 0), 0) || 1;
       return rows.map((row: any) => {
         const supplierId = String(row?.supplier_id || '');
         const boxes = Number(row?.boxes || 0);
-        if (!supplierId || boxes <= 0) return null;
+        const pallets = Number(row?.pallets || 0);
+        const units = boxes + pallets;
+        if (!supplierId || units <= 0) return null;
         if (selectedSupplier !== 'all' && supplierId !== selectedSupplier) return null;
         const supplierName = suppliers.find((s: any) => String(s.id) === supplierId)?.name || 'Без поставщика';
         return {
@@ -3190,7 +3199,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           courier: courier || 'Доставщик',
           supplierName,
           boxes,
-          amount: Number(delivery?.amount || 0) * (boxes / totalBoxes),
+          pallets,
+          amount: Number(delivery?.amount || 0) * (units / totalUnits),
           is_paid: isPaid,
           paidByText: getDeliveryPaidByText(delivery),
         };
