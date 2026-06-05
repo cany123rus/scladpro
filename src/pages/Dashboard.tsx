@@ -17469,12 +17469,16 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     )}
                   </div>
 
-                  <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                    <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+                  <div className="mb-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                    <div className="flex flex-col gap-3 p-4 xl:flex-row xl:items-end xl:justify-between">
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
+                          <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl ${warehouseOfflineEnabled ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-500'}`}>
+                            <Database className="h-4 w-4" />
+                          </div>
                           <div className="text-sm font-bold text-slate-900">Склад offline</div>
-                          <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${warehouseOfflineEnabled ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>
+                          <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold ${warehouseOfflineEnabled ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>
+                            <span className={`h-1.5 w-1.5 rounded-full ${warehouseOfflineEnabled ? 'bg-emerald-500' : 'bg-slate-400'}`} />
                             {warehouseOfflineEnabled ? 'Включен' : 'Выключен'}
                           </span>
                           <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${warehouseOfflineStatus?.ok ? 'bg-sky-100 text-sky-700' : 'bg-amber-100 text-amber-700'}`}>
@@ -17521,33 +17525,33 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           type="button"
                           onClick={() => checkWarehouseOfflineServer(true)}
                           disabled={warehouseOfflineBusy}
-                          className="min-h-[48px] rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                          className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-700 shadow-sm transition-all hover:bg-slate-50 hover:border-slate-300 active:scale-[0.98] disabled:opacity-50"
                         >
-                          Проверить
+                          <CheckCircle2 className="h-4 w-4" /> Проверить
                         </button>
                         <button
                           type="button"
                           onClick={() => loadWarehouseOfflineSnapshot(true)}
                           disabled={warehouseOfflineBusy || !warehouseOfflineEnabled}
-                          className="min-h-[48px] rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                          className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-700 shadow-sm transition-all hover:bg-slate-50 hover:border-slate-300 active:scale-[0.98] disabled:opacity-50"
                         >
-                          Загрузить
+                          <Database className="h-4 w-4" /> Загрузить
                         </button>
                         <button
                           type="button"
                           onClick={refreshWarehouseOfflineBase}
                           disabled={warehouseOfflineBusy}
-                          className="min-h-[48px] rounded-xl bg-indigo-600 px-4 py-3 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+                          className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-3 text-sm font-medium text-white shadow-sm shadow-indigo-600/20 transition-all hover:bg-indigo-700 hover:shadow-md active:scale-[0.98] disabled:opacity-50"
                         >
-                          {warehouseOfflineBusy ? 'Работаю...' : 'Обновить offline-базу'}
+                          <RefreshCw className={`h-4 w-4 ${warehouseOfflineBusy ? 'animate-spin' : ''}`} /> {warehouseOfflineBusy ? 'Работаю...' : 'Обновить offline-базу'}
                         </button>
                         <button
                           type="button"
                           onClick={syncWarehouseOfflineScans}
                           disabled={warehouseOfflineBusy}
-                          className="min-h-[48px] rounded-xl bg-emerald-600 px-4 py-3 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+                          className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 text-sm font-medium text-white shadow-sm shadow-emerald-600/20 transition-all hover:bg-emerald-700 hover:shadow-md active:scale-[0.98] disabled:opacity-50"
                         >
-                          Синхронизировать
+                          <RefreshCw className="h-4 w-4" /> Синхронизировать
                         </button>
                       </div>
                     </div>
@@ -17587,30 +17591,47 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 	                    </button>
 	                  </div>
 
-                  <div className="oc-card p-5">
-                    <div className="font-medium text-slate-900 mb-2">Коробки (FBO)</div>
-                    <div className="text-xs text-slate-600 mb-2">Загрузите Excel с колонкой «ШК короба» (или первой колонкой с кодом), затем сгенерируйте этикетки 58x40 с нумерацией. Макет берётся из «Конструктор этикеток → Короба FBO».</div>
+                  <div className="oc-card overflow-hidden p-0">
+                    <div className="flex items-center gap-3 border-b border-slate-100 bg-gradient-to-r from-sky-50 to-cyan-50 px-5 py-4">
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-sky-500 to-cyan-500 text-white shadow-sm">
+                        <Box className="h-6 w-6" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="font-bold text-slate-900 leading-tight">Коробки (FBO)</div>
+                        <div className="text-xs text-slate-500">Этикетки коробов 58×40 из Excel</div>
+                      </div>
+                    </div>
+                    <div className="p-5">
+                    <div className="mb-3 rounded-xl bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-600">
+                      Загрузите Excel с колонкой «ШК короба» (или первой колонкой с кодом), затем сгенерируйте этикетки 58×40 с нумерацией. Макет берётся из «Конструктор этикеток → Короба FBO».
+                    </div>
+                    <label className="mb-1 block text-xs font-medium text-slate-500">Поставщик</label>
                     <select
                       value={fboBoxesSupplierId}
                       onChange={(e) => setFboBoxesSupplierId(e.target.value)}
-                      className="oc-select mb-2 min-h-[48px]"
+                      className="oc-select mb-3 min-h-[48px]"
                     >
                       <option value="">Выберите поставщика для коробок FBO...</option>
                       {(warehouseOfflineEnabled ? getWarehouseOfflineSuppliers() : suppliers).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                     </select>
-                    <div className="flex flex-col sm:flex-row gap-2">
+                    <label className="group flex cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center transition-colors hover:border-sky-300 hover:bg-sky-50">
+                      <FileSpreadsheet className="h-7 w-7 text-slate-400 group-hover:text-sky-500" />
+                      <div className="text-sm font-medium text-slate-700">
+                        {fboBoxesExcelFile ? fboBoxesExcelFile.name : 'Нажмите, чтобы выбрать Excel-файл'}
+                      </div>
+                      <div className="text-[11px] text-slate-400">.xlsx или .xls</div>
                       <input
                         type="file"
                         accept=".xlsx,.xls"
                         onChange={(e) => setFboBoxesExcelFile(e.target.files?.[0] || null)}
-                        className="flex-1 p-2 border rounded-lg bg-white"
+                        className="hidden"
                       />
-                    </div>
+                    </label>
 
                     {fboBoxesExcelFile && (
-                      <div className="mt-2 p-2 rounded-lg bg-slate-50 border border-slate-200">
-                        <div className="text-xs text-slate-700 mb-2">
-                          Найдено коробок в файле: <span className="font-semibold">{fboBoxesTotalLabels}</span>
+                      <div className="mt-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+                        <div className="mb-2 flex items-center gap-2 text-xs text-slate-700">
+                          <span className="inline-flex items-center rounded-full bg-sky-100 px-2.5 py-0.5 font-semibold text-sky-700">Найдено коробок: {fboBoxesTotalLabels}</span>
                         </div>
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 items-end">
                           <div>
@@ -17621,7 +17642,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               max={Math.max(1, fboBoxesTotalLabels)}
                               value={fboBoxesRangeFrom}
                               onChange={(e) => setFboBoxesRangeFrom(e.target.value)}
-                              className="h-11 rounded-xl border-slate-200 bg-slate-50 text-sm"
+                              className="h-11 w-full rounded-xl border-slate-200 bg-slate-50 text-sm"
                               placeholder="1"
                             />
                           </div>
@@ -17633,12 +17654,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               max={Math.max(1, fboBoxesTotalLabels)}
                               value={fboBoxesRangeTo}
                               onChange={(e) => setFboBoxesRangeTo(e.target.value)}
-                              className="h-11 rounded-xl border-slate-200 bg-slate-50 text-sm"
+                              className="h-11 w-full rounded-xl border-slate-200 bg-slate-50 text-sm"
                               placeholder={fboBoxesTotalLabels ? String(fboBoxesTotalLabels) : ''}
                             />
                           </div>
-                          <div className="text-xs text-slate-600">
-                            Этикеток к печати: <span className="font-semibold">{(() => {
+                          <div className="rounded-xl bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
+                            К печати: <span className="font-bold">{(() => {
                               const total = fboBoxesTotalLabels || 0;
                               if (!total) return 0;
                               const from = Math.max(1, Math.min(total, parseInt(fboBoxesRangeFrom || '1', 10) || 1));
@@ -17650,15 +17671,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       </div>
                     )}
 
-                    <div className="mt-2">
-                      <button
-                        type="button"
-                        onClick={handleGenerateFboBoxesLabelsFromExcel}
-                        disabled={!fboBoxesSupplierId || !fboBoxesExcelFile || fboBoxesGenerating}
-                        className={`px-4 py-2 ${(!fboBoxesSupplierId || !fboBoxesExcelFile || fboBoxesGenerating) ? 'btn-primary' : 'btn-primary'}`}
-                      >
-                        {fboBoxesGenerating ? 'Генерация...' : 'Сгенерировать ШК коробов'}
-                      </button>
+                    <button
+                      type="button"
+                      onClick={handleGenerateFboBoxesLabelsFromExcel}
+                      disabled={!fboBoxesSupplierId || !fboBoxesExcelFile || fboBoxesGenerating}
+                      className="btn-primary mt-4 w-full min-h-[48px]"
+                    >
+                      {fboBoxesGenerating ? <RefreshCw className="h-5 w-5 animate-spin" /> : <Printer className="h-5 w-5" />}
+                      {fboBoxesGenerating ? 'Генерация...' : 'Сгенерировать ШК коробов'}
+                    </button>
                     </div>
                   </div>
                   </div>
@@ -24740,9 +24761,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   {hasAssemblyButtonAccess('cw_tab_calendar') && (
                   <button
                     onClick={() => setCompletedWorkStep('CALENDAR')}
-                    className={`min-h-[44px] min-w-0 px-3 py-2 rounded-lg text-sm font-medium leading-tight text-center transition-all ${completedWorkStep === 'CALENDAR' || completedWorkStep === 'FORM' ? 'bg-white shadow-sm text-slate-900' : 'text-indigo-100/90 hover:text-white hover:bg-white/10'}`}
+                    className={`inline-flex min-h-[44px] min-w-0 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium leading-tight transition-all active:scale-[0.97] ${completedWorkStep === 'CALENDAR' || completedWorkStep === 'FORM' ? 'bg-white text-slate-900 shadow-md' : 'text-indigo-100/90 hover:text-white hover:bg-white/10'}`}
                   >
-                    Календарь
+                    <Calendar className="h-4 w-4 shrink-0" /> Календарь
                   </button>
                   )}
                   <button
@@ -24752,46 +24773,46 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       loadDeliveryData();
                       setShowGeneralReportModal(true);
                     }}
-                    className="min-h-[44px] min-w-0 px-3 py-2 rounded-lg text-sm font-medium leading-tight text-center transition-all text-indigo-100/90 hover:text-white hover:bg-white/10"
+                    className="inline-flex min-h-[44px] min-w-0 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium leading-tight transition-all active:scale-[0.97] text-indigo-100/90 hover:text-white hover:bg-white/10"
                   >
-                    Общий отчет
+                    <FileSpreadsheet className="h-4 w-4 shrink-0" /> Общий отчет
                   </button>
                   {hasAssemblyButtonAccess('cw_tab_rates') && (
                   <button
                     onClick={() => setCompletedWorkStep('RATES')}
-                    className={`min-h-[44px] min-w-0 px-3 py-2 rounded-lg text-sm font-medium leading-tight text-center transition-all ${completedWorkStep === 'RATES' ? 'bg-white shadow-sm text-slate-900' : 'text-indigo-100/90 hover:text-white hover:bg-white/10'}`}
+                    className={`inline-flex min-h-[44px] min-w-0 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium leading-tight transition-all active:scale-[0.97] ${completedWorkStep === 'RATES' ? 'bg-white text-slate-900 shadow-md' : 'text-indigo-100/90 hover:text-white hover:bg-white/10'}`}
                   >
-                    Расценки
+                    <Wallet className="h-4 w-4 shrink-0" /> Расценки
                   </button>
                   )}
                   {hasAssemblyButtonAccess('cw_tab_packaging') && (
                   <button
                     onClick={() => setCompletedWorkStep('PACKAGING')}
-                    className={`min-h-[44px] min-w-0 px-3 py-2 rounded-lg text-sm font-medium leading-tight text-center transition-all ${completedWorkStep === 'PACKAGING' ? 'bg-white shadow-sm text-slate-900' : 'text-indigo-100/90 hover:text-white hover:bg-white/10'}`}
+                    className={`inline-flex min-h-[44px] min-w-0 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium leading-tight transition-all active:scale-[0.97] ${completedWorkStep === 'PACKAGING' ? 'bg-white text-slate-900 shadow-md' : 'text-indigo-100/90 hover:text-white hover:bg-white/10'}`}
                   >
-                    Упаковка
+                    <Package className="h-4 w-4 shrink-0" /> Упаковка
                   </button>
                   )}
                   {hasAssemblyButtonAccess('cw_tab_boxes') && (
                   <button
                     onClick={() => setCompletedWorkStep('BOXES')}
-                    className={`min-h-[44px] min-w-0 px-3 py-2 rounded-lg text-sm font-medium leading-tight text-center transition-all ${completedWorkStep === 'BOXES' ? 'bg-white shadow-sm text-slate-900' : 'text-indigo-100/90 hover:text-white hover:bg-white/10'}`}
+                    className={`inline-flex min-h-[44px] min-w-0 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium leading-tight transition-all active:scale-[0.97] ${completedWorkStep === 'BOXES' ? 'bg-white text-slate-900 shadow-md' : 'text-indigo-100/90 hover:text-white hover:bg-white/10'}`}
                   >
-                    ФБС / Коробки
+                    <Box className="h-4 w-4 shrink-0" /> ФБС / Коробки
                   </button>
                   )}
                   {hasAssemblyButtonAccess('cw_tab_purchase') && (
                   <button
                     onClick={() => setCompletedWorkStep('PURCHASE')}
-                    className={`min-h-[44px] min-w-0 px-3 py-2 rounded-lg text-sm font-medium leading-tight text-center transition-all ${completedWorkStep === 'PURCHASE' ? 'bg-white shadow-sm text-slate-900' : 'text-indigo-100/90 hover:text-white hover:bg-white/10'}`}
+                    className={`inline-flex min-h-[44px] min-w-0 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium leading-tight transition-all active:scale-[0.97] ${completedWorkStep === 'PURCHASE' ? 'bg-white text-slate-900 shadow-md' : 'text-indigo-100/90 hover:text-white hover:bg-white/10'}`}
                   >
-                    Закуп
+                    <ShoppingCart className="h-4 w-4 shrink-0" /> Закуп
                   </button>
                   )}
                   {hasAssemblyButtonAccess('cw_send_report') && (
                   <button
                     onClick={handleSendEmployeeReport}
-                    className="min-h-[44px] min-w-0 px-3 py-2 rounded-lg text-sm font-medium text-emerald-100 hover:text-white hover:bg-emerald-500/20 inline-flex items-center justify-center gap-1.5 leading-tight text-center transition-colors"
+                    className="min-h-[44px] min-w-0 px-3 py-2 rounded-lg text-sm font-medium text-emerald-100 hover:text-white hover:bg-emerald-500/20 inline-flex items-center justify-center gap-1.5 leading-tight text-center transition-all active:scale-[0.97]"
                     title="Отправить отчет сотруднику в Telegram"
                   >
                     <Send className="h-4 w-4 shrink-0" />
@@ -24804,9 +24825,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       setCwReportModalOpen(true);
                       setCwReportResult(null);
                     }}
-                    className="min-h-[44px] min-w-0 px-3 py-2 rounded-lg text-sm font-medium leading-tight text-center text-indigo-100 hover:text-white hover:bg-white/10 transition-colors"
+                    className="inline-flex min-h-[44px] min-w-0 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium leading-tight text-indigo-100 hover:text-white hover:bg-white/10 transition-all active:scale-[0.97]"
                   >
-                    Отчет
+                    <FileText className="h-4 w-4 shrink-0" /> Отчет
                   </button>
                   )}
                 </div>
