@@ -2264,6 +2264,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     (suppliers || []).filter((s: any) => isDeliveryPayerSupplier(s?.name))
   ), [suppliers]);
 
+  // Show the payer's supplier name (e.g. "ИП Власенко_И_А") instead of the raw wallet title.
+  const getSupplierNameForOwner = (owner: WarehouseMoneyOwner) => {
+    const s = (suppliers || []).find((x: any) => getDeliveryPayerOwner(x?.name) === owner);
+    return s?.name || (WAREHOUSE_MONEY_OWNERS.find((o) => o.id === owner)?.title || '');
+  };
+
   const deliveryQuickPaySelectedRows = useMemo(() => {
     const selected = new Set(deliveryQuickPaySelectedIds.map(String));
     return (deliveryHistory || []).filter((delivery: any) => selected.has(String(delivery?.id)) && !delivery?.is_paid);
@@ -4720,9 +4726,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     const selected = salaryPayRows.filter((r) => salaryPaySelectedIds.includes(r.employee_id));
     if (!selected.length) { showToast('Выберите сотрудников для оплаты', 'error'); return; }
     const period = cwSalaryPeriods.find((p) => p.key === salaryPayPeriodKey);
-    const ownerTitle = WAREHOUSE_MONEY_OWNERS.find((o) => o.id === salaryPayOwner)?.title || '';
+    const ownerTitle = getSupplierNameForOwner(salaryPayOwner);
     const total = selected.reduce((s, r) => s + r.amount, 0);
-    if (!window.confirm(`Оплатить ЗП?\nСотрудников: ${selected.length}\nСумма: ${total.toFixed(2)} ₽\nИсточник: ${ownerTitle}`)) return;
+    if (!window.confirm(`Оплатить ЗП?\nСотрудников: ${selected.length}\nСумма: ${total.toFixed(2)} ₽\nОплата: ${ownerTitle}`)) return;
     setSalaryPaySaving(true);
     try {
       for (const r of selected) {
@@ -29390,13 +29396,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       </select>
                     </label>
                     <label className="block">
-                      <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Источник денег</span>
+                      <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Оплата</span>
                       <select
                         value={salaryPayOwner}
                         onChange={(e) => setSalaryPayOwner(e.target.value as WarehouseMoneyOwner)}
                         className="oc-input h-11 rounded-xl bg-white text-sm"
                       >
-                        {WAREHOUSE_MONEY_OWNERS.map((o) => (<option key={'salary-owner-' + o.id} value={o.id}>{o.title}</option>))}
+                        {WAREHOUSE_MONEY_OWNERS.map((o) => (<option key={'salary-owner-' + o.id} value={o.id}>{getSupplierNameForOwner(o.id)}</option>))}
                       </select>
                     </label>
                   </div>
