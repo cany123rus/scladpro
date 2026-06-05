@@ -4644,11 +4644,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       const p2s = new Date(y, m, 21);
       const p2e = new Date(y, m + 1, 5);
       const fmt = (d: Date) => d.toLocaleDateString('ru-RU');
-      const iso = (d: Date) => d.toISOString().split('T')[0];
+      // Build ISO from LOCAL date parts — toISOString() shifts to UTC and moves
+      // the boundary by a day in timezones ahead of UTC (e.g. Moscow UTC+3).
+      const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
       result.push({ key: `${iso(p1s)}_${iso(p1e)}`, label: `${fmt(p1s)} - ${fmt(p1e)}`, start: iso(p1s), end: iso(p1e) });
       result.push({ key: `${iso(p2s)}_${iso(p2e)}`, label: `${fmt(p2s)} - ${fmt(p2e)}`, start: iso(p2s), end: iso(p2e) });
     }
-    const todayIso = new Date().toISOString().split('T')[0];
+    const _t = new Date();
+    const todayIso = `${_t.getFullYear()}-${String(_t.getMonth() + 1).padStart(2, '0')}-${String(_t.getDate()).padStart(2, '0')}`;
     return result
       .filter((p) => p.end < todayIso || (p.start <= todayIso && p.end >= todayIso))
       .sort((a, b) => (a.start < b.start ? 1 : -1));
