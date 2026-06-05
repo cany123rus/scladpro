@@ -1412,36 +1412,41 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
     setEditingVariant(null);
   };
 
-  const desktopRowHeight = 108;
+  const desktopRowHeight = 118;
   const desktopListHeight = typeof window !== 'undefined'
     ? Math.max(520, Math.min(1200, window.innerHeight - 220))
     : 700;
-  const ProductTabletCard = useCallback(({ variant }: { variant: ProductVariant }) => (
-    <div className="h-full overflow-hidden rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+  const ProductTabletCard = useCallback(({ variant }: { variant: ProductVariant }) => {
+    const qty = quantities[variant.id] || 0;
+    return (
+    <div className={`group relative h-full overflow-hidden rounded-2xl border bg-white p-3 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md ${qty > 0 ? 'border-indigo-300 ring-1 ring-indigo-200' : 'border-slate-200 hover:border-indigo-200'}`}>
+      {qty > 0 && (
+        <span className="absolute right-2 top-2 z-10 inline-flex min-w-[1.5rem] items-center justify-center rounded-full bg-indigo-600 px-2 py-0.5 text-xs font-bold text-white shadow">{qty}</span>
+      )}
       <div className="flex h-full gap-3">
         <div className="w-20 shrink-0">
-          <div className="h-28 w-20 overflow-hidden rounded-lg border border-slate-200 bg-slate-100 shadow-sm">
+          <div className="h-28 w-20 overflow-hidden rounded-xl border border-slate-200 bg-slate-100 shadow-sm">
             {variant.product.photos?.[0]?.c246x328 ? (
               <img
                 src={variant.product.photos[0].c246x328}
                 alt={variant.product.title}
-                className="h-full w-full cursor-pointer object-cover transition-opacity hover:opacity-90"
+                className="h-full w-full cursor-pointer object-cover transition-transform duration-300 group-hover:scale-105"
                 onClick={() => setSelectedImage(variant.product.photos[0].big || variant.product.photos[0].c516x688 || variant.product.photos[0].c246x328)}
               />
             ) : (
-              <div className="flex h-full items-center justify-center text-slate-400"><ImageIcon className="h-6 w-6" /></div>
+              <div className="flex h-full items-center justify-center text-slate-300"><ImageIcon className="h-6 w-6" /></div>
             )}
           </div>
           <div className="mt-2 flex justify-center gap-1.5">
-            <button onClick={() => openEditModal(variant)} className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-amber-200 text-amber-700 hover:bg-amber-50" title="Редактировать локально"><Pencil className="h-4 w-4" /></button>
-            <a href={getWbProductUrl(variant.product)} target="_blank" rel="noopener noreferrer" className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-indigo-200 text-indigo-600 hover:bg-indigo-50" title="Открыть на WB"><ExternalLink className="h-4 w-4" /></a>
+            <button onClick={() => openEditModal(variant)} className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-amber-200 text-amber-700 transition-colors hover:bg-amber-50 active:scale-95" title="Редактировать локально"><Pencil className="h-4 w-4" /></button>
+            <a href={getWbProductUrl(variant.product)} target="_blank" rel="noopener noreferrer" className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-indigo-200 text-indigo-600 transition-colors hover:bg-indigo-50 active:scale-95" title="Открыть на WB"><ExternalLink className="h-4 w-4" /></a>
           </div>
         </div>
         <div className="flex min-w-0 flex-1 flex-col">
           <div className="line-clamp-2 text-sm font-semibold leading-5 text-slate-900" title={variant.product.title}>{variant.product.title || 'Без названия'}</div>
-          <div className="mt-1 flex flex-wrap gap-1.5">
-            <span className="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-500">ID: {variant.product.nmID}</span>
-            {variant.product.vendorCode && <span className="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-500">Арт: {variant.product.vendorCode}</span>}
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-xs font-medium text-slate-500">ID: {variant.product.nmID}</span>
+            {variant.product.vendorCode && <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-xs font-medium text-slate-500">Арт: {variant.product.vendorCode}</span>}
           </div>
           <input
             type="text"
@@ -1450,64 +1455,68 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
             onKeyDown={(e) => {
               if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
             }}
-            className="mt-2 w-full rounded-lg border border-indigo-200 px-2 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+            className="mt-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2 text-sm outline-none transition focus:border-indigo-300 focus:bg-white focus:ring-2 focus:ring-indigo-500"
             placeholder="Номер модели"
             title="Номер модели общий для всех размеров этой карточки WB"
           />
-          <div className="mt-2 grid grid-cols-[1fr_auto] gap-2 text-xs text-slate-600">
-            <div className="min-w-0 truncate">Цвет: {localLabelEdits[variant.id]?.color || getColor(variant.product)}</div>
-            <span className="rounded bg-indigo-50 px-2 py-0.5 font-bold text-indigo-700">{localLabelEdits[variant.id]?.size || variant.size.techSize}</span>
+          <div className="mt-2 flex items-center justify-between gap-2 text-xs text-slate-600">
+            <div className="min-w-0 truncate">Цвет: <span className="font-medium text-slate-700">{localLabelEdits[variant.id]?.color || getColor(variant.product)}</span></div>
+            <span className="shrink-0 rounded-lg bg-gradient-to-br from-indigo-500 to-violet-500 px-2.5 py-0.5 text-xs font-bold text-white shadow-sm">{localLabelEdits[variant.id]?.size || variant.size.techSize}</span>
           </div>
-          <div className="mt-1 truncate font-mono text-xs text-slate-500">{variant.barcode || '-'}</div>
-          <div className="mt-auto flex items-center justify-end gap-2 pt-3">
-            <button onClick={() => updateQuantity(variant.id, -1)} className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-slate-100 text-slate-600"><Minus className="h-5 w-5" /></button>
-            <input
-              type="text"
-              inputMode="numeric"
-              defaultValue={String(quantities[variant.id] || 0)}
-              onChange={(e) => handleQuantityInput(variant.id, e.target.value)}
-              onBlur={(e) => commitQuantityDeferred(variant.id, e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  commitQuantity(variant.id, (e.target as HTMLInputElement).value);
-                  (e.target as HTMLInputElement).blur();
-                }
-              }}
-              className="h-11 w-16 rounded-lg border border-slate-300 p-1 text-center text-base outline-none focus:ring-2 focus:ring-indigo-500"
-            />
-            <button onClick={() => updateQuantity(variant.id, 1)} className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-slate-100 text-slate-600"><Plus className="h-5 w-5" /></button>
+          <div className="mt-1.5 truncate rounded-md bg-slate-50 px-2 py-1 font-mono text-xs text-slate-500">{variant.barcode || '-'}</div>
+          <div className="mt-auto flex items-center justify-end gap-1.5 pt-3">
+            <div className="inline-flex items-center gap-1 rounded-full bg-slate-100 p-1">
+              <button onClick={() => updateQuantity(variant.id, -1)} className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-white text-slate-600 shadow-sm transition hover:text-rose-600 active:scale-90"><Minus className="h-4 w-4" /></button>
+              <input
+                type="text"
+                inputMode="numeric"
+                defaultValue={String(quantities[variant.id] || 0)}
+                onChange={(e) => handleQuantityInput(variant.id, e.target.value)}
+                onBlur={(e) => commitQuantityDeferred(variant.id, e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    commitQuantity(variant.id, (e.target as HTMLInputElement).value);
+                    (e.target as HTMLInputElement).blur();
+                  }
+                }}
+                className="h-9 w-12 rounded-lg border-0 bg-transparent p-0 text-center text-base font-semibold text-slate-900 outline-none"
+              />
+              <button onClick={() => updateQuantity(variant.id, 1)} className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-white text-slate-600 shadow-sm transition hover:text-indigo-600 active:scale-90"><Plus className="h-4 w-4" /></button>
+            </div>
           </div>
         </div>
       </div>
     </div>
-  ), [commitModelNumber, commitQuantity, commitQuantityDeferred, getModelNumber, getWbProductUrl, handleQuantityInput, localLabelEdits, openEditModal, quantities, updateQuantity]);
+    );
+  }, [commitModelNumber, commitQuantity, commitQuantityDeferred, getModelNumber, getWbProductUrl, handleQuantityInput, localLabelEdits, openEditModal, quantities, updateQuantity]);
 
   const VirtualizedRow = useCallback(({ index, style }: ListChildComponentProps) => {
     const variant = filteredVariants[index];
     if (!variant) return null;
 
+    const rowQty = quantities[variant.id] || 0;
     return (
-      <div style={style} className="px-2">
-        <div className="grid grid-cols-[64px_1fr_96px_120px_160px_160px_120px] items-center gap-2 hover:bg-slate-50 transition-colors group border-b border-slate-100 px-2">
+      <div style={style} className="px-2 py-1">
+        <div className={`grid grid-cols-[64px_1fr_96px_120px_160px_160px_120px] items-center gap-2 group rounded-xl border px-2 transition-all ${rowQty > 0 ? 'border-indigo-200 bg-indigo-50/40' : 'border-transparent hover:border-slate-200 hover:bg-slate-50'}`}>
           <div className="p-2">
             <div className="w-12 h-16 bg-slate-100 rounded-lg overflow-hidden border border-slate-200 shadow-sm">
               {variant.product.photos?.[0]?.c246x328 ? (
                 <img
                   src={variant.product.photos[0].c246x328}
                   alt={variant.product.title}
-                  className="w-full h-full object-cover cursor-pointer hover:opacity-90 transition-opacity"
+                  className="w-full h-full object-cover cursor-pointer transition-transform duration-300 group-hover:scale-105"
                   onClick={() => setSelectedImage(variant.product.photos[0].big || variant.product.photos[0].c516x688 || variant.product.photos[0].c246x328)}
                 />
               ) : (
-                <div className="flex items-center justify-center h-full text-slate-400"><ImageIcon className="h-6 w-6" /></div>
+                <div className="flex items-center justify-center h-full text-slate-300"><ImageIcon className="h-6 w-6" /></div>
               )}
             </div>
           </div>
           <div className="min-w-0">
             <div className="font-medium text-slate-900 truncate group-hover:text-indigo-600 transition-colors" title={variant.product.title}>{variant.product.title || 'Без названия'}</div>
             <div className="flex items-center gap-2 mt-1 flex-wrap">
-              <span className="text-xs text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">ID: {variant.product.nmID}</span>
-              {variant.product.vendorCode && <span className="text-xs text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">Арт: {variant.product.vendorCode}</span>}
+              <span className="text-xs font-medium text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded-md">ID: {variant.product.nmID}</span>
+              {variant.product.vendorCode && <span className="text-xs font-medium text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded-md">Арт: {variant.product.vendorCode}</span>}
             </div>
             <input
               type="text"
@@ -1516,35 +1525,37 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
               onKeyDown={(e) => {
                 if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
               }}
-              className="mt-2 w-full max-w-xs px-2 py-1.5 text-sm border border-indigo-200 rounded-md focus:ring-2 focus:ring-indigo-500 outline-none"
+              className="mt-2 w-full max-w-xs px-2.5 py-1.5 text-sm border border-slate-200 bg-slate-50 rounded-lg focus:border-indigo-300 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition"
               placeholder="Номер модели"
               title="Номер модели общий для всех размеров этой карточки WB"
             />
           </div>
-          <div className="text-sm text-slate-700">{localLabelEdits[variant.id]?.color || getColor(variant.product)}</div>
-          <div><span className="font-bold text-sm bg-indigo-50 text-indigo-700 px-2 py-1 rounded">{localLabelEdits[variant.id]?.size || variant.size.techSize}</span></div>
-          <div><span className="font-mono text-sm text-slate-600 bg-slate-50 px-2 py-1 rounded border border-slate-200">{variant.barcode || '-'}</span></div>
-          <div className="flex items-center justify-center gap-2">
-            <button onClick={() => updateQuantity(variant.id, -1)} className="p-1.5 rounded-full hover:bg-slate-100 text-slate-500 transition-colors"><Minus className="h-4 w-4" /></button>
-            <input
-              type="text"
-              inputMode="numeric"
-              defaultValue={String(quantities[variant.id] || 0)}
-              onChange={(e) => handleQuantityInput(variant.id, e.target.value)}
-              onBlur={(e) => commitQuantityDeferred(variant.id, e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  commitQuantity(variant.id, (e.target as HTMLInputElement).value);
-                  (e.target as HTMLInputElement).blur();
-                }
-              }}
-              className="w-16 text-center p-1 border border-slate-300 rounded-md focus:ring-2 focus:ring-indigo-500 outline-none"
-            />
-            <button onClick={() => updateQuantity(variant.id, 1)} className="p-1.5 rounded-full hover:bg-slate-100 text-slate-500 transition-colors"><Plus className="h-4 w-4" /></button>
+          <div className="text-sm font-medium text-slate-700">{localLabelEdits[variant.id]?.color || getColor(variant.product)}</div>
+          <div><span className="inline-block font-bold text-sm bg-gradient-to-br from-indigo-500 to-violet-500 text-white px-2.5 py-1 rounded-lg shadow-sm">{localLabelEdits[variant.id]?.size || variant.size.techSize}</span></div>
+          <div><span className="font-mono text-sm text-slate-600 bg-slate-50 px-2 py-1 rounded-md border border-slate-200">{variant.barcode || '-'}</span></div>
+          <div className="flex items-center justify-center">
+            <div className="inline-flex items-center gap-1 rounded-full bg-slate-100 p-1">
+              <button onClick={() => updateQuantity(variant.id, -1)} className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white text-slate-500 shadow-sm transition hover:text-rose-600 active:scale-90"><Minus className="h-4 w-4" /></button>
+              <input
+                type="text"
+                inputMode="numeric"
+                defaultValue={String(quantities[variant.id] || 0)}
+                onChange={(e) => handleQuantityInput(variant.id, e.target.value)}
+                onBlur={(e) => commitQuantityDeferred(variant.id, e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    commitQuantity(variant.id, (e.target as HTMLInputElement).value);
+                    (e.target as HTMLInputElement).blur();
+                  }
+                }}
+                className="w-10 text-center p-0 bg-transparent border-0 text-sm font-semibold text-slate-900 outline-none"
+              />
+              <button onClick={() => updateQuantity(variant.id, 1)} className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white text-slate-500 shadow-sm transition hover:text-indigo-600 active:scale-90"><Plus className="h-4 w-4" /></button>
+            </div>
           </div>
           <div className="flex justify-center gap-1">
-            <button onClick={() => openEditModal(variant)} className="inline-flex items-center justify-center w-8 h-8 rounded-md border border-amber-200 text-amber-700 hover:bg-amber-50 transition-colors" title="Редактировать локально"><Pencil className="h-4 w-4" /></button>
-            <a href={getWbProductUrl(variant.product)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center w-8 h-8 rounded-md border border-indigo-200 text-indigo-600 hover:bg-indigo-50 transition-colors" title="Открыть на WB"><ExternalLink className="h-4 w-4" /></a>
+            <button onClick={() => openEditModal(variant)} className="inline-flex items-center justify-center w-8 h-8 rounded-lg border border-amber-200 text-amber-700 hover:bg-amber-50 transition-colors active:scale-95" title="Редактировать локально"><Pencil className="h-4 w-4" /></button>
+            <a href={getWbProductUrl(variant.product)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center w-8 h-8 rounded-lg border border-indigo-200 text-indigo-600 hover:bg-indigo-50 transition-colors active:scale-95" title="Открыть на WB"><ExternalLink className="h-4 w-4" /></a>
           </div>
         </div>
       </div>
@@ -1706,10 +1717,15 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
 
       {/* Mobile Cards */}
       <div className="no-print md:hidden p-3 space-y-3">
-        {filteredVariants.map((variant) => (
-          <div key={variant.id} className="border border-slate-200 rounded-lg p-3 bg-white shadow-sm">
+        {filteredVariants.map((variant) => {
+          const mQty = quantities[variant.id] || 0;
+          return (
+          <div key={variant.id} className={`relative rounded-2xl border bg-white p-3 shadow-sm transition-all ${mQty > 0 ? 'border-indigo-300 ring-1 ring-indigo-200' : 'border-slate-200'}`}>
+            {mQty > 0 && (
+              <span className="absolute right-2.5 top-2.5 inline-flex min-w-[1.5rem] items-center justify-center rounded-full bg-indigo-600 px-2 py-0.5 text-xs font-bold text-white shadow">{mQty}</span>
+            )}
             <div className="flex gap-3">
-              <div className="w-16 h-20 bg-slate-100 rounded-lg overflow-hidden border border-slate-200 shrink-0">
+              <div className="w-16 h-20 bg-slate-100 rounded-xl overflow-hidden border border-slate-200 shrink-0">
                 {variant.product.photos?.[0]?.c246x328 ? (
                   <img
                     src={variant.product.photos[0].c246x328}
@@ -1718,12 +1734,15 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
                     onClick={() => setSelectedImage(variant.product.photos[0].big || variant.product.photos[0].c516x688 || variant.product.photos[0].c246x328)}
                   />
                 ) : (
-                  <div className="flex items-center justify-center h-full text-slate-400"><ImageIcon className="h-5 w-5" /></div>
+                  <div className="flex items-center justify-center h-full text-slate-300"><ImageIcon className="h-5 w-5" /></div>
                 )}
               </div>
               <div className="min-w-0 flex-1">
-                <div className="font-medium text-slate-900 text-sm line-clamp-2">{variant.product.title || 'Без названия'}</div>
-                <div className="text-xs text-slate-500 mt-1">ID: {variant.product.nmID} • Арт: {variant.product.vendorCode || '-'}</div>
+                <div className="font-semibold text-slate-900 text-sm line-clamp-2 pr-7">{variant.product.title || 'Без названия'}</div>
+                <div className="mt-1 flex flex-wrap gap-1.5">
+                  <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-xs font-medium text-slate-500">ID: {variant.product.nmID}</span>
+                  {variant.product.vendorCode && <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-xs font-medium text-slate-500">Арт: {variant.product.vendorCode}</span>}
+                </div>
                 <input
                   type="text"
                   defaultValue={getModelNumber(variant)}
@@ -1731,28 +1750,31 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
                   }}
-                  className="mt-2 w-full px-2 py-1.5 text-sm border border-indigo-200 rounded-md focus:ring-2 focus:ring-indigo-500 outline-none"
+                  className="mt-2 w-full px-2.5 py-1.5 text-sm border border-slate-200 bg-slate-50 rounded-lg focus:border-indigo-300 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition"
                   placeholder="Номер модели"
                   title="Номер модели общий для всех размеров этой карточки WB"
                 />
-                <div className="text-xs text-slate-600 mt-1">Цвет: {localLabelEdits[variant.id]?.color || getColor(variant.product)} • Размер: {localLabelEdits[variant.id]?.size || variant.size.techSize}</div>
-                <div className="text-xs font-mono text-slate-600 mt-1 break-all">{variant.barcode || '-'}</div>
+                <div className="mt-2 flex items-center gap-2 text-xs text-slate-600">
+                  <span>Цвет: <span className="font-medium text-slate-700">{localLabelEdits[variant.id]?.color || getColor(variant.product)}</span></span>
+                  <span className="rounded-md bg-gradient-to-br from-indigo-500 to-violet-500 px-2 py-0.5 font-bold text-white shadow-sm">{localLabelEdits[variant.id]?.size || variant.size.techSize}</span>
+                </div>
+                <div className="text-xs font-mono text-slate-500 mt-1.5 break-all rounded-md bg-slate-50 px-2 py-1">{variant.barcode || '-'}</div>
               </div>
             </div>
             <div className="mt-3 flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <button onClick={() => openEditModal(variant)} className="inline-flex items-center px-2 py-1 text-xs rounded border border-amber-200 text-amber-700 bg-amber-50"><Pencil className="h-3.5 w-3.5 mr-1"/>Редактировать</button>
+                <button onClick={() => openEditModal(variant)} className="inline-flex items-center px-2.5 py-1.5 text-xs font-medium rounded-lg border border-amber-200 text-amber-700 bg-amber-50 active:scale-95"><Pencil className="h-3.5 w-3.5 mr-1"/>Редактировать</button>
                 <a
                   href={getWbProductUrl(variant.product)}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-xs text-indigo-600"
+                  className="inline-flex items-center px-2.5 py-1.5 text-xs font-medium rounded-lg border border-indigo-200 text-indigo-600 active:scale-95"
                 >
-                  Открыть на WB
+                  <ExternalLink className="h-3.5 w-3.5 mr-1" /> WB
                 </a>
               </div>
-              <div className="flex items-center gap-2">
-                <button onClick={() => updateQuantity(variant.id, -1)} className="p-2 rounded-full bg-slate-100"><Minus className="h-4 w-4" /></button>
+              <div className="inline-flex items-center gap-1 rounded-full bg-slate-100 p-1">
+                <button onClick={() => updateQuantity(variant.id, -1)} className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-white text-slate-600 shadow-sm active:scale-90"><Minus className="h-4 w-4" /></button>
                 <input
                   type="text"
                   inputMode="numeric"
@@ -1765,13 +1787,14 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
                       (e.target as HTMLInputElement).blur();
                     }
                   }}
-                  className="w-14 text-center p-1 border border-slate-300 rounded-md"
+                  className="w-11 text-center p-0 bg-transparent border-0 text-base font-semibold text-slate-900 outline-none"
                 />
-                <button onClick={() => updateQuantity(variant.id, 1)} className="p-2 rounded-full bg-slate-100"><Plus className="h-4 w-4" /></button>
+                <button onClick={() => updateQuantity(variant.id, 1)} className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-white text-slate-600 shadow-sm active:scale-90"><Plus className="h-4 w-4" /></button>
               </div>
             </div>
           </div>
-        ))}
+          );
+        })}
         {filteredVariants.length === 0 && !loading && (
           <div className="p-8 text-center text-slate-500 text-sm">Товары не найдены. Проверьте фильтры или нажмите «Обновить».</div>
         )}
