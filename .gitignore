@@ -102,3 +102,4 @@ tmp_*
 "firebase deploy/"
 dist /
 firebase deploy/
+awesome-design-md/
