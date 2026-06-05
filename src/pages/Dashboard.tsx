@@ -10219,7 +10219,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   };
 
   const logEmployeeChange = async (op: 'create' | 'update' | 'delete', beforeData: any | null, afterData: any | null) => {
-    const details = JSON.stringify({ kind: 'employee_change', op, before: beforeData, after: afterData });
+    // Never persist plaintext passwords inside activity logs.
+    const stripPw = (row: any | null) => {
+      if (!row || typeof row !== 'object') return row;
+      const { password, ...rest } = row;
+      return rest;
+    };
+    const details = JSON.stringify({ kind: 'employee_change', op, before: stripPw(beforeData), after: stripPw(afterData) });
     await logAction('Изменение сотрудника', details, currentEmployee?.id);
   };
 
@@ -12461,7 +12467,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       return `auth_${Date.now().toString(36)}_${randomPart}`;
   };
 
-  const generateAndSendQR = async (employee: any, isNew = false) => {
+  const generateAndSendQR = async (employee: any, isNew = false, plainPassword = '') => {
     await ensurePdfLibs();
       let authToken = employee.auth_token;
       if (!authToken) {
@@ -12503,7 +12509,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           const formData = new FormData();
           formData.append('chat_id', employee.telegram_chat_id);
           formData.append('caption', isNew
-            ? `Ваш аккаунт зарегистрирован.\nЛогин: ${employee.login}\nПароль: ${employee.password}\nQR постоянный (без срока действия).`
+            ? `Ваш аккаунт зарегистрирован.\nЛогин: ${employee.login}\nПароль: ${plainPassword || '(задан администратором)'}\nQR постоянный (без срока действия).`
             : `Ваш постоянный QR код для входа (без срока действия).`);
           formData.append('document', pdfBlob, 'QR_для_входа.pdf');
 
@@ -12547,7 +12553,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       if (error) throw error;
 
       await logEmployeeChange('create', null, data);
-      await generateAndSendQR(data, true);
+      await generateAndSendQR(data, true, normalizedPassword);
 
       showToast('Сотрудник добавлен и уведомлен', 'success');
       setShowAddEmployeeModal(false);
@@ -12581,15 +12587,17 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
     try {
       const before = employees.find(emp => emp.id === editingEmployee.id) || null;
-      const nextData = {
+      const nextData: Record<string, any> = {
         full_name: editingEmployee.full_name,
         login: editingEmployee.login,
-        password: editingEmployee.password,
         telegram_chat_id: editingEmployee.telegram_chat_id,
         role: editingEmployee.role,
         permissions: editingEmployee.permissions,
         can_access_database: editingEmployee.can_access_database
       };
+      // Only set the password when the admin typed a new one; blank = keep current hash.
+      const newPassword = String(editingEmployee.password || '').trim();
+      if (newPassword) nextData.password = newPassword;
 
       const { error } = await supabase.from('employees').update(nextData).eq('id', editingEmployee.id);
 
@@ -23931,10 +23939,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             <div className="mt-1 text-xs text-slate-500">{emp.role || 'Сборщик'} • {emp.login}</div>
                             <div className="mt-1 text-xs text-slate-500">Chat ID: {emp.telegram_chat_id || '-'}</div>
                           </div>
-                          <details className="text-right">
-                            <summary className="list-none cursor-pointer text-[11px] text-indigo-600 font-medium">Пароль</summary>
-                            <div className="mt-1 text-xs font-mono text-slate-600">{emp.password || '-'}</div>
-                          </details>
+                          <div className="text-right">
+                            <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500" title="Пароли хранятся в виде хэша и не отображаются. Изменить можно в редактировании сотрудника.">
+                              <Lock className="h-3 w-3" /> Пароль скрыт
+                            </span>
+                          </div>
                         </div>
                         <div className="mt-3 flex flex-wrap gap-1.5">
                           <button onClick={async () => {
@@ -23997,7 +24006,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             </span>
                           </td>
                           <td className="px-6 py-4 text-slate-600">{emp.login}</td>
-                          <td className="px-6 py-4 text-slate-600 font-mono">{emp.password}</td>
+                          <td className="px-6 py-4 text-slate-400"><span className="inline-flex items-center gap-1 text-xs"><Lock className="h-3 w-3" /> скрыт</span></td>
                           <td className="px-6 py-4 text-slate-600">{emp.telegram_chat_id}</td>
                           <td className="px-6 py-4 text-right flex justify-end gap-2">
                             <button
@@ -24221,11 +24230,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <label className="block text-sm font-medium text-slate-700 mb-1">Пароль</label>
                         <input
                         type="text"
-                        value={editingEmployee.password}
+                        value={editingEmployee.password || ''}
                         onChange={e => setEditingEmployee({...editingEmployee, password: e.target.value})}
                         className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-indigo-500"
-                        required
+                        placeholder="Оставьте пустым — пароль не изменится"
                         />
+                        <p className="mt-1 text-xs text-slate-400">Пароли хранятся в виде хэша. Введите новый, чтобы сбросить.</p>
                     </div>
                     <div>
                         <label className="block text-sm font-medium text-slate-700 mb-1">Chat ID</label>
