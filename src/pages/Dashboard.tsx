@@ -2224,6 +2224,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     return supplier?.name || 'Поставщик';
   };
 
+  // Show the real composition: boxes only, pallets only, or both.
+  const formatDeliveryUnits = (boxes: number, pallets: number) => {
+    const parts: string[] = [];
+    if (Number(boxes) > 0) parts.push('коробок: ' + Math.floor(Number(boxes)).toLocaleString('ru-RU'));
+    if (Number(pallets) > 0) parts.push('паллет: ' + Math.floor(Number(pallets)).toLocaleString('ru-RU'));
+    return parts.length ? parts.join(' • ') : '—';
+  };
+  const sumDeliveryUnits = (rows: any[], key: 'boxes' | 'pallets') => (Array.isArray(rows) ? rows : []).reduce((sum: number, row: any) => sum + Number(row?.[key] || 0), 0);
+
   const normalizeDeliveryRows = (rows: any[]) => (Array.isArray(rows) ? rows : [])
     .map((row: any) => ({ supplier_id: String(row?.supplier_id || '').trim(), boxes: Number(row?.boxes || 0), pallets: Number(row?.pallets || 0) }))
     .filter((row: any) => row.supplier_id && (row.boxes > 0 || row.pallets > 0));
@@ -2265,27 +2274,32 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   ), [deliveryQuickPaySelectedRows]);
 
   const deliveryInfographics = useMemo(() => {
-    const bySupplier = new Map<string, { supplierId: string; supplierName: string; boxes: number; amount: number; unpaidAmount: number; deliveries: number }>();
+    const bySupplier = new Map<string, { supplierId: string; supplierName: string; boxes: number; pallets: number; amount: number; unpaidAmount: number; deliveries: number }>();
     (deliveryHistory || []).forEach((delivery: any) => {
-      const totalBoxes = (delivery?.rows || []).reduce((sum: number, row: any) => sum + Number(row?.boxes || 0), 0) || 1;
+      // A pallet counts the same as a box for cost allocation.
+      const totalUnits = (delivery?.rows || []).reduce((sum: number, row: any) => sum + Number(row?.boxes || 0) + Number(row?.pallets || 0), 0) || 1;
       (delivery?.rows || []).forEach((row: any) => {
         const supplierId = String(row?.supplier_id || '');
         const boxes = Number(row?.boxes || 0);
-        if (!supplierId || boxes <= 0) return;
+        const pallets = Number(row?.pallets || 0);
+        const units = boxes + pallets;
+        if (!supplierId || units <= 0) return;
         const supplierName = suppliers.find((s: any) => String(s.id) === supplierId)?.name || 'Без поставщика';
-        const item = bySupplier.get(supplierId) || { supplierId, supplierName, boxes: 0, amount: 0, unpaidAmount: 0, deliveries: 0 };
-        const allocatedAmount = Number(delivery?.amount || 0) * (boxes / totalBoxes);
+        const item = bySupplier.get(supplierId) || { supplierId, supplierName, boxes: 0, pallets: 0, amount: 0, unpaidAmount: 0, deliveries: 0 };
+        const allocatedAmount = Number(delivery?.amount || 0) * (units / totalUnits);
         item.boxes += boxes;
+        item.pallets += pallets;
         item.amount += allocatedAmount;
         if (!delivery?.is_paid) item.unpaidAmount += allocatedAmount;
         item.deliveries += 1;
         bySupplier.set(supplierId, item);
       });
     });
-    const supplierRows = Array.from(bySupplier.values()).sort((a, b) => b.boxes - a.boxes);
+    const supplierRows = Array.from(bySupplier.values()).sort((a, b) => (b.boxes + b.pallets) - (a.boxes + a.pallets));
     return {
       supplierRows,
       totalBoxes: supplierRows.reduce((sum, row) => sum + row.boxes, 0),
+      totalPallets: supplierRows.reduce((sum, row) => sum + row.pallets, 0),
       totalAmount: (deliveryHistory || []).reduce((sum: number, delivery: any) => sum + Number(delivery?.amount || 0), 0),
       unpaidCount: (deliveryHistory || []).filter((delivery: any) => !delivery?.is_paid).length,
       unpaidAmount: (deliveryHistory || []).filter((delivery: any) => !delivery?.is_paid).reduce((sum: number, delivery: any) => sum + Number(delivery?.amount || 0), 0),
@@ -28926,7 +28940,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         const id = String(delivery?.id || '');
                         const selected = deliveryQuickPaySelectedIds.includes(id);
                         const rows = Array.isArray(delivery?.rows) ? delivery.rows : [];
-                        const totalBoxes = rows.reduce((sum: number, row: any) => sum + Number(row?.boxes || 0), 0);
                         return (
                           <label key={`quick-pay-delivery-row-${id}`} className={`block rounded-2xl border p-3 cursor-pointer transition-all ${selected ? 'border-emerald-400 bg-emerald-50 shadow-sm' : 'border-slate-200 bg-white hover:bg-slate-50'}`}>
                             <div className="flex items-start gap-3">
@@ -28944,7 +28957,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                   <div className="font-bold text-emerald-700">{Number(delivery?.amount || 0).toFixed(2)} ₽</div>
                                 </div>
                                 <div className="mt-1 text-xs text-slate-500">
-                                  {delivery?.date ? new Date(String(delivery.date) + 'T12:00:00').toLocaleDateString('ru-RU') : '—'} • коробок: {Math.floor(totalBoxes).toLocaleString('ru-RU')}
+                                  {delivery?.date ? new Date(String(delivery.date) + 'T12:00:00').toLocaleDateString('ru-RU') : '—'} • {formatDeliveryUnits(sumDeliveryUnits(rows, 'boxes'), sumDeliveryUnits(rows, 'pallets'))}
                                 </div>
                                 <div className="mt-1 text-xs text-slate-500 truncate">
                                   {rows.map((row: any) => suppliers.find((s: any) => String(s.id) === String(row?.supplier_id))?.name || 'Поставщик').join(', ') || 'Без поставщиков'}
@@ -29073,6 +29086,18 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         />
                       </label>
                       <label className="block">
+                        <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Сумма</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={deliveryForm.amount}
+                          onChange={(e) => setDeliveryForm(prev => ({ ...prev, amount: e.target.value }))}
+                          placeholder="0"
+                          className="oc-input h-11 rounded-xl bg-white text-sm"
+                        />
+                      </label>
+                      <label className="block">
                         <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Доставщик</span>
                         <select
                           value={deliveryForm.courier}
@@ -29107,18 +29132,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             <Plus className="h-4 w-4" />
                           </button>
                         </div>
-                      </label>
-                      <label className="block">
-                        <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Сумма</span>
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          value={deliveryForm.amount}
-                          onChange={(e) => setDeliveryForm(prev => ({ ...prev, amount: e.target.value }))}
-                          placeholder="0"
-                          className="oc-input h-11 rounded-xl bg-white text-sm"
-                        />
                       </label>
                     </div>
 
@@ -29217,10 +29230,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         {deliveryInfographics.supplierRows.map((row) => (
                           <div key={'delivery-supplier-card-' + row.supplierId} className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
                             <div className="font-semibold text-slate-900 truncate" title={row.supplierName}>{row.supplierName}</div>
-                            <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                            <div className="mt-2 grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
                               <div>
                                 <div className="text-slate-500">Коробок</div>
                                 <div className="font-bold text-slate-900">{Math.floor(row.boxes).toLocaleString('ru-RU')}</div>
+                              </div>
+                              <div>
+                                <div className="text-slate-500">Паллет</div>
+                                <div className="font-bold text-slate-900">{Math.floor(row.pallets).toLocaleString('ru-RU')}</div>
                               </div>
                               <div>
                                 <div className="text-slate-500">Доставок</div>
@@ -29268,7 +29285,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                 </span>
                               </div>
                               <div className="mt-1 text-xs text-slate-500">
-                                {delivery?.date ? new Date(String(delivery.date) + 'T12:00:00').toLocaleDateString('ru-RU') : '—'} • коробок: {Math.floor(totalBoxes).toLocaleString('ru-RU')}{totalPallets > 0 ? ' • паллет: ' + Math.floor(totalPallets).toLocaleString('ru-RU') : ''}
+                                {delivery?.date ? new Date(String(delivery.date) + 'T12:00:00').toLocaleDateString('ru-RU') : '—'} • {formatDeliveryUnits(totalBoxes, totalPallets)}
                               </div>
                               {delivery.is_paid && (
                                 <div className="mt-1 text-xs text-emerald-700">
