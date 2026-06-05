@@ -229,15 +229,9 @@ export default function Login() {
       });
 
       if (error) {
-        // Try Employee Login
-        const { data: employees, error: empError } = await supabase
-          .from('employees')
-          .select('*')
-          .ilike('login', normalizedEmail)
-          .eq('password', normalizedPassword)
-          .limit(1);
-
-        const employee = employees?.[0];
+        // Try Employee Login via secure RPC (password verified server-side, hash never leaves DB)
+        const { data: employee, error: empError } = await supabase
+          .rpc('verify_employee_login', { p_login: normalizedEmail, p_password: normalizedPassword });
 
         if (empError || !employee) {
           console.error('Employee fallback login failed:', { authError: error, empError, login: normalizedEmail });
@@ -329,15 +323,8 @@ export default function Login() {
           const login = loginPayload.slice(0, splitIndex).trim();
           const pass = loginPayload.slice(splitIndex + 1).trim();
 
-          const { data: employees, error: empError } = await supabase
-            .from('employees')
-            .select('*')
-            .is('deleted_at', null)
-            .ilike('login', login)
-            .eq('password', pass)
-            .limit(1);
-
-          const employee = employees?.[0];
+          const { data: employee, error: empError } = await supabase
+            .rpc('verify_employee_login', { p_login: login, p_password: pass });
 
           if (empError || !employee) {
             throw new Error('Сотрудник не найден или неверный пароль');
