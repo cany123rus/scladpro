@@ -4983,7 +4983,7 @@ export const WBSupplyManager = ({
   };
 
   return (
-    <div className={embeddedMode ? 'font-sans text-gray-800' : 'p-3 md:p-6 bg-gray-50 min-h-screen font-sans text-gray-800'}>
+    <div className={embeddedMode ? 'font-sans text-slate-800' : 'p-3 md:p-6 bg-slate-50 min-h-screen font-sans text-slate-800'}>
       {!embeddedMode && (
         <>
           {/* Header */}
@@ -5021,7 +5021,7 @@ export const WBSupplyManager = ({
           <div className="flex gap-2 mb-6 border-b overflow-x-auto whitespace-nowrap">
               <button 
                 onClick={() => setActiveTab('fbs')}
-                className={`px-4 py-2 font-medium transition-colors border-b-2 ${activeTab === 'fbs' ? 'border-purple-600 text-purple-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+                className={`px-4 py-2 font-medium transition-colors border-b-2 ${activeTab === 'fbs' ? 'border-purple-600 text-purple-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
               >
                   <div className="flex items-center gap-2">
                       <LayoutGrid className="w-4 h-4" />
@@ -5030,7 +5030,7 @@ export const WBSupplyManager = ({
               </button>
               <button 
                 onClick={() => setActiveTab('fbs_calc')}
-                className={`px-4 py-2 font-medium transition-colors border-b-2 ${activeTab === 'fbs_calc' ? 'border-purple-600 text-purple-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+                className={`px-4 py-2 font-medium transition-colors border-b-2 ${activeTab === 'fbs_calc' ? 'border-purple-600 text-purple-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
               >
                   <div className="flex items-center gap-2">
                       <Calculator className="w-4 h-4" />
@@ -5039,7 +5039,7 @@ export const WBSupplyManager = ({
               </button>
               <button 
                 onClick={() => setActiveTab('fbs_orders')}
-                className={`px-4 py-2 font-medium transition-colors border-b-2 ${activeTab === 'fbs_orders' ? 'border-purple-600 text-purple-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+                className={`px-4 py-2 font-medium transition-colors border-b-2 ${activeTab === 'fbs_orders' ? 'border-purple-600 text-purple-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
               >
                   <div className="flex items-center gap-2">
                       <FileSpreadsheet className="w-4 h-4" />
@@ -5048,7 +5048,7 @@ export const WBSupplyManager = ({
               </button>
               <button 
                 onClick={() => setActiveTab('fbo_acceptance')}
-                className={`px-4 py-2 font-medium transition-colors border-b-2 ${activeTab === 'fbo_acceptance' ? 'border-purple-600 text-purple-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+                className={`px-4 py-2 font-medium transition-colors border-b-2 ${activeTab === 'fbo_acceptance' ? 'border-purple-600 text-purple-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
               >
                   <div className="flex items-center gap-2">
                       <FileSpreadsheet className="w-4 h-4" />
@@ -5084,8 +5084,8 @@ export const WBSupplyManager = ({
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             
             {/* Column 1: Orders */}
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col min-h-[380px] 2xl:h-[calc(100vh-10rem)]">
-                <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50 rounded-t-xl">
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col min-h-[380px] 2xl:h-[calc(100vh-10rem)]">
+                <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50 rounded-t-xl">
                     <h2 className="font-semibold flex items-center gap-2">
                         <Package className="w-5 h-5 text-blue-500" />
                         Новые заказы
@@ -5100,9 +5100,9 @@ export const WBSupplyManager = ({
                     </button>
                 </div>
                 
-                <div className="p-2 border-b border-gray-100 flex justify-between items-center bg-white">
+                <div className="p-2 border-b border-slate-100 flex justify-between items-center bg-white">
                     <div className="flex items-center gap-2">
-                        <button onClick={toggleAllOrders} className="text-sm text-gray-600 hover:text-gray-900">
+                        <button onClick={toggleAllOrders} className="text-sm text-slate-600 hover:text-slate-900">
                             {selectedOrderIds.size === orders.length && orders.length > 0 ? 'Снять все' : 'Выбрать все'}
                         </button>
                     </div>
@@ -5113,14 +5113,14 @@ export const WBSupplyManager = ({
 
                 <div className="2xl:flex-1 2xl:overflow-auto p-0">
                     <table className="w-full text-sm text-left">
-                        <thead className="text-xs text-gray-700 uppercase bg-gray-50 sticky top-0">
+                        <thead className="text-xs text-slate-700 uppercase bg-slate-50 sticky top-0">
                             <tr>
                                 <th className="p-3 w-10">
                                     <input 
                                         type="checkbox" 
                                         checked={selectedOrderIds.size === orders.length && orders.length > 0}
                                         onChange={toggleAllOrders}
-                                        className="rounded border-gray-300"
+                                        className="rounded border-slate-300"
                                     />
                                 </th>
                                 <th className="p-3">Заказ</th>
@@ -5131,7 +5131,7 @@ export const WBSupplyManager = ({
                         <tbody>
                             {orders.length === 0 ? (
                                 <tr>
-                                    <td colSpan={4} className="p-8 text-center text-gray-500">
+                                    <td colSpan={4} className="p-8 text-center text-slate-500">
                                         Нет новых заказов
                                     </td>
                                 </tr>
@@ -5139,7 +5139,7 @@ export const WBSupplyManager = ({
                                 orders.map(order => (
                                     <tr 
                                         key={order.id} 
-                                        className={`border-b hover:bg-gray-50 cursor-pointer ${selectedOrderIds.has(order.id.toString()) ? 'bg-blue-50' : ''}`}
+                                        className={`border-b hover:bg-slate-50 cursor-pointer ${selectedOrderIds.has(order.id.toString()) ? 'bg-blue-50' : ''}`}
                                         onClick={() => toggleOrderSelection(order.id.toString())}
                                     >
                                         <td className="p-3">
@@ -5147,19 +5147,19 @@ export const WBSupplyManager = ({
                                                 type="checkbox" 
                                                 checked={selectedOrderIds.has(order.id.toString())}
                                                 onChange={() => toggleOrderSelection(order.id.toString())}
-                                                className="rounded border-gray-300"
+                                                className="rounded border-slate-300"
                                                 onClick={(e) => e.stopPropagation()}
                                             />
                                         </td>
                                         <td className="p-3">
                                             <div className="font-medium">{order.id}</div>
-                                            <div className="text-xs text-gray-500">{order.supplyId ? `В поставке: ${order.supplyId}` : 'Не в поставке'}</div>
+                                            <div className="text-xs text-slate-500">{order.supplyId ? `В поставке: ${order.supplyId}` : 'Не в поставке'}</div>
                                         </td>
                                         <td className="p-3">
                                             <div className="font-medium truncate max-w-[150px]" title={order.article}>{order.article}</div>
-                                            <div className="text-xs text-gray-500">{order.convertedPrice / 100} в‚Ѕ</div>
+                                            <div className="text-xs text-slate-500">{order.convertedPrice / 100} в‚Ѕ</div>
                                         </td>
-                                        <td className="p-3 text-xs text-gray-500">
+                                        <td className="p-3 text-xs text-slate-500">
                                             {formatDate(order.createdAt)}
                                         </td>
                                     </tr>
@@ -5178,7 +5178,7 @@ export const WBSupplyManager = ({
                     className={`
                         p-4 rounded-xl shadow-sm border flex items-center justify-center gap-3 transition-all
                         ${!activeSupplyId || selectedOrderIds.size === 0 
-                            ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed' 
+                            ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed' 
                             : 'bg-blue-600 text-white border-blue-600 hover:bg-blue-700 shadow-md transform hover:-translate-y-1'}
                     `}
                 >
@@ -5195,8 +5195,8 @@ export const WBSupplyManager = ({
             </div>
 
             {/* Column 3: Supplies */}
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col min-h-[380px] 2xl:h-[calc(100vh-10rem)]">
-                <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50 rounded-t-xl">
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col min-h-[380px] 2xl:h-[calc(100vh-10rem)]">
+                <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50 rounded-t-xl">
                     <h2 className="font-semibold flex items-center gap-2">
                         <Truck className="w-5 h-5 text-purple-500" />
                         Поставки
@@ -5240,7 +5240,7 @@ export const WBSupplyManager = ({
                         <button 
                             onClick={fetchSupplies}
                             disabled={loading}
-                            className="p-2 hover:bg-gray-100 rounded-full transition-colors text-gray-600"
+                            className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-600"
                             title="Обновить"
                         >
                             <RefreshCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
@@ -5248,40 +5248,40 @@ export const WBSupplyManager = ({
                     </div>
                 </div>
 
-                <div className="p-2 border-b border-gray-100 flex items-center gap-2 bg-white px-4">
+                <div className="p-2 border-b border-slate-100 flex items-center gap-2 bg-white px-4">
                     <input 
                         type="checkbox" 
                         id="showAll"
                         checked={showAllSupplies}
                         onChange={(e) => setShowAllSupplies(e.target.checked)}
-                        className="rounded border-gray-300"
+                        className="rounded border-slate-300"
                     />
-                    <label htmlFor="showAll" className="text-sm text-gray-600 cursor-pointer select-none">
+                    <label htmlFor="showAll" className="text-sm text-slate-600 cursor-pointer select-none">
                         Показывать закрытые
                     </label>
                 </div>
 
                 <div className="2xl:flex-1 2xl:overflow-auto p-0">
                     {supplies.length === 0 ? (
-                        <div className="p-8 text-center text-gray-500">Нет поставок</div>
+                        <div className="p-8 text-center text-slate-500">Нет поставок</div>
                     ) : (
                         supplies.map(supply => (
                             <div 
                                 key={supply.id}
                                 onClick={() => setActiveSupplyId(supply.id)}
                                 className={`
-                                    p-4 border-b cursor-pointer transition-colors hover:bg-gray-50
+                                    p-4 border-b cursor-pointer transition-colors hover:bg-slate-50
                                     ${activeSupplyId === supply.id ? 'bg-purple-50 border-l-4 border-l-purple-500' : 'border-l-4 border-l-transparent'}
                                 `}
                             >
                                 <div className="flex justify-between items-start mb-1">
-                                    <div className="font-medium text-gray-900">{supply.name}</div>
-                                    <div className={`text-xs px-2 py-0.5 rounded-full ${supply.closedAt ? 'bg-gray-200 text-gray-600' : 'bg-green-100 text-green-700'}`}>
+                                    <div className="font-medium text-slate-900">{supply.name}</div>
+                                    <div className={`text-xs px-2 py-0.5 rounded-full ${supply.closedAt ? 'bg-slate-200 text-slate-600' : 'bg-green-100 text-green-700'}`}>
                                         {supply.closedAt ? 'Закрыта' : 'Активна'}
                                     </div>
                                 </div>
-                                <div className="text-xs text-gray-500 font-mono mb-2">{supply.id}</div>
-                                <div className="flex justify-between items-center text-xs text-gray-500">
+                                <div className="text-xs text-slate-500 font-mono mb-2">{supply.id}</div>
+                                <div className="flex justify-between items-center text-xs text-slate-500">
                                     <span>{formatDate(supply.createdAt)}</span>
                                 </div>
                                 
@@ -5289,25 +5289,25 @@ export const WBSupplyManager = ({
                                     <div className="mt-3 flex flex-wrap gap-2">
                                         <button 
                                             onClick={(e) => { e.stopPropagation(); generatePickingList(); }}
-                                            className="flex items-center gap-1 bg-white border border-gray-300 px-2 py-1 rounded text-xs hover:bg-gray-50"
+                                            className="flex items-center gap-1 bg-white border border-slate-300 px-2 py-1 rounded text-xs hover:bg-slate-50"
                                         >
                                             <FileText className="w-3 h-3" /> Лист
                                         </button>
                                         <button 
                                             onClick={(e) => { e.stopPropagation(); generateGroupedSupplierPickingList(); }}
-                                            className="flex items-center gap-1 bg-white border border-gray-300 px-2 py-1 rounded text-xs hover:bg-gray-50"
+                                            className="flex items-center gap-1 bg-white border border-slate-300 px-2 py-1 rounded text-xs hover:bg-slate-50"
                                         >
                                             <List className="w-3 h-3" /> Лист (групп.)
                                         </button>
                                         <button 
                                             onClick={(e) => { e.stopPropagation(); generateSupplyBarcode(); }}
-                                            className="flex items-center gap-1 bg-white border border-gray-300 px-2 py-1 rounded text-xs hover:bg-gray-50"
+                                            className="flex items-center gap-1 bg-white border border-slate-300 px-2 py-1 rounded text-xs hover:bg-slate-50"
                                         >
                                             <Barcode className="w-3 h-3" /> ШК
                                         </button>
                                         <button 
                                             onClick={(e) => { e.stopPropagation(); downloadFBSStickers(); }}
-                                            className="flex items-center gap-1 bg-white border border-gray-300 px-2 py-1 rounded text-xs hover:bg-gray-50"
+                                            className="flex items-center gap-1 bg-white border border-slate-300 px-2 py-1 rounded text-xs hover:bg-slate-50"
                                         >
                                             <Printer className="w-3 h-3" /> Стикеры
                                         </button>
@@ -5334,13 +5334,13 @@ export const WBSupplyManager = ({
       )}
 
       {fbsScanModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={() => { setFbsScanModalOpen(false); setFbsPendingStickerRow(null); setFbsScanMode('sticker'); setFbsScanInputValue(''); }}>
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => { setFbsScanModalOpen(false); setFbsPendingStickerRow(null); setFbsScanMode('sticker'); setFbsScanInputValue(''); }}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
-            <div className="px-5 py-4 border-b border-gray-200 flex items-start justify-between gap-4">
+            <div className="px-5 py-4 border-b border-slate-200 flex items-start justify-between gap-4">
               <div>
-                <div className="text-lg font-bold text-gray-900">Скан ЧЗ</div>
-                <div className="text-sm text-gray-500">Поставка: {supplies.find((s) => s.id === activeSupplyId)?.name || activeSupplyId || '-'}</div>
-                <div className="text-xs text-gray-500 mt-1 space-y-1">
+                <div className="text-lg font-bold text-slate-900">Скан ЧЗ</div>
+                <div className="text-sm text-slate-500">Поставка: {supplies.find((s) => s.id === activeSupplyId)?.name || activeSupplyId || '-'}</div>
+                <div className="text-xs text-slate-500 mt-1 space-y-1">
                   {(() => {
                     const stats = getFbsScanProgressStats(fbsScanRows, fbsScansBySticker);
                     return (
@@ -5352,12 +5352,12 @@ export const WBSupplyManager = ({
                   })()}
                 </div>
               </div>
-              <button onClick={() => { setFbsScanModalOpen(false); setFbsPendingStickerRow(null); setFbsScanMode('sticker'); setFbsScanInputValue(''); }} className="p-2 rounded-lg hover:bg-gray-100 text-gray-500">
+              <button onClick={() => { setFbsScanModalOpen(false); setFbsPendingStickerRow(null); setFbsScanMode('sticker'); setFbsScanInputValue(''); }} className="p-2 rounded-lg hover:bg-slate-100 text-slate-500">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="p-5 border-b border-gray-100 bg-gray-50 space-y-3">
+            <div className="p-5 border-b border-slate-100 bg-slate-50 space-y-3">
               <div className="flex flex-col lg:flex-row gap-3 lg:items-center lg:justify-between">
                 <div className={`rounded-xl border px-4 py-3 flex-1 ${fbsScanMode === 'sticker' ? 'border-blue-200 bg-blue-50 text-blue-900' : 'border-amber-200 bg-amber-50 text-amber-900'}`}>
                   {fbsScanMode === 'sticker' ? (
@@ -5387,7 +5387,7 @@ export const WBSupplyManager = ({
                   >
                     <Download className="w-4 h-4" /> Скачать скан файл
                   </button>
-                  <label className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-gray-300 bg-white hover:bg-gray-50 cursor-pointer text-sm font-medium text-gray-700">
+                  <label className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 cursor-pointer text-sm font-medium text-slate-700">
                     <Upload className="w-4 h-4" /> Загрузить файл поставки
                     <input
                       type="file"
@@ -5430,7 +5430,7 @@ export const WBSupplyManager = ({
                   <button
                     type="button"
                     onClick={() => { setFbsPendingStickerRow(null); setFbsScanMode('sticker'); setFbsScanInputValue(''); setFbsScanNotice({ type: 'info', text: 'Скан ЧЗ сброшен. Можно сканировать следующий стикер.' }); }}
-                    className="px-4 py-2 rounded-xl border border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
+                    className="px-4 py-2 rounded-xl border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
                   >
                     Сбросить
                   </button>
@@ -5440,13 +5440,13 @@ export const WBSupplyManager = ({
 
             <div className="p-5 overflow-auto">
               {fbsScanLoading ? (
-                <div className="text-gray-500">Загрузка заказов поставки...</div>
+                <div className="text-slate-500">Загрузка заказов поставки...</div>
               ) : !fbsScanRows.length ? (
-                <div className="text-gray-500">В этой поставке пока нет заказов со стикерами.</div>
+                <div className="text-slate-500">В этой поставке пока нет заказов со стикерами.</div>
               ) : (
-                <div className="overflow-auto rounded-xl border border-gray-200">
+                <div className="overflow-auto rounded-xl border border-slate-200">
                   <table className="w-full text-sm">
-                    <thead className="bg-gray-50 text-gray-600">
+                    <thead className="bg-slate-50 text-slate-600">
                       <tr>
                         <th className="px-3 py-2 text-left">Номер заказа</th>
                         <th className="px-3 py-2 text-left">Стикер</th>
@@ -5461,12 +5461,12 @@ export const WBSupplyManager = ({
                         return (
                           <tr
                             key={row.storageKey}
-                            className={`${scan?.honestSignCode ? 'bg-emerald-50/60' : isActive ? 'bg-amber-50' : 'bg-white'} border-t border-gray-100`}
+                            className={`${scan?.honestSignCode ? 'bg-emerald-50/60' : isActive ? 'bg-amber-50' : 'bg-white'} border-t border-slate-100`}
                           >
-                            <td className="px-3 py-2 font-medium text-gray-900 whitespace-nowrap">{row.orderId || '—'}</td>
-                            <td className="px-3 py-2 font-mono text-gray-700 whitespace-nowrap">{getSafeStickerText(row)}</td>
+                            <td className="px-3 py-2 font-medium text-slate-900 whitespace-nowrap">{row.orderId || '—'}</td>
+                            <td className="px-3 py-2 font-mono text-slate-700 whitespace-nowrap">{getSafeStickerText(row)}</td>
                             <td className="px-3 py-2">
-                              <div className={`font-mono text-[11px] break-all ${scan?.honestSignCode ? 'text-emerald-700' : 'text-gray-700'}`}>{finalReadValue}</div>
+                              <div className={`font-mono text-[11px] break-all ${scan?.honestSignCode ? 'text-emerald-700' : 'text-slate-700'}`}>{finalReadValue}</div>
                               <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px]">
                                 {scan?.honestSignCode ? (
                                   <>
@@ -5502,7 +5502,7 @@ export const WBSupplyManager = ({
 
       {/* Content: FBS Orders Tab */}
       {(activeTab === 'fbs_orders' || activeTab === 'fbo_acceptance') && (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 md:p-6 space-y-4">
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 md:p-6 space-y-4">
           <div className="flex flex-col gap-3">
             <select
               className="w-full md:w-[320px] border rounded-lg p-2 bg-white"
@@ -5521,7 +5521,7 @@ export const WBSupplyManager = ({
             </select>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:flex xl:flex-wrap gap-2 md:gap-3">
-              <label className="w-full xl:w-auto px-4 py-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 cursor-pointer inline-flex items-center justify-center gap-2 text-center">
+              <label className="w-full xl:w-auto px-4 py-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 cursor-pointer inline-flex items-center justify-center gap-2 text-center">
                 <Upload className="w-4 h-4 shrink-0" />
                 <span>Загрузить файл</span>
                 <input
@@ -5543,18 +5543,18 @@ export const WBSupplyManager = ({
               </button>
               <button
                 onClick={async () => { await syncMissingBlocksFromVisibleData(); setFbsRenameRulesOpen(true); }}
-                className="w-full xl:w-auto px-4 py-2 rounded-lg border bg-white border-gray-300 text-gray-700"
+                className="w-full xl:w-auto px-4 py-2 rounded-lg border bg-white border-slate-300 text-slate-700"
               >
                 Правила названий
               </button>
               <button
                 onClick={() => setFbsOrdersHistoryOpen(true)}
-                className="w-full xl:w-auto px-4 py-2 rounded-lg border bg-white border-gray-300 text-gray-700"
+                className="w-full xl:w-auto px-4 py-2 rounded-lg border bg-white border-slate-300 text-slate-700"
               >
                 {`История ${fbsOrdersTabTitle}`}
               </button>
             </div>
-            {fbsOrdersLoading && <div className="text-sm text-gray-500">Обработка файла...</div>}
+            {fbsOrdersLoading && <div className="text-sm text-slate-500">Обработка файла...</div>}
           </div>
 
           {fbsAllSuppliersSummary.items.length > 0 && (
@@ -5614,11 +5614,11 @@ export const WBSupplyManager = ({
                   const expanded = !!fbsOrdersExpanded[g.name];
                   return (
                     <div key={`g-${gi}`} className="border rounded-xl overflow-hidden">
-                      <div className="px-3 py-2 bg-gray-50 border-b flex items-center justify-between gap-2">
+                      <div className="px-3 py-2 bg-slate-50 border-b flex items-center justify-between gap-2">
                         <button
                           type="button"
                           onClick={() => setFbsOrdersExpanded((prev) => ({ ...prev, [g.name]: !prev[g.name] }))}
-                          className="font-medium text-gray-900 hover:text-indigo-700 text-left"
+                          className="font-medium text-slate-900 hover:text-indigo-700 text-left"
                         >
                           {expanded ? '▼' : '▶'} {g.name || '-'}
                         </button>
@@ -5640,7 +5640,7 @@ export const WBSupplyManager = ({
                           )}
                           {Array.isArray(g.articles) && g.articles.length > 0 ? (
                             <table className="w-full text-sm min-w-[520px]">
-                              <thead className="bg-white text-gray-600">
+                              <thead className="bg-white text-slate-600">
                                 <tr>
                                   <th className="px-3 py-2 text-left">Артикул WB</th>
                                   <th className="px-3 py-2 text-right">Кол-во {fbsMetricLabel}</th>
@@ -5656,7 +5656,7 @@ export const WBSupplyManager = ({
                               </tbody>
                             </table>
                           ) : (
-                            <div className="px-3 py-2 text-xs text-gray-500">Детализация по артикулам недоступна для этого отчёта. Используй блоки названий выше.</div>
+                            <div className="px-3 py-2 text-xs text-slate-500">Детализация по артикулам недоступна для этого отчёта. Используй блоки названий выше.</div>
                           )}
                         </div>
                       )}
@@ -5668,15 +5668,15 @@ export const WBSupplyManager = ({
           )}
 
           {fbsRenameRulesOpen && (
-            <div className="fixed inset-0 z-[117] bg-black/50 flex items-end sm:items-center justify-center p-2 sm:p-4" onClick={() => setFbsRenameRulesOpen(false)}>
+            <div className="fixed inset-0 z-[117] bg-slate-900/50 backdrop-blur-sm flex items-end sm:items-center justify-center p-2 sm:p-4" onClick={() => setFbsRenameRulesOpen(false)}>
               <div className="w-full max-w-2xl max-h-[90svh] 2xl:max-h-[86vh] overflow-y-auto 2xl:overflow-hidden bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl" onClick={(e) => e.stopPropagation()}>
-                <div className="p-3 sm:p-4 border-b border-gray-200 flex items-center justify-between gap-3">
-                  <div className="font-semibold text-gray-900">Правила названий (Артикул → Название)</div>
-                  <button type="button" onClick={() => setFbsRenameRulesOpen(false)} className="px-3 py-1.5 text-sm rounded border border-gray-300 hover:bg-gray-50">Закрыть</button>
+                <div className="p-3 sm:p-4 border-b border-slate-200 flex items-center justify-between gap-3">
+                  <div className="font-semibold text-slate-900">Правила названий (Артикул → Название)</div>
+                  <button type="button" onClick={() => setFbsRenameRulesOpen(false)} className="px-3 py-1.5 text-sm rounded border border-slate-300 hover:bg-slate-50">Закрыть</button>
                 </div>
                 <div className="p-3 overflow-y-auto max-h-[78vh] sm:max-h-[72vh] space-y-4">
                   <div>
-                    <div className="text-sm font-medium text-gray-800 mb-2">Артикул → Название</div>
+                    <div className="text-sm font-medium text-slate-800 mb-2">Артикул → Название</div>
                     {(fbsRenameRules || []).map((r, i) => (
                       <div key={`rule-${i}`} className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-2 mb-2">
                         <input value={r.article} onChange={(e) => setFbsRenameRules((prev) => prev.map((x, idx) => idx === i ? { ...x, article: e.target.value } : x))} placeholder="Артикул WB" className="oc-input" />
@@ -5684,11 +5684,11 @@ export const WBSupplyManager = ({
                         <button type="button" onClick={() => setFbsRenameRules((prev) => prev.filter((_, idx) => idx !== i))} className="w-full sm:w-auto px-3 py-2 text-sm rounded border border-rose-300 text-rose-700 hover:bg-rose-50">Удалить</button>
                       </div>
                     ))}
-                    <button type="button" onClick={() => setFbsRenameRules((prev) => [...prev, { article: '', name: '' }])} className="px-3 py-2 text-sm rounded border border-gray-300 hover:bg-gray-50">Добавить правило</button>
+                    <button type="button" onClick={() => setFbsRenameRules((prev) => [...prev, { article: '', name: '' }])} className="px-3 py-2 text-sm rounded border border-slate-300 hover:bg-slate-50">Добавить правило</button>
                   </div>
 
                   <div className="border-t pt-3">
-                    <div className="text-sm font-medium text-gray-800 mb-2">Редактор блоков названий</div>
+                    <div className="text-sm font-medium text-slate-800 mb-2">Редактор блоков названий</div>
                     <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-2 mb-2">
                       <input value={fbsNewBlockName} onChange={(e) => setFbsNewBlockName(e.target.value)} placeholder="Новое имя блока (например 12х35)" className="oc-input" />
                       <button
@@ -5723,7 +5723,7 @@ export const WBSupplyManager = ({
                       {(fbsBlockGroups || []).map((g, i) => (
                         <div key={`bg-${i}`} className="border rounded-lg p-2">
                           <div className="flex items-center justify-between gap-2">
-                            <div className="text-sm font-medium text-gray-900">{g.name}</div>
+                            <div className="text-sm font-medium text-slate-900">{g.name}</div>
                             <div className="flex items-center gap-2">
                               <button
                                 type="button"
@@ -5738,11 +5738,11 @@ export const WBSupplyManager = ({
                               <button type="button" onClick={async () => saveFbsBlockGroups((fbsBlockGroups || []).filter((_, idx) => idx !== i))} className="px-2 py-1 text-xs rounded border border-rose-300 text-rose-700 hover:bg-rose-50">Удалить блок</button>
                             </div>
                           </div>
-                          <div className="text-xs text-gray-600 mt-1">{(g.items || []).join(', ')}</div>
+                          <div className="text-xs text-slate-600 mt-1">{(g.items || []).join(', ')}</div>
 
                           {fbsEditingBlockName === g.name && (
                             <div className="mt-2 border-t pt-2 space-y-2">
-                              <div className="text-xs font-medium text-gray-700">Добавить/убрать блоки названий</div>
+                              <div className="text-xs font-medium text-slate-700">Добавить/убрать блоки названий</div>
                               <div className="max-h-36 overflow-auto border rounded-lg p-2 grid grid-cols-1 md:grid-cols-2 gap-1">
                                 {fbsSourceNames
                                   .filter((nm) => {
@@ -5777,7 +5777,7 @@ export const WBSupplyManager = ({
                                 >
                                   Сохранить изменения
                                 </button>
-                                <button type="button" onClick={() => { setFbsEditingBlockName(''); setFbsEditingBlockItems([]); }} className="px-2 py-1 text-xs rounded border border-gray-300 hover:bg-gray-50">Отмена</button>
+                                <button type="button" onClick={() => { setFbsEditingBlockName(''); setFbsEditingBlockItems([]); }} className="px-2 py-1 text-xs rounded border border-slate-300 hover:bg-slate-50">Отмена</button>
                               </div>
                             </div>
                           )}
@@ -5795,33 +5795,33 @@ export const WBSupplyManager = ({
           )}
 
           {fbsSaveMetaOpen && (
-            <div className="fixed inset-0 z-[118] bg-black/50 flex items-center justify-center p-4" onClick={() => setFbsSaveMetaOpen(false)}>
+            <div className="fixed inset-0 z-[118] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setFbsSaveMetaOpen(false)}>
               <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl p-4" onClick={(e) => e.stopPropagation()}>
-                <div className="text-base font-semibold text-gray-900 mb-3">{fbsSaveMetaEditId ? 'Редактировать параметры отчета' : 'Параметры отчета'}</div>
+                <div className="text-base font-semibold text-slate-900 mb-3">{fbsSaveMetaEditId ? 'Редактировать параметры отчета' : 'Параметры отчета'}</div>
                 <div className="space-y-3">
                   <div>
-                    <label className="block text-sm text-gray-700 mb-1">Количество коробок</label>
+                    <label className="block text-sm text-slate-700 mb-1">Количество коробок</label>
                     <input type="number" min="0" value={fbsSaveBoxes} onChange={(e) => setFbsSaveBoxes(e.target.value)} className="oc-input" placeholder="0" />
                   </div>
                   {activeTab === 'fbo_acceptance' && (
                     <>
                       <div>
-                        <label className="block text-sm text-gray-700 mb-1">Количество паллет</label>
+                        <label className="block text-sm text-slate-700 mb-1">Количество паллет</label>
                         <input type="number" min="0" value={fbsSavePallets} onChange={(e) => setFbsSavePallets(e.target.value)} className="oc-input" placeholder="0" />
                       </div>
                       <div>
-                        <label className="block text-sm text-gray-700 mb-1">Название склада</label>
+                        <label className="block text-sm text-slate-700 mb-1">Название склада</label>
                         <input type="text" value={fbsSaveWarehouseName} onChange={(e) => setFbsSaveWarehouseName(e.target.value)} className="oc-input" placeholder="Например: Коледино" />
                       </div>
                       <div>
-                        <label className="block text-sm text-gray-700 mb-1">Дата поставки</label>
+                        <label className="block text-sm text-slate-700 mb-1">Дата поставки</label>
                         <input type="date" value={fbsSaveSupplyDate} onChange={(e) => setFbsSaveSupplyDate(e.target.value)} className="oc-input" />
                       </div>
                     </>
                   )}
                 </div>
                 <div className="mt-4 flex justify-end gap-2">
-                  <button type="button" onClick={() => setFbsSaveMetaOpen(false)} className="px-3 py-2 text-sm rounded border border-gray-300 hover:bg-gray-50">Отмена</button>
+                  <button type="button" onClick={() => setFbsSaveMetaOpen(false)} className="px-3 py-2 text-sm rounded border border-slate-300 hover:bg-slate-50">Отмена</button>
                   <button type="button" onClick={async () => { const pallets = activeTab === 'fbo_acceptance' ? Number(fbsSavePallets || 0) : 0; const meta = { boxes: Number(fbsSaveBoxes || 0), pallets, warehouseName: activeTab === 'fbo_acceptance' ? fbsSaveWarehouseName : '', supplyDate: activeTab === 'fbo_acceptance' ? fbsSaveSupplyDate : '' }; if (fbsSaveMetaEditId) { await updateFbsOrdersHistoryMeta(fbsSaveMetaEditId, meta); } else { await saveFbsOrdersReport(meta); } setFbsSaveMetaOpen(false); }} className="px-3 py-2 text-sm rounded border border-emerald-300 text-emerald-700 hover:bg-emerald-50">Сохранить</button>
                 </div>
               </div>
@@ -5829,12 +5829,12 @@ export const WBSupplyManager = ({
           )}
 
           {fbsOrdersHistoryOpen && (
-            <div className="fixed inset-0 z-[118] bg-black/50 flex items-center justify-center p-4" onClick={() => setFbsOrdersHistoryOpen(false)}>
+            <div className="fixed inset-0 z-[118] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setFbsOrdersHistoryOpen(false)}>
               <div className="w-full max-w-3xl max-h-[90svh] 2xl:h-[86vh] overflow-y-auto 2xl:overflow-hidden bg-white rounded-2xl shadow-2xl flex flex-col" onClick={(e) => e.stopPropagation()}>
-                <div className="p-4 border-b border-gray-200 space-y-3 shrink-0">
+                <div className="p-4 border-b border-slate-200 space-y-3 shrink-0">
                   <div className="flex items-center justify-between">
-                    <div className="font-semibold text-gray-900">{`История ${fbsOrdersTabTitle}`}</div>
-                    <button type="button" onClick={() => setFbsOrdersHistoryOpen(false)} className="px-3 py-1.5 text-sm rounded border border-gray-300 hover:bg-gray-50">Закрыть</button>
+                    <div className="font-semibold text-slate-900">{`История ${fbsOrdersTabTitle}`}</div>
+                    <button type="button" onClick={() => setFbsOrdersHistoryOpen(false)} className="px-3 py-1.5 text-sm rounded border border-slate-300 hover:bg-slate-50">Закрыть</button>
                   </div>
                   <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-3 text-sm space-y-3">
                     <div>
@@ -5891,21 +5891,21 @@ export const WBSupplyManager = ({
                 </div>
                 <div className="p-3 overflow-auto flex-1 pb-6">
                   {!fbsOrdersHistory.length ? (
-                    <div className="text-sm text-gray-500 p-3">История пока пустая</div>
+                    <div className="text-sm text-slate-500 p-3">История пока пустая</div>
                   ) : (
                     <div className="space-y-2">
                       {fbsOrdersHistory.map((h) => (
                         <div key={h.id} className="border rounded-xl p-3">
                           <div className="flex items-center justify-between gap-2">
                             <div>
-                              <div className="text-sm font-medium text-gray-900">{h.supplierName}</div>
-                              <div className="text-xs text-gray-500">{new Date(h.createdAt).toLocaleString('ru-RU')}</div>
+                              <div className="text-sm font-medium text-slate-900">{h.supplierName}</div>
+                              <div className="text-xs text-slate-500">{new Date(h.createdAt).toLocaleString('ru-RU')}</div>
                               {activeTab === 'fbo_acceptance' ? (
-                                <div className="text-xs text-gray-500">Склад: {h.warehouseName || '-'} • Дата поставки: {h.supplyDate ? new Date(`${h.supplyDate}T12:00:00`).toLocaleDateString('ru-RU') : '-'}</div>
+                                <div className="text-xs text-slate-500">Склад: {h.warehouseName || '-'} • Дата поставки: {h.supplyDate ? new Date(`${h.supplyDate}T12:00:00`).toLocaleDateString('ru-RU') : '-'}</div>
                               ) : (
-                                <div className="text-xs text-gray-500">Период: {h.periodStart ? new Date(h.periodStart).toLocaleDateString('ru-RU') : '-'} — {h.periodEnd ? new Date(h.periodEnd).toLocaleDateString('ru-RU') : '-'}</div>
+                                <div className="text-xs text-slate-500">Период: {h.periodStart ? new Date(h.periodStart).toLocaleDateString('ru-RU') : '-'} — {h.periodEnd ? new Date(h.periodEnd).toLocaleDateString('ru-RU') : '-'}</div>
                               )}
-                              <div className="text-xs text-gray-500">Коробок: {Number(h.boxes || 0).toLocaleString('ru-RU')}{activeTab === 'fbo_acceptance' ? ` • Паллет: ${Number(h.pallets || 0).toLocaleString('ru-RU')}` : ''}</div>
+                              <div className="text-xs text-slate-500">Коробок: {Number(h.boxes || 0).toLocaleString('ru-RU')}{activeTab === 'fbo_acceptance' ? ` • Паллет: ${Number(h.pallets || 0).toLocaleString('ru-RU')}` : ''}</div>
                             </div>
                             <div className="flex items-center gap-2">
                               <div className="text-sm font-semibold text-indigo-700">Всего {fbsMetricLabel}: {Number(h.totalTasks || 0).toLocaleString('ru-RU')}</div>
@@ -5942,9 +5942,9 @@ export const WBSupplyManager = ({
                               return Array.from(regrouped.entries())
                                 .sort((a, b) => Number(b[1]) - Number(a[1]) || String(a[0]).localeCompare(String(b[0]), 'ru'))
                                 .map(([name, total], i: number) => (
-                                  <details key={`hist-${h.id}-${i}`} className="border rounded-lg bg-gray-50">
+                                  <details key={`hist-${h.id}-${i}`} className="border rounded-lg bg-slate-50">
                                     <summary className="cursor-pointer list-none px-3 py-2 flex items-center justify-between text-sm">
-                                      <span className="text-gray-900">{name}</span>
+                                      <span className="text-slate-900">{name}</span>
                                       <span className="font-semibold text-indigo-700">Заданий: {Number(total || 0).toLocaleString('ru-RU')}</span>
                                     </summary>
                                   </details>
@@ -6038,27 +6038,27 @@ export const WBSupplyManager = ({
       )}
 
       {orderMissingCostsModalOpen && (
-        <div className="fixed inset-0 z-[132] bg-black/50 flex items-center justify-center p-4" onClick={() => setOrderMissingCostsModalOpen(false)}>
+        <div className="fixed inset-0 z-[132] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setOrderMissingCostsModalOpen(false)}>
           <div className="w-full max-w-4xl bg-white rounded-2xl shadow-2xl p-5" onClick={(e) => e.stopPropagation()}>
-            <div className="text-lg font-bold text-gray-900 mb-2">Заполните себестоимость</div>
-            <div className="text-sm text-gray-500 mb-4">Перед скачиванием нужно указать цену для товаров без себестоимости.</div>
+            <div className="text-lg font-bold text-slate-900 mb-2">Заполните себестоимость</div>
+            <div className="text-sm text-slate-500 mb-4">Перед скачиванием нужно указать цену для товаров без себестоимости.</div>
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 max-h-[60vh] overflow-auto">
               {orderMissingCostItems.map((r) => {
                 const code = String(r?.nmId || r?.article || '');
                 const photo = calcPhotoByNmId[String(r?.nmId || '')] || '';
                 const valueKey = String(r.nmId || r.article || r.title || '');
                 return (
-                  <div key={`missing-cost-${valueKey}`} className="border border-gray-200 rounded-xl p-3 bg-white">
+                  <div key={`missing-cost-${valueKey}`} className="border border-slate-200 rounded-xl p-3 bg-white">
                     <div className="flex gap-3">
                       {photo ? (
-                        <img src={photo} alt={r?.title || code} className="w-20 h-24 object-contain rounded border border-gray-200 bg-white p-1" />
+                        <img src={photo} alt={r?.title || code} className="w-20 h-24 object-contain rounded border border-slate-200 bg-white p-1" />
                       ) : (
-                        <div className="w-20 h-24 rounded border border-gray-200 bg-gray-100 text-gray-400 text-xs flex items-center justify-center">N/A</div>
+                        <div className="w-20 h-24 rounded border border-slate-200 bg-slate-100 text-slate-400 text-xs flex items-center justify-center">N/A</div>
                       )}
                       <div className="min-w-0 flex-1">
-                        <div className="text-xs text-gray-500">{code || 'Без артикула'}</div>
-                        <div className="text-sm text-gray-900 leading-5 break-words">{r?.title || '-'}</div>
-                        <div className="mt-1 text-xs text-gray-500">Кол-во: {r.qty}</div>
+                        <div className="text-xs text-slate-500">{code || 'Без артикула'}</div>
+                        <div className="text-sm text-slate-900 leading-5 break-words">{r?.title || '-'}</div>
+                        <div className="mt-1 text-xs text-slate-500">Кол-во: {r.qty}</div>
                         <div className="mt-2">
                           <input
                             type="number"
@@ -6066,7 +6066,7 @@ export const WBSupplyManager = ({
                             step="0.01"
                             value={orderCostEditorValues[valueKey] ?? ''}
                             onChange={(e) => setOrderCostEditorValues((prev) => ({ ...prev, [valueKey]: e.target.value }))}
-                            className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm"
+                            className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm"
                             placeholder="Себестоимость"
                           />
                         </div>
@@ -6077,7 +6077,7 @@ export const WBSupplyManager = ({
               })}
             </div>
             <div className="flex justify-end gap-2 mt-4">
-              <button onClick={() => setOrderMissingCostsModalOpen(false)} className="px-4 py-2 rounded-lg border border-gray-300 hover:bg-gray-50">Отмена</button>
+              <button onClick={() => setOrderMissingCostsModalOpen(false)} className="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-50">Отмена</button>
               <button
                 onClick={async () => {
                   const next = { ...(orderCostOverrides || {}) };
@@ -6116,10 +6116,10 @@ export const WBSupplyManager = ({
       )}
 
       {orderPdfNameModalOpen && (
-        <div className="fixed inset-0 z-[131] bg-black/50 flex items-center justify-center p-4" onClick={() => setOrderPdfNameModalOpen(false)}>
+        <div className="fixed inset-0 z-[131] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setOrderPdfNameModalOpen(false)}>
           <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl p-5" onClick={(e) => e.stopPropagation()}>
-            <div className="text-lg font-bold text-gray-900 mb-2">Название PDF</div>
-            <div className="text-sm text-gray-500 mb-4">Введите название файла для заказа</div>
+            <div className="text-lg font-bold text-slate-900 mb-2">Название PDF</div>
+            <div className="text-sm text-slate-500 mb-4">Введите название файла для заказа</div>
             <input
               type="text"
               value={orderPdfFileName}
@@ -6128,7 +6128,7 @@ export const WBSupplyManager = ({
               placeholder="Название файла"
             />
             <div className="flex justify-end gap-2">
-              <button onClick={() => setOrderPdfNameModalOpen(false)} className="px-4 py-2 rounded-lg border border-gray-300 hover:bg-gray-50">Отмена</button>
+              <button onClick={() => setOrderPdfNameModalOpen(false)} className="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-50">Отмена</button>
               <button
                 onClick={async () => {
                   await generateSupplyOrderDocument(orderPdfFileName);
@@ -6144,12 +6144,12 @@ export const WBSupplyManager = ({
       )}
 
       {orderCostEditorOpen && (
-        <div className="fixed inset-0 z-[131] bg-black/55 flex items-center justify-center p-4" onClick={() => setOrderCostEditorOpen(false)}>
+        <div className="fixed inset-0 z-[131] bg-slate-900/55 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setOrderCostEditorOpen(false)}>
           <div className="w-full max-w-5xl max-h-[90vh] overflow-hidden bg-white rounded-2xl shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <div className="p-4 border-b border-gray-200 flex items-center justify-between gap-3">
+            <div className="p-4 border-b border-slate-200 flex items-center justify-between gap-3">
               <div>
-                <div className="font-semibold text-gray-900">Себестоимость — Заказ товара</div>
-                <div className="text-xs text-gray-500 mt-1">Только карточки товаров, которые были в заказах текущего поставщика</div>
+                <div className="font-semibold text-slate-900">Себестоимость — Заказ товара</div>
+                <div className="text-xs text-slate-500 mt-1">Только карточки товаров, которые были в заказах текущего поставщика</div>
               </div>
               <div className="flex items-center gap-2">
                 <button
@@ -6179,12 +6179,12 @@ export const WBSupplyManager = ({
                 >
                   Сохранить
                 </button>
-                <button type="button" onClick={() => setOrderCostEditorOpen(false)} className="px-3 py-2 text-sm rounded-lg border border-gray-300 hover:bg-gray-50">Закрыть</button>
+                <button type="button" onClick={() => setOrderCostEditorOpen(false)} className="px-3 py-2 text-sm rounded-lg border border-slate-300 hover:bg-slate-50">Закрыть</button>
               </div>
             </div>
             <div className="p-4 overflow-auto max-h-[78vh]">
               {orderCostItems.length === 0 ? (
-                <div className="text-sm text-gray-500">Нет карточек товаров для настройки себестоимости.</div>
+                <div className="text-sm text-slate-500">Нет карточек товаров для настройки себестоимости.</div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                   {orderCostItems.map((r) => {
@@ -6192,17 +6192,17 @@ export const WBSupplyManager = ({
                     const photo = calcPhotoByNmId[String(r?.nmId || '')] || '';
                     const valueKey = String(r.key || '');
                     return (
-                      <div key={`order-cost-${valueKey}`} className="border border-gray-200 rounded-xl p-3 bg-white">
+                      <div key={`order-cost-${valueKey}`} className="border border-slate-200 rounded-xl p-3 bg-white">
                         <div className="flex gap-3">
                           {photo ? (
-                            <img src={photo} alt={r?.title || code} className="w-20 h-24 object-contain rounded border border-gray-200 bg-white p-1" />
+                            <img src={photo} alt={r?.title || code} className="w-20 h-24 object-contain rounded border border-slate-200 bg-white p-1" />
                           ) : (
-                            <div className="w-20 h-24 rounded border border-gray-200 bg-gray-100 text-gray-400 text-xs flex items-center justify-center">N/A</div>
+                            <div className="w-20 h-24 rounded border border-slate-200 bg-slate-100 text-slate-400 text-xs flex items-center justify-center">N/A</div>
                           )}
                           <div className="min-w-0 flex-1">
-                            <div className="text-xs text-gray-500">{code || 'Без артикула'}</div>
-                            <div className="text-sm text-gray-900 leading-5 break-words">{r?.title || '-'}</div>
-                            <div className="mt-1 text-xs text-gray-500">Кол-во: {r.qty}</div>
+                            <div className="text-xs text-slate-500">{code || 'Без артикула'}</div>
+                            <div className="text-sm text-slate-900 leading-5 break-words">{r?.title || '-'}</div>
+                            <div className="mt-1 text-xs text-slate-500">Кол-во: {r.qty}</div>
                             <div className="mt-2">
                               <input
                                 type="number"
@@ -6210,7 +6210,7 @@ export const WBSupplyManager = ({
                                 step="0.01"
                                 value={orderCostEditorValues[valueKey] ?? ''}
                                 onChange={(e) => setOrderCostEditorValues((prev) => ({ ...prev, [valueKey]: e.target.value }))}
-                                className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm"
+                                className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm"
                                 placeholder="Себестоимость"
                               />
                             </div>
@@ -6227,23 +6227,23 @@ export const WBSupplyManager = ({
       )}
 
       {orderHistoryOpen && (
-        <div className="fixed inset-0 z-[130] bg-black/50 flex items-center justify-center p-4" onClick={() => setOrderHistoryOpen(false)}>
+        <div className="fixed inset-0 z-[130] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setOrderHistoryOpen(false)}>
           <div className="w-full max-w-3xl max-h-[85vh] overflow-hidden bg-white rounded-2xl shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <div className="p-4 border-b border-gray-200 flex items-center justify-between">
+            <div className="p-4 border-b border-slate-200 flex items-center justify-between">
               <div>
-                <div className="text-lg font-bold text-gray-900">История заказов</div>
-                <div className="text-sm text-gray-500">Сохраненные PDF по текущему поставщику</div>
+                <div className="text-lg font-bold text-slate-900">История заказов</div>
+                <div className="text-sm text-slate-500">Сохраненные PDF по текущему поставщику</div>
               </div>
-              <button onClick={() => setOrderHistoryOpen(false)} className="px-3 py-2 rounded-lg border border-gray-300 hover:bg-gray-50">Закрыть</button>
+              <button onClick={() => setOrderHistoryOpen(false)} className="px-3 py-2 rounded-lg border border-slate-300 hover:bg-slate-50">Закрыть</button>
             </div>
             <div className="p-4 overflow-auto max-h-[70vh] space-y-2">
               {!orderHistory.length ? (
-                <div className="text-sm text-gray-500">История заказов пока пуста.</div>
+                <div className="text-sm text-slate-500">История заказов пока пуста.</div>
               ) : orderHistory.map((item) => (
                 <div key={item.id} className="border rounded-xl p-3 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                   <div>
-                    <div className="font-medium text-gray-900">{item.fileName}</div>
-                    <div className="text-xs text-gray-500">{new Date(item.createdAt).toLocaleString('ru-RU')} • {item.totalQty} шт. • {Number(item.totalCost || 0).toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽</div>
+                    <div className="font-medium text-slate-900">{item.fileName}</div>
+                    <div className="text-xs text-slate-500">{new Date(item.createdAt).toLocaleString('ru-RU')} • {item.totalQty} шт. • {Number(item.totalCost || 0).toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽</div>
                   </div>
                   <div className="flex gap-2 flex-wrap">
                     <a href={item.dataUrl} download={item.fileName} className="px-3 py-2 rounded-lg border border-indigo-300 text-indigo-700 hover:bg-indigo-50">Открыть PDF</a>
@@ -6272,9 +6272,9 @@ export const WBSupplyManager = ({
 
       {/* Content: FBS Calc Tab */}
       {activeTab === 'fbs_calc' && (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 md:p-6 space-y-4">
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 md:p-6 space-y-4">
           <div>
-            <label className="text-xs text-gray-500">Поставщик</label>
+            <label className="text-xs text-slate-500">Поставщик</label>
             <select
               className="w-full md:w-[420px] border rounded-lg p-2 bg-white"
               value={selectedSupplierIdCalc}
@@ -6287,7 +6287,7 @@ export const WBSupplyManager = ({
           </div>
           <div className="flex flex-col md:flex-row md:items-end gap-3">
             <div className="flex-1">
-              <label className="text-xs text-gray-500">Поставка FBS</label>
+              <label className="text-xs text-slate-500">Поставка FBS</label>
               <select
                 className="w-full border rounded-lg p-2 bg-white"
                 value={calcSupplyId}
@@ -6309,7 +6309,7 @@ export const WBSupplyManager = ({
             <button
               onClick={() => openCalcCostEditor(false)}
               disabled={!calcRows.length}
-              className="px-4 py-2 rounded-lg border bg-white border-gray-300 text-gray-700 disabled:opacity-50"
+              className="px-4 py-2 rounded-lg border bg-white border-slate-300 text-slate-700 disabled:opacity-50"
             >
               Редактировать себестоимость
             </button>
@@ -6322,7 +6322,7 @@ export const WBSupplyManager = ({
             </button>
             <button
               onClick={() => setCalcHistoryOpen(true)}
-              className="px-4 py-2 rounded-lg border bg-white border-gray-300 text-gray-700"
+              className="px-4 py-2 rounded-lg border bg-white border-slate-300 text-slate-700"
             >
               История расчетов
             </button>
@@ -6330,12 +6330,12 @@ export const WBSupplyManager = ({
 
           {calcRows.length > 0 && (
             <>
-              <div className="text-sm text-gray-700">
+              <div className="text-sm text-slate-700">
                 Товаров в групп-листе: <b>{calcRows.length}</b> • Кол-во единиц: <b>{calcRows.reduce((s, r) => s + r.qty, 0)}</b> • Общая себестоимость: <b>{calcRows.reduce((s, r) => s + (r.qty * Number(getCalcStoredCost(r) || 0)), 0).toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽</b>
               </div>
               <div className="overflow-auto border rounded-xl">
                 <table className="w-full text-sm min-w-[980px]">
-                  <thead className="bg-gray-50 text-gray-600">
+                  <thead className="bg-slate-50 text-slate-600">
                     <tr>
                       <th className="px-3 py-2 text-left">Фото</th>
                       <th className="px-3 py-2 text-left">Номенклатура</th>
@@ -6354,7 +6354,7 @@ export const WBSupplyManager = ({
                       return (
                         <tr key={r.key} className="border-t">
                           <td className="px-3 py-2">
-                            {photo ? <img src={photo} alt={r.title} className="w-36 h-36 rounded object-cover border" /> : <div className="w-36 h-36 rounded bg-gray-100 border" />}
+                            {photo ? <img src={photo} alt={r.title} className="w-36 h-36 rounded object-cover border" /> : <div className="w-36 h-36 rounded bg-slate-100 border" />}
                           </td>
                           <td className="px-3 py-2">{r.nmId || '-'}</td>
                           <td className="px-3 py-2">{r.title}</td>
@@ -6370,17 +6370,17 @@ export const WBSupplyManager = ({
                   </tbody>
                 </table>
               </div>
-              <div className="text-xs text-gray-500">Редактирование себестоимости работает как в аналитике: вводите стоимость по товару, итог пересчитывается автоматически.</div>
+              <div className="text-xs text-slate-500">Редактирование себестоимости работает как в аналитике: вводите стоимость по товару, итог пересчитывается автоматически.</div>
             </>
           )}
 
           {calcHistoryOpen && (
-            <div className="fixed inset-0 z-[118] bg-black/50 flex items-center justify-center p-4" onClick={() => setCalcHistoryOpen(false)}>
+            <div className="fixed inset-0 z-[118] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setCalcHistoryOpen(false)}>
               <div className="w-full max-w-3xl max-h-[90svh] 2xl:max-h-[86vh] overflow-y-auto 2xl:overflow-hidden bg-white rounded-2xl shadow-2xl" onClick={(e) => e.stopPropagation()}>
-                <div className="p-4 border-b border-gray-200 space-y-3">
+                <div className="p-4 border-b border-slate-200 space-y-3">
                   <div className="flex items-center justify-between">
-                    <div className="font-semibold text-gray-900">История расчетов</div>
-                    <button type="button" onClick={() => setCalcHistoryOpen(false)} className="px-3 py-1.5 text-sm rounded border border-gray-300 hover:bg-gray-50">Закрыть</button>
+                    <div className="font-semibold text-slate-900">История расчетов</div>
+                    <button type="button" onClick={() => setCalcHistoryOpen(false)} className="px-3 py-1.5 text-sm rounded border border-slate-300 hover:bg-slate-50">Закрыть</button>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
                     <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">Общая сумма по всем отчетам: <span className="font-semibold">{calcHistorySummaryAll.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽</span></div>
@@ -6389,19 +6389,19 @@ export const WBSupplyManager = ({
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
                     <input type="date" value={calcHistoryPeriodStart} onChange={(e) => setCalcHistoryPeriodStart(e.target.value)} className="oc-input" placeholder="Дата начала" />
                     <input type="date" value={calcHistoryPeriodEnd} onChange={(e) => setCalcHistoryPeriodEnd(e.target.value)} className="oc-input" placeholder="Дата конца" />
-                    <button type="button" onClick={() => { setCalcHistoryPeriodStart(''); setCalcHistoryPeriodEnd(''); }} className="px-3 py-2 text-sm rounded border border-gray-300 hover:bg-gray-50">Сбросить период</button>
+                    <button type="button" onClick={() => { setCalcHistoryPeriodStart(''); setCalcHistoryPeriodEnd(''); }} className="px-3 py-2 text-sm rounded border border-slate-300 hover:bg-slate-50">Сбросить период</button>
                   </div>
                 </div>
                 <div className="p-3 overflow-auto max-h-[74vh]">
                   {!calcHistory.length ? (
-                    <div className="text-sm text-gray-500 p-3">История пока пустая</div>
+                    <div className="text-sm text-slate-500 p-3">История пока пустая</div>
                   ) : (
                     <div className="space-y-2">
                       {calcHistoryFiltered.map((h) => (
                         <div key={h.id} className="border rounded-xl p-3 flex items-center justify-between gap-3">
                           <div className="min-w-0">
-                            <div className="text-sm font-medium text-gray-900 truncate">{h.supplyName}</div>
-                            <div className="text-xs text-gray-500">Дата отчёта: {(() => { const m = String(h?.supplyName || '').match(/(\d{2}\.\d{2}\.\d{4})/); return m?.[1] || new Date(h.createdAt).toLocaleDateString('ru-RU'); })()} • Позиций: {h.rows?.length || 0}</div>
+                            <div className="text-sm font-medium text-slate-900 truncate">{h.supplyName}</div>
+                            <div className="text-xs text-slate-500">Дата отчёта: {(() => { const m = String(h?.supplyName || '').match(/(\d{2}\.\d{2}\.\d{4})/); return m?.[1] || new Date(h.createdAt).toLocaleDateString('ru-RU'); })()} • Позиций: {h.rows?.length || 0}</div>
                           </div>
                           <div className="flex items-center gap-2">
                             <div className="text-sm font-semibold text-emerald-700 whitespace-nowrap">{Number(h.totalCost || 0).toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽</div>
@@ -6418,11 +6418,11 @@ export const WBSupplyManager = ({
           )}
 
           {calcCostEditorOpen && (
-            <div className="fixed inset-0 z-[120] bg-black/55 flex items-center justify-center p-4" onClick={() => setCalcCostEditorOpen(false)}>
+            <div className="fixed inset-0 z-[120] bg-slate-900/55 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setCalcCostEditorOpen(false)}>
               <div className="w-full max-w-5xl max-h-[90vh] overflow-hidden bg-white rounded-2xl shadow-2xl" onClick={(e) => e.stopPropagation()}>
-                <div className="p-4 border-b border-gray-200 flex items-center justify-between gap-3">
+                <div className="p-4 border-b border-slate-200 flex items-center justify-between gap-3">
                   <div>
-                    <div className="font-semibold text-gray-900">Редактор себестоимости (ФБС расчёт)</div>
+                    <div className="font-semibold text-slate-900">Редактор себестоимости (ФБС расчёт)</div>
                     {calcMissingCostOnly && <div className="text-xs text-amber-700 mt-1">Показаны только новые товары без сохранённой себестоимости</div>}
                   </div>
                   <div className="flex items-center gap-2">
@@ -6431,10 +6431,10 @@ export const WBSupplyManager = ({
                       value={calcCostEditorSearch}
                       onChange={(e) => setCalcCostEditorSearch(e.target.value)}
                       placeholder="Поиск по номенклатуре/названию"
-                      className="w-64 px-3 py-2 text-sm border border-gray-300 rounded-lg"
+                      className="w-64 px-3 py-2 text-sm border border-slate-300 rounded-lg"
                     />
                     <button type="button" onClick={saveCalcCostEditor} className="px-3 py-2 text-sm rounded-lg border border-emerald-300 text-emerald-700 hover:bg-emerald-50">Сохранить</button>
-                    <button type="button" onClick={() => setCalcCostEditorOpen(false)} className="px-3 py-2 text-sm rounded-lg border border-gray-300 hover:bg-gray-50">Закрыть</button>
+                    <button type="button" onClick={() => setCalcCostEditorOpen(false)} className="px-3 py-2 text-sm rounded-lg border border-slate-300 hover:bg-slate-50">Закрыть</button>
                   </div>
                 </div>
                 <div className="p-4 overflow-auto max-h-[78vh]">
@@ -6443,17 +6443,17 @@ export const WBSupplyManager = ({
                       const code = String(r?.nmId || r?.key || '');
                       const photo = calcPhotoByNmId[String(r?.nmId || '')] || '';
                       return (
-                        <div key={`calc-edit-${r.key}`} className="border border-gray-200 rounded-xl p-3 bg-white">
+                        <div key={`calc-edit-${r.key}`} className="border border-slate-200 rounded-xl p-3 bg-white">
                           <div className="flex gap-3">
                             {photo ? (
-                              <img src={photo} alt={r?.title || code} className="w-20 h-24 object-contain rounded border border-gray-200 bg-white p-1" />
+                              <img src={photo} alt={r?.title || code} className="w-20 h-24 object-contain rounded border border-slate-200 bg-white p-1" />
                             ) : (
-                              <div className="w-20 h-24 rounded border border-gray-200 bg-gray-100 text-gray-400 text-xs flex items-center justify-center">N/A</div>
+                              <div className="w-20 h-24 rounded border border-slate-200 bg-slate-100 text-slate-400 text-xs flex items-center justify-center">N/A</div>
                             )}
                             <div className="min-w-0 flex-1">
-                              <div className="text-xs text-gray-500">{code}</div>
-                              <div className="text-sm text-gray-900 leading-5 break-words">{r?.title || '-'}</div>
-                              <div className="mt-1 text-xs text-gray-500">Кол-во: {r.qty}</div>
+                              <div className="text-xs text-slate-500">{code}</div>
+                              <div className="text-sm text-slate-900 leading-5 break-words">{r?.title || '-'}</div>
+                              <div className="mt-1 text-xs text-slate-500">Кол-во: {r.qty}</div>
                               <div className="mt-2">
                                 <input
                                   type="number"
@@ -6461,7 +6461,7 @@ export const WBSupplyManager = ({
                                   step="0.01"
                                   value={calcCostEditorValues[r.key] ?? ''}
                                   onChange={(e) => setCalcCostEditorValues((prev) => ({ ...prev, [r.key]: e.target.value }))}
-                                  className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm"
+                                  className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm"
                                   placeholder="Себестоимость"
                                 />
                               </div>
@@ -6480,10 +6480,10 @@ export const WBSupplyManager = ({
 
       {/* Content: Supply Order Tab */}
       {activeTab === 'supply_order' && (
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col min-h-[380px] 2xl:h-[calc(100vh-10rem)]">
-              <div className="p-4 border-b border-gray-100 bg-gray-50 rounded-t-xl space-y-3">
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col min-h-[380px] 2xl:h-[calc(100vh-10rem)]">
+              <div className="p-4 border-b border-slate-100 bg-slate-50 rounded-t-xl space-y-3">
                   <div>
-                      <label className="text-xs text-gray-500">Поставщик</label>
+                      <label className="text-xs text-slate-500">Поставщик</label>
                       <select
                           className="w-full md:w-[420px] border rounded-lg p-2 bg-white"
                           value={selectedSupplierIdSupplyOrder}
@@ -6502,7 +6502,7 @@ export const WBSupplyManager = ({
                   <div className="flex gap-2">
                       <button 
                           onClick={() => setShowFilters(!showFilters)}
-                          className={`p-2 rounded-full transition-colors ${showFilters ? 'bg-purple-100 text-purple-600' : 'hover:bg-gray-100 text-gray-600'}`}
+                          className={`p-2 rounded-full transition-colors ${showFilters ? 'bg-purple-100 text-purple-600' : 'hover:bg-slate-100 text-slate-600'}`}
                           title="Фильтры"
                       >
                           <Filter className="w-5 h-5" />
@@ -6513,9 +6513,9 @@ export const WBSupplyManager = ({
 
               {/* Filters Bar */}
               {(showFilters || productSearch) && (
-                  <div className="p-4 border-b border-gray-100 bg-gray-50 grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="p-4 border-b border-slate-100 bg-slate-50 grid grid-cols-1 md:grid-cols-3 gap-4">
                       <div className="relative">
-                          <Search className="w-4 h-4 absolute left-3 top-3 text-gray-400" />
+                          <Search className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
                           <input 
                               type="text" 
                               placeholder="Поиск по артикулу, номенклатуре (WB) или названию..." 
@@ -6544,7 +6544,7 @@ export const WBSupplyManager = ({
                                   <option value="">Все категории</option>
                                   {categories.map(c => <option key={c} value={c}>{c}</option>)}
                               </select>
-                              <label className="flex items-center gap-2 text-sm text-gray-700">
+                              <label className="flex items-center gap-2 text-sm text-slate-700">
                                   <input
                                       type="checkbox"
                                       checked={showFilledOrderCards}
@@ -6559,7 +6559,7 @@ export const WBSupplyManager = ({
 
               <div className="2xl:flex-1 2xl:overflow-auto p-0">
                   <table className="w-full text-sm text-left">
-                      <thead className="text-xs text-gray-700 uppercase bg-gray-50 sticky top-0 z-10">
+                      <thead className="text-xs text-slate-700 uppercase bg-slate-50 sticky top-0 z-10">
                           <tr>
                               <th className="p-3 w-28">Фото</th>
                               <th className="p-3">Артикул / Название</th>
@@ -6584,7 +6584,7 @@ export const WBSupplyManager = ({
                                   return matchesSearch && matchesBrand && matchesCategory && matchesFilledState;
                               })
                               .map(product => (
-                                  <tr key={product.nmID} className="border-b hover:bg-gray-50">
+                                  <tr key={product.nmID} className="border-b hover:bg-slate-50">
                                       <td className="p-3">
                                           <img 
                                               src={product.photos?.[0]?.big || product.photos?.[0]?.tm || ''} 
@@ -6594,16 +6594,16 @@ export const WBSupplyManager = ({
                                           />
                                       </td>
                                       <td className="p-3">
-                                          <div className="font-medium text-gray-900">{product.vendorCode}</div>
-                                          <div className="text-xs text-gray-500 mb-1">{product.brand}</div>
-                                          <div className="text-xs text-gray-600 line-clamp-2" title={product.title}>{product.title}</div>
+                                          <div className="font-medium text-slate-900">{product.vendorCode}</div>
+                                          <div className="text-xs text-slate-500 mb-1">{product.brand}</div>
+                                          <div className="text-xs text-slate-600 line-clamp-2" title={product.title}>{product.title}</div>
                                       </td>
                                       <td className="p-3">
                                           <div className="flex flex-wrap gap-2">
                                               {sortSizes(product.sizes).map((size, idx) => (
-                                                  <div key={idx} className="flex flex-col items-center bg-gray-100 p-1 rounded min-w-[3rem]">
+                                                  <div key={idx} className="flex flex-col items-center bg-slate-100 p-1 rounded min-w-[3rem]">
                                                       <span className="font-bold text-xs">{size.techSize}</span>
-                                                      <span className={`text-[10px] ${size.stock ? 'text-green-600 font-bold' : 'text-gray-500'}`} title={`По размеру: ${size.stock || 0} • Всего по товару: ${(size as any).totalStock || 0}`}>
+                                                      <span className={`text-[10px] ${size.stock ? 'text-green-600 font-bold' : 'text-slate-500'}`} title={`По размеру: ${size.stock || 0} • Всего по товару: ${(size as any).totalStock || 0}`}>
                                                           {size.stock || 0} шт. / {(size as any).totalStock || 0}
                                                       </span>
                                                   </div>
@@ -6630,7 +6630,7 @@ export const WBSupplyManager = ({
                                                           <div className="flex items-center border rounded bg-white">
                                                               <button 
                                                                   onClick={() => handleSupplyOrderQuantityChange(product.nmID, size.techSize, qty - 1)}
-                                                                  className="px-2 py-1 hover:bg-gray-100 text-gray-600"
+                                                                  className="px-2 py-1 hover:bg-slate-100 text-slate-600"
                                                               >
                                                                   -
                                                               </button>
@@ -6646,7 +6646,7 @@ export const WBSupplyManager = ({
                                                               />
                                                               <button 
                                                                   onClick={() => handleSupplyOrderQuantityChange(product.nmID, size.techSize, qty + 1)}
-                                                                  className="px-2 py-1 hover:bg-gray-100 text-gray-600"
+                                                                  className="px-2 py-1 hover:bg-slate-100 text-slate-600"
                                                               >
                                                                   +
                                                               </button>
@@ -6666,21 +6666,21 @@ export const WBSupplyManager = ({
 
       {/* Product Orders Chart Modal */}
       {productChartModal.open && productChartModal.product && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-xl w-[96vw] max-w-[1800px] max-h-[94vh] overflow-auto p-4 md:p-7">
             <div className="flex items-start justify-between mb-4 gap-3">
               <div>
                 <h3 className="text-lg font-bold">График заказов товара</h3>
-                <div className="text-sm text-gray-600">{productChartModal.product.vendorCode} • {productChartModal.product.title}</div>
+                <div className="text-sm text-slate-600">{productChartModal.product.vendorCode} • {productChartModal.product.title}</div>
               </div>
-              <button onClick={() => setProductChartModal({ open: false, product: null })} className="text-gray-400 hover:text-gray-700">
+              <button onClick={() => setProductChartModal({ open: false, product: null })} className="text-slate-400 hover:text-slate-700">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
               <div>
-                <label className="text-xs text-gray-500">С</label>
+                <label className="text-xs text-slate-500">С</label>
                 <input
                   type="date"
                   value={productChartRange.start}
@@ -6689,7 +6689,7 @@ export const WBSupplyManager = ({
                 />
               </div>
               <div>
-                <label className="text-xs text-gray-500">По</label>
+                <label className="text-xs text-slate-500">По</label>
                 <input
                   type="date"
                   value={productChartRange.end}
@@ -6717,11 +6717,11 @@ export const WBSupplyManager = ({
               </div>
             </div>
 
-            <div className="border rounded-lg p-3 bg-gray-50">
+            <div className="border rounded-lg p-3 bg-slate-50">
               {loadingProductChart ? (
-                <div className="h-[520px] flex items-center justify-center text-gray-500 text-lg">Загрузка...</div>
+                <div className="h-[520px] flex items-center justify-center text-slate-500 text-lg">Загрузка...</div>
               ) : productChartData.length === 0 ? (
-                <div className="h-[520px] flex items-center justify-center text-gray-500 text-lg">Нет данных за выбранный период</div>
+                <div className="h-[520px] flex items-center justify-center text-slate-500 text-lg">Нет данных за выбранный период</div>
               ) : (() => {
                 const max = Math.max(1, ...productChartData.map((d) => d.qty));
                 const w = 1400;
@@ -6833,7 +6833,7 @@ export const WBSupplyManager = ({
                     </svg>
 
                     <div className="mt-3 flex flex-wrap gap-2 text-sm">
-                      <span className="px-3 py-1.5 rounded bg-gray-100 text-gray-800 border">Итого — черный</span>
+                      <span className="px-3 py-1.5 rounded bg-slate-100 text-slate-800 border">Итого — черный</span>
                       {sizeNames.map((s, i) => {
                         const hidden = hiddenChartSizes.includes(s);
                         return (
@@ -6841,7 +6841,7 @@ export const WBSupplyManager = ({
                             key={s}
                             type="button"
                             onClick={() => setHiddenChartSizes((prev) => prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s])}
-                            className={`px-3 py-1.5 rounded border transition ${hidden ? 'opacity-40 line-through bg-gray-50' : 'bg-white hover:bg-gray-50'}`}
+                            className={`px-3 py-1.5 rounded border transition ${hidden ? 'opacity-40 line-through bg-slate-50' : 'bg-white hover:bg-slate-50'}`}
                             style={{ color: palette[i % palette.length], borderColor: palette[i % palette.length] }}
                             title={hidden ? 'Показать линию размера' : 'Скрыть линию размера'}
                           >
@@ -6851,11 +6851,11 @@ export const WBSupplyManager = ({
                       })}
                     </div>
 
-                    <div className="mt-3 max-h-80 overflow-auto text-sm text-gray-700 grid grid-cols-1 gap-2">
+                    <div className="mt-3 max-h-80 overflow-auto text-sm text-slate-700 grid grid-cols-1 gap-2">
                       {productChartData.map((d) => (
                         <div key={d.date} className="border-b pb-1">
                           <b>{new Date(`${d.date}T00:00:00`).toLocaleDateString('ru-RU')}</b>: {d.qty} шт.
-                          <span className="ml-2 text-gray-500">
+                          <span className="ml-2 text-slate-500">
                             {sizeNames
                               .filter((sz) => !hiddenChartSizes.includes(sz))
                               .map((sz) => `${sz}:${d.bySize?.[sz] || 0}`)
@@ -6874,7 +6874,7 @@ export const WBSupplyManager = ({
 
       {/* Create Supply Modal */}
       {showCreateSupplyModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6">
             <h3 className="text-lg font-bold mb-4">Новая поставка</h3>
             <input 
@@ -6887,7 +6887,7 @@ export const WBSupplyManager = ({
             <div className="flex justify-end gap-3">
               <button 
                 onClick={() => setShowCreateSupplyModal(false)}
-                className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg"
+                className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg"
               >
                 Отмена
               </button>

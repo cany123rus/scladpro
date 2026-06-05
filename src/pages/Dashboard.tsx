@@ -14,6 +14,7 @@ const Tasks = React.lazy(() => import('../components/Tasks').then((m) => ({ defa
 const WarehouseTab = React.lazy(() => import('../components/WarehouseTab').then((m) => ({ default: m.WarehouseTab })));
 const AdvertisingInsights = React.lazy(() => import('../components/AdvertisingInsights').then((m) => ({ default: m.AdvertisingInsights })));
 const CamerasTab = React.lazy(() => import('../components/CamerasTab').then((m) => ({ default: m.CamerasTab })));
+import { SectionSkeleton } from '../components/Skeleton';
 import { createWorkbookBlob, downloadAoaWorkbook, downloadWorkbook } from '../utils/excelExport';
 import { QRCodeSVG } from 'qrcode.react';
 import bwipjs from 'bwip-js';
@@ -642,8 +643,8 @@ const fixLayout = (str: string) => {
 const ExcelUploader = ({ onUpload, disabled = false, maxFileBytes }: { onUpload: (data: any[], fileName?: string, sourceFile?: File) => void | Promise<void>; disabled?: boolean; maxFileBytes?: number }) => {
   return (
     <div className="oc-card p-6">
-      <h2 className="text-lg font-bold text-gray-900 mb-4">Загрузка отчета</h2>
-      <div className={`border-2 border-dashed rounded-xl p-4 md:p-8 text-center transition-colors ${disabled ? 'border-gray-200 bg-gray-50' : 'border-gray-200 hover:border-indigo-500'}`}>
+      <h2 className="text-lg font-bold text-slate-900 mb-4">Загрузка отчета</h2>
+      <div className={`border-2 border-dashed rounded-xl p-4 md:p-8 text-center transition-colors ${disabled ? 'border-slate-200 bg-slate-50' : 'border-slate-200 hover:border-indigo-500'}`}>
         <input
           type="file"
           accept=".xlsx, .xls"
@@ -698,8 +699,8 @@ const ExcelUploader = ({ onUpload, disabled = false, maxFileBytes }: { onUpload:
           <div className="p-4 bg-indigo-50 rounded-full mb-4">
             <Upload className="h-8 w-8 text-indigo-600" />
           </div>
-          <span className="text-gray-900 font-medium">{disabled ? 'Сначала выберите поставщика' : 'Нажмите для загрузки'}</span>
-          <span className="text-sm text-gray-500 mt-1">{disabled ? 'Загрузка недоступна без выбранного поставщика' : 'можно выбрать один или несколько файлов Excel'}</span>
+          <span className="text-slate-900 font-medium">{disabled ? 'Сначала выберите поставщика' : 'Нажмите для загрузки'}</span>
+          <span className="text-sm text-slate-500 mt-1">{disabled ? 'Загрузка недоступна без выбранного поставщика' : 'можно выбрать один или несколько файлов Excel'}</span>
         </label>
       </div>
     </div>
@@ -4110,7 +4111,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
         <div className="max-h-56 overflow-y-auto rounded-lg border bg-white">
           {rows.length === 0 ? (
-            <div className="p-3 text-sm text-gray-500">Пока нет операций.</div>
+            <div className="p-3 text-sm text-slate-500">Пока нет операций.</div>
           ) : (
             <div className="divide-y">
               {rows.map((row) => {
@@ -4157,24 +4158,24 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           <button
                             type="button"
                             onClick={handleCancelEditWarehouseMoney}
-                            className="inline-flex items-center justify-center rounded-lg border border-gray-200 px-3 py-2 text-gray-600 hover:bg-gray-50"
+                            className="inline-flex items-center justify-center rounded-lg border border-slate-200 px-3 py-2 text-slate-600 hover:bg-slate-50"
                             title="Отмена"
                           >
                             <X className="h-4 w-4" />
                           </button>
                         </div>
-                        <div className="text-xs text-gray-500">{new Date(row.created_at).toLocaleString('ru-RU')}</div>
+                        <div className="text-xs text-slate-500">{new Date(row.created_at).toLocaleString('ru-RU')}</div>
                       </div>
                     ) : (
                       <div className="flex flex-col gap-3 2xl:flex-row 2xl:items-center 2xl:justify-between">
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
-                            <div className="font-medium text-gray-900">{displayComment || 'Без комментария'}</div>
+                            <div className="font-medium text-slate-900">{displayComment || 'Без комментария'}</div>
                             <span className={'rounded-full px-2 py-0.5 text-[10px] font-medium ' + (isManual ? 'bg-slate-100 text-slate-600' : 'bg-violet-100 text-violet-700')}>
                               {isManual ? 'Ручная' : 'ЗП'}
                             </span>
                           </div>
-                          <div className="text-xs text-gray-500">{new Date(row.created_at).toLocaleString('ru-RU')}</div>
+                          <div className="text-xs text-slate-500">{new Date(row.created_at).toLocaleString('ru-RU')}</div>
                         </div>
                         <div className="grid shrink-0 grid-cols-[minmax(0,1fr)_44px_44px] items-center gap-2 2xl:flex 2xl:justify-end">
                           <div className={'font-bold ' + (Number(row.amount) >= 0 ? 'text-emerald-700' : 'text-rose-700')}>
@@ -12685,7 +12686,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     if (type.includes('pdf')) return <FileText className="h-6 w-6 text-red-500" />;
     if (type.includes('sheet') || type.includes('excel')) return <FileSpreadsheet className="h-6 w-6 text-green-500" />;
     if (type.includes('image')) return <Camera className="h-6 w-6 text-blue-500" />;
-    return <File className="h-6 w-6 text-gray-400" />;
+    return <File className="h-6 w-6 text-slate-400" />;
   };
 
   const waitForDatabaseBackupRetry = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -17118,16 +17119,16 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   };
 
   return (
-    <div className="flex h-screen bg-gray-50 font-sans text-gray-900 relative">
+    <div className="flex h-screen bg-slate-50 font-sans text-slate-900 relative">
       {/* Mobile Header */}
-      <div className="md:hidden fixed top-0 left-0 right-0 bg-white border-b border-gray-200 p-4 z-20 flex items-center justify-between">
+      <div className="md:hidden fixed top-0 left-0 right-0 bg-white border-b border-slate-200 p-4 z-20 flex items-center justify-between">
         <div className="flex items-center space-x-3">
           <div className="bg-indigo-600 p-1.5 rounded-lg">
             <Box className="h-6 w-6 text-white" />
           </div>
           <span className="text-xl font-bold text-indigo-900">СкладПро</span>
         </div>
-        <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg">
+        <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2 text-slate-600 hover:bg-slate-100 rounded-lg">
           {isSidebarOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
         </button>
       </div>
@@ -17145,7 +17146,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       {/* Notification History Button */}
       <button
         onClick={() => setIsNotificationHistoryVisible(!isNotificationHistoryVisible)}
-        className="fixed bottom-4 right-4 z-[9990] p-3 bg-white rounded-full shadow-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-all"
+        className="fixed bottom-4 right-4 z-[9990] p-3 bg-white rounded-full shadow-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition-all"
         title="История уведомлений"
       >
         <Bell className="h-6 w-6" />
@@ -17153,23 +17154,23 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
       {/* Notification History Popover */}
       {isNotificationHistoryVisible && (
-        <div className="fixed bottom-20 right-4 z-[9990] w-[min(20rem,calc(100vw-2rem))] bg-white rounded-xl shadow-2xl border border-gray-200 max-h-96 overflow-y-auto animate-fade-in-up">
-          <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50 rounded-t-xl">
-            <span className="font-bold text-gray-900">История уведомлений</span>
-            <button onClick={() => setIsNotificationHistoryVisible(false)} className="text-gray-400 hover:text-gray-600">
+        <div className="fixed bottom-20 right-4 z-[9990] w-[min(20rem,calc(100vw-2rem))] bg-white rounded-xl shadow-2xl border border-slate-200 max-h-96 overflow-y-auto animate-fade-in-up">
+          <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50 rounded-t-xl">
+            <span className="font-bold text-slate-900">История уведомлений</span>
+            <button onClick={() => setIsNotificationHistoryVisible(false)} className="text-slate-400 hover:text-slate-600">
               <X className="h-4 w-4" />
             </button>
           </div>
-          <div className="divide-y divide-gray-100">
+          <div className="divide-y divide-slate-100">
             {notificationHistory.length === 0 ? (
-              <div className="p-6 text-center text-gray-400 text-sm">Нет уведомлений</div>
+              <div className="p-6 text-center text-slate-400 text-sm">Нет уведомлений</div>
             ) : (
               notificationHistory.map(n => (
-                <div key={n.id} className="p-3 hover:bg-gray-50 transition-colors">
+                <div key={n.id} className="p-3 hover:bg-slate-50 transition-colors">
                   <div className={`text-sm font-medium ${getNotificationHistoryTextClass(n.type)}`}>
                     {n.message}
                   </div>
-                  <div className="text-xs text-gray-400 mt-1">
+                  <div className="text-xs text-slate-400 mt-1">
                     {n.time instanceof Date && !isNaN(n.time.getTime())
                       ? n.time.toLocaleTimeString()
                       : new Date().toLocaleTimeString()}
@@ -17219,14 +17220,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           })}
         </nav>
 
-        <div className="p-4 border-t border-gray-200 mt-auto">
+        <div className="p-4 border-t border-slate-200 mt-auto">
           <div className="flex items-center mb-4">
-            <div className="h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center text-gray-500">
+            <div className="h-10 w-10 rounded-full bg-slate-200 flex items-center justify-center text-slate-500">
               <UserCog className="h-6 w-6" />
             </div>
             <div className="ml-3">
-              <p className="text-sm font-medium text-gray-900">{currentEmployee?.full_name || 'Администратор'}</p>
-              <p className="text-xs text-gray-500">{currentEmployee?.role || 'Управляющий'}</p>
+              <p className="text-sm font-medium text-slate-900">{currentEmployee?.full_name || 'Администратор'}</p>
+              <p className="text-xs text-slate-500">{currentEmployee?.role || 'Управляющий'}</p>
             </div>
           </div>
             <button
@@ -17264,48 +17265,48 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           {activeTab === 'suppliers' && (
             <>
               <div className="mb-8">
-                <h1 className="text-2xl font-bold text-gray-900">Поставщики</h1>
-                <p className="text-gray-500 mt-1">Управление базой поставщиков</p>
+                <h1 className="text-2xl font-bold text-slate-900">Поставщики</h1>
+                <p className="text-slate-500 mt-1">Управление базой поставщиков</p>
               </div>
 
               <div className="oc-card p-6 mb-8 sticky top-0 z-20">
                 <form onSubmit={handleSupplierSubmit} className="flex flex-col md:flex-row gap-4 items-end" autoComplete="off">
                   <div className="flex-1 w-full">
-                    <label className="block text-xs font-medium text-gray-500 mb-1.5 uppercase tracking-wide">Название поставщика</label>
+                    <label className="block text-xs font-medium text-slate-500 mb-1.5 uppercase tracking-wide">Название поставщика</label>
                     <input
                       type="text"
                       value={supplierForm.name}
                       onChange={(e) => setSupplierForm({ ...supplierForm, name: e.target.value })}
-                      className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                      className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
                       placeholder="ООО Ромашка"
                       required
                     />
                   </div>
                   <div className="flex-1 w-full">
-                    <label className="block text-xs font-medium text-gray-500 mb-1.5 uppercase tracking-wide">Telegram Chat ID</label>
+                    <label className="block text-xs font-medium text-slate-500 mb-1.5 uppercase tracking-wide">Telegram Chat ID</label>
                     <input
                       type="text"
                       value={supplierForm.telegram_chat_id}
                       onChange={(e) => setSupplierForm({ ...supplierForm, telegram_chat_id: e.target.value })}
-                      className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                      className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
                       placeholder="123456789"
                       required
                     />
                   </div>
                   <div className="flex-1 w-full">
-                    <label className="block text-xs font-medium text-gray-500 mb-1.5 uppercase tracking-wide">API Токен WB</label>
+                    <label className="block text-xs font-medium text-slate-500 mb-1.5 uppercase tracking-wide">API Токен WB</label>
                     <input
                       type="text"
                       value={supplierForm.wb_api_token || ''}
                       onChange={(e) => setSupplierForm({ ...supplierForm, wb_api_token: e.target.value.trim() })}
-                      className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                      className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
                       placeholder="eyJ..."
                       autoComplete="new-password"
                     />
                   </div>
                   <div className="flex gap-2">
                     {editingSupplierId && (
-                      <button type="button" onClick={() => { setSupplierForm({ name: '', telegram_chat_id: '', wb_api_token: '' }); setEditingSupplierId(null); }} className="px-4 py-2.5 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200">
+                      <button type="button" onClick={() => { setSupplierForm({ name: '', telegram_chat_id: '', wb_api_token: '' }); setEditingSupplierId(null); }} className="px-4 py-2.5 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200">
                         <X className="h-5 w-5" />
                       </button>
                     )}
@@ -17317,10 +17318,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
               </div>
 
               {loadingSuppliers ? (
-                <div className="text-center py-12 text-gray-400">Загрузка...</div>
+                <div className="text-center py-12 text-slate-400">Загрузка...</div>
               ) : suppliers.length === 0 ? (
-                <div className="text-center py-12 text-gray-400 bg-white rounded-xl border border-gray-100">
-                  <Users className="h-12 w-12 mx-auto text-gray-300 mb-4" />
+                <div className="text-center py-12 text-slate-400 bg-white rounded-xl border border-slate-100">
+                  <Users className="h-12 w-12 mx-auto text-slate-300 mb-4" />
                   <p>Список поставщиков пуст</p>
                 </div>
               ) : (
@@ -17331,19 +17332,19 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <div className="flex items-start space-x-4 min-w-0">
                           <div className="bg-indigo-50 p-3 rounded-lg shrink-0"><Truck className="h-6 w-6 text-indigo-600" /></div>
                           <div className="min-w-0">
-                            <h3 className="text-lg font-bold text-gray-900 break-words">{supplier.name}</h3>
-                            <div className="flex items-center mt-1"><span className="bg-gray-100 text-gray-500 text-xs px-2 py-0.5 rounded font-medium">TG: {supplier.telegram_chat_id}</span></div>
+                            <h3 className="text-lg font-bold text-slate-900 break-words">{supplier.name}</h3>
+                            <div className="flex items-center mt-1"><span className="bg-slate-100 text-slate-500 text-xs px-2 py-0.5 rounded font-medium">TG: {supplier.telegram_chat_id}</span></div>
                           </div>
                         </div>
                         <div className="flex space-x-2 shrink-0 ml-2">
-                          <button onClick={() => setShowSupplierQR(supplier)} className="text-gray-400 hover:text-indigo-600 p-1 hover:bg-indigo-50 rounded" title="QR код"><QrCode className="h-4 w-4" /></button>
-                          <button onClick={() => handleEditSupplier(supplier)} className="text-gray-400 hover:text-indigo-600 p-1 hover:bg-indigo-50 rounded"><Pencil className="h-4 w-4" /></button>
-                          <button onClick={() => handleDeleteSupplier(supplier.id)} className="text-gray-400 hover:text-red-600 p-1 hover:bg-red-50 rounded"><Trash2 className="h-4 w-4" /></button>
+                          <button onClick={() => setShowSupplierQR(supplier)} className="text-slate-400 hover:text-indigo-600 p-1 hover:bg-indigo-50 rounded" title="QR код"><QrCode className="h-4 w-4" /></button>
+                          <button onClick={() => handleEditSupplier(supplier)} className="text-slate-400 hover:text-indigo-600 p-1 hover:bg-indigo-50 rounded"><Pencil className="h-4 w-4" /></button>
+                          <button onClick={() => handleDeleteSupplier(supplier.id)} className="text-slate-400 hover:text-red-600 p-1 hover:bg-red-50 rounded"><Trash2 className="h-4 w-4" /></button>
                         </div>
                       </div>
                       <div className="flex gap-2 mt-2">
-                        <button className="flex-1 py-2.5 bg-gray-50 text-gray-600 text-sm font-medium rounded-lg hover:bg-gray-100 flex items-center justify-center" onClick={() => handleOpenSupplierHistory(supplier)}><History className="h-4 w-4 mr-2 text-gray-500" /> Поставки</button>
-                        <button className="flex-1 py-2.5 bg-gray-50 text-gray-600 text-sm font-medium rounded-lg hover:bg-gray-100 flex items-center justify-center" onClick={() => handleOpenSupplierHistory(supplier, 'receptions')}><ClipboardCheck className="h-4 w-4 mr-2 text-gray-500" /> Приемки</button>
+                        <button className="flex-1 py-2.5 bg-slate-50 text-slate-600 text-sm font-medium rounded-lg hover:bg-slate-100 flex items-center justify-center" onClick={() => handleOpenSupplierHistory(supplier)}><History className="h-4 w-4 mr-2 text-slate-500" /> Поставки</button>
+                        <button className="flex-1 py-2.5 bg-slate-50 text-slate-600 text-sm font-medium rounded-lg hover:bg-slate-100 flex items-center justify-center" onClick={() => handleOpenSupplierHistory(supplier, 'receptions')}><ClipboardCheck className="h-4 w-4 mr-2 text-slate-500" /> Приемки</button>
                       </div>
                     </div>
                   ))}
@@ -17352,11 +17353,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
               {/* Supplier QR Modal */}
               {showSupplierQR && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowSupplierQR(null)}>
+                <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => setShowSupplierQR(null)}>
                   <div className="bg-white p-8 rounded-xl text-center" onClick={e => e.stopPropagation()}>
                     <h3 className="text-xl font-bold mb-4">QR Поставщика</h3>
-                    <p className="text-gray-500 mb-4">{showSupplierQR.name}</p>
-                    <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-100 inline-block mb-4" id="supplier-qr-code">
+                    <p className="text-slate-500 mb-4">{showSupplierQR.name}</p>
+                    <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-100 inline-block mb-4" id="supplier-qr-code">
                       <QRCodeSVG value={`SUPPLIER:${showSupplierQR.id}`} size={200} />
                     </div>
                     <div className="flex justify-center gap-3">
@@ -17378,7 +17379,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       }} className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center">
                         <Printer className="h-4 w-4 mr-2" /> Печать
                       </button>
-                      <button onClick={() => setShowSupplierQR(null)} className="px-4 py-2 bg-gray-100 rounded-lg hover:bg-gray-200">Закрыть</button>
+                      <button onClick={() => setShowSupplierQR(null)} className="px-4 py-2 bg-slate-100 rounded-lg hover:bg-slate-200">Закрыть</button>
                     </div>
                   </div>
                 </div>
@@ -17386,11 +17387,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
               {/* Product QR Modal */}
               {showProductQR && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowProductQR(null)}>
+                <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => setShowProductQR(null)}>
                   <div className="bg-white p-8 rounded-xl text-center" onClick={e => e.stopPropagation()}>
                     <h3 className="text-xl font-bold mb-4">QR Товара</h3>
-                    <p className="text-gray-500 mb-4">{showProductQR.name}</p>
-                    <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-100 inline-block mb-4" id="product-qr-code">
+                    <p className="text-slate-500 mb-4">{showProductQR.name}</p>
+                    <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-100 inline-block mb-4" id="product-qr-code">
                       <QRCodeSVG value={`PRODUCT:${showProductQR.id}`} size={200} />
                     </div>
                     <div className="flex justify-center gap-3">
@@ -17412,7 +17413,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       }} className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center">
                         <Printer className="h-4 w-4 mr-2" /> Печать
                       </button>
-                      <button onClick={() => setShowProductQR(null)} className="px-4 py-2 bg-gray-100 rounded-lg hover:bg-gray-200">Закрыть</button>
+                      <button onClick={() => setShowProductQR(null)} className="px-4 py-2 bg-slate-100 rounded-lg hover:bg-slate-200">Закрыть</button>
                     </div>
                   </div>
                 </div>
@@ -17432,8 +17433,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       <Truck className="h-8 w-8 text-indigo-600" />
                     </div>
                       <div>
-                        <h1 className="text-2xl font-bold text-gray-900">Приемка поставки</h1>
-                        <p className="text-gray-500 mt-1">Отсканируйте штрихкод поставки или создайте ее локально без интернета</p>
+                        <h1 className="text-2xl font-bold text-slate-900">Приемка поставки</h1>
+                        <p className="text-slate-500 mt-1">Отсканируйте штрихкод поставки или создайте ее локально без интернета</p>
                       </div>
                     </div>
                     {warehouseOfflineEnabled && (
@@ -17530,7 +17531,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                   <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(340px,420px)]">
                   <div className="oc-card p-5 md:p-6">
-                    <div className="text-xs text-gray-600 mb-2">Поставщик для ШК поставки</div>
+                    <div className="text-xs text-slate-600 mb-2">Поставщик для ШК поставки</div>
                     <select
                       value={selectedSupplierId}
                       onChange={(e) => setSelectedSupplierId(e.target.value)}
@@ -17546,11 +17547,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         value={supplyInput}
                         onChange={(e) => setSupplyInput(e.target.value)}
                         placeholder="Штрихкод поставки..."
-                        className="min-h-[52px] flex-1 rounded-xl border border-gray-200 bg-gray-50 p-3 text-base outline-none focus:ring-2 focus:ring-indigo-500"
+                        className="min-h-[52px] flex-1 rounded-xl border border-slate-200 bg-slate-50 p-3 text-base outline-none focus:ring-2 focus:ring-indigo-500"
                         autoFocus
                       />
-	                      <button type="submit" className="min-h-[52px] min-w-[52px] rounded-xl bg-gray-100 p-3 hover:bg-gray-200">
-	                        <ArrowLeft className="h-6 w-6 text-gray-600 rotate-180" />
+	                      <button type="submit" className="min-h-[52px] min-w-[52px] rounded-xl bg-slate-100 p-3 hover:bg-slate-200">
+	                        <ArrowLeft className="h-6 w-6 text-slate-600 rotate-180" />
 	                      </button>
 	                    </form>
 	                    <button
@@ -17563,8 +17564,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 	                  </div>
 
                   <div className="oc-card p-5">
-                    <div className="font-medium text-gray-900 mb-2">Коробки (FBO)</div>
-                    <div className="text-xs text-gray-600 mb-2">Загрузите Excel с колонкой «ШК короба» (или первой колонкой с кодом), затем сгенерируйте этикетки 58x40 с нумерацией. Макет берётся из «Конструктор этикеток → Короба FBO».</div>
+                    <div className="font-medium text-slate-900 mb-2">Коробки (FBO)</div>
+                    <div className="text-xs text-slate-600 mb-2">Загрузите Excel с колонкой «ШК короба» (или первой колонкой с кодом), затем сгенерируйте этикетки 58x40 с нумерацией. Макет берётся из «Конструктор этикеток → Короба FBO».</div>
                     <select
                       value={fboBoxesSupplierId}
                       onChange={(e) => setFboBoxesSupplierId(e.target.value)}
@@ -17583,13 +17584,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     </div>
 
                     {fboBoxesExcelFile && (
-                      <div className="mt-2 p-2 rounded-lg bg-gray-50 border border-gray-200">
-                        <div className="text-xs text-gray-700 mb-2">
+                      <div className="mt-2 p-2 rounded-lg bg-slate-50 border border-slate-200">
+                        <div className="text-xs text-slate-700 mb-2">
                           Найдено коробок в файле: <span className="font-semibold">{fboBoxesTotalLabels}</span>
                         </div>
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 items-end">
                           <div>
-                            <label className="block text-[11px] text-gray-600 mb-1">От</label>
+                            <label className="block text-[11px] text-slate-600 mb-1">От</label>
                             <input
                               type="number"
                               min={1}
@@ -17601,7 +17602,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             />
                           </div>
                           <div>
-                            <label className="block text-[11px] text-gray-600 mb-1">До</label>
+                            <label className="block text-[11px] text-slate-600 mb-1">До</label>
                             <input
                               type="number"
                               min={1}
@@ -17612,7 +17613,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               placeholder={fboBoxesTotalLabels ? String(fboBoxesTotalLabels) : ''}
                             />
                           </div>
-                          <div className="text-xs text-gray-600">
+                          <div className="text-xs text-slate-600">
                             Этикеток к печати: <span className="font-semibold">{(() => {
                               const total = fboBoxesTotalLabels || 0;
                               if (!total) return 0;
@@ -17641,7 +17642,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                   <div className="mt-6 space-y-3">
                     <div className="flex flex-wrap items-center justify-between gap-3">
-                      <h3 className="font-medium text-gray-900">Поставки</h3>
+                      <h3 className="font-medium text-slate-900">Поставки</h3>
                       {warehouseOfflineEnabled && (
                         <div className="text-xs font-medium text-slate-500">Показываются данные из локальной базы ПК</div>
                       )}
@@ -17656,11 +17657,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       .slice()
                       .sort((a, b) => new Date(String(b?.created_at || '')).getTime() - new Date(String(a?.created_at || '')).getTime())
                       .map(supply => (
-                      <div key={supply.id} className={`bg-white p-4 rounded-xl border flex flex-col justify-between gap-4 ${supply.status === 'closed' ? 'border-green-200 bg-green-50' : 'border-gray-100'}`}>
+                      <div key={supply.id} className={`bg-white p-4 rounded-xl border flex flex-col justify-between gap-4 ${supply.status === 'closed' ? 'border-green-200 bg-green-50' : 'border-slate-100'}`}>
                         <div onClick={() => { setCurrentSupply(supply); fetchBoxesList(supply.id); fetchSupplyStats(supply.id); setSupplyStep('SUPPLY'); }} className="cursor-pointer flex-1 w-full sm:w-auto">
-                          <div className="font-bold text-gray-900">{supply.name}</div>
-                          <div className="text-sm text-gray-500 flex items-center gap-2">
-                            <span className="bg-white px-2 py-0.5 rounded text-xs font-medium text-gray-600 border border-gray-200">
+                          <div className="font-bold text-slate-900">{supply.name}</div>
+                          <div className="text-sm text-slate-500 flex items-center gap-2">
+                            <span className="bg-white px-2 py-0.5 rounded text-xs font-medium text-slate-600 border border-slate-200">
                               {supply.total_items || 0} шт.
                             </span>
                             {supply.status === 'closed' ? (
@@ -17676,11 +17677,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <div className="flex gap-2 w-full sm:w-auto justify-end">
                           <button
                             onClick={(e) => { e.stopPropagation(); handleToggleSupplyLockList(supply); }}
-                            className={`p-2 rounded-lg border ${supply.status === 'closed' ? 'text-gray-500 border-gray-200 bg-white' : 'text-gray-400 border-gray-100 hover:border-gray-300 bg-white'}`}
+                            className={`p-2 rounded-lg border ${supply.status === 'closed' ? 'text-slate-500 border-slate-200 bg-white' : 'text-slate-400 border-slate-100 hover:border-slate-300 bg-white'}`}
                           >
                             {supply.status === 'closed' ? <Lock className="h-5 w-5" /> : <LockOpen className="h-5 w-5" />}
                           </button>
-                          <button onClick={(e) => { e.stopPropagation(); handleDeleteSupply(supply.id); }} className="p-2 rounded-lg border border-gray-100 text-gray-400 hover:text-red-600 hover:border-red-100 bg-white">
+                          <button onClick={(e) => { e.stopPropagation(); handleDeleteSupply(supply.id); }} className="p-2 rounded-lg border border-slate-100 text-slate-400 hover:text-red-600 hover:border-red-100 bg-white">
                             <Trash2 className="h-5 w-5" />
                           </button>
                         </div>
@@ -17693,14 +17694,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
               )}
 
               {supplyStep === 'SUPPLY' && currentSupply && (
-                <div className="bg-white border border-gray-200 rounded-xl shadow-sm flex flex-col 2xl:h-[calc(100vh-6rem)] 2xl:overflow-hidden">
-                  <div className="p-4 border-b border-gray-200 bg-white z-10 flex flex-col gap-4 oc-filterbar">
+                <div className="bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col 2xl:h-[calc(100vh-6rem)] 2xl:overflow-hidden">
+                  <div className="p-4 border-b border-slate-200 bg-white z-10 flex flex-col gap-4 oc-filterbar">
                     <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                       <div className="flex items-center">
-                        <button onClick={() => setSupplyStep('LIST')} className="mr-4 text-gray-400 hover:text-gray-600"><ArrowLeft className="h-6 w-6" /></button>
+                        <button onClick={() => setSupplyStep('LIST')} className="mr-4 text-slate-400 hover:text-slate-600"><ArrowLeft className="h-6 w-6" /></button>
                         <div>
-                          <h1 className="text-2xl font-bold text-gray-900">Поставка {currentSupply.name}</h1>
-                          <p className="text-gray-500">{supplyStats.boxes} коробок • {supplyStats.items} товаров</p>
+                          <h1 className="text-2xl font-bold text-slate-900">Поставка {currentSupply.name}</h1>
+                          <p className="text-slate-500">{supplyStats.boxes} коробок • {supplyStats.items} товаров</p>
                           <div className="mt-2 flex flex-wrap items-center gap-2">
                             {offlineFboUnsyncedStats.sessions > 0 && (
                               <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-100 text-slate-700 text-xs font-medium border border-slate-200">
@@ -17833,7 +17834,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       </div>
                     </div>
 
-                    <div className={`bg-gray-50 rounded-xl border border-gray-200 p-1 ${currentSupply.status === 'closed' ? 'opacity-50 pointer-events-none' : ''}`}>
+                    <div className={`bg-slate-50 rounded-xl border border-slate-200 p-1 ${currentSupply.status === 'closed' ? 'opacity-50 pointer-events-none' : ''}`}>
                       <form onSubmit={handleBoxScan} className="flex items-center bg-white rounded-lg p-1 shadow-sm">
                         <input
                           type="text"
@@ -17844,8 +17845,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           autoFocus
                           disabled={currentSupply.status === 'closed'}
                         />
-                        <button type="submit" className="p-2 bg-gray-100 rounded-lg hover:bg-gray-200 m-1" disabled={currentSupply.status === 'closed'}>
-                          <Plus className="h-6 w-6 text-gray-600" />
+                        <button type="submit" className="p-2 bg-slate-100 rounded-lg hover:bg-slate-200 m-1" disabled={currentSupply.status === 'closed'}>
+                          <Plus className="h-6 w-6 text-slate-600" />
                         </button>
                       </form>
                     </div>
@@ -17986,55 +17987,55 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             <div className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${offlineFboValidation.ok ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
                               {offlineFboValidation.ok ? 'Проверка пройдена' : 'Есть проблемы перед синхронизацией'}
                             </div>
-                            <div className="mt-3 text-sm text-gray-700">{offlineFboValidation.message}</div>
+                            <div className="mt-3 text-sm text-slate-700">{offlineFboValidation.message}</div>
                           </div>
-                          <div className="text-xs text-gray-500">{new Date(offlineFboValidation.checkedAt).toLocaleString()}</div>
+                          <div className="text-xs text-slate-500">{new Date(offlineFboValidation.checkedAt).toLocaleString()}</div>
                         </div>
                         <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-                          <div className="rounded-xl bg-white px-4 py-3"><div className="text-xs text-gray-500">Коробки</div><div className="mt-1 text-xl font-semibold text-gray-900">{offlineFboValidation.boxesCount}</div></div>
-                          <div className="rounded-xl bg-white px-4 py-3"><div className="text-xs text-gray-500">Сканы</div><div className="mt-1 text-xl font-semibold text-gray-900">{offlineFboValidation.itemsCount}</div></div>
-                          <div className="rounded-xl bg-white px-4 py-3"><div className="text-xs text-gray-500">Локальные дубли</div><div className="mt-1 text-xl font-semibold text-gray-900">{offlineFboValidation.duplicateLocal.length}</div></div>
-                          <div className="rounded-xl bg-white px-4 py-3"><div className="text-xs text-gray-500">Конфликты с БД</div><div className="mt-1 text-xl font-semibold text-gray-900">{offlineFboValidation.duplicateDb.length}</div></div>
-                          <div className="rounded-xl bg-white px-4 py-3"><div className="text-xs text-gray-500">Потерянные товары</div><div className="mt-1 text-xl font-semibold text-gray-900">{offlineFboValidation.missingProducts.length}</div></div>
+                          <div className="rounded-xl bg-white px-4 py-3"><div className="text-xs text-slate-500">Коробки</div><div className="mt-1 text-xl font-semibold text-slate-900">{offlineFboValidation.boxesCount}</div></div>
+                          <div className="rounded-xl bg-white px-4 py-3"><div className="text-xs text-slate-500">Сканы</div><div className="mt-1 text-xl font-semibold text-slate-900">{offlineFboValidation.itemsCount}</div></div>
+                          <div className="rounded-xl bg-white px-4 py-3"><div className="text-xs text-slate-500">Локальные дубли</div><div className="mt-1 text-xl font-semibold text-slate-900">{offlineFboValidation.duplicateLocal.length}</div></div>
+                          <div className="rounded-xl bg-white px-4 py-3"><div className="text-xs text-slate-500">Конфликты с БД</div><div className="mt-1 text-xl font-semibold text-slate-900">{offlineFboValidation.duplicateDb.length}</div></div>
+                          <div className="rounded-xl bg-white px-4 py-3"><div className="text-xs text-slate-500">Потерянные товары</div><div className="mt-1 text-xl font-semibold text-slate-900">{offlineFboValidation.missingProducts.length}</div></div>
                         </div>
                         <div className="mt-4 grid gap-3 xl:grid-cols-3">
                           <div className="rounded-xl bg-white px-4 py-4">
-                            <div className="text-sm font-semibold text-gray-900 mb-2">Локальные дубли ЧЗ</div>
+                            <div className="text-sm font-semibold text-slate-900 mb-2">Локальные дубли ЧЗ</div>
                             {offlineFboValidation.duplicateLocal.length ? offlineFboValidation.duplicateLocal.slice(0, 10).map((row) => (
                               <div key={`local-${row.code}`} className="mb-2 rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-sm text-rose-700">{row.code}<div className="mt-1 text-xs text-rose-600">Коробки: {row.boxNames.join(', ')}</div></div>
-                            )) : <div className="text-sm text-gray-400">Нет локальных дублей</div>}
+                            )) : <div className="text-sm text-slate-400">Нет локальных дублей</div>}
                           </div>
                           <div className="rounded-xl bg-white px-4 py-4">
-                            <div className="text-sm font-semibold text-gray-900 mb-2">Конфликты с БД</div>
+                            <div className="text-sm font-semibold text-slate-900 mb-2">Конфликты с БД</div>
                             {offlineFboValidation.duplicateDb.length ? offlineFboValidation.duplicateDb.slice(0, 10).map((row, index) => (
                               <div key={`db-${row.code}-${index}`} className="mb-2 rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-sm text-rose-700">{row.code}<div className="mt-1 text-xs text-rose-600">Поставка {row.supplyName} , коробка {row.boxName}</div></div>
-                            )) : <div className="text-sm text-gray-400">Конфликтов с базой нет</div>}
+                            )) : <div className="text-sm text-slate-400">Конфликтов с базой нет</div>}
                           </div>
                           <div className="rounded-xl bg-white px-4 py-4">
-                            <div className="text-sm font-semibold text-gray-900 mb-2">Товары вне базы</div>
+                            <div className="text-sm font-semibold text-slate-900 mb-2">Товары вне базы</div>
                             {offlineFboValidation.missingProducts.length ? offlineFboValidation.missingProducts.slice(0, 10).map((row, index) => (
                               <div key={`missing-${row.label}-${index}`} className="mb-2 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-sm text-amber-700">{row.label}<div className="mt-1 text-xs text-amber-600">Коробка {row.boxName}</div></div>
-                            )) : <div className="text-sm text-gray-400">Все товары найдены в базе</div>}
+                            )) : <div className="text-sm text-slate-400">Все товары найдены в базе</div>}
                           </div>
                         </div>
                       </div>
                     )}
-                    <h3 className="font-medium text-gray-900 mb-3">Коробки</h3>
+                    <h3 className="font-medium text-slate-900 mb-3">Коробки</h3>
                     <div className="space-y-3">
                       {boxesList.length === 0 ? (
-                        <div className="text-center py-8 text-gray-400 bg-white rounded-xl border border-gray-100">
+                        <div className="text-center py-8 text-slate-400 bg-white rounded-xl border border-slate-100">
                           Нет коробок. Отсканируйте штрихкод, чтобы создать первую.
                         </div>
                       ) : (
                         boxesList.map(box => (
-                          <div key={box.id} onClick={() => { setCurrentBox(box); setSupplyStep('BOX'); }} className="bg-white p-4 rounded-xl border border-gray-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 cursor-pointer hover:shadow-md transition-shadow group">
+                          <div key={box.id} onClick={() => { setCurrentBox(box); setSupplyStep('BOX'); }} className="bg-white p-4 rounded-xl border border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 cursor-pointer hover:shadow-md transition-shadow group">
                             <div className="flex items-center w-full sm:w-auto">
                               <div className="bg-blue-50 p-2 rounded-lg mr-3">
                                 <Box className="h-5 w-5 text-blue-600" />
                               </div>
                               <div>
-                                <div className="font-bold text-gray-900">{box.name}</div>
-                                <div className="text-xs text-gray-500">
+                                <div className="font-bold text-slate-900">{box.name}</div>
+                                <div className="text-xs text-slate-500">
                                   {new Date(box.created_at).toLocaleDateString()} • {box.total_items || 0} товаров
                                 </div>
                               </div>
@@ -18045,12 +18046,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                       e.stopPropagation();
                                       handleDeleteBox(box.id);
                                   }}
-                                  className="p-2 text-gray-400 hover:text-red-600 rounded-lg opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
+                                  className="p-2 text-slate-400 hover:text-red-600 rounded-lg opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
                                   title="Удалить коробку"
                               >
                                   <Trash2 className="h-5 w-5" />
                               </button>
-                              <ChevronRight className="h-5 w-5 text-gray-400" />
+                              <ChevronRight className="h-5 w-5 text-slate-400" />
                             </div>
                           </div>
                         ))
@@ -18061,9 +18062,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
               )}
 
               {showOfflineFboHistory && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setShowOfflineFboHistory(false)}>
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4" onClick={() => setShowOfflineFboHistory(false)}>
                   <div className="w-full max-w-5xl max-h-[85vh] overflow-hidden rounded-[28px] bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
-                    <div className="border-b border-gray-100 bg-gradient-to-r from-slate-950 via-slate-900 to-slate-800 px-6 py-5 text-white">
+                    <div className="border-b border-slate-100 bg-gradient-to-r from-slate-950 via-slate-900 to-slate-800 px-6 py-5 text-white">
                       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                         <div>
                           <div className="text-[11px] uppercase tracking-[0.25em] text-slate-400">Offline history</div>
@@ -18138,10 +18139,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 <div className="max-w-2xl mx-auto">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4">
                     <div className="flex items-center">
-                      <button onClick={() => { finishCurrentBoxAndReturn().catch(() => undefined); }} className="mr-4 text-gray-400 hover:text-gray-600"><ArrowLeft className="h-6 w-6" /></button>
+                      <button onClick={() => { finishCurrentBoxAndReturn().catch(() => undefined); }} className="mr-4 text-slate-400 hover:text-slate-600"><ArrowLeft className="h-6 w-6" /></button>
                       <div>
-                        <h1 className="text-xl font-bold text-gray-900">Коробка {currentBox.name}</h1>
-                        <p className="text-gray-500 text-sm">Сканируйте товары для добавления</p>
+                        <h1 className="text-xl font-bold text-slate-900">Коробка {currentBox.name}</h1>
+                        <p className="text-slate-500 text-sm">Сканируйте товары для добавления</p>
                         {fboOfflineMode && <div className="mt-2 inline-flex items-center px-2 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-medium">Оффлайн • локально на устройстве через IndexedDB</div>}
                       </div>
                     </div>
@@ -18159,17 +18160,17 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   </div>
 
                   <div className="mb-4 grid gap-3 sm:grid-cols-3">
-                    <div className="rounded-xl border border-gray-200 bg-white px-4 py-3">
-                      <div className="text-xs text-gray-500">Текущая коробка</div>
-                      <div className="mt-1 text-lg font-semibold text-gray-900">{currentBox.name}</div>
+                    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+                      <div className="text-xs text-slate-500">Текущая коробка</div>
+                      <div className="mt-1 text-lg font-semibold text-slate-900">{currentBox.name}</div>
                     </div>
-                    <div className="rounded-xl border border-gray-200 bg-white px-4 py-3">
-                      <div className="text-xs text-gray-500">Сканов в коробке</div>
-                      <div className="mt-1 text-lg font-semibold text-gray-900">{boxItems.length}</div>
+                    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+                      <div className="text-xs text-slate-500">Сканов в коробке</div>
+                      <div className="mt-1 text-lg font-semibold text-slate-900">{boxItems.length}</div>
                     </div>
-                    <div className="rounded-xl border border-gray-200 bg-white px-4 py-3">
-                      <div className="text-xs text-gray-500">Режим</div>
-                      <div className="mt-1 text-sm font-semibold text-gray-900">{fboOfflineMode ? 'Оффлайн, можно работать без сети' : 'Онлайн, запись идёт в базу'}</div>
+                    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+                      <div className="text-xs text-slate-500">Режим</div>
+                      <div className="mt-1 text-sm font-semibold text-slate-900">{fboOfflineMode ? 'Оффлайн, можно работать без сети' : 'Онлайн, запись идёт в базу'}</div>
                     </div>
                   </div>
 
@@ -18177,11 +18178,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center mx-auto mb-4 shadow-sm">
                       <Box className="h-6 w-6 text-indigo-600" />
                     </div>
-                    <h2 className="text-lg font-bold text-gray-900">Сканируйте Товар</h2>
+                    <h2 className="text-lg font-bold text-slate-900">Сканируйте Товар</h2>
                     <p className="text-indigo-500 text-sm">Ожидание штрихкода (SKU)...</p>
                   </div>
 
-                  <div className={`bg-white rounded-xl shadow-sm border border-gray-200 p-1 mb-6 ${currentSupply.status === 'closed' ? 'opacity-50 pointer-events-none' : ''}`}>
+                  <div className={`bg-white rounded-xl shadow-sm border border-slate-200 p-1 mb-6 ${currentSupply.status === 'closed' ? 'opacity-50 pointer-events-none' : ''}`}>
                     <form onSubmit={handleItemScan} className="flex items-center">
                       <input
                         ref={itemInputRef}
@@ -18191,46 +18192,46 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         autoFocus
                         disabled={currentSupply.status === 'closed'}
                       />
-                      <button type="submit" className="p-2 bg-gray-100 rounded-lg hover:bg-gray-200 m-1" disabled={currentSupply.status === 'closed'}>
-                        <Plus className="h-5 w-5 text-gray-600" />
+                      <button type="submit" className="p-2 bg-slate-100 rounded-lg hover:bg-slate-200 m-1" disabled={currentSupply.status === 'closed'}>
+                        <Plus className="h-5 w-5 text-slate-600" />
                       </button>
                     </form>
                   </div>
 
-                  <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-                    <div className="px-4 py-3 bg-gray-50 border-b border-gray-100 font-medium text-sm text-gray-700">
+                  <div className="bg-white rounded-xl border border-slate-100 overflow-hidden">
+                    <div className="px-4 py-3 bg-slate-50 border-b border-slate-100 font-medium text-sm text-slate-700">
                       Содержимое коробки
                     </div>
                     {boxItems.length === 0 ? (
-                      <div className="p-8 text-center text-gray-400 text-sm">
+                      <div className="p-8 text-center text-slate-400 text-sm">
                         Коробка пуста. Сканируйте товары.
                       </div>
                     ) : (
-                      <div className="divide-y divide-gray-100">
+                      <div className="divide-y divide-slate-100">
                         {boxItems.map(item => (
                           <div key={item.id} className="p-3 flex items-center justify-between gap-3">
                             <div className="flex min-w-0 flex-1 items-center gap-3">
-                              <div className="h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-gray-200 bg-gray-50 flex items-center justify-center">
+                              <div className="h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-slate-200 bg-slate-50 flex items-center justify-center">
                                 {(item.product as any)?.photo_url ? (
                                   <img src={(item.product as any).photo_url} alt={item.product?.name || 'Товар'} className="h-full w-full object-cover" />
                                 ) : (
-                                  <Package className="h-5 w-5 text-gray-300" />
+                                  <Package className="h-5 w-5 text-slate-300" />
                                 )}
                               </div>
                               <div className="min-w-0 flex-1">
-                                <div className="font-medium text-gray-900 truncate">{item.product?.name || 'Unknown'}</div>
-                                <div className="mt-1 flex flex-wrap gap-1.5 text-[11px] text-gray-600">
+                                <div className="font-medium text-slate-900 truncate">{item.product?.name || 'Unknown'}</div>
+                                <div className="mt-1 flex flex-wrap gap-1.5 text-[11px] text-slate-600">
                                   {(item.product as any)?.vendor_code && <span className="rounded bg-slate-100 px-2 py-0.5">Арт: {(item.product as any).vendor_code}</span>}
                                   {(item.product as any)?.model_number && <span className="rounded bg-slate-100 px-2 py-0.5">Модель: {(item.product as any).model_number}</span>}
                                   {item.product?.size && <span className="rounded bg-slate-100 px-2 py-0.5">Размер: {item.product.size}</span>}
                                   {item.product?.color && <span className="rounded bg-slate-100 px-2 py-0.5">Цвет: {item.product.color}</span>}
                                 </div>
-                                <div className="mt-1 text-xs text-gray-500 break-all">{item.honest_sign_code}</div>
+                                <div className="mt-1 text-xs text-slate-500 break-all">{item.honest_sign_code}</div>
                               </div>
                             </div>
                             <button
                               onClick={() => handleDeleteSupplyItem(String(item.id || ''))}
-                              className="rounded-lg p-2 text-gray-400 hover:bg-red-50 hover:text-red-600"
+                              className="rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600"
                               title="Удалить скан"
                             >
                               <Trash2 className="h-4 w-4" />
@@ -18247,10 +18248,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 <div className="max-w-2xl mx-auto">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4">
                     <div className="flex items-center">
-                      <button onClick={() => { setSupplyStep('BOX'); setScannedItem(null); }} className="mr-4 text-gray-400 hover:text-gray-600"><ArrowLeft className="h-6 w-6" /></button>
+                      <button onClick={() => { setSupplyStep('BOX'); setScannedItem(null); }} className="mr-4 text-slate-400 hover:text-slate-600"><ArrowLeft className="h-6 w-6" /></button>
                       <div>
-                        <h1 className="text-xl font-bold text-gray-900">Коробка {currentBox?.name}</h1>
-                        <p className="text-gray-500 text-sm">Сканируйте товары для добавления</p>
+                        <h1 className="text-xl font-bold text-slate-900">Коробка {currentBox?.name}</h1>
+                        <p className="text-slate-500 text-sm">Сканируйте товары для добавления</p>
                         {fboOfflineMode && <div className="mt-2 inline-flex items-center px-2 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-medium">Оффлайн • сканы хранятся на устройстве, запись в БД по кнопке</div>}
                       </div>
                     </div>
@@ -18277,7 +18278,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <div className="inline-flex items-center rounded-full bg-white px-3 py-1 text-xs font-semibold text-yellow-700 border border-yellow-100">
                           <ShieldCheck className="mr-1.5 h-3.5 w-3.5" /> Сканируйте Честный Знак
                         </div>
-                        <h2 className="mt-3 text-xl font-bold text-gray-900 break-words">{scannedItem.name}</h2>
+                        <h2 className="mt-3 text-xl font-bold text-slate-900 break-words">{scannedItem.name}</h2>
                         {fboPalletHint && (
 	                          <div className="mt-3 rounded-2xl border border-violet-200 bg-violet-50 px-4 py-3 text-violet-900">
 	                            <div className="text-xs font-semibold uppercase tracking-wide text-violet-600">Куда ставить коробку</div>
@@ -18290,28 +18291,28 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <div className="mt-3 grid gap-2 sm:grid-cols-2">
                           {scannedItem.vendor_code && (
                             <div className="rounded-lg bg-white px-3 py-2 border border-yellow-100">
-                              <div className="text-[11px] text-gray-500">Артикул / номер WB</div>
-                              <div className="text-sm font-semibold text-gray-900 break-all">{scannedItem.vendor_code}</div>
+                              <div className="text-[11px] text-slate-500">Артикул / номер WB</div>
+                              <div className="text-sm font-semibold text-slate-900 break-all">{scannedItem.vendor_code}</div>
                             </div>
                           )}
                           {scannedItem.model_number && (
                             <div className="rounded-lg bg-white px-3 py-2 border border-yellow-100">
-                              <div className="text-[11px] text-gray-500">Номер модели</div>
-                              <div className="text-sm font-semibold text-gray-900 break-all">{scannedItem.model_number}</div>
+                              <div className="text-[11px] text-slate-500">Номер модели</div>
+                              <div className="text-sm font-semibold text-slate-900 break-all">{scannedItem.model_number}</div>
                             </div>
                           )}
                           <div className="rounded-lg bg-white px-3 py-2 border border-yellow-100">
-                            <div className="text-[11px] text-gray-500">Размер</div>
-                            <div className="text-sm font-semibold text-gray-900">{scannedItem.size || '-'}</div>
+                            <div className="text-[11px] text-slate-500">Размер</div>
+                            <div className="text-sm font-semibold text-slate-900">{scannedItem.size || '-'}</div>
                           </div>
                           <div className="rounded-lg bg-white px-3 py-2 border border-yellow-100">
-                            <div className="text-[11px] text-gray-500">Цвет</div>
-                            <div className="text-sm font-semibold text-gray-900">{scannedItem.color || '-'}</div>
+                            <div className="text-[11px] text-slate-500">Цвет</div>
+                            <div className="text-sm font-semibold text-slate-900">{scannedItem.color || '-'}</div>
                           </div>
                         </div>
                         <div className="mt-3 rounded-lg bg-white px-3 py-2 border border-yellow-100">
-                          <div className="text-[11px] text-gray-500">ШК товара</div>
-                          <div className="font-mono text-xs text-gray-700 break-all">{scannedItem.barcode || '-'}</div>
+                          <div className="text-[11px] text-slate-500">ШК товара</div>
+                          <div className="font-mono text-xs text-slate-700 break-all">{scannedItem.barcode || '-'}</div>
                         </div>
                         <p className="text-yellow-600 text-sm mt-3">Ожидание Data Matrix кода...</p>
                       </div>
@@ -18327,8 +18328,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         className="flex-1 p-3 outline-none"
                         autoFocus
                       />
-                      <button type="submit" className="p-2 bg-gray-100 rounded-lg hover:bg-gray-200 m-1">
-                        <Plus className="h-5 w-5 text-gray-600" />
+                      <button type="submit" className="p-2 bg-slate-100 rounded-lg hover:bg-slate-200 m-1">
+                        <Plus className="h-5 w-5 text-slate-600" />
                       </button>
                     </form>
                   </div>
@@ -18337,7 +18338,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
 
               {fboPalletModalOpen && (
-                <div className="fixed inset-0 z-[72] flex items-end justify-center bg-black/50 p-2 md:items-center md:p-4" onClick={() => setFboPalletModalOpen(false)}>
+                <div className="fixed inset-0 z-[72] flex items-end justify-center bg-slate-900/50 backdrop-blur-sm p-2 md:items-center md:p-4" onClick={() => setFboPalletModalOpen(false)}>
                   <div className="max-h-[94svh] w-full max-w-6xl overflow-y-auto rounded-t-3xl bg-slate-50 shadow-2xl md:rounded-2xl" onClick={(e) => e.stopPropagation()}>
                     <div className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 px-4 py-4 backdrop-blur md:px-6">
                       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
@@ -18672,7 +18673,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 	              )}
 
 	              {fboPalletProductPicker.open && (
-	                <div className="fixed inset-0 z-[74] flex items-end justify-center bg-black/50 p-2 md:items-center md:p-4" onClick={closeFboPalletProductPicker}>
+	                <div className="fixed inset-0 z-[74] flex items-end justify-center bg-slate-900/50 backdrop-blur-sm p-2 md:items-center md:p-4" onClick={closeFboPalletProductPicker}>
 	                  <div className="max-h-[94svh] w-full max-w-6xl overflow-y-auto rounded-t-3xl bg-white shadow-2xl md:rounded-2xl" onClick={(e) => e.stopPropagation()}>
 	                    <div className="sticky top-0 z-10 border-b bg-white/95 px-4 py-4 backdrop-blur">
 	                      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -18759,7 +18760,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
               )}
 
               {fboPalletHistoryOpen && (
-                <div className="fixed inset-0 z-[73] flex items-end justify-center bg-black/50 p-2 md:items-center md:p-4" onClick={() => setFboPalletHistoryOpen(false)}>
+                <div className="fixed inset-0 z-[73] flex items-end justify-center bg-slate-900/50 backdrop-blur-sm p-2 md:items-center md:p-4" onClick={() => setFboPalletHistoryOpen(false)}>
                   <div className="max-h-[94svh] w-full max-w-5xl overflow-y-auto rounded-t-3xl bg-white shadow-2xl md:rounded-2xl" onClick={(e) => e.stopPropagation()}>
                     <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b bg-white/95 px-4 py-4 backdrop-blur">
                       <div>
@@ -18807,37 +18808,37 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
               {/* QR Modal */}
               {showSupplyProductsModal && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowSupplyProductsModal(false)}>
+                <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => setShowSupplyProductsModal(false)}>
                   <div className="bg-white rounded-xl w-[95vw] max-w-5xl max-h-[85vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
                     <div className="p-4 border-b flex items-center justify-between gap-3">
                       <div>
                         <h3 className="text-xl font-bold">Товары в поставке</h3>
-                        <div className="text-sm text-gray-500">{currentSupply?.name || ''}</div>
+                        <div className="text-sm text-slate-500">{currentSupply?.name || ''}</div>
                       </div>
                       <div className="flex items-center gap-2">
                         <button onClick={refreshSupplyProductsPhotos} disabled={supplyProductsPhotoLoading || supplyProductsLoading} className="px-4 py-2 bg-sky-100 text-sky-800 rounded-lg hover:bg-sky-200 disabled:opacity-50">{supplyProductsPhotoLoading ? 'Обновляю...' : 'Обновить фото'}</button>
-                        <button onClick={() => setShowSupplyProductsModal(false)} className="px-4 py-2 bg-gray-100 rounded-lg hover:bg-gray-200">Закрыть</button>
+                        <button onClick={() => setShowSupplyProductsModal(false)} className="px-4 py-2 bg-slate-100 rounded-lg hover:bg-slate-200">Закрыть</button>
                       </div>
                     </div>
                     <div className="p-4 overflow-auto">
                       {supplyProductsLoading ? (
-                        <div className="text-gray-500">Загрузка...</div>
+                        <div className="text-slate-500">Загрузка...</div>
                       ) : !supplyProductsRows.length ? (
-                        <div className="text-gray-500">Товары в поставке не найдены.</div>
+                        <div className="text-slate-500">Товары в поставке не найдены.</div>
                       ) : (
                         <div className="space-y-3">
                           {supplyProductsRows.map((row) => (
                             <div key={row.key} className="border rounded-xl p-3 flex gap-4 items-start">
-                              <div className="w-48 h-48 rounded-lg border bg-gray-50 overflow-hidden flex items-center justify-center shrink-0">
-                                {row.image ? <img src={row.image} alt={row.title} className="w-full h-full object-cover" /> : <div className="text-xs text-gray-400">Нет фото</div>}
+                              <div className="w-48 h-48 rounded-lg border bg-slate-50 overflow-hidden flex items-center justify-center shrink-0">
+                                {row.image ? <img src={row.image} alt={row.title} className="w-full h-full object-cover" /> : <div className="text-xs text-slate-400">Нет фото</div>}
                               </div>
                               <div className="min-w-0 flex-1">
-                                <div className="font-semibold text-gray-900">{row.article}</div>
-                                <div className="text-sm text-gray-700 break-words">{row.title}</div>
-                                <div className="text-sm text-gray-500 mt-1">{row.sizesText}</div>
+                                <div className="font-semibold text-slate-900">{row.article}</div>
+                                <div className="text-sm text-slate-700 break-words">{row.title}</div>
+                                <div className="text-sm text-slate-500 mt-1">{row.sizesText}</div>
                                 <div className="mt-2 space-y-1">
                                   {row.sizeBarcodeLines.map((line, index) => (
-                                    <div key={`${row.key}-size-barcode-${index}`} className="text-xs text-gray-600 break-all bg-gray-50 border border-gray-100 rounded-lg px-2 py-1.5">
+                                    <div key={`${row.key}-size-barcode-${index}`} className="text-xs text-slate-600 break-all bg-slate-50 border border-slate-100 rounded-lg px-2 py-1.5">
                                       {line}
                                     </div>
                                   ))}
@@ -18854,11 +18855,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
               )}
 
               {supplySyncOpen && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setSupplySyncOpen(false)}>
+                <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => setSupplySyncOpen(false)}>
                   <div className="bg-white p-8 rounded-xl text-center w-full max-w-lg" onClick={e => e.stopPropagation()}>
                     <h3 className="text-xl font-bold mb-4">Синхронизировать коробки</h3>
-                    <p className="text-gray-500 mb-4 text-sm">Загрузите Excel файл как в разделе «Коробки (FBO)». Номера коробок в текущей поставке будут заменены по порядку на реальные коды из файла.</p>
-                    <label className="inline-flex items-center gap-2 px-4 py-3 bg-gray-100 hover:bg-gray-200 rounded-lg cursor-pointer mb-4">
+                    <p className="text-slate-500 mb-4 text-sm">Загрузите Excel файл как в разделе «Коробки (FBO)». Номера коробок в текущей поставке будут заменены по порядку на реальные коды из файла.</p>
+                    <label className="inline-flex items-center gap-2 px-4 py-3 bg-slate-100 hover:bg-slate-200 rounded-lg cursor-pointer mb-4">
                       <FileSpreadsheet className="h-4 w-4" />
                       <span>{supplySyncExcelFile ? supplySyncExcelFile.name : 'Выбрать Excel файл'}</span>
                       <input type="file" accept=".xlsx,.xls" className="hidden" onChange={(e) => setSupplySyncExcelFile(e.target.files?.[0] || null)} />
@@ -18867,14 +18868,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       <button onClick={handleSyncSupplyBoxesFromExcel} disabled={!supplySyncExcelFile || supplySyncLoading} className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium disabled:opacity-50">
                         {supplySyncLoading ? 'Синхронизация...' : 'Синхронизировать'}
                       </button>
-                      <button onClick={() => setSupplySyncOpen(false)} className="px-6 py-2 bg-gray-100 rounded-lg hover:bg-gray-200 font-medium">Закрыть</button>
+                      <button onClick={() => setSupplySyncOpen(false)} className="px-6 py-2 bg-slate-100 rounded-lg hover:bg-slate-200 font-medium">Закрыть</button>
                     </div>
                   </div>
                 </div>
               )}
 
               {showGenerateBoxQR && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowGenerateBoxQR(false)}>
+                <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => setShowGenerateBoxQR(false)}>
                   <div className="bg-white p-8 rounded-xl text-center" onClick={e => e.stopPropagation()}>
                     <form onSubmit={async (e) => {
                       e.preventDefault();
@@ -18893,10 +18894,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       />
                     </form>
                     <h3 className="text-xl font-bold mb-4">QR генерация коробки</h3>
-                    <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-100 inline-block" id="generate-box-qr">
+                    <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-100 inline-block" id="generate-box-qr">
                       <QRCodeSVG value="ACTION:GENERATE_BOX" size={200} />
                     </div>
-                    <p className="text-gray-500 mt-4 text-sm">Отсканируйте этот код, чтобы<br/>создать новую коробку по порядку в текущей поставке</p>
+                    <p className="text-slate-500 mt-4 text-sm">Отсканируйте этот код, чтобы<br/>создать новую коробку по порядку в текущей поставке</p>
                     <div className="flex justify-center gap-3 mt-6">
                       <button onClick={() => {
                         const win = window.open();
@@ -18925,53 +18926,53 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       }} className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium flex items-center">
                         <Printer className="h-4 w-4 mr-2" /> Печать
                       </button>
-                      <button onClick={() => setShowGenerateBoxQR(false)} className="px-6 py-2 bg-gray-100 rounded-lg hover:bg-gray-200 font-medium">Закрыть</button>
+                      <button onClick={() => setShowGenerateBoxQR(false)} className="px-6 py-2 bg-slate-100 rounded-lg hover:bg-slate-200 font-medium">Закрыть</button>
                     </div>
                   </div>
                 </div>
               )}
 
               {showNameSequencePrintModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => !nameSequencePrintLoading && setShowNameSequencePrintModal(false)}>
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4" onClick={() => !nameSequencePrintLoading && setShowNameSequencePrintModal(false)}>
                   <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <h3 className="text-xl font-bold text-gray-900">Печать этикеток 58x40</h3>
-                        <p className="mt-1 text-sm text-gray-500">Сверху будет номер по порядку, внизу имя. Если введёшь 100, создастся 100 этикеток: 1, 2, 3 и так далее.</p>
+                        <h3 className="text-xl font-bold text-slate-900">Печать этикеток 58x40</h3>
+                        <p className="mt-1 text-sm text-slate-500">Сверху будет номер по порядку, внизу имя. Если введёшь 100, создастся 100 этикеток: 1, 2, 3 и так далее.</p>
                       </div>
-                      <button onClick={() => !nameSequencePrintLoading && setShowNameSequencePrintModal(false)} className="rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600">
+                      <button onClick={() => !nameSequencePrintLoading && setShowNameSequencePrintModal(false)} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-600">
                         <X className="h-5 w-5" />
                       </button>
                     </div>
 
                     <div className="mt-5 space-y-4">
                       <div>
-                        <label className="mb-1 block text-sm font-medium text-gray-700">Имя</label>
+                        <label className="mb-1 block text-sm font-medium text-slate-700">Имя</label>
                         <input
                           autoFocus
                           type="text"
                           value={nameSequencePrintForm.name}
                           onChange={(e) => setNameSequencePrintForm(prev => ({ ...prev, name: e.target.value }))}
-                          className="w-full rounded-xl border border-gray-200 px-4 py-3 outline-none focus:border-fuchsia-400 focus:ring-2 focus:ring-fuchsia-200"
+                          className="w-full rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-fuchsia-400 focus:ring-2 focus:ring-fuchsia-200"
                           placeholder="Введите имя"
                         />
                       </div>
                       <div>
-                        <label className="mb-1 block text-sm font-medium text-gray-700">Количество</label>
+                        <label className="mb-1 block text-sm font-medium text-slate-700">Количество</label>
                         <input
                           type="number"
                           min={1}
                           max={500}
                           value={nameSequencePrintForm.quantity}
                           onChange={(e) => setNameSequencePrintForm(prev => ({ ...prev, quantity: e.target.value }))}
-                          className="w-full rounded-xl border border-gray-200 px-4 py-3 outline-none focus:border-fuchsia-400 focus:ring-2 focus:ring-fuchsia-200"
+                          className="w-full rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-fuchsia-400 focus:ring-2 focus:ring-fuchsia-200"
                           placeholder="1"
                         />
                       </div>
                     </div>
 
                     <div className="mt-6 flex justify-end gap-3">
-                      <button onClick={() => setShowNameSequencePrintModal(false)} disabled={nameSequencePrintLoading} className="rounded-xl bg-gray-100 px-5 py-2.5 font-medium text-gray-700 hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-50">Отмена</button>
+                      <button onClick={() => setShowNameSequencePrintModal(false)} disabled={nameSequencePrintLoading} className="rounded-xl bg-slate-100 px-5 py-2.5 font-medium text-slate-700 hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50">Отмена</button>
                       <button onClick={handlePrintNameSequenceLabels} disabled={nameSequencePrintLoading} className="rounded-xl bg-fuchsia-600 px-5 py-2.5 font-medium text-white hover:bg-fuchsia-700 disabled:cursor-not-allowed disabled:opacity-50">
                         {nameSequencePrintLoading ? 'Генерация...' : 'Печать'}
                       </button>
@@ -18981,7 +18982,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
               )}
 
               {showNewBoxQR && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowNewBoxQR(false)}>
+                <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => setShowNewBoxQR(false)}>
                   <div className="bg-white p-8 rounded-xl text-center" onClick={e => e.stopPropagation()}>
                     <form onSubmit={(e) => {
                       e.preventDefault();
@@ -19000,10 +19001,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       />
                     </form>
                     <h3 className="text-xl font-bold mb-4">QR для новой коробки</h3>
-                    <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-100 inline-block" id="new-box-qr">
+                    <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-100 inline-block" id="new-box-qr">
                       <QRCodeSVG value="ACTION:NEW_BOX" size={200} />
                     </div>
-                    <p className="text-gray-500 mt-4 text-sm">Отсканируйте этот код, чтобы<br/>завершить текущую коробку</p>
+                    <p className="text-slate-500 mt-4 text-sm">Отсканируйте этот код, чтобы<br/>завершить текущую коробку</p>
                     <div className="flex justify-center gap-3 mt-6">
                       <button onClick={() => {
                         const win = window.open();
@@ -19057,7 +19058,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       }} className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium flex items-center">
                         <Printer className="h-4 w-4 mr-2" /> Печать
                       </button>
-                      <button onClick={() => setShowNewBoxQR(false)} className="px-6 py-2 bg-gray-100 rounded-lg hover:bg-gray-200 font-medium">Закрыть</button>
+                      <button onClick={() => setShowNewBoxQR(false)} className="px-6 py-2 bg-slate-100 rounded-lg hover:bg-slate-200 font-medium">Закрыть</button>
                     </div>
                   </div>
                 </div>
@@ -19067,7 +19068,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
           {/* ORDERS TAB */}
           {activeTab === 'orders' && (
-            <React.Suspense fallback={<div className="p-4 text-sm text-gray-500">Загрузка раздела заказа товара...</div>}>
+            <React.Suspense fallback={<SectionSkeleton />}>
               <WBSupplyManager suppliers={suppliers} embeddedTab="supply_order" initialTab="supply_order" />
             </React.Suspense>
           )}
@@ -19084,7 +19085,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       <select
                         value={receptionSupplierId}
                         onChange={(e) => setReceptionSupplierId(e.target.value)}
-                        className="flex-1 p-3 bg-gray-50 border border-gray-200 rounded-lg outline-none"
+                        className="flex-1 p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none"
                       >
                         <option value="">-- Выберите поставщика --</option>
                         {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -19104,13 +19105,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       <button
                         onClick={refreshVisibleReceptionMeta}
                         disabled={receptionMetaRefreshing || receptionsList.length === 0}
-                        className={`px-3 py-1.5 text-sm rounded-lg border ${receptionMetaRefreshing || receptionsList.length === 0 ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-50'}`}
+                        className={`px-3 py-1.5 text-sm rounded-lg border ${receptionMetaRefreshing || receptionsList.length === 0 ? 'opacity-50 cursor-not-allowed' : 'hover:bg-slate-50'}`}
                       >
                         {receptionMetaRefreshing ? 'Обновляем количество...' : 'Обновить количество'}
                       </button>
                     </div>
                     {receptionsList.length === 0 ? (
-                      <div className="text-center py-8 text-gray-400 bg-white rounded-xl border border-gray-100">
+                      <div className="text-center py-8 text-slate-400 bg-white rounded-xl border border-slate-100">
                         История пуста
                       </div>
                     ) : (
@@ -19118,11 +19119,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <div
                           key={reception.id}
                           onClick={() => handleOpenReception(reception)}
-                          className="bg-white p-4 rounded-xl border border-gray-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 cursor-pointer hover:shadow-md transition-shadow"
+                          className="bg-white p-4 rounded-xl border border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 cursor-pointer hover:shadow-md transition-shadow"
                         >
                           <div className="w-full sm:w-auto">
-                            <div className="font-bold text-gray-900">{reception.supplier?.name || 'Неизвестный поставщик'}</div>
-                            <div className="text-sm text-gray-500">
+                            <div className="font-bold text-slate-900">{reception.supplier?.name || 'Неизвестный поставщик'}</div>
+                            <div className="text-sm text-slate-500">
                               {new Date(reception.created_at).toLocaleString('ru-RU')} • {typeof (reception as any).items_quantity === 'number' ? `${(reception as any).items_quantity} шт.` : (typeof receptionMetaMap[String(reception.id)]?.quantity === 'number' ? `${receptionMetaMap[String(reception.id)]?.quantity} шт.` : '- шт.')}
                             </div>
                           </div>
@@ -19135,7 +19136,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                 e.stopPropagation();
                                 handleDeleteReception(reception.id);
                               }}
-                              className="p-1 text-gray-400 hover:text-red-600 rounded"
+                              className="p-1 text-slate-400 hover:text-red-600 rounded"
                               title="Удалить"
                             >
                               <Trash2 className="h-5 w-5" />
@@ -19145,12 +19146,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                 e.stopPropagation();
                                 handleOpenReception(reception);
                               }}
-                              className="p-1 text-gray-400 hover:text-indigo-600 rounded"
+                              className="p-1 text-slate-400 hover:text-indigo-600 rounded"
                               title="Редактировать"
                             >
                               <Pencil className="h-5 w-5" />
                             </button>
-                            <ChevronRight className="h-5 w-5 text-gray-400" />
+                            <ChevronRight className="h-5 w-5 text-slate-400" />
                           </div>
                         </div>
                       ))
@@ -19161,35 +19162,35 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 <>
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4">
                     <div className="flex items-center">
-                      <button onClick={() => { setReceptionStep('LIST'); setCurrentReception(null); setReceptionDate(new Date().toISOString().split('T')[0]); }} className="mr-4 text-gray-400 hover:text-gray-600"><ArrowLeft className="h-6 w-6" /></button>
+                      <button onClick={() => { setReceptionStep('LIST'); setCurrentReception(null); setReceptionDate(new Date().toISOString().split('T')[0]); }} className="mr-4 text-slate-400 hover:text-slate-600"><ArrowLeft className="h-6 w-6" /></button>
                       <div>
                         <h2 className="text-xl font-bold">Приемка товара</h2>
-                        <p className="text-sm text-gray-500 mb-2">
+                        <p className="text-sm text-slate-500 mb-2">
                           {currentReception?.supplier?.name} • {new Date(currentReception?.created_at).toLocaleDateString()}
                         </p>
                         <div className="flex items-center gap-2">
-                          <label className="text-xs text-gray-500">Дата приемки</label>
+                          <label className="text-xs text-slate-500">Дата приемки</label>
                           <input
                             type="date"
                             value={receptionDate}
                             onChange={(e) => setReceptionDate(e.target.value)}
-                            className="px-2 py-1 text-sm border border-gray-200 rounded-lg bg-white"
+                            className="px-2 py-1 text-sm border border-slate-200 rounded-lg bg-white"
                           />
                         </div>
                       </div>
                     </div>
                     <button
                       onClick={handleSaveReception}
-                      className="self-start sm:self-auto px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 flex items-center"
+                      className="self-start sm:self-auto px-4 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 flex items-center"
                     >
                       <Save className="h-4 w-4 mr-2" /> Сохранить
                     </button>
                   </div>
 
                   <div className="oc-card p-6 mb-6">
-                    <div className="flex justify-between items-center mb-6 border-b border-gray-100 pb-4">
+                    <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
                       <div>
-                        <div className="text-sm text-gray-500">Итого товара</div>
+                        <div className="text-sm text-slate-500">Итого товара</div>
                         <div className="text-2xl font-bold text-indigo-600">
                           {receptionPhotos.reduce((sum, p) => sum + (parseInt(p.quantity) || 0), 0)} шт
                         </div>
@@ -19201,10 +19202,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                     <div className="space-y-4 mb-6">
                       {receptionPhotos.map((photo, idx) => (
-                        <div key={photo.id} className="flex gap-4 items-start border border-gray-100 p-4 rounded-lg">
-                          <img src={photo.url} alt="Preview" className="w-24 h-24 object-cover rounded-lg bg-gray-100" />
+                        <div key={photo.id} className="flex gap-4 items-start border border-slate-100 p-4 rounded-lg">
+                          <img src={photo.url} alt="Preview" className="w-24 h-24 object-cover rounded-lg bg-slate-100" />
                           <div className="flex-1">
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Кол-во товара</label>
+                            <label className="block text-sm font-medium text-slate-700 mb-1">Кол-во товара</label>
                             <input
                               type="number"
                               value={photo.quantity}
@@ -19213,7 +19214,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                 newPhotos[idx].quantity = e.target.value;
                                 setReceptionPhotos(newPhotos);
                               }}
-                              className="w-full p-2 bg-gray-50 border border-gray-200 rounded-lg outline-none"
+                              className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg outline-none"
                               placeholder="0"
                             />
                             <button
@@ -19230,7 +19231,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     <div className="flex gap-3">
                         <button
                           onClick={() => fileInputRefReception.current?.click()}
-                          className="flex-1 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 font-medium flex items-center justify-center"
+                          className="flex-1 py-3 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 font-medium flex items-center justify-center"
                         >
                           <Camera className="h-5 w-5 mr-2" /> Добавить фото
                         </button>
@@ -19277,8 +19278,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           {activeTab === 'map' && (
             <div className="max-w-6xl mx-auto">
               <div className="mb-8">
-                <h1 className="text-2xl font-bold text-gray-900">Конструктор этикеток</h1>
-                <p className="text-gray-500 mt-1">Создание и печать этикеток внутри системы</p>
+                <h1 className="text-2xl font-bold text-slate-900">Конструктор этикеток</h1>
+                <p className="text-slate-500 mt-1">Создание и печать этикеток внутри системы</p>
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -19361,15 +19362,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 </div>
 
                 <div className="oc-card p-6">
-                  <h3 className="font-semibold text-gray-900 mb-4">Предпросмотр 58×40 (XPrinter 420B)</h3>
-                  <p className="text-xs text-gray-500 mb-3">В реальном времени: двигаешь ползунки слева, и сразу меняются размеры блоков во всех макетах.</p>
+                  <h3 className="font-semibold text-slate-900 mb-4">Предпросмотр 58×40 (XPrinter 420B)</h3>
+                  <p className="text-xs text-slate-500 mb-3">В реальном времени: двигаешь ползунки слева, и сразу меняются размеры блоков во всех макетах.</p>
 
                   <div className="space-y-4">
                     <div>
-                      <div className="text-xs font-semibold text-gray-700 mb-2">Макет 1: с ЧЗ (QR + штрихкод)</div>
-                      <div className="mx-auto border border-gray-300 rounded-xl p-2 w-[390px] h-[270px] bg-white relative overflow-hidden">
+                      <div className="text-xs font-semibold text-slate-700 mb-2">Макет 1: с ЧЗ (QR + штрихкод)</div>
+                      <div className="mx-auto border border-slate-300 rounded-xl p-2 w-[390px] h-[270px] bg-white relative overflow-hidden">
                         <div
-                          className="absolute border-2 border-indigo-300 rounded bg-gray-50 flex items-center justify-center text-[10px] text-gray-600 cursor-move"
+                          className="absolute border-2 border-indigo-300 rounded bg-slate-50 flex items-center justify-center text-[10px] text-slate-600 cursor-move"
                           onMouseDown={(e) => startWbBlockDrag(e, 'withChz', 'dmXpx', 'dmYpx', wbLayoutEditor.withChz.dmXpx, wbLayoutEditor.withChz.dmYpx)}
                           style={{
                             left: `${wbLayoutEditor.withChz.dmXpx}px`,
@@ -19381,21 +19382,21 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           QR/DataMatrix
                         </div>
 
-                        <div className="absolute text-gray-900 border-2 border-emerald-300 rounded px-2 py-1 bg-white/70 cursor-move" onMouseDown={(e) => startWbBlockDrag(e, 'withChz', 'textXpx', 'textYpx', wbLayoutEditor.withChz.textXpx, wbLayoutEditor.withChz.textYpx)} style={{ left: `${wbLayoutEditor.withChz.textXpx}px`, top: `${wbLayoutEditor.withChz.textYpx}px`, right: '10px', fontSize: `${ptToPreviewPx(wbLayoutEditor.withChz.titleFont)}px`, lineHeight: 1.05, fontWeight: 700 }}>
+                        <div className="absolute text-slate-900 border-2 border-emerald-300 rounded px-2 py-1 bg-white/70 cursor-move" onMouseDown={(e) => startWbBlockDrag(e, 'withChz', 'textXpx', 'textYpx', wbLayoutEditor.withChz.textXpx, wbLayoutEditor.withChz.textYpx)} style={{ left: `${wbLayoutEditor.withChz.textXpx}px`, top: `${wbLayoutEditor.withChz.textYpx}px`, right: '10px', fontSize: `${ptToPreviewPx(wbLayoutEditor.withChz.titleFont)}px`, lineHeight: 1.05, fontWeight: 700 }}>
                           Костюм мужской домашний
                         </div>
-                        <div className="absolute text-gray-800" style={{ left: `${wbLayoutEditor.withChz.textXpx + 2}px`, top: `${wbLayoutEditor.withChz.textYpx + mmToPreviewY(4.0 + wbLayoutEditor.withChz.titleGap)}px`, fontSize: `${ptToPreviewPx(wbLayoutEditor.withChz.textFont)}px` }}>Артикул: 232759650</div>
-                        <div className="absolute text-gray-800" style={{ left: `${wbLayoutEditor.withChz.textXpx + 2}px`, top: `${wbLayoutEditor.withChz.textYpx + mmToPreviewY(4.0 + wbLayoutEditor.withChz.titleGap + wbLayoutEditor.withChz.dataGap)}px`, fontSize: `${ptToPreviewPx(wbLayoutEditor.withChz.textFont)}px` }}>Модель: M-2026</div>
-                        <div className="absolute text-gray-800" style={{ left: `${wbLayoutEditor.withChz.textXpx + 2}px`, top: `${wbLayoutEditor.withChz.textYpx + mmToPreviewY(4.0 + wbLayoutEditor.withChz.titleGap + wbLayoutEditor.withChz.dataGap * 2)}px`, fontSize: `${ptToPreviewPx(wbLayoutEditor.withChz.textFont)}px` }}>Размер: 7XL</div>
-                        <div className="absolute text-gray-800" style={{ left: `${wbLayoutEditor.withChz.textXpx + 2}px`, top: `${wbLayoutEditor.withChz.textYpx + mmToPreviewY(4.0 + wbLayoutEditor.withChz.titleGap + wbLayoutEditor.withChz.dataGap * 3)}px`, fontSize: `${ptToPreviewPx(wbLayoutEditor.withChz.textFont)}px` }}>Цвет: графит</div>
-                        <div className="absolute text-gray-800" style={{ left: `${wbLayoutEditor.withChz.textXpx + 2}px`, top: `${wbLayoutEditor.withChz.textYpx + mmToPreviewY(4.0 + wbLayoutEditor.withChz.titleGap + wbLayoutEditor.withChz.dataGap * 4)}px`, fontSize: `${ptToPreviewPx(wbLayoutEditor.withChz.textFont)}px` }}>Поставщик: ИП Власенко_И_А</div>
+                        <div className="absolute text-slate-800" style={{ left: `${wbLayoutEditor.withChz.textXpx + 2}px`, top: `${wbLayoutEditor.withChz.textYpx + mmToPreviewY(4.0 + wbLayoutEditor.withChz.titleGap)}px`, fontSize: `${ptToPreviewPx(wbLayoutEditor.withChz.textFont)}px` }}>Артикул: 232759650</div>
+                        <div className="absolute text-slate-800" style={{ left: `${wbLayoutEditor.withChz.textXpx + 2}px`, top: `${wbLayoutEditor.withChz.textYpx + mmToPreviewY(4.0 + wbLayoutEditor.withChz.titleGap + wbLayoutEditor.withChz.dataGap)}px`, fontSize: `${ptToPreviewPx(wbLayoutEditor.withChz.textFont)}px` }}>Модель: M-2026</div>
+                        <div className="absolute text-slate-800" style={{ left: `${wbLayoutEditor.withChz.textXpx + 2}px`, top: `${wbLayoutEditor.withChz.textYpx + mmToPreviewY(4.0 + wbLayoutEditor.withChz.titleGap + wbLayoutEditor.withChz.dataGap * 2)}px`, fontSize: `${ptToPreviewPx(wbLayoutEditor.withChz.textFont)}px` }}>Размер: 7XL</div>
+                        <div className="absolute text-slate-800" style={{ left: `${wbLayoutEditor.withChz.textXpx + 2}px`, top: `${wbLayoutEditor.withChz.textYpx + mmToPreviewY(4.0 + wbLayoutEditor.withChz.titleGap + wbLayoutEditor.withChz.dataGap * 3)}px`, fontSize: `${ptToPreviewPx(wbLayoutEditor.withChz.textFont)}px` }}>Цвет: графит</div>
+                        <div className="absolute text-slate-800" style={{ left: `${wbLayoutEditor.withChz.textXpx + 2}px`, top: `${wbLayoutEditor.withChz.textYpx + mmToPreviewY(4.0 + wbLayoutEditor.withChz.titleGap + wbLayoutEditor.withChz.dataGap * 4)}px`, fontSize: `${ptToPreviewPx(wbLayoutEditor.withChz.textFont)}px` }}>Поставщик: ИП Власенко_И_А</div>
 
-                        <div className="absolute text-[11px] text-gray-700 border border-amber-300 rounded px-1 bg-white/70 cursor-move" onMouseDown={(e) => startWbBlockDrag(e, 'withChz', 'dmTextXpx', 'dmTextYpx', wbLayoutEditor.withChz.dmTextXpx, wbLayoutEditor.withChz.dmTextYpx)} style={{ left: `${wbLayoutEditor.withChz.dmTextXpx}px`, top: `${wbLayoutEditor.withChz.dmTextYpx}px`, width: `${Math.max(90, wbLayoutEditor.withChz.dmSize * PREVIEW_SCALE_X)}px` }}>
+                        <div className="absolute text-[11px] text-slate-700 border border-amber-300 rounded px-1 bg-white/70 cursor-move" onMouseDown={(e) => startWbBlockDrag(e, 'withChz', 'dmTextXpx', 'dmTextYpx', wbLayoutEditor.withChz.dmTextXpx, wbLayoutEditor.withChz.dmTextYpx)} style={{ left: `${wbLayoutEditor.withChz.dmTextXpx}px`, top: `${wbLayoutEditor.withChz.dmTextYpx}px`, width: `${Math.max(90, wbLayoutEditor.withChz.dmSize * PREVIEW_SCALE_X)}px` }}>
                           01046240600993100000...
                         </div>
 
                         <div
-                          className="absolute border-2 border-dashed border-fuchsia-400 rounded flex items-center justify-center text-[12px] text-gray-600 cursor-move"
+                          className="absolute border-2 border-dashed border-fuchsia-400 rounded flex items-center justify-center text-[12px] text-slate-600 cursor-move"
                           onMouseDown={(e) => startWbBlockDrag(e, 'withChz', 'barcodeXpx', 'barcodeYpx', wbLayoutEditor.withChz.barcodeXpx, wbLayoutEditor.withChz.barcodeYpx)}
                           style={{
                             left: `${wbLayoutEditor.withChz.barcodeXpx}px`,
@@ -19413,10 +19414,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     </div>
 
                     <div>
-                      <div className="text-xs font-semibold text-gray-700 mb-2">Макет 2: без ЧЗ (только штрихкод)</div>
-                      <div className="mx-auto border border-gray-300 rounded-xl p-2 w-[390px] h-[270px] bg-white relative overflow-hidden">
+                      <div className="text-xs font-semibold text-slate-700 mb-2">Макет 2: без ЧЗ (только штрихкод)</div>
+                      <div className="mx-auto border border-slate-300 rounded-xl p-2 w-[390px] h-[270px] bg-white relative overflow-hidden">
                         <div
-                          className="absolute border-2 border-dashed border-fuchsia-400 rounded flex items-center justify-center text-[12px] text-gray-600 cursor-move"
+                          className="absolute border-2 border-dashed border-fuchsia-400 rounded flex items-center justify-center text-[12px] text-slate-600 cursor-move"
                           onMouseDown={(e) => startWbBlockDrag(e, 'withoutChz', 'barcodeXpx', 'barcodeYpx', wbLayoutEditor.withoutChz.barcodeXpx, wbLayoutEditor.withoutChz.barcodeYpx)}
                           style={{
                             left: `${wbLayoutEditor.withoutChz.barcodeXpx}px`,
@@ -19431,47 +19432,47 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           2045891906831
                         </div>
 
-                        <div className="absolute border-2 border-emerald-300 rounded px-2 py-1 bg-white/70 cursor-move text-gray-900" onMouseDown={(e) => startWbBlockDrag(e, 'withoutChz', 'textXpx', 'textYpx', wbLayoutEditor.withoutChz.textXpx, wbLayoutEditor.withoutChz.textYpx)} style={{ left: `${wbLayoutEditor.withoutChz.textXpx}px`, top: `${wbLayoutEditor.withoutChz.textYpx}px`, width: '350px' }}>
+                        <div className="absolute border-2 border-emerald-300 rounded px-2 py-1 bg-white/70 cursor-move text-slate-900" onMouseDown={(e) => startWbBlockDrag(e, 'withoutChz', 'textXpx', 'textYpx', wbLayoutEditor.withoutChz.textXpx, wbLayoutEditor.withoutChz.textYpx)} style={{ left: `${wbLayoutEditor.withoutChz.textXpx}px`, top: `${wbLayoutEditor.withoutChz.textYpx}px`, width: '350px' }}>
                           <div className="text-center" style={{ fontSize: `${ptToPreviewPx(wbLayoutEditor.withoutChz.titleFont)}px`, lineHeight: 1.07, fontWeight: 700 }}>
                             Костюм мужской домашний с футболкой и шортами летний
                           </div>
-                          <div className="text-center text-gray-800" style={{ marginTop: `${mmToPreviewY(wbLayoutEditor.withoutChz.titleGap)}px`, fontSize: `${ptToPreviewPx(wbLayoutEditor.withoutChz.textFont)}px`, lineHeight: `${mmToPreviewY(wbLayoutEditor.withoutChz.dataGap)}px` }}>Артикул: 526817909</div>
-                          <div className="text-center text-gray-800" style={{ fontSize: `${ptToPreviewPx(wbLayoutEditor.withoutChz.textFont)}px`, lineHeight: `${mmToPreviewY(wbLayoutEditor.withoutChz.dataGap)}px` }}>Модель: BK-104</div>
-                          <div className="text-center text-gray-800" style={{ fontSize: `${ptToPreviewPx(wbLayoutEditor.withoutChz.textFont)}px`, lineHeight: `${mmToPreviewY(wbLayoutEditor.withoutChz.dataGap)}px` }}>Размер: M-L</div>
-                          <div className="text-center text-gray-800" style={{ fontSize: `${ptToPreviewPx(wbLayoutEditor.withoutChz.textFont)}px`, lineHeight: `${mmToPreviewY(wbLayoutEditor.withoutChz.dataGap)}px` }}>Цвет: бордовый</div>
-                          <div className="text-center text-gray-800" style={{ fontSize: `${ptToPreviewPx(wbLayoutEditor.withoutChz.textFont)}px`, lineHeight: `${mmToPreviewY(wbLayoutEditor.withoutChz.dataGap)}px` }}>Поставщик: ИП БЕКИРОВА_Л_Р</div>
+                          <div className="text-center text-slate-800" style={{ marginTop: `${mmToPreviewY(wbLayoutEditor.withoutChz.titleGap)}px`, fontSize: `${ptToPreviewPx(wbLayoutEditor.withoutChz.textFont)}px`, lineHeight: `${mmToPreviewY(wbLayoutEditor.withoutChz.dataGap)}px` }}>Артикул: 526817909</div>
+                          <div className="text-center text-slate-800" style={{ fontSize: `${ptToPreviewPx(wbLayoutEditor.withoutChz.textFont)}px`, lineHeight: `${mmToPreviewY(wbLayoutEditor.withoutChz.dataGap)}px` }}>Модель: BK-104</div>
+                          <div className="text-center text-slate-800" style={{ fontSize: `${ptToPreviewPx(wbLayoutEditor.withoutChz.textFont)}px`, lineHeight: `${mmToPreviewY(wbLayoutEditor.withoutChz.dataGap)}px` }}>Размер: M-L</div>
+                          <div className="text-center text-slate-800" style={{ fontSize: `${ptToPreviewPx(wbLayoutEditor.withoutChz.textFont)}px`, lineHeight: `${mmToPreviewY(wbLayoutEditor.withoutChz.dataGap)}px` }}>Цвет: бордовый</div>
+                          <div className="text-center text-slate-800" style={{ fontSize: `${ptToPreviewPx(wbLayoutEditor.withoutChz.textFont)}px`, lineHeight: `${mmToPreviewY(wbLayoutEditor.withoutChz.dataGap)}px` }}>Поставщик: ИП БЕКИРОВА_Л_Р</div>
                         </div>
                       </div>
                     </div>
 
                     <div>
-                      <div className="text-xs font-semibold text-gray-700 mb-2">Макет 3: Короба FBO</div>
-                      <div className="mx-auto border border-gray-300 rounded-xl p-2 w-[390px] h-[270px] bg-white relative overflow-hidden">
+                      <div className="text-xs font-semibold text-slate-700 mb-2">Макет 3: Короба FBO</div>
+                      <div className="mx-auto border border-slate-300 rounded-xl p-2 w-[390px] h-[270px] bg-white relative overflow-hidden">
                         <div className="absolute text-black font-bold border border-cyan-300 rounded px-1 bg-white/70 cursor-move" onMouseDown={(e) => startWbBlockDrag(e, 'fboBoxes', 'numberXpx', 'numberYpx', wbLayoutEditor.fboBoxes.numberXpx, wbLayoutEditor.fboBoxes.numberYpx)} style={{ left: `${wbLayoutEditor.fboBoxes.numberXpx - mmToPreviewX(6)}px`, top: `${wbLayoutEditor.fboBoxes.numberYpx}px`, width: `${mmToPreviewX(12)}px`, textAlign: 'center', fontSize: `${ptToPreviewPx(wbLayoutEditor.fboBoxes.numberFont)}px` }}>
                           1/120
                         </div>
-                        <div className="absolute text-gray-800 border border-emerald-300 rounded px-1 bg-white/70 cursor-move" onMouseDown={(e) => startWbBlockDrag(e, 'fboBoxes', 'supplierXpx', 'supplierYpx', wbLayoutEditor.fboBoxes.supplierXpx, wbLayoutEditor.fboBoxes.supplierYpx)} style={{ left: `${wbLayoutEditor.fboBoxes.supplierXpx - mmToPreviewX(12)}px`, top: `${wbLayoutEditor.fboBoxes.supplierYpx}px`, width: `${mmToPreviewX(24)}px`, textAlign: 'center', fontSize: `${ptToPreviewPx(wbLayoutEditor.fboBoxes.supplierFont)}px` }}>
+                        <div className="absolute text-slate-800 border border-emerald-300 rounded px-1 bg-white/70 cursor-move" onMouseDown={(e) => startWbBlockDrag(e, 'fboBoxes', 'supplierXpx', 'supplierYpx', wbLayoutEditor.fboBoxes.supplierXpx, wbLayoutEditor.fboBoxes.supplierYpx)} style={{ left: `${wbLayoutEditor.fboBoxes.supplierXpx - mmToPreviewX(12)}px`, top: `${wbLayoutEditor.fboBoxes.supplierYpx}px`, width: `${mmToPreviewX(24)}px`, textAlign: 'center', fontSize: `${ptToPreviewPx(wbLayoutEditor.fboBoxes.supplierFont)}px` }}>
                           ИП Власенко
                         </div>
-                        <div className="absolute border-2 border-dashed border-fuchsia-400 rounded flex items-center justify-center text-[12px] text-gray-600 cursor-move" onMouseDown={(e) => startWbBlockDrag(e, 'fboBoxes', 'barcodeXpx', 'barcodeYpx', wbLayoutEditor.fboBoxes.barcodeXpx, wbLayoutEditor.fboBoxes.barcodeYpx)} style={{ left: `${wbLayoutEditor.fboBoxes.barcodeXpx}px`, top: `${wbLayoutEditor.fboBoxes.barcodeYpx}px`, width: `${wbLayoutEditor.fboBoxes.barcodeW * PREVIEW_SCALE_X}px`, height: `${wbLayoutEditor.fboBoxes.barcodeH * PREVIEW_SCALE_Y}px` }}>
+                        <div className="absolute border-2 border-dashed border-fuchsia-400 rounded flex items-center justify-center text-[12px] text-slate-600 cursor-move" onMouseDown={(e) => startWbBlockDrag(e, 'fboBoxes', 'barcodeXpx', 'barcodeYpx', wbLayoutEditor.fboBoxes.barcodeXpx, wbLayoutEditor.fboBoxes.barcodeYpx)} style={{ left: `${wbLayoutEditor.fboBoxes.barcodeXpx}px`, top: `${wbLayoutEditor.fboBoxes.barcodeYpx}px`, width: `${wbLayoutEditor.fboBoxes.barcodeW * PREVIEW_SCALE_X}px`, height: `${wbLayoutEditor.fboBoxes.barcodeH * PREVIEW_SCALE_Y}px` }}>
                           Штрихкод
                         </div>
                         <div className="absolute text-black font-bold border border-cyan-300 rounded px-1 bg-white/70 cursor-move" onMouseDown={(e) => startWbBlockDrag(e, 'fboBoxes', 'codeXpx', 'codeYpx', wbLayoutEditor.fboBoxes.codeXpx, wbLayoutEditor.fboBoxes.codeYpx)} style={{ left: `${wbLayoutEditor.fboBoxes.codeXpx - mmToPreviewX(14)}px`, top: `${wbLayoutEditor.fboBoxes.codeYpx}px`, width: `${mmToPreviewX(28)}px`, textAlign: 'center', fontSize: `${ptToPreviewPx(wbLayoutEditor.fboBoxes.codeFont)}px` }}>
                           WBBOX001234567
                         </div>
-                        <div className="absolute text-gray-700 border border-amber-300 rounded px-1 bg-white/70 cursor-move" onMouseDown={(e) => startWbBlockDrag(e, 'fboBoxes', 'footerXpx', 'footerYpx', wbLayoutEditor.fboBoxes.footerXpx, wbLayoutEditor.fboBoxes.footerYpx)} style={{ left: `${wbLayoutEditor.fboBoxes.footerXpx - mmToPreviewX(10)}px`, top: `${wbLayoutEditor.fboBoxes.footerYpx}px`, width: `${mmToPreviewX(20)}px`, textAlign: 'center', fontSize: `${ptToPreviewPx(wbLayoutEditor.fboBoxes.footerFont)}px` }}>
+                        <div className="absolute text-slate-700 border border-amber-300 rounded px-1 bg-white/70 cursor-move" onMouseDown={(e) => startWbBlockDrag(e, 'fboBoxes', 'footerXpx', 'footerYpx', wbLayoutEditor.fboBoxes.footerXpx, wbLayoutEditor.fboBoxes.footerYpx)} style={{ left: `${wbLayoutEditor.fboBoxes.footerXpx - mmToPreviewX(10)}px`, top: `${wbLayoutEditor.fboBoxes.footerYpx}px`, width: `${mmToPreviewX(20)}px`, textAlign: 'center', fontSize: `${ptToPreviewPx(wbLayoutEditor.fboBoxes.footerFont)}px` }}>
                           ШК короба
                         </div>
                       </div>
                     </div>
 
                     <div>
-                      <div className="text-xs font-semibold text-gray-700 mb-2">Макет 4: Номер + имя</div>
-                      <div className="mx-auto border border-gray-300 rounded-xl p-2 w-[390px] h-[270px] bg-white relative overflow-hidden">
+                      <div className="text-xs font-semibold text-slate-700 mb-2">Макет 4: Номер + имя</div>
+                      <div className="mx-auto border border-slate-300 rounded-xl p-2 w-[390px] h-[270px] bg-white relative overflow-hidden">
                         <div className="absolute text-black font-bold border border-cyan-300 rounded px-1 bg-white/70 cursor-move" onMouseDown={(e) => startWbBlockDrag(e, 'nameSequence', 'numberXpx', 'numberYpx', wbLayoutEditor.nameSequence.numberXpx, wbLayoutEditor.nameSequence.numberYpx)} style={{ left: `${wbLayoutEditor.nameSequence.numberXpx - mmToPreviewX(8)}px`, top: `${wbLayoutEditor.nameSequence.numberYpx}px`, width: `${mmToPreviewX(16)}px`, textAlign: 'center', fontSize: `${ptToPreviewPx(wbLayoutEditor.nameSequence.numberFont)}px` }}>
                           1
                         </div>
-                        <div className="absolute text-gray-800 border border-emerald-300 rounded px-1 bg-white/70 cursor-move" onMouseDown={(e) => startWbBlockDrag(e, 'nameSequence', 'nameXpx', 'nameYpx', wbLayoutEditor.nameSequence.nameXpx, wbLayoutEditor.nameSequence.nameYpx)} style={{ left: `${wbLayoutEditor.nameSequence.nameXpx - mmToPreviewX(16)}px`, top: `${wbLayoutEditor.nameSequence.nameYpx}px`, width: `${mmToPreviewX(32)}px`, textAlign: 'center', fontSize: `${ptToPreviewPx(wbLayoutEditor.nameSequence.nameFont)}px` }}>
+                        <div className="absolute text-slate-800 border border-emerald-300 rounded px-1 bg-white/70 cursor-move" onMouseDown={(e) => startWbBlockDrag(e, 'nameSequence', 'nameXpx', 'nameYpx', wbLayoutEditor.nameSequence.nameXpx, wbLayoutEditor.nameSequence.nameYpx)} style={{ left: `${wbLayoutEditor.nameSequence.nameXpx - mmToPreviewX(16)}px`, top: `${wbLayoutEditor.nameSequence.nameYpx}px`, width: `${mmToPreviewX(32)}px`, textAlign: 'center', fontSize: `${ptToPreviewPx(wbLayoutEditor.nameSequence.nameFont)}px` }}>
                           Имя
                         </div>
                       </div>
@@ -19484,12 +19485,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
           {/* PRODUCTS TAB */}
           {activeTab === 'products' && (
-            <div className="bg-white border border-gray-200 rounded-xl shadow-sm flex flex-col 2xl:h-[calc(100vh-6rem)] 2xl:overflow-hidden">
-              <div className="p-4 border-b border-gray-200 bg-white z-10 flex flex-col gap-4 oc-filterbar">
+            <div className="bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col 2xl:h-[calc(100vh-6rem)] 2xl:overflow-hidden">
+              <div className="p-4 border-b border-slate-200 bg-white z-10 flex flex-col gap-4 oc-filterbar">
                 <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
                   <div className="flex items-center">
-                    <button onClick={() => switchTab('suppliers')} className="mr-4 text-gray-400 hover:text-gray-600"><ArrowLeft className="h-6 w-6" /></button>
-                    <h1 className="text-2xl font-bold text-gray-900">Товары</h1>
+                    <button onClick={() => switchTab('suppliers')} className="mr-4 text-slate-400 hover:text-slate-600"><ArrowLeft className="h-6 w-6" /></button>
+                    <h1 className="text-2xl font-bold text-slate-900">Товары</h1>
                   </div>
                   <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
                     {lastImportedIds.length > 0 && (
@@ -19512,14 +19513,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     <button
                       onClick={() => fileInputRef.current?.click()}
                       disabled={!selectedSupplierId}
-                      className={`px-4 py-2 rounded-lg font-medium flex items-center justify-center ${!selectedSupplierId ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}
+                      className={`px-4 py-2 rounded-lg font-medium flex items-center justify-center ${!selectedSupplierId ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-slate-200 text-slate-700 hover:bg-slate-300'}`}
                     >
                       <Upload className="h-4 w-4 mr-2" /> Импорт Excel
                     </button>
                     <button
                       onClick={() => setShowAddProductModal(true)}
                       disabled={!selectedSupplierId}
-                      className={`px-4 py-2 rounded-lg font-medium flex items-center justify-center ${!selectedSupplierId ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}
+                      className={`px-4 py-2 rounded-lg font-medium flex items-center justify-center ${!selectedSupplierId ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-slate-200 text-slate-700 hover:bg-slate-300'}`}
                     >
                       <Plus className="h-4 w-4 mr-2" /> Добавить товар
                     </button>
@@ -19531,18 +19532,18 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     <select
                       value={selectedSupplierId}
                       onChange={(e) => handleSupplierSelect(e.target.value)}
-                      className="w-full p-3 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
                     >
                       <option value="">Выбрать поставщика</option>
                       {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                     </select>
                   </div>
                   <div className="relative">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-slate-400" />
                     <input
                       type="text"
                       placeholder="Поиск по названию, артикулу, баркоду или WB..."
-                      className="w-full pl-10 p-3 bg-gray-50 border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500"
+                      className="w-full pl-10 p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500"
                       value={productSearch}
                       onChange={(e) => setProductSearch(e.target.value)}
                     />
@@ -19552,20 +19553,20 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
               <div className="p-0 relative 2xl:flex-1 2xl:overflow-y-auto">
                 <table className="w-full text-left border-collapse">
-                  <thead className="sticky top-0 bg-gray-50 z-10 shadow-sm">
-                    <tr className="border-b border-gray-200">
-                      <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Наименование</th>
-                      <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">WB Артикул</th>
-                      <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Баркод</th>
-                      <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Размер</th>
-                      <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Цвет</th>
-                      <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase text-right">Действия</th>
+                  <thead className="sticky top-0 bg-slate-50 z-10 shadow-sm">
+                    <tr className="border-b border-slate-200">
+                      <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase">Наименование</th>
+                      <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase">WB Артикул</th>
+                      <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase">Баркод</th>
+                      <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase">Размер</th>
+                      <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase">Цвет</th>
+                      <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase text-right">Действия</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-100 bg-white">
+                  <tbody className="divide-y divide-slate-100 bg-white">
                     {products.length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="px-6 py-12 text-center text-gray-400">Товары не найдены</td>
+                        <td colSpan={6} className="px-6 py-12 text-center text-slate-400">Товары не найдены</td>
                       </tr>
                     ) : (
                       products.filter(p =>
@@ -19573,15 +19574,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         (p.wb_sku && p.wb_sku.toLowerCase().includes(productSearch.toLowerCase())) ||
                         (p.barcode && p.barcode.toLowerCase().includes(productSearch.toLowerCase()))
                       ).map(product => (
-                        <tr key={product.id} className="hover:bg-gray-50 transition-colors">
-                          <td className="px-6 py-4 font-medium text-gray-900">{product.name}</td>
-                          <td className="px-6 py-4 text-gray-600">{product.wb_sku}</td>
-                          <td className="px-6 py-4 text-gray-600">{product.barcode}</td>
-                          <td className="px-6 py-4 text-gray-600">{product.size}</td>
-                          <td className="px-6 py-4 text-gray-600">{product.color}</td>
+                        <tr key={product.id} className="hover:bg-slate-50 transition-colors">
+                          <td className="px-6 py-4 font-medium text-slate-900">{product.name}</td>
+                          <td className="px-6 py-4 text-slate-600">{product.wb_sku}</td>
+                          <td className="px-6 py-4 text-slate-600">{product.barcode}</td>
+                          <td className="px-6 py-4 text-slate-600">{product.size}</td>
+                          <td className="px-6 py-4 text-slate-600">{product.color}</td>
                           <td className="px-6 py-4 text-right">
                             <div className="flex justify-end gap-2">
-                              <button onClick={() => handleDeleteProduct(product)} className="text-gray-400 hover:text-red-600" title="Удалить"><Trash2 className="h-4 w-4" /></button>
+                              <button onClick={() => handleDeleteProduct(product)} className="text-slate-400 hover:text-red-600" title="Удалить"><Trash2 className="h-4 w-4" /></button>
                             </div>
                           </td>
                         </tr>
@@ -19595,7 +19596,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
           {/* Add Product Modal */}
           {showAddProductModal && (
-            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50">
               <div className="bg-white rounded-xl p-6 w-full max-w-md">
                 <h2 className="text-xl font-bold mb-4">Добавить товар</h2>
                 <form onSubmit={handleAddProduct} className="space-y-4">
@@ -19607,7 +19608,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     <input type="text" placeholder="Цвет" className="w-full p-2 border rounded" value={newProduct.color} onChange={e => setNewProduct({...newProduct, color: e.target.value})} />
                   </div>
                   <div className="flex justify-end gap-2 mt-6">
-                    <button type="button" onClick={() => setShowAddProductModal(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded">Отмена</button>
+                    <button type="button" onClick={() => setShowAddProductModal(false)} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded">Отмена</button>
                     <button type="submit" className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700">Добавить</button>
                   </div>
                 </form>
@@ -19617,7 +19618,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
           {/* WAREHOUSE TAB */}
           {activeTab === 'warehouse' && (
-            <React.Suspense fallback={<div className="p-4 text-sm text-gray-500">Загрузка склада...</div>}>
+            <React.Suspense fallback={<SectionSkeleton />}>
               <WarehouseTab
                 warehouseFill={warehouseFill}
                 setWarehouseFill={setWarehouseFill}
@@ -19661,7 +19662,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
           {/* CAMERAS TAB */}
           {activeTab === 'cameras' && (
-            <React.Suspense fallback={<div className="p-4 text-sm text-gray-500">Загрузка камер...</div>}>
+            <React.Suspense fallback={<SectionSkeleton />}>
               <CamerasTab
                 cameraStreams={cameraStreams}
                 setCameraStreams={setCameraStreams}
@@ -19674,7 +19675,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           {/* TASKS TAB */}
           {activeTab === 'tasks' && (
             <div className="max-w-full mx-auto px-4 h-full">
-              <React.Suspense fallback={<div className="p-4 text-sm text-gray-500">Загрузка задач...</div>}>
+              <React.Suspense fallback={<SectionSkeleton />}>
                 <Tasks />
               </React.Suspense>
             </div>
@@ -19683,7 +19684,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           {/* WB PRODUCTS TAB */}
           <div className={`w-full mx-auto px-2 md:px-4 ${activeTab === 'wb_products' ? '' : 'hidden'}`}>
             <WBProductsSection>
-              <React.Suspense fallback={<div className="p-4 text-sm text-gray-500">Загрузка WB товаров...</div>}>
+              <React.Suspense fallback={<SectionSkeleton />}>
                 <WBProducts suppliers={suppliers} />
               </React.Suspense>
             </WBProductsSection>
@@ -19691,7 +19692,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
           {/* ADVERTISING TAB */}
           <div className={`w-full mx-auto px-2 md:px-4 ${activeTab === 'advertising' ? '' : 'hidden'}`}>
-            <React.Suspense fallback={<div className="p-4 text-sm text-gray-500">Загрузка раздела рекламы...</div>}>
+            <React.Suspense fallback={<SectionSkeleton />}>
               <AdvertisingInsights />
             </React.Suspense>
           </div>
@@ -20394,16 +20395,16 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                         <div className="mt-3 max-h-56 overflow-y-auto border rounded-lg bg-white">
                           {barterMoneyLoading ? (
-                            <div className="p-3 text-sm text-gray-500">Загрузка операций...</div>
+                            <div className="p-3 text-sm text-slate-500">Загрузка операций...</div>
                           ) : filteredBarterMoneyHistory.length === 0 ? (
-                            <div className="p-3 text-sm text-gray-500">Пока нет операций по этому поставщику.</div>
+                            <div className="p-3 text-sm text-slate-500">Пока нет операций по этому поставщику.</div>
                           ) : (
                             <div className="divide-y">
                               {filteredBarterMoneyHistory.map((row) => (
                                 <div key={`barter-money-${row.id}`} className="p-3 text-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                                   <div className="min-w-0">
-                                    <div className="font-medium text-gray-900 break-words">{row.comment || 'Без комментария'}</div>
-                                    <div className="text-xs text-gray-500 mt-1">{row.created_at ? new Date(row.created_at).toLocaleString('ru-RU') : '-'}</div>
+                                    <div className="font-medium text-slate-900 break-words">{row.comment || 'Без комментария'}</div>
+                                    <div className="text-xs text-slate-500 mt-1">{row.created_at ? new Date(row.created_at).toLocaleString('ru-RU') : '-'}</div>
                                   </div>
                                   <div className="flex items-center justify-between sm:justify-end gap-2 shrink-0">
                                     <div className={`font-bold ${Number(row.amount) >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
@@ -20462,7 +20463,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
               </div>
 
               {barterDuplicateModal.open && (
-                <div className="fixed inset-0 z-[120] bg-black/50 flex items-center justify-center p-4" onClick={() => setBarterDuplicateModal({ open: false, targetMonth: barterMonth })}>
+                <div className="fixed inset-0 z-[120] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setBarterDuplicateModal({ open: false, targetMonth: barterMonth })}>
                   <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl p-4 sm:p-6" onClick={(e) => e.stopPropagation()}>
                     <div className="text-lg font-bold mb-4">Дублировать карточки</div>
                     <div className="space-y-3">
@@ -20498,10 +20499,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
               )}
 
               {externalAdsBaseModalOpen && (
-                <div className="fixed inset-0 z-[120] bg-black/50 flex items-end md:items-center justify-center p-2 md:p-4" onClick={() => setExternalAdsBaseModalOpen(false)}>
+                <div className="fixed inset-0 z-[120] bg-slate-900/50 backdrop-blur-sm flex items-end md:items-center justify-center p-2 md:p-4" onClick={() => setExternalAdsBaseModalOpen(false)}>
                   <div className="w-full max-w-2xl bg-white rounded-t-3xl md:rounded-2xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
                     <div className="sticky top-0 z-10 bg-white border-b px-4 pt-2 pb-3 md:px-6 md:pt-5 md:pb-4">
-                      <div className="mx-auto mb-2 h-1.5 w-12 rounded-full bg-gray-300 md:hidden" />
+                      <div className="mx-auto mb-2 h-1.5 w-12 rounded-full bg-slate-300 md:hidden" />
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <div className="text-lg font-bold text-slate-900">База Внешней рекламы</div>
@@ -20988,7 +20989,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     <button
                       type="button"
                       onClick={() => closeBarterPreviewGallery()}
-                      className="absolute right-0 top-0 z-10 inline-flex h-10 w-10 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70"
+                      className="absolute right-0 top-0 z-10 inline-flex h-10 w-10 items-center justify-center rounded-full bg-slate-900/50 backdrop-blur-sm text-white hover:bg-black/70"
                       title="Закрыть"
                     >
                       <X className="h-5 w-5" />
@@ -21066,7 +21067,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
               )}
 
               {barterModalOpen && (
-                <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-3" onClick={() => closeBarterAddModal()}>
+                <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-3" onClick={() => closeBarterAddModal()}>
                   <div className="w-full max-w-3xl bg-white rounded-2xl shadow-xl p-4" onClick={(e) => e.stopPropagation()}>
                     <div className="flex items-center justify-between mb-3">
                       <div className="text-base font-semibold text-slate-900">Добавить товар</div>
@@ -21134,7 +21135,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
           {/* FBS TAB */}
           {activeTab === 'fbs' && (
-             <React.Suspense fallback={<div className="p-4 text-sm text-gray-500">Загрузка FBS менеджера...</div>}>
+             <React.Suspense fallback={<SectionSkeleton />}>
                <WBSupplyManager suppliers={suppliers} />
              </React.Suspense>
           )}
@@ -21147,39 +21148,39 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   <div className="bg-indigo-100 p-2 rounded-lg">
                     <ShieldCheck className="h-6 w-6 text-indigo-600" />
                   </div>
-                  <h1 className="text-2xl font-bold text-gray-900">ЧЗ / Печать</h1>
+                  <h1 className="text-2xl font-bold text-slate-900">ЧЗ / Печать</h1>
                 </div>
-                <p className="text-gray-500">Управление маркировкой и печать документов</p>
+                <p className="text-slate-500">Управление маркировкой и печать документов</p>
               </div>
 
-              <div className="flex space-x-1 bg-gray-100 p-1 rounded-xl mb-6 w-fit">
+              <div className="flex space-x-1 bg-slate-100 p-1 rounded-xl mb-6 w-fit">
                 <button
                   onClick={() => setHonestSignTab('codes')}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${honestSignTab === 'codes' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${honestSignTab === 'codes' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                 >
                   База кодов
                 </button>
                 <button
                   onClick={() => setHonestSignTab('base')}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${honestSignTab === 'base' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${honestSignTab === 'base' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                 >
                   База
                 </button>
                 <button
                   onClick={() => setHonestSignTab('printed')}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${honestSignTab === 'printed' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${honestSignTab === 'printed' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                 >
                   Напечатанные
                 </button>
                 <button
                   onClick={() => setHonestSignTab('scanned')}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${honestSignTab === 'scanned' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${honestSignTab === 'scanned' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                 >
                   Отсканировано
                 </button>
                 <button
                   onClick={() => setHonestSignTab('print')}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${honestSignTab === 'print' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${honestSignTab === 'print' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                 >
                   Печать документов
                 </button>
@@ -21188,11 +21189,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
               {honestSignTab === 'codes' && (
                 <>
                   <div className="oc-card p-6 mb-6">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Выберите поставщика</label>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">Выберите поставщика</label>
                     <select
                       value={honestSignSupplierId}
                       onChange={(e) => setHonestSignSupplierId(e.target.value)}
-                      className="w-full p-3 bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                      className="w-full p-3 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
                     >
                       <option value="">-- Выберите поставщика --</option>
                       {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -21200,22 +21201,22 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   </div>
 
                   {!honestSignSupplierId ? (
-                    <div className="text-center py-12 text-gray-400 bg-white rounded-xl border border-gray-100 border-dashed">
-                      <ShieldCheck className="h-12 w-12 mx-auto text-gray-300 mb-4" />
+                    <div className="text-center py-12 text-slate-400 bg-white rounded-xl border border-slate-100 border-dashed">
+                      <ShieldCheck className="h-12 w-12 mx-auto text-slate-300 mb-4" />
                       <p>Выберите поставщика для просмотра базы</p>
                     </div>
                   ) : loadingHonestSign ? (
-                    <div className="text-center py-12 text-gray-400">Загрузка...</div>
+                    <div className="text-center py-12 text-slate-400">Загрузка...</div>
                   ) : honestSignCodes.length === 0 ? (
-                    <div className="text-center py-12 text-gray-400 bg-white rounded-xl border border-gray-100 border-dashed">
-                      <ShieldCheck className="h-12 w-12 mx-auto text-gray-300 mb-4" />
-                      <h3 className="text-lg font-medium text-gray-900 mb-1">База пуста</h3>
+                    <div className="text-center py-12 text-slate-400 bg-white rounded-xl border border-slate-100 border-dashed">
+                      <ShieldCheck className="h-12 w-12 mx-auto text-slate-300 mb-4" />
+                      <h3 className="text-lg font-medium text-slate-900 mb-1">База пуста</h3>
                       <p>Сканируйте товары в поставках, чтобы наполнить базу</p>
                     </div>
                   ) : (
                     <div className="oc-card overflow-hidden">
-                      <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
-                        <span className="font-medium text-gray-700">Отсканировано поставок: {honestSignCodes.length}</span>
+                      <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                        <span className="font-medium text-slate-700">Отсканировано поставок: {honestSignCodes.length}</span>
                         <button
                           onClick={handleDownloadHonestSign}
                           className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center text-sm font-medium"
@@ -21223,23 +21224,23 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           <Download className="h-4 w-4 mr-2" /> Скачать Excel
                         </button>
                       </div>
-                      <div className="divide-y divide-gray-100">
+                      <div className="divide-y divide-slate-100">
                         {honestSignCodes.map((item) => (
-                          <div key={item.id} className="p-4 hover:bg-gray-50 flex justify-between items-center gap-4">
+                          <div key={item.id} className="p-4 hover:bg-slate-50 flex justify-between items-center gap-4">
                             <div>
-                              <div className="font-medium text-gray-900">{item.name}</div>
-                              <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-gray-500 font-mono">
+                              <div className="font-medium text-slate-900">{item.name}</div>
+                              <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-slate-500 font-mono">
                                 <span>Кодов: {item.code_count}</span>
-                                <span className="font-sans text-gray-600">Пол: <span className="font-medium text-gray-800">{item.gender_label || '-'}</span></span>
+                                <span className="font-sans text-slate-600">Пол: <span className="font-medium text-slate-800">{item.gender_label || '-'}</span></span>
                               </div>
                             </div>
                             <div className="flex items-center gap-4 shrink-0">
-                              <div className="text-xs text-gray-400">
+                              <div className="text-xs text-slate-400">
                                 {new Date(item.created_at).toLocaleDateString()}
                               </div>
                               <button
                                 onClick={() => handleDeleteHonestSign(item.id)}
-                                className="p-1 text-gray-400 hover:text-red-600 rounded"
+                                className="p-1 text-slate-400 hover:text-red-600 rounded"
                                 title="Удалить коды"
                               >
                                 <Trash2 className="h-4 w-4" />
@@ -21255,15 +21256,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
               {honestSignTab === 'printed' && (
                 <div className="oc-card p-6 mb-6">
-                    <h2 className="text-lg font-bold text-gray-900 mb-4">История напечатанных кодов</h2>
+                    <h2 className="text-lg font-bold text-slate-900 mb-4">История напечатанных кодов</h2>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">Выберите поставщика</label>
+                            <label className="block text-sm font-medium text-slate-700 mb-2">Выберите поставщика</label>
                             <select
                               value={honestSignSupplierId}
                               onChange={(e) => setHonestSignSupplierId(e.target.value)}
-                              className="w-full p-3 bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                              className="w-full p-3 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
                             >
                               <option value="">-- Выберите поставщика --</option>
                               {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -21273,20 +21274,20 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                     {honestSignPrintedHistory.length > 0 ? (
                         <div>
-                            <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                            <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
                                 <table className="w-full text-left text-sm">
-                                    <thead className="bg-gray-50 border-b border-gray-200">
+                                    <thead className="bg-slate-50 border-b border-slate-200">
                                         <tr>
-                                            <th className="p-3 font-medium text-gray-500">Дата печати</th>
-                                            <th className="p-3 font-medium text-gray-500">Файл</th>
-                                            <th className="p-3 font-medium text-gray-500">Категория</th>
-                                            <th className="p-3 font-medium text-gray-500">Пол</th>
-                                            <th className="p-3 font-medium text-gray-500 text-right">Действия</th>
+                                            <th className="p-3 font-medium text-slate-500">Дата печати</th>
+                                            <th className="p-3 font-medium text-slate-500">Файл</th>
+                                            <th className="p-3 font-medium text-slate-500">Категория</th>
+                                            <th className="p-3 font-medium text-slate-500">Пол</th>
+                                            <th className="p-3 font-medium text-slate-500 text-right">Действия</th>
                                         </tr>
                                     </thead>
-                                    <tbody className="divide-y divide-gray-100">
+                                    <tbody className="divide-y divide-slate-100">
                                         {honestSignPrintedHistory.map((item, idx) => (
-                                            <tr key={idx} className="hover:bg-gray-50">
+                                            <tr key={idx} className="hover:bg-slate-50">
                                                 <td className="p-3">{new Date(item.created_at).toLocaleString('ru-RU')}</td>
                                                 <td className="p-3">{item.file_name}</td>
                                                 <td className="p-3">{item.category || '-'}</td>
@@ -21307,8 +21308,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             </div>
                         </div>
                     ) : (
-                        <div className="text-center py-12 text-gray-400 bg-white rounded-xl border border-gray-100 border-dashed">
-                            <Printer className="h-12 w-12 mx-auto text-gray-300 mb-4" />
+                        <div className="text-center py-12 text-slate-400 bg-white rounded-xl border border-slate-100 border-dashed">
+                            <Printer className="h-12 w-12 mx-auto text-slate-300 mb-4" />
                             <p>Нет напечатанных кодов</p>
                         </div>
                     )}
@@ -21317,15 +21318,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
               {honestSignTab === 'scanned' && (
                 <div className="oc-card p-6 mb-6">
-                    <h2 className="text-lg font-bold text-gray-900 mb-4">История отсканированных кодов</h2>
+                    <h2 className="text-lg font-bold text-slate-900 mb-4">История отсканированных кодов</h2>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">Выберите поставщика</label>
+                            <label className="block text-sm font-medium text-slate-700 mb-2">Выберите поставщика</label>
                             <select
                               value={honestSignSupplierId}
                               onChange={(e) => setHonestSignSupplierId(e.target.value)}
-                              className="w-full p-3 bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                              className="w-full p-3 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
                             >
                               <option value="">-- Выберите поставщика --</option>
                               {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -21335,20 +21336,20 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                     {honestSignScannedHistory.length > 0 ? (
                         <div>
-                            <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                            <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
                                 <table className="w-full text-left text-sm">
-                                    <thead className="bg-gray-50 border-b border-gray-200">
+                                    <thead className="bg-slate-50 border-b border-slate-200">
                                         <tr>
-                                            <th className="p-3 font-medium text-gray-500">Дата сканирования</th>
-                                            <th className="p-3 font-medium text-gray-500">Файл</th>
-                                            <th className="p-3 font-medium text-gray-500">Категория</th>
-                                            <th className="p-3 font-medium text-gray-500">Пол</th>
-                                            <th className="p-3 font-medium text-gray-500 text-right">Действия</th>
+                                            <th className="p-3 font-medium text-slate-500">Дата сканирования</th>
+                                            <th className="p-3 font-medium text-slate-500">Файл</th>
+                                            <th className="p-3 font-medium text-slate-500">Категория</th>
+                                            <th className="p-3 font-medium text-slate-500">Пол</th>
+                                            <th className="p-3 font-medium text-slate-500 text-right">Действия</th>
                                         </tr>
                                     </thead>
-                                    <tbody className="divide-y divide-gray-100">
+                                    <tbody className="divide-y divide-slate-100">
                                         {honestSignScannedHistory.map((item, idx) => (
-                                            <tr key={idx} className="hover:bg-gray-50">
+                                            <tr key={idx} className="hover:bg-slate-50">
                                                 <td className="p-3">{new Date(item.created_at).toLocaleString('ru-RU')}</td>
                                                 <td className="p-3">{item.file_name}</td>
                                                 <td className="p-3">{item.category || '-'}</td>
@@ -21369,8 +21370,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             </div>
                         </div>
                     ) : (
-                        <div className="text-center py-12 text-gray-400 bg-white rounded-xl border border-gray-100 border-dashed">
-                            <ShieldCheck className="h-12 w-12 mx-auto text-gray-300 mb-4" />
+                        <div className="text-center py-12 text-slate-400 bg-white rounded-xl border border-slate-100 border-dashed">
+                            <ShieldCheck className="h-12 w-12 mx-auto text-slate-300 mb-4" />
                             <p>Нет отсканированных кодов</p>
                         </div>
                     )}
@@ -21379,26 +21380,26 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
               {honestSignTab === 'base' && (
                 <div className="oc-card p-6 mb-6">
-                    <h2 className="text-lg font-bold text-gray-900 mb-4">Загрузка базы кодов</h2>
+                    <h2 className="text-lg font-bold text-slate-900 mb-4">Загрузка базы кодов</h2>
 
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">Выберите поставщика</label>
+                            <label className="block text-sm font-medium text-slate-700 mb-2">Выберите поставщика</label>
                             <select
                               value={honestSignSupplierId}
                               onChange={(e) => setHonestSignSupplierId(e.target.value)}
-                              className="w-full p-3 bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                              className="w-full p-3 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
                             >
                               <option value="">-- Выберите поставщика --</option>
                               {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                             </select>
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">Категории товаров по поставщику</label>
+                            <label className="block text-sm font-medium text-slate-700 mb-2">Категории товаров по поставщику</label>
                             <select
                               value={honestSignBaseCategory}
                               onChange={(e) => setHonestSignBaseCategory(e.target.value)}
-                              className="w-full p-3 bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                              className="w-full p-3 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
                               disabled={loadingCategories}
                             >
                               <option value="">-- Выберите категорию --</option>
@@ -21417,11 +21418,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             </select>
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">Пол</label>
+                            <label className="block text-sm font-medium text-slate-700 mb-2">Пол</label>
                             <select
                               value={honestSignBaseGender}
                               onChange={(e) => setHonestSignBaseGender(normalizeHSGender(e.target.value) as 'male' | 'female' | '')}
-                              className="w-full p-3 bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                              className="w-full p-3 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
                             >
                               <option value="">-- Выберите пол --</option>
                               <option value="male">Мужской</option>
@@ -21432,13 +21433,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                     {honestSignCategoryStats.length > 0 && (
                       <div className="mb-6">
-                        <h3 className="text-sm font-semibold text-gray-700 mb-3">Инфографика по ЧЗ в категориях</h3>
+                        <h3 className="text-sm font-semibold text-slate-700 mb-3">Инфографика по ЧЗ в категориях</h3>
                         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                           {honestSignCategoryStats.map((s) => (
-                            <div key={s.category} className="bg-gray-50 border border-gray-200 rounded-lg p-3">
-                              <div className="font-medium text-gray-900 mb-2">{s.category}</div>
-                              <div className="text-xs text-gray-600 space-y-1">
-                                <div>Всего: <span className="font-semibold text-gray-900">{s.total}</span></div>
+                            <div key={s.category} className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+                              <div className="font-medium text-slate-900 mb-2">{s.category}</div>
+                              <div className="text-xs text-slate-600 space-y-1">
+                                <div>Всего: <span className="font-semibold text-slate-900">{s.total}</span></div>
                                 <div>В базе: <span className="font-semibold text-indigo-700">{s.inBase}</span></div>
                                 <div>Напечатано: <span className="font-semibold text-green-700">{s.printed}</span></div>
                                 <div>Отсканировано: <span className="font-semibold text-orange-700">{s.scanned}</span></div>
@@ -21463,8 +21464,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <label
                           className={`flex flex-col items-center justify-center w-full h-64 border-2 border-dashed rounded-lg transition-colors ${
                             !honestSignSupplierId || !honestSignBaseCategory || !honestSignBaseGender
-                              ? 'border-gray-200 bg-gray-100 cursor-not-allowed opacity-70'
-                              : 'border-gray-300 cursor-pointer bg-gray-50 hover:bg-gray-100'
+                              ? 'border-slate-200 bg-slate-100 cursor-not-allowed opacity-70'
+                              : 'border-slate-300 cursor-pointer bg-slate-50 hover:bg-slate-100'
                           }`}
                           onClick={(ev) => {
                             if (!honestSignSupplierId || !honestSignBaseCategory || !honestSignBaseGender) {
@@ -21474,9 +21475,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           }}
                         >
                             <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                                <Upload className="w-8 h-8 mb-4 text-gray-500" />
-                                <p className="mb-2 text-sm text-gray-500"><span className="font-semibold">Нажмите для загрузки</span> или перетащите файл</p>
-                                <p className="text-xs text-gray-500">CSV, Excel или TXT файл с кодами</p>
+                                <Upload className="w-8 h-8 mb-4 text-slate-500" />
+                                <p className="mb-2 text-sm text-slate-500"><span className="font-semibold">Нажмите для загрузки</span> или перетащите файл</p>
+                                <p className="text-xs text-slate-500">CSV, Excel или TXT файл с кодами</p>
                             </div>
                             <input
                               type="file"
@@ -21500,21 +21501,21 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                     {honestSignUploadHistory.length > 0 && (
                         <div>
-                            <h3 className="text-md font-bold text-gray-900 mb-3">История загрузок</h3>
-                            <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                            <h3 className="text-md font-bold text-slate-900 mb-3">История загрузок</h3>
+                            <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
                                 <table className="w-full text-left text-sm">
-                                    <thead className="bg-gray-50 border-b border-gray-200">
+                                    <thead className="bg-slate-50 border-b border-slate-200">
                                         <tr>
-                                            <th className="p-3 font-medium text-gray-500">Дата</th>
-                                            <th className="p-3 font-medium text-gray-500">Файл</th>
-                                            <th className="p-3 font-medium text-gray-500">Категория</th>
-                                            <th className="p-3 font-medium text-gray-500">Пол</th>
-                                            <th className="p-3 font-medium text-gray-500 text-right">Действия</th>
+                                            <th className="p-3 font-medium text-slate-500">Дата</th>
+                                            <th className="p-3 font-medium text-slate-500">Файл</th>
+                                            <th className="p-3 font-medium text-slate-500">Категория</th>
+                                            <th className="p-3 font-medium text-slate-500">Пол</th>
+                                            <th className="p-3 font-medium text-slate-500 text-right">Действия</th>
                                         </tr>
                                     </thead>
-                                    <tbody className="divide-y divide-gray-100">
+                                    <tbody className="divide-y divide-slate-100">
                                         {honestSignUploadHistory.map((item, idx) => (
-                                            <tr key={idx} className="hover:bg-gray-50">
+                                            <tr key={idx} className="hover:bg-slate-50">
                                                 <td className="p-3">{new Date(item.created_at).toLocaleString('ru-RU')}</td>
                                                 <td className="p-3">{item.file_name}</td>
                                                 <td className="p-3">{item.category || '-'}</td>
@@ -21552,21 +21553,21 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                     {honestSignPrintedHistory.length > 0 && (
                       <div className="mt-8">
-                        <h3 className="text-md font-bold text-gray-900 mb-3">История напечатанных кодов</h3>
-                        <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                        <h3 className="text-md font-bold text-slate-900 mb-3">История напечатанных кодов</h3>
+                        <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
                           <table className="w-full text-left text-sm">
-                            <thead className="bg-gray-50 border-b border-gray-200">
+                            <thead className="bg-slate-50 border-b border-slate-200">
                               <tr>
-                                <th className="p-3 font-medium text-gray-500">Дата печати</th>
-                                <th className="p-3 font-medium text-gray-500">Файл</th>
-                                <th className="p-3 font-medium text-gray-500">Категория</th>
-                                <th className="p-3 font-medium text-gray-500">Пол</th>
-                                <th className="p-3 font-medium text-gray-500 text-right">Действия</th>
+                                <th className="p-3 font-medium text-slate-500">Дата печати</th>
+                                <th className="p-3 font-medium text-slate-500">Файл</th>
+                                <th className="p-3 font-medium text-slate-500">Категория</th>
+                                <th className="p-3 font-medium text-slate-500">Пол</th>
+                                <th className="p-3 font-medium text-slate-500 text-right">Действия</th>
                               </tr>
                             </thead>
-                            <tbody className="divide-y divide-gray-100">
+                            <tbody className="divide-y divide-slate-100">
                               {honestSignPrintedHistory.map((item, idx) => (
-                                <tr key={`printed-${idx}`} className="hover:bg-gray-50">
+                                <tr key={`printed-${idx}`} className="hover:bg-slate-50">
                                   <td className="p-3">{new Date(item.created_at).toLocaleString('ru-RU')}</td>
                                   <td className="p-3">{item.file_name}</td>
                                   <td className="p-3">{item.category || '-'}</td>
@@ -21627,13 +21628,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 <>
                   <div className="flex flex-col gap-4 mb-6">
                     <div className="flex justify-between items-center">
-                      <h2 className="text-lg font-bold text-gray-900">Файлы для печати</h2>
+                      <h2 className="text-lg font-bold text-slate-900">Файлы для печати</h2>
                     </div>
                     <div className="flex gap-2 items-center">
                       <select
                         value={printSupplierId}
                         onChange={(e) => setPrintSupplierId(e.target.value)}
-                        className="flex-1 p-2 bg-white border border-gray-200 rounded-lg outline-none"
+                        className="flex-1 p-2 bg-white border border-slate-200 rounded-lg outline-none"
                       >
                         <option value="">-- Выберите поставщика --</option>
                         {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -21678,20 +21679,20 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   )}
 
                   {printFiles.filter(f => !printSupplierId || f.supplier_id === printSupplierId).length === 0 ? (
-                    <div className="text-center py-20 text-gray-400 bg-white rounded-xl border border-gray-100 border-dashed">
-                      <Printer className="h-12 w-12 mx-auto text-gray-300 mb-4" />
+                    <div className="text-center py-20 text-slate-400 bg-white rounded-xl border border-slate-100 border-dashed">
+                      <Printer className="h-12 w-12 mx-auto text-slate-300 mb-4" />
                       <p>Нет файлов для печати</p>
                     </div>
                   ) : (
                     <div className="grid grid-cols-1 gap-4">
                       {printFiles.filter(f => !printSupplierId || f.supplier_id === printSupplierId).map(file => (
-                        <div key={file.id} className="bg-white p-4 rounded-xl border border-gray-100 flex items-center justify-between hover:shadow-md transition-shadow">
+                        <div key={file.id} className="bg-white p-4 rounded-xl border border-slate-100 flex items-center justify-between hover:shadow-md transition-shadow">
                           <div className="flex items-center gap-4">
-                            <div className="p-3 bg-gray-50 rounded-lg">
+                            <div className="p-3 bg-slate-50 rounded-lg">
                               {getFileIcon(file.type)}
                             </div>
                             <div>
-                              <div className="font-medium text-gray-900">{file.name}</div>
+                              <div className="font-medium text-slate-900">{file.name}</div>
                               {file.printed_at && (
                                 <div className="text-xs text-green-600 flex items-center mt-1">
                                   <CheckCircle2 className="h-3 w-3 mr-1" />
@@ -21702,11 +21703,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           </div>
                           <div className="flex items-center gap-2">
                             {file.printed_at ? (
-                              <Lock className="h-5 w-5 text-gray-400 mr-2" />
+                              <Lock className="h-5 w-5 text-slate-400 mr-2" />
                             ) : (
                               <button
                                 onClick={() => handlePrintFile(file.id)}
-                                className="p-2 text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg"
+                                className="p-2 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg"
                                 title="Печать"
                               >
                                 <Printer className="h-5 w-5" />
@@ -21714,7 +21715,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             )}
                             <button
                               onClick={() => handleDeletePrintFile(file.id)}
-                              className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg"
+                              className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg"
                               title="Удалить"
                             >
                               <Trash2 className="h-5 w-5" />
@@ -21734,12 +21735,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           {activeTab === 'trash' && (
             <div className="max-w-7xl mx-auto">
               <div className="mb-8">
-                <h1 className="text-2xl font-bold text-gray-900">Удаленные элементы</h1>
-                <p className="text-gray-500 mt-1">Восстановление или безвозвратное удаление</p>
+                <h1 className="text-2xl font-bold text-slate-900">Удаленные элементы</h1>
+                <p className="text-slate-500 mt-1">Восстановление или безвозвратное удаление</p>
               </div>
 
               {/* Trash Tabs */}
-              <div className="flex space-x-1 bg-gray-100 p-1 rounded-xl mb-6 overflow-x-auto">
+              <div className="flex space-x-1 bg-slate-100 p-1 rounded-xl mb-6 overflow-x-auto">
                 {[
                   { id: 'suppliers', label: 'Поставщики' },
                   { id: 'products', label: 'Товары' },
@@ -21752,8 +21753,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     onClick={() => setTrashTab(tab.id)}
                     className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${
                       trashTab === tab.id
-                        ? 'bg-white text-gray-900 shadow-sm'
-                        : 'text-gray-500 hover:text-gray-900 hover:bg-gray-200'
+                        ? 'bg-white text-slate-900 shadow-sm'
+                        : 'text-slate-500 hover:text-slate-900 hover:bg-slate-200'
                     }`}
                   >
                     {tab.label}
@@ -21762,7 +21763,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
               </div>
 
               {loadingTrash ? (
-                <div className="text-center py-12 text-gray-400">Загрузка удаленных элементов...</div>
+                <div className="text-center py-12 text-slate-400">Загрузка удаленных элементов...</div>
               ) : (
                 <div className="space-y-6">
                   <div className="oc-card p-4">
@@ -21771,16 +21772,16 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         value={trashSearch}
                         onChange={(e) => setTrashSearch(e.target.value)}
                         placeholder="Поиск по названию, поставщику, удалившему..."
-                        className="px-3 py-2 border border-gray-300 rounded-lg"
+                        className="px-3 py-2 border border-slate-300 rounded-lg"
                       />
-                      <input type="date" value={trashDeletedFrom} onChange={(e) => setTrashDeletedFrom(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-lg" />
-                      <input type="date" value={trashDeletedTo} onChange={(e) => setTrashDeletedTo(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-lg" />
+                      <input type="date" value={trashDeletedFrom} onChange={(e) => setTrashDeletedFrom(e.target.value)} className="px-3 py-2 border border-slate-300 rounded-lg" />
+                      <input type="date" value={trashDeletedTo} onChange={(e) => setTrashDeletedTo(e.target.value)} className="px-3 py-2 border border-slate-300 rounded-lg" />
                     </div>
                   </div>
 
                   <div className="oc-card overflow-hidden">
-                    <div className="px-6 py-4 border-b border-gray-100 bg-gray-50">
-                      <h3 className="font-semibold text-gray-900">
+                    <div className="px-6 py-4 border-b border-slate-100 bg-slate-50">
+                      <h3 className="font-semibold text-slate-900">
                         {trashTab === 'suppliers' && 'Поставщики'}
                         {trashTab === 'products' && 'Товары'}
                         {trashTab === 'supplies' && 'Поставки'}
@@ -21791,46 +21792,46 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     </div>
 
                     {filteredTrashItems.length === 0 ? (
-                      <div className="text-center py-12 text-gray-400">
+                      <div className="text-center py-12 text-slate-400">
                         Корзина пуста
                       </div>
                     ) : (
-                      <div className="divide-y divide-gray-100">
+                      <div className="divide-y divide-slate-100">
                         {filteredTrashItems.map((item) => (
                           <div key={item.id} className="px-6 py-4 flex items-center justify-between">
                             <div>
                               {trashTab === 'suppliers' && (
                                 <>
-                                  <div className="font-medium text-gray-900">{item.name}</div>
-                                  <div className="text-sm text-gray-500">ID: {item.id}</div>
+                                  <div className="font-medium text-slate-900">{item.name}</div>
+                                  <div className="text-sm text-slate-500">ID: {item.id}</div>
                                 </>
                               )}
                               {trashTab === 'products' && (
                                 <>
-                                  <div className="font-medium text-gray-900">{item.name || 'Без названия'}</div>
-                                  <div className="text-sm text-gray-500">SKU: {item.wb_sku || '-'} • Поставщик: {item.supplier?.name || '-'}</div>
+                                  <div className="font-medium text-slate-900">{item.name || 'Без названия'}</div>
+                                  <div className="text-sm text-slate-500">SKU: {item.wb_sku || '-'} • Поставщик: {item.supplier?.name || '-'}</div>
                                 </>
                               )}
                               {trashTab === 'supplies' && (
                                 <>
-                                  <div className="font-medium text-gray-900">{item.name || 'Поставка без названия'}</div>
-                                  <div className="text-sm text-gray-500">Статус: {item.status || '-'} • Поставщик: {item.supplier?.name || '-'}</div>
+                                  <div className="font-medium text-slate-900">{item.name || 'Поставка без названия'}</div>
+                                  <div className="text-sm text-slate-500">Статус: {item.status || '-'} • Поставщик: {item.supplier?.name || '-'}</div>
                                 </>
                               )}
                               {trashTab === 'receptions' && (
                                 <>
-                                  <div className="font-medium text-gray-900">Приемка от {item.created_at ? new Date(item.created_at).toLocaleDateString('ru-RU') : '-'}</div>
-                                  <div className="text-sm text-gray-500">Статус: {item.status || '-'} • Поставщик: {item.supplier?.name || '-'}</div>
+                                  <div className="font-medium text-slate-900">Приемка от {item.created_at ? new Date(item.created_at).toLocaleDateString('ru-RU') : '-'}</div>
+                                  <div className="text-sm text-slate-500">Статус: {item.status || '-'} • Поставщик: {item.supplier?.name || '-'}</div>
                                 </>
                               )}
                               {trashTab === 'employees' && (
                                 <>
-                                  <div className="font-medium text-gray-900">{item.full_name || item.login || 'Без имени'}</div>
-                                  <div className="text-sm text-gray-500">{item.role || '-'}</div>
+                                  <div className="font-medium text-slate-900">{item.full_name || item.login || 'Без имени'}</div>
+                                  <div className="text-sm text-slate-500">{item.role || '-'}</div>
                                 </>
                               )}
-                              <div className="text-xs text-gray-400 mt-1">Удалено: {item.deleted_at ? new Date(item.deleted_at).toLocaleString('ru-RU') : '-'}</div>
-                              <div className="text-xs text-gray-400">Удалил: {trashDeletedByMap[String(item.deleted_by || '')] || '-'}</div>
+                              <div className="text-xs text-slate-400 mt-1">Удалено: {item.deleted_at ? new Date(item.deleted_at).toLocaleString('ru-RU') : '-'}</div>
+                              <div className="text-xs text-slate-400">Удалил: {trashDeletedByMap[String(item.deleted_by || '')] || '-'}</div>
                             </div>
                             <div className="flex gap-2">
                               <button
@@ -21861,8 +21862,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           {activeTab === 'analytics' && (
             <div className="w-full max-w-none mx-auto">
               <div className="mb-6">
-                <h1 className="text-2xl font-bold text-gray-900">Аналитика</h1>
-                <p className="text-gray-500 mt-1">Разделённые модули: отчёты и реклама</p>
+                <h1 className="text-2xl font-bold text-slate-900">Аналитика</h1>
+                <p className="text-slate-500 mt-1">Разделённые модули: отчёты и реклама</p>
                 <div className="mt-4 flex flex-wrap gap-2">
                   <button
                     type="button"
@@ -21883,9 +21884,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
               {analyticsSubTab === 'ads' && (
                 <div className="w-full mb-4 space-y-4">
-                  <div className="bg-white rounded-xl border border-gray-100 p-6">
-                    <h2 className="text-lg font-semibold text-gray-900">Аналитика рекламы</h2>
-                    <p className="text-sm text-gray-500 mt-1">Загрузите Excel-файл рекламы - будут показаны все 4 листа.</p>
+                  <div className="bg-white rounded-xl border border-slate-100 p-6">
+                    <h2 className="text-lg font-semibold text-slate-900">Аналитика рекламы</h2>
+                    <p className="text-sm text-slate-500 mt-1">Загрузите Excel-файл рекламы - будут показаны все 4 листа.</p>
 
                     <div className="mt-4 flex items-center gap-3 flex-wrap">
                       <label className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 cursor-pointer">
@@ -21901,13 +21902,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           }}
                         />
                       </label>
-                      {adsAnalyticsFileName && <div className="text-xs text-gray-500">Файл: {adsAnalyticsFileName}</div>}
+                      {adsAnalyticsFileName && <div className="text-xs text-slate-500">Файл: {adsAnalyticsFileName}</div>}
                     </div>
                   </div>
 
-                  <div className="bg-white rounded-xl border border-gray-100 p-4 space-y-4">
+                  <div className="bg-white rounded-xl border border-slate-100 p-4 space-y-4">
                     <div>
-                      <div className="text-sm font-semibold text-gray-900 mb-2">Пороговые настройки аналитики</div>
+                      <div className="text-sm font-semibold text-slate-900 mb-2">Пороговые настройки аналитики</div>
                       <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
                         <label className="flex flex-col gap-1">Целевой ДРР, %<input className="px-2 py-1 border rounded" type="number" value={adsRules.targetDrr} onChange={(e)=>setAdsRules((p)=>({...p,targetDrr:Number(e.target.value||0)}))} /></label>
                         <label className="flex flex-col gap-1">Мин. кликов<input className="px-2 py-1 border rounded" type="number" value={adsRules.minClicksForDecision} onChange={(e)=>setAdsRules((p)=>({...p,minClicksForDecision:Number(e.target.value||0)}))} /></label>
@@ -21918,7 +21919,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     </div>
 
                     <div>
-                      <div className="text-sm font-semibold text-gray-900 mb-2">KPI рекламы (по объединённой таблице)</div>
+                      <div className="text-sm font-semibold text-slate-900 mb-2">KPI рекламы (по объединённой таблице)</div>
                       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2 text-xs">
                         <div className="border rounded p-2">Расход<br/><b>{adsKpi.spend.toLocaleString('ru-RU')}</b></div>
                         <div className="border rounded p-2">Выручка<br/><b>{adsKpi.revenue.toLocaleString('ru-RU')}</b></div>
@@ -21932,7 +21933,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       </div>
                     </div>
 
-                    <div className="text-sm font-semibold text-gray-900 mb-2">Рекомендации по ключам</div>
+                    <div className="text-sm font-semibold text-slate-900 mb-2">Рекомендации по ключам</div>
                     {adsInsights.all.length === 0 && (
                       <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2 mb-3">
                         Недостаточно данных для рекомендаций по ключам (нужны минимум: ключ, клики, расход).
@@ -21941,14 +21942,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                     </div>
 
-                  <div className="bg-white rounded-xl border border-gray-100 p-4">
+                  <div className="bg-white rounded-xl border border-slate-100 p-4">
                     <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
-                      <h3 className="text-base font-semibold text-gray-900">Аналитика по номенклатурам</h3>
-                      <div className="text-xs text-gray-500">Номенклатур: {adsByNm.length}</div>
+                      <h3 className="text-base font-semibold text-slate-900">Аналитика по номенклатурам</h3>
+                      <div className="text-xs text-slate-500">Номенклатур: {adsByNm.length}</div>
                     </div>
-                    <div className="overflow-auto max-h-[42vh] border border-gray-100 rounded-lg mb-4">
+                    <div className="overflow-auto max-h-[42vh] border border-slate-100 rounded-lg mb-4">
                       <table className="min-w-full text-xs">
-                        <thead className="bg-gray-50 sticky top-0 z-10">
+                        <thead className="bg-slate-50 sticky top-0 z-10">
                           <tr>
                             <th className="px-2 py-2 text-left">Номенклатура</th>
                             <th className="px-2 py-2 text-left">Расход</th>
@@ -21963,7 +21964,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         </thead>
                         <tbody>
                           {adsByNm.map((x: any) => (
-                            <tr key={x.nm} className="border-t border-gray-100">
+                            <tr key={x.nm} className="border-t border-slate-100">
                               <td className="px-2 py-1.5 font-semibold">{x.nm}</td>
                               <td className="px-2 py-1.5">{x.spend.toLocaleString('ru-RU')}</td>
                               <td className="px-2 py-1.5">{x.revenue.toLocaleString('ru-RU')}</td>
@@ -21976,15 +21977,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             </tr>
                           ))}
                           {adsByNm.length === 0 && (
-                            <tr><td colSpan={9} className="px-3 py-4 text-center text-gray-500">Не найдена колонка номенклатуры в файле рекламы</td></tr>
+                            <tr><td colSpan={9} className="px-3 py-4 text-center text-slate-500">Не найдена колонка номенклатуры в файле рекламы</td></tr>
                           )}
                         </tbody>
                       </table>
                     </div>
 
                     <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
-                      <h3 className="text-base font-semibold text-gray-900">Объединённая таблица (все 4 листа)</h3>
-                      <div className="text-xs text-gray-500">Строк: {adsUnified.viewRows.length} / {adsUnified.rows.length}</div>
+                      <h3 className="text-base font-semibold text-slate-900">Объединённая таблица (все 4 листа)</h3>
+                      <div className="text-xs text-slate-500">Строк: {adsUnified.viewRows.length} / {adsUnified.rows.length}</div>
                     </div>
 
                     <div className="mb-3">
@@ -21992,16 +21993,16 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         value={adsUnifiedFilter}
                         onChange={(e) => setAdsUnifiedFilter(e.target.value)}
                         placeholder="Фильтр по объединённой таблице"
-                        className="w-full md:w-[360px] px-3 py-2 text-xs border border-gray-300 rounded-lg"
+                        className="w-full md:w-[360px] px-3 py-2 text-xs border border-slate-300 rounded-lg"
                       />
                     </div>
 
-                    <div className="overflow-auto max-h-[58vh] border border-gray-100 rounded-lg">
+                    <div className="overflow-auto max-h-[58vh] border border-slate-100 rounded-lg">
                       <table className="min-w-full text-xs">
-                        <thead className="bg-gray-50 sticky top-0 z-10">
+                        <thead className="bg-slate-50 sticky top-0 z-10">
                           <tr>
                             {adsUnified.columns.map((col) => (
-                              <th key={col} className="px-2 py-2 text-left font-semibold text-gray-700 whitespace-nowrap">
+                              <th key={col} className="px-2 py-2 text-left font-semibold text-slate-700 whitespace-nowrap">
                                 <button
                                   type="button"
                                   onClick={() => {
@@ -22021,15 +22022,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         </thead>
                         <tbody>
                           {adsUnified.viewRows.map((row, idx) => (
-                            <tr key={idx} className="border-t border-gray-100">
+                            <tr key={idx} className="border-t border-slate-100">
                               {adsUnified.columns.map((col) => (
-                                <td key={`${idx}-${col}`} className="px-2 py-1.5 text-gray-700 whitespace-nowrap">{formatAdsCell((row as any)?.[col])}</td>
+                                <td key={`${idx}-${col}`} className="px-2 py-1.5 text-slate-700 whitespace-nowrap">{formatAdsCell((row as any)?.[col])}</td>
                               ))}
                             </tr>
                           ))}
                           {adsUnified.viewRows.length === 0 && (
                             <tr>
-                              <td colSpan={Math.max(1, adsUnified.columns.length)} className="px-3 py-5 text-center text-gray-500">Нет данных по фильтру</td>
+                              <td colSpan={Math.max(1, adsUnified.columns.length)} className="px-3 py-5 text-center text-slate-500">Нет данных по фильтру</td>
                             </tr>
                           )}
                         </tbody>
@@ -22040,14 +22041,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
               )}
 
               <div className={analyticsSubTab === 'reports' ? 'w-full' : 'hidden'}>
-                <div className="bg-white rounded-xl border border-gray-100 p-4 w-full">
+                <div className="bg-white rounded-xl border border-slate-100 p-4 w-full">
                   <div className="flex flex-wrap items-end justify-start gap-3 mb-3">
                     <div className="min-w-[260px]">
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Поставщик для загружаемого отчёта</label>
+                      <label className="block text-sm font-medium text-slate-700 mb-2">Поставщик для загружаемого отчёта</label>
                       <select
                         value={uploadedSelectedSupplierId}
                         onChange={(e) => setUploadedSelectedSupplierId(e.target.value)}
-                        className="w-full md:w-[420px] px-3 py-2 border border-gray-300 rounded-lg bg-white"
+                        className="w-full md:w-[420px] px-3 py-2 border border-slate-300 rounded-lg bg-white"
                       >
                         <option value="">- Выберите поставщика -</option>
                         {visibleUploadedAnalyticsSuppliers.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -22071,12 +22072,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     </button>
                     <div className="flex items-end gap-2 flex-wrap">
                       <div>
-                        <label className="block text-[11px] text-gray-500 mb-1">Период c</label>
-                        <input type="date" value={wbApiFromDate} onChange={(e) => setWbApiFromDate(e.target.value)} className="px-2 py-2 text-xs border border-gray-300 rounded-lg bg-white" />
+                        <label className="block text-[11px] text-slate-500 mb-1">Период c</label>
+                        <input type="date" value={wbApiFromDate} onChange={(e) => setWbApiFromDate(e.target.value)} className="px-2 py-2 text-xs border border-slate-300 rounded-lg bg-white" />
                       </div>
                       <div>
-                        <label className="block text-[11px] text-gray-500 mb-1">по</label>
-                        <input type="date" value={wbApiToDate} onChange={(e) => setWbApiToDate(e.target.value)} className="px-2 py-2 text-xs border border-gray-300 rounded-lg bg-white" />
+                        <label className="block text-[11px] text-slate-500 mb-1">по</label>
+                        <input type="date" value={wbApiToDate} onChange={(e) => setWbApiToDate(e.target.value)} className="px-2 py-2 text-xs border border-slate-300 rounded-lg bg-white" />
                       </div>
                       <button
                         onClick={downloadWbReportsFromApi}
@@ -22134,14 +22135,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
 
               {uploadedShareHistoryOpen && (
-                <div className="fixed inset-0 z-[122] bg-black/40 flex items-center justify-center p-4">
-                  <div className="w-full max-w-3xl bg-white rounded-2xl shadow-2xl border border-gray-200 p-4">
+                <div className="fixed inset-0 z-[122] bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
+                  <div className="w-full max-w-3xl bg-white rounded-2xl shadow-2xl border border-slate-200 p-4">
                     <div className="flex items-center justify-between mb-3">
-                      <div className="text-base font-semibold text-gray-900">История ссылок (30 дней)</div>
+                      <div className="text-base font-semibold text-slate-900">История ссылок (30 дней)</div>
                       <button type="button" onClick={() => setUploadedShareHistoryOpen(false)} className="px-3 py-1.5 text-xs font-medium rounded-xl border border-slate-200 bg-white hover:bg-slate-50 shadow-sm">Закрыть</button>
                     </div>
                     <div className="max-h-[62vh] overflow-auto space-y-2 pr-1">
-                      {uploadedShareLinksLoading && <div className="text-xs text-gray-500">Загрузка...</div>}
+                      {uploadedShareLinksLoading && <div className="text-xs text-slate-500">Загрузка...</div>}
                       {!uploadedShareLinksLoading && uploadedShareLinks.map((x: any) => {
                         const hideById = uploadedShareHiddenKeys[`id:${String(x?.id || '')}`];
                         const hideByToken = uploadedShareHiddenKeys[`token:${String(x?.token || '')}`];
@@ -22150,11 +22151,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         const link = `${window.location.origin}/shared/${x.token}`;
                         const expired = x?.expires_at ? new Date(x.expires_at).getTime() < Date.now() : false;
                         return (
-                          <div key={x.id} className="flex items-center justify-between gap-2 bg-white border border-gray-200 rounded-lg px-3 py-2">
+                          <div key={x.id} className="flex items-center justify-between gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2">
                             <div className="min-w-0">
-                              <div className="text-xs font-medium text-gray-800 truncate">{x?.payload_json?.title || 'Ссылка на аналитику'}</div>
-                              <div className="text-[11px] text-gray-500 truncate">{link}</div>
-                              <div className="text-[11px] text-gray-500">Создано: {new Date(x.created_at).toLocaleString('ru-RU')} {x?.expires_at ? `• До: ${new Date(x.expires_at).toLocaleString('ru-RU')}` : ''}</div>
+                              <div className="text-xs font-medium text-slate-800 truncate">{x?.payload_json?.title || 'Ссылка на аналитику'}</div>
+                              <div className="text-[11px] text-slate-500 truncate">{link}</div>
+                              <div className="text-[11px] text-slate-500">Создано: {new Date(x.created_at).toLocaleString('ru-RU')} {x?.expires_at ? `• До: ${new Date(x.expires_at).toLocaleString('ru-RU')}` : ''}</div>
                             </div>
                             <div className="flex items-center gap-2">
                               <button type="button" onClick={async () => { try { await navigator.clipboard.writeText(link); showToast('Ссылка скопирована', 'success'); } catch {} }} className="px-3 py-1.5 text-xs rounded-xl border border-slate-200 bg-white hover:bg-slate-50 shadow-sm">Копировать</button>
@@ -22165,7 +22166,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         );
                       })}
                       {!uploadedShareLinksLoading && uploadedShareLinks.length === 0 && (
-                        <div className="text-xs text-gray-500">Ссылок пока нет</div>
+                        <div className="text-xs text-slate-500">Ссылок пока нет</div>
                       )}
                     </div>
                   </div>
@@ -22173,18 +22174,18 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
               )}
 
               {wbApiHistoryOpen && (
-                <div className="fixed inset-0 z-[123] bg-black/40 flex items-center justify-center p-4">
-                  <div className="w-full max-w-3xl bg-white rounded-2xl shadow-2xl border border-gray-200 p-4">
+                <div className="fixed inset-0 z-[123] bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
+                  <div className="w-full max-w-3xl bg-white rounded-2xl shadow-2xl border border-slate-200 p-4">
                     <div className="flex items-center justify-between mb-3">
-                      <div className="text-base font-semibold text-gray-900">Хранилище WB API</div>
+                      <div className="text-base font-semibold text-slate-900">Хранилище WB API</div>
                       <button type="button" onClick={() => setWbApiHistoryOpen(false)} className="px-3 py-1.5 text-xs font-medium rounded-xl border border-slate-200 bg-white hover:bg-slate-50 shadow-sm">Закрыть</button>
                     </div>
                     <div className="max-h-[62vh] overflow-auto space-y-2 pr-1">
                       {wbApiHistory.map((h: any) => (
-                        <div key={h.id} className="flex items-center justify-between gap-2 bg-white border border-gray-200 rounded-lg px-3 py-2">
+                        <div key={h.id} className="flex items-center justify-between gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2">
                           <div className="min-w-0">
-                            <div className="text-xs font-medium text-gray-800 truncate">{h.file_name || 'Без имени'}</div>
-                            <div className="text-[11px] text-gray-500">Период: {h.period_start || '-'} - {h.period_end || '-'} • {new Date(h.created_at).toLocaleString('ru-RU')}</div>
+                            <div className="text-xs font-medium text-slate-800 truncate">{h.file_name || 'Без имени'}</div>
+                            <div className="text-[11px] text-slate-500">Период: {h.period_start || '-'} - {h.period_end || '-'} • {new Date(h.created_at).toLocaleString('ru-RU')}</div>
                           </div>
                           <div className="flex items-center gap-2">
                             <button type="button" onClick={() => downloadWbApiRowsExcel(Array.isArray(h.rows_json) ? h.rows_json : [], h.file_name || 'wb_report.xlsx')} className="px-3 py-1.5 text-xs rounded-xl border border-slate-200 bg-white hover:bg-slate-50 shadow-sm">Скачать</button>
@@ -22193,7 +22194,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         </div>
                       ))}
                       {wbApiHistory.length === 0 && (
-                        <div className="text-xs text-gray-500">Хранилище WB API пусто</div>
+                        <div className="text-xs text-slate-500">Хранилище WB API пусто</div>
                       )}
                     </div>
                   </div>
@@ -22201,10 +22202,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
               )}
 
               {uploadedRawHistoryPickerOpen && (
-                <div className="fixed inset-0 z-[121] bg-black/40 flex items-center justify-center p-4">
-                  <div className="w-full max-w-2xl bg-white rounded-2xl shadow-2xl border border-gray-200 p-4">
+                <div className="fixed inset-0 z-[121] bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
+                  <div className="w-full max-w-2xl bg-white rounded-2xl shadow-2xl border border-slate-200 p-4">
                     <div className="flex items-center justify-between mb-3">
-                      <div className="text-base font-semibold text-gray-900">История отчётов WB</div>
+                      <div className="text-base font-semibold text-slate-900">История отчётов WB</div>
                       <button type="button" onClick={() => setUploadedRawHistoryPickerOpen(false)} className="px-3 py-1.5 text-xs font-medium rounded-xl border border-slate-200 bg-white hover:bg-slate-50 shadow-sm">Закрыть</button>
                     </div>
                     <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -22213,7 +22214,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           key={y}
                           type="button"
                           onClick={() => setUploadedRawHistoryYear(y)}
-                          className={`px-2 py-1 text-xs rounded-lg border ${uploadedRawHistoryYear === y ? 'bg-indigo-600 text-white border-indigo-600' : 'border-gray-300 hover:bg-gray-50'}`}
+                          className={`px-2 py-1 text-xs rounded-lg border ${uploadedRawHistoryYear === y ? 'bg-indigo-600 text-white border-indigo-600' : 'border-slate-300 hover:bg-slate-50'}`}
                         >
                           {y}
                         </button>
@@ -22221,9 +22222,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     </div>
                     <div className="max-h-[60vh] overflow-auto space-y-3 pr-1">
                       {uploadedRawHistoryGrouped.map(([month, items]) => (
-                        <div key={month} className="border border-gray-200 rounded-xl p-2 bg-gray-50">
+                        <div key={month} className="border border-slate-200 rounded-xl p-2 bg-slate-50">
                           <div className="flex items-center justify-between mb-2 gap-2">
-                            <div className="flex items-center gap-2 text-sm font-semibold text-gray-800">
+                            <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
                               <button
                                 type="button"
                                 onClick={() => setUploadedRawHistoryCollapsedMonths((prev) => ({ ...prev, [month]: !prev[month] }))}
@@ -22244,10 +22245,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           {!uploadedRawHistoryCollapsedMonths[month] && (
                           <div className="space-y-2">
                             {items.map((h: any) => (
-                              <div key={h.id} className="flex items-center justify-between bg-white border border-gray-200 rounded-lg px-3 py-2 gap-2">
+                              <div key={h.id} className="flex items-center justify-between bg-white border border-slate-200 rounded-lg px-3 py-2 gap-2">
                                 <div className="min-w-0">
-                                  <div className="text-xs font-medium text-gray-800 truncate">{h.file_name || 'Без имени'}</div>
-                                  <div className="text-[11px] text-gray-500">{new Date(h.created_at).toLocaleString('ru-RU')}</div>
+                                  <div className="text-xs font-medium text-slate-800 truncate">{h.file_name || 'Без имени'}</div>
+                                  <div className="text-[11px] text-slate-500">{new Date(h.created_at).toLocaleString('ru-RU')}</div>
                                   {h?.summary_json?.report_number && (
                                     <div className="text-[11px] text-indigo-600">Отчёт № {h.summary_json.report_number}</div>
                                   )}
@@ -22264,7 +22265,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         </div>
                       ))}
                       {uploadedRawHistoryGrouped.length === 0 && (
-                        <div className="text-xs text-gray-500">История WB-отчётов пуста для выбранного продавца/года</div>
+                        <div className="text-xs text-slate-500">История WB-отчётов пуста для выбранного продавца/года</div>
                       )}
                     </div>
                   </div>
@@ -22272,10 +22273,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
               )}
 
               {uploadedHistoryPickerOpen && (
-                <div className="fixed inset-0 z-[120] bg-black/40 flex items-center justify-center p-4">
-                  <div className="w-full max-w-2xl bg-white rounded-2xl shadow-2xl border border-gray-200 p-4">
+                <div className="fixed inset-0 z-[120] bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
+                  <div className="w-full max-w-2xl bg-white rounded-2xl shadow-2xl border border-slate-200 p-4">
                     <div className="flex items-center justify-between mb-3">
-                      <div className="text-base font-semibold text-gray-900">Отчёты</div>
+                      <div className="text-base font-semibold text-slate-900">Отчёты</div>
                       <button type="button" onClick={() => setUploadedHistoryPickerOpen(false)} className="px-3 py-1.5 text-xs font-medium rounded-xl border border-slate-200 bg-white hover:bg-slate-50 shadow-sm">Закрыть</button>
                     </div>
                     <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -22284,7 +22285,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           key={y}
                           type="button"
                           onClick={() => setUploadedHistoryYear(y)}
-                          className={`px-2 py-1 text-xs rounded-lg border ${uploadedHistoryYear === y ? 'bg-indigo-600 text-white border-indigo-600' : 'border-gray-300 hover:bg-gray-50'}`}
+                          className={`px-2 py-1 text-xs rounded-lg border ${uploadedHistoryYear === y ? 'bg-indigo-600 text-white border-indigo-600' : 'border-slate-300 hover:bg-slate-50'}`}
                         >
                           {y}
                         </button>
@@ -22319,15 +22320,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           return allSelected ? 'Сбросить все' : 'Выбрать все';
                         })()}
                       </button>
-                      <div className="ml-auto text-xs text-gray-600">Выбрано: {uploadedHistorySelectedCount}</div>
+                      <div className="ml-auto text-xs text-slate-600">Выбрано: {uploadedHistorySelectedCount}</div>
                       <button type="button" onClick={openUploadedHistorySelected} className="px-3 py-1.5 text-xs font-semibold rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 shadow-sm">Отчёт по выбранным периодам</button>
                     </div>
 
                     <div className="max-h-[60vh] overflow-auto space-y-3 pr-1">
                       {uploadedHistoryGrouped.map(([month, items]) => (
-                        <div key={month} className="border border-gray-200 rounded-xl p-2 bg-gray-50">
+                        <div key={month} className="border border-slate-200 rounded-xl p-2 bg-slate-50">
                           <div className="flex items-center justify-between mb-2 gap-2">
-                            <label className="flex items-center gap-2 text-sm font-semibold text-gray-800"><input type="checkbox" checked={(items as any[]).length > 0 && (items as any[]).every((h: any) => uploadedHistorySelectedIds[String(h.id)])} onChange={(e) => { const ch = e.target.checked; setUploadedHistorySelectedIds((prev) => { const next = { ...prev }; (items as any[]).forEach((h: any) => { next[String(h.id)] = ch; }); return next; }); }} />{uploadedHistoryMonthNames[month]}</label>
+                            <label className="flex items-center gap-2 text-sm font-semibold text-slate-800"><input type="checkbox" checked={(items as any[]).length > 0 && (items as any[]).every((h: any) => uploadedHistorySelectedIds[String(h.id)])} onChange={(e) => { const ch = e.target.checked; setUploadedHistorySelectedIds((prev) => { const next = { ...prev }; (items as any[]).forEach((h: any) => { next[String(h.id)] = ch; }); return next; }); }} />{uploadedHistoryMonthNames[month]}</label>
                             <div className="flex items-center gap-2">
                               <button
                                 type="button"
@@ -22351,13 +22352,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           {!uploadedHistoryCollapsedMonths[month] && (
                           <div className="space-y-2">
                             {items.map((h: any) => (
-                              <div key={h.id} className="flex items-center justify-between bg-white border border-gray-200 rounded-lg px-3 py-2 gap-2">
+                              <div key={h.id} className="flex items-center justify-between bg-white border border-slate-200 rounded-lg px-3 py-2 gap-2">
                                 <label className="flex items-center gap-2 mr-1">
                                   <input type="checkbox" checked={!!uploadedHistorySelectedIds[String(h.id)]} onChange={(e) => setUploadedHistorySelectedIds((prev) => ({ ...prev, [String(h.id)]: e.target.checked }))} />
                                 </label>
                                 <div className="min-w-0">
-                                  <div className="text-xs font-medium text-gray-800 truncate">{h.file_name || 'Без имени'}</div>
-                                  <div className="text-[11px] text-gray-500">{new Date(h.created_at).toLocaleString('ru-RU')}</div>
+                                  <div className="text-xs font-medium text-slate-800 truncate">{h.file_name || 'Без имени'}</div>
+                                  <div className="text-[11px] text-slate-500">{new Date(h.created_at).toLocaleString('ru-RU')}</div>
                                   {h?.summary_json?.report_number && (
                                     <div className="text-[11px] text-indigo-600">Отчёт № {h.summary_json.report_number}</div>
                                   )}
@@ -22380,7 +22381,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       ))}
 
                       {!uploadedHistoryLoading && uploadedHistoryGrouped.length === 0 && (
-                        <div className="text-xs text-gray-500">История пуста для выбранного продавца/года</div>
+                        <div className="text-xs text-slate-500">История пуста для выбранного продавца/года</div>
                       )}
                     </div>
                   </div>
@@ -22388,9 +22389,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
               )}
 
               {uploadedReportSummary && (
-                <div id="uploaded-analytics-pdf-capture" className="mt-6 bg-white rounded-xl border border-gray-100 p-5">
+                <div id="uploaded-analytics-pdf-capture" className="mt-6 bg-white rounded-xl border border-slate-100 p-5">
                   <div className="flex flex-wrap items-center justify-between mb-2 gap-3">
-                    <h2 className="text-lg font-semibold text-gray-900">Аналитика по загруженному отчёту</h2>
+                    <h2 className="text-lg font-semibold text-slate-900">Аналитика по загруженному отчёту</h2>
                     <div className="flex flex-wrap items-center gap-2">
                       <button
                         type="button"
@@ -22421,7 +22422,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     </div>
                   </div>
                   {(uploadedReportSummary?.period_start || uploadedReportSummary?.period_end) && (
-                    <div className="mb-3 text-xs text-gray-600">
+                    <div className="mb-3 text-xs text-slate-600">
                       Период отчёта: {uploadedReportSummary?.period_start ? new Date(uploadedReportSummary.period_start).toLocaleDateString('ru-RU') : '-'}
                       {' - '}
                       {uploadedReportSummary?.period_end ? new Date(uploadedReportSummary.period_end).toLocaleDateString('ru-RU') : '-'}
@@ -22433,12 +22434,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       value={uploadedSearch}
                       onChange={(e) => setUploadedSearch(e.target.value)}
                       placeholder="Поиск по коду/названию товара"
-                      className="w-full md:w-96 px-3 py-2 text-sm border border-gray-300 rounded-lg"
+                      className="w-full md:w-96 px-3 py-2 text-sm border border-slate-300 rounded-lg"
                     />
                     <button
                       type="button"
                       onClick={() => setUploadedFilterOpen((v) => !v)}
-                      className="px-3 py-2 text-sm rounded-lg border border-gray-300 hover:bg-gray-50"
+                      className="px-3 py-2 text-sm rounded-lg border border-slate-300 hover:bg-slate-50"
                     >
                       Фильтр
                     </button>
@@ -22461,11 +22462,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
 
                   {uploadedFilterOpen && (
-                    <div className="mb-4 border border-gray-200 rounded-xl p-3 bg-gray-50">
+                    <div className="mb-4 border border-slate-200 rounded-xl p-3 bg-slate-50">
                       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                         <div>
                           <div className="flex items-center justify-between mb-2">
-                            <div className="text-sm font-medium text-gray-700">Колонки таблицы</div>
+                            <div className="text-sm font-medium text-slate-700">Колонки таблицы</div>
                             <div className="flex items-center gap-2">
                               <button
                                 type="button"
@@ -22483,7 +22484,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                   acquiring_sum: true,
                                   acquiring_percent: true,
                                 })}
-                                className="px-2 py-1 text-xs rounded border border-gray-300 hover:bg-gray-50"
+                                className="px-2 py-1 text-xs rounded border border-slate-300 hover:bg-slate-50"
                               >
                                 Выбрать все
                               </button>
@@ -22503,7 +22504,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                   acquiring_sum: false,
                                   acquiring_percent: false,
                                 })}
-                                className="px-2 py-1 text-xs rounded border border-gray-300 hover:bg-gray-50"
+                                className="px-2 py-1 text-xs rounded border border-slate-300 hover:bg-slate-50"
                               >
                                 Снять все
                               </button>
@@ -22550,7 +22551,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                         <div>
                           <div className="flex items-center justify-between mb-2">
-                            <div className="text-sm font-medium text-gray-700">Товары</div>
+                            <div className="text-sm font-medium text-slate-700">Товары</div>
                             <div className="flex items-center gap-2">
                               <button
                                 type="button"
@@ -22564,7 +22565,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                   setUploadedSelectedNames(names);
                                   setUploadedSelectedNameCodes(codes);
                                 }}
-                                className="px-2 py-1 text-xs rounded border border-gray-300 hover:bg-gray-50"
+                                className="px-2 py-1 text-xs rounded border border-slate-300 hover:bg-slate-50"
                               >
                                 Выбрать все
                               </button>
@@ -22580,7 +22581,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                   setUploadedSelectedNames(names);
                                   setUploadedSelectedNameCodes(codes);
                                 }}
-                                className="px-2 py-1 text-xs rounded border border-gray-300 hover:bg-gray-50"
+                                className="px-2 py-1 text-xs rounded border border-slate-300 hover:bg-slate-50"
                               >
                                 Снять все
                               </button>
@@ -22605,7 +22606,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               const nameChecked = uploadedSelectedNames[name] !== false;
                               const expanded = !!uploadedExpandedNames[name];
                               return (
-                                <div key={name} className="bg-white border border-gray-200 rounded-lg p-2">
+                                <div key={name} className="bg-white border border-slate-200 rounded-lg p-2">
                                   <div className="flex items-center justify-between gap-2">
                                     <label className="flex items-center gap-2 min-w-0">
                                       <input
@@ -22626,7 +22627,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                     <button
                                       type="button"
                                       onClick={() => setUploadedExpandedNames((prev) => ({ ...prev, [name]: !prev[name] }))}
-                                      className="text-[11px] px-2 py-0.5 rounded border border-gray-300 hover:bg-gray-50"
+                                      className="text-[11px] px-2 py-0.5 rounded border border-slate-300 hover:bg-slate-50"
                                     >
                                       {expanded ? 'Скрыть' : 'Номенклатуры'}
                                     </button>
@@ -22660,20 +22661,20 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
 
                   {uploadedViewTab === 'history' && (
-                  <div className="mb-4 bg-gray-50 border border-gray-200 rounded-xl p-3">
+                  <div className="mb-4 bg-slate-50 border border-slate-200 rounded-xl p-3">
                     <div className="flex items-center justify-between mb-2">
-                      <div className="text-sm font-medium text-gray-700">История загрузок</div>
+                      <div className="text-sm font-medium text-slate-700">История загрузок</div>
                       <div className="flex items-center gap-2">
-                        <button type="button" onClick={() => setUploadedViewTab('table')} className="px-2 py-1 text-xs rounded-lg border border-gray-300 hover:bg-gray-50">К таблице</button>
-                        <div className="text-xs text-gray-500">{uploadedHistoryLoading ? 'Загрузка...' : `${uploadedHistory.length} шт`}</div>
+                        <button type="button" onClick={() => setUploadedViewTab('table')} className="px-2 py-1 text-xs rounded-lg border border-slate-300 hover:bg-slate-50">К таблице</button>
+                        <div className="text-xs text-slate-500">{uploadedHistoryLoading ? 'Загрузка...' : `${uploadedHistory.length} шт`}</div>
                       </div>
                     </div>
                     <div className="max-h-36 overflow-auto space-y-2">
                       {uploadedHistory.map((h) => (
-                        <div key={h.id} className="flex items-center justify-between bg-white border border-gray-200 rounded-lg px-3 py-2 gap-2">
+                        <div key={h.id} className="flex items-center justify-between bg-white border border-slate-200 rounded-lg px-3 py-2 gap-2">
                           <div className="min-w-0">
-                            <div className="text-xs font-medium text-gray-800 truncate">{h.file_name || 'Без имени'}</div>
-                            <div className="text-[11px] text-gray-500">{new Date(h.created_at).toLocaleString('ru-RU')}</div>
+                            <div className="text-xs font-medium text-slate-800 truncate">{h.file_name || 'Без имени'}</div>
+                            <div className="text-[11px] text-slate-500">{new Date(h.created_at).toLocaleString('ru-RU')}</div>
                             {h?.summary_json?.report_number && (
                               <div className="text-[11px] text-indigo-600">Отчёт № {h.summary_json.report_number}</div>
                             )}
@@ -22685,7 +22686,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         </div>
                       ))}
                       {!uploadedHistoryLoading && uploadedHistory.length === 0 && (
-                        <div className="text-xs text-gray-500">История пуста для выбранного продавца</div>
+                        <div className="text-xs text-slate-500">История пуста для выбранного продавца</div>
                       )}
                     </div>
                   </div>
@@ -22693,78 +22694,78 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                   {uploadedViewTab === 'summary' && (
                   <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
-                    <div className="bg-gray-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-gray-500">Номенклатур</div><div className="font-bold">{uploadedSummaryForView.items}</div></div>
-                    <div className="bg-gray-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-gray-500">Продажи</div><div className="font-bold">{Number(uploadedSummaryForView.sales_net || 0).toLocaleString('ru-RU')}</div></div>
-                    <div className="bg-gray-50 rounded-lg p-2 min-w-[170px] shrink-0"><div className="flex items-center justify-between gap-2"><div className="text-xs text-gray-500">Налоги</div><button type="button" onClick={() => setUploadedTaxRateOverride((prev) => prev === 0.01 ? 0.06 : 0.01)} className="text-[11px] px-2 py-0.5 rounded-full border border-indigo-200 text-indigo-700 bg-white hover:bg-indigo-50">{Math.round(getCurrentUploadedTaxRate() * 100)}%</button></div><div className="font-bold">{Number(getUploadedTaxValue(uploadedSummaryForView)).toLocaleString('ru-RU', { maximumFractionDigits: 2 })}</div></div>
-                    <div className="bg-gray-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-gray-500">Возвраты</div><div className="font-bold">{Number(uploadedSummaryForView.returns_gross || 0).toLocaleString('ru-RU')}</div></div>
-                    <div className="bg-gray-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-gray-500">Логистика</div><div className="font-bold">{Number(uploadedSummaryForView.logistics_sum || 0).toLocaleString('ru-RU')}</div></div>
-                    <div className="bg-gray-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-gray-500">К перечислению</div><div className="font-bold">{Number(uploadedSummaryForView.payout_net || 0).toLocaleString('ru-RU')}</div></div>
-                    <div className="bg-gray-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-gray-500">Итого к оплате (WB)</div><div className="font-bold">{Number(uploadedSummaryForView.to_pay_total || 0).toLocaleString('ru-RU')}</div></div>
-                    <div className="bg-gray-50 rounded-lg p-2 min-w-[180px] shrink-0">
-                      <div className="text-xs text-gray-500">Доп траты</div>
-                      <input type="number" min="0" step="0.01" value={uploadedExtraCosts} onChange={(e) => setUploadedExtraCosts(Number(e.target.value || 0))} className="mt-1 w-full px-2 py-1 text-sm border border-gray-300 rounded" />
+                    <div className="bg-slate-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-slate-500">Номенклатур</div><div className="font-bold">{uploadedSummaryForView.items}</div></div>
+                    <div className="bg-slate-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-slate-500">Продажи</div><div className="font-bold">{Number(uploadedSummaryForView.sales_net || 0).toLocaleString('ru-RU')}</div></div>
+                    <div className="bg-slate-50 rounded-lg p-2 min-w-[170px] shrink-0"><div className="flex items-center justify-between gap-2"><div className="text-xs text-slate-500">Налоги</div><button type="button" onClick={() => setUploadedTaxRateOverride((prev) => prev === 0.01 ? 0.06 : 0.01)} className="text-[11px] px-2 py-0.5 rounded-full border border-indigo-200 text-indigo-700 bg-white hover:bg-indigo-50">{Math.round(getCurrentUploadedTaxRate() * 100)}%</button></div><div className="font-bold">{Number(getUploadedTaxValue(uploadedSummaryForView)).toLocaleString('ru-RU', { maximumFractionDigits: 2 })}</div></div>
+                    <div className="bg-slate-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-slate-500">Возвраты</div><div className="font-bold">{Number(uploadedSummaryForView.returns_gross || 0).toLocaleString('ru-RU')}</div></div>
+                    <div className="bg-slate-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-slate-500">Логистика</div><div className="font-bold">{Number(uploadedSummaryForView.logistics_sum || 0).toLocaleString('ru-RU')}</div></div>
+                    <div className="bg-slate-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-slate-500">К перечислению</div><div className="font-bold">{Number(uploadedSummaryForView.payout_net || 0).toLocaleString('ru-RU')}</div></div>
+                    <div className="bg-slate-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-slate-500">Итого к оплате (WB)</div><div className="font-bold">{Number(uploadedSummaryForView.to_pay_total || 0).toLocaleString('ru-RU')}</div></div>
+                    <div className="bg-slate-50 rounded-lg p-2 min-w-[180px] shrink-0">
+                      <div className="text-xs text-slate-500">Доп траты</div>
+                      <input type="number" min="0" step="0.01" value={uploadedExtraCosts} onChange={(e) => setUploadedExtraCosts(Number(e.target.value || 0))} className="mt-1 w-full px-2 py-1 text-sm border border-slate-300 rounded" />
                     </div>
-                    <div className="bg-gray-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-gray-500">Заработок</div><div className="font-bold">{Number(getUploadedHeadlineProfitNet(uploadedSummaryForView)).toLocaleString('ru-RU', { maximumFractionDigits: 2 })}</div></div>
-                    <div className="bg-gray-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-gray-500">Штрафы</div><div className="font-bold">{Number(uploadedSummaryForView.fine_sum || 0).toLocaleString('ru-RU')}</div></div>
-                    <div className="bg-gray-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-gray-500">Хранение</div><div className="font-bold">{Number(uploadedSummaryForView.storage_sum || 0).toLocaleString('ru-RU')}</div></div>
-                    <div className="bg-gray-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-gray-500">Реклама WB</div><div className="font-bold">{Number(uploadedSummaryForView.withhold_sum || 0).toLocaleString('ru-RU')}</div></div>
-                    <div className="bg-gray-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-gray-500">Кол-во проданных</div><div className="font-bold">{Number(uploadedSummaryForView.sold_qty || 0).toLocaleString('ru-RU')}</div></div>
-                    <div className="bg-gray-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-gray-500">Кол-во возвратов</div><div className="font-bold">{Number(uploadedSummaryForView.return_qty || 0).toLocaleString('ru-RU')}</div></div>
-                    <div className="bg-gray-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-gray-500">Эквайринг/Комиссии</div><div className="font-bold">{Number(uploadedSummaryForView.acquiring_sum || 0).toLocaleString('ru-RU')}</div></div>
-                    <div className="bg-gray-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-gray-500">Комиссия эквайринга, %</div><div className="font-bold">{Number(uploadedSummaryForView.acquiring_percent || 0).toLocaleString('ru-RU', { maximumFractionDigits: 2 })}</div></div>
+                    <div className="bg-slate-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-slate-500">Заработок</div><div className="font-bold">{Number(getUploadedHeadlineProfitNet(uploadedSummaryForView)).toLocaleString('ru-RU', { maximumFractionDigits: 2 })}</div></div>
+                    <div className="bg-slate-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-slate-500">Штрафы</div><div className="font-bold">{Number(uploadedSummaryForView.fine_sum || 0).toLocaleString('ru-RU')}</div></div>
+                    <div className="bg-slate-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-slate-500">Хранение</div><div className="font-bold">{Number(uploadedSummaryForView.storage_sum || 0).toLocaleString('ru-RU')}</div></div>
+                    <div className="bg-slate-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-slate-500">Реклама WB</div><div className="font-bold">{Number(uploadedSummaryForView.withhold_sum || 0).toLocaleString('ru-RU')}</div></div>
+                    <div className="bg-slate-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-slate-500">Кол-во проданных</div><div className="font-bold">{Number(uploadedSummaryForView.sold_qty || 0).toLocaleString('ru-RU')}</div></div>
+                    <div className="bg-slate-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-slate-500">Кол-во возвратов</div><div className="font-bold">{Number(uploadedSummaryForView.return_qty || 0).toLocaleString('ru-RU')}</div></div>
+                    <div className="bg-slate-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-slate-500">Эквайринг/Комиссии</div><div className="font-bold">{Number(uploadedSummaryForView.acquiring_sum || 0).toLocaleString('ru-RU')}</div></div>
+                    <div className="bg-slate-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-slate-500">Комиссия эквайринга, %</div><div className="font-bold">{Number(uploadedSummaryForView.acquiring_percent || 0).toLocaleString('ru-RU', { maximumFractionDigits: 2 })}</div></div>
                   </div>
                   )}
 
                   {uploadedViewTab === 'table' && (
                   <>
                   <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
-                    <div className="bg-gray-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-gray-500">Номенклатур</div><div className="font-bold">{uploadedSummaryForView.items}</div></div>
-                    <div className="bg-gray-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-gray-500">Продажи</div><div className="font-bold">{Number(uploadedSummaryForView.sales_net || 0).toLocaleString('ru-RU')}</div></div>
-                    <div className="bg-gray-50 rounded-lg p-2 min-w-[170px] shrink-0"><div className="flex items-center justify-between gap-2"><div className="text-xs text-gray-500">Налоги</div><button type="button" onClick={() => setUploadedTaxRateOverride((prev) => prev === 0.01 ? 0.06 : 0.01)} className="text-[11px] px-2 py-0.5 rounded-full border border-indigo-200 text-indigo-700 bg-white hover:bg-indigo-50">{Math.round(getCurrentUploadedTaxRate() * 100)}%</button></div><div className="font-bold">{Number(getUploadedTaxValue(uploadedSummaryForView)).toLocaleString('ru-RU', { maximumFractionDigits: 2 })}</div></div>
-                    <div className="bg-gray-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-gray-500">Возвраты</div><div className="font-bold">{Number(uploadedSummaryForView.returns_gross || 0).toLocaleString('ru-RU')}</div></div>
-                    <div className="bg-gray-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-gray-500">Логистика</div><div className="font-bold">{Number(uploadedSummaryForView.logistics_sum || 0).toLocaleString('ru-RU')}</div></div>
-                    <div className="bg-gray-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-gray-500">К перечислению</div><div className="font-bold">{Number(uploadedSummaryForView.payout_net || 0).toLocaleString('ru-RU')}</div></div>
-                    <div className="bg-gray-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-gray-500">Итого к оплате (WB)</div><div className="font-bold">{Number(uploadedSummaryForView.to_pay_total || 0).toLocaleString('ru-RU')}</div></div>
-                    <div className="bg-gray-50 rounded-lg p-2 min-w-[180px] shrink-0">
-                      <div className="text-xs text-gray-500">Доп траты</div>
-                      <input type="number" min="0" step="0.01" value={uploadedExtraCosts} onChange={(e) => setUploadedExtraCosts(Number(e.target.value || 0))} className="mt-1 w-full px-2 py-1 text-sm border border-gray-300 rounded" />
+                    <div className="bg-slate-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-slate-500">Номенклатур</div><div className="font-bold">{uploadedSummaryForView.items}</div></div>
+                    <div className="bg-slate-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-slate-500">Продажи</div><div className="font-bold">{Number(uploadedSummaryForView.sales_net || 0).toLocaleString('ru-RU')}</div></div>
+                    <div className="bg-slate-50 rounded-lg p-2 min-w-[170px] shrink-0"><div className="flex items-center justify-between gap-2"><div className="text-xs text-slate-500">Налоги</div><button type="button" onClick={() => setUploadedTaxRateOverride((prev) => prev === 0.01 ? 0.06 : 0.01)} className="text-[11px] px-2 py-0.5 rounded-full border border-indigo-200 text-indigo-700 bg-white hover:bg-indigo-50">{Math.round(getCurrentUploadedTaxRate() * 100)}%</button></div><div className="font-bold">{Number(getUploadedTaxValue(uploadedSummaryForView)).toLocaleString('ru-RU', { maximumFractionDigits: 2 })}</div></div>
+                    <div className="bg-slate-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-slate-500">Возвраты</div><div className="font-bold">{Number(uploadedSummaryForView.returns_gross || 0).toLocaleString('ru-RU')}</div></div>
+                    <div className="bg-slate-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-slate-500">Логистика</div><div className="font-bold">{Number(uploadedSummaryForView.logistics_sum || 0).toLocaleString('ru-RU')}</div></div>
+                    <div className="bg-slate-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-slate-500">К перечислению</div><div className="font-bold">{Number(uploadedSummaryForView.payout_net || 0).toLocaleString('ru-RU')}</div></div>
+                    <div className="bg-slate-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-slate-500">Итого к оплате (WB)</div><div className="font-bold">{Number(uploadedSummaryForView.to_pay_total || 0).toLocaleString('ru-RU')}</div></div>
+                    <div className="bg-slate-50 rounded-lg p-2 min-w-[180px] shrink-0">
+                      <div className="text-xs text-slate-500">Доп траты</div>
+                      <input type="number" min="0" step="0.01" value={uploadedExtraCosts} onChange={(e) => setUploadedExtraCosts(Number(e.target.value || 0))} className="mt-1 w-full px-2 py-1 text-sm border border-slate-300 rounded" />
                     </div>
-                    <div className="bg-gray-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-gray-500">Заработок</div><div className="font-bold">{Number(getUploadedHeadlineProfitNet(uploadedSummaryForView)).toLocaleString('ru-RU', { maximumFractionDigits: 2 })}</div></div>
-                    <div className="bg-gray-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-gray-500">Штрафы</div><div className="font-bold">{Number(uploadedSummaryForView.fine_sum || 0).toLocaleString('ru-RU')}</div></div>
-                    <div className="bg-gray-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-gray-500">Хранение</div><div className="font-bold">{Number(uploadedSummaryForView.storage_sum || 0).toLocaleString('ru-RU')}</div></div>
-                    <div className="bg-gray-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-gray-500">Реклама WB</div><div className="font-bold">{Number(uploadedSummaryForView.withhold_sum || 0).toLocaleString('ru-RU')}</div></div>
-                    <div className="bg-gray-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-gray-500">Кол-во проданных</div><div className="font-bold">{Number(uploadedSummaryForView.sold_qty || 0).toLocaleString('ru-RU')}</div></div>
-                    <div className="bg-gray-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-gray-500">Кол-во возвратов</div><div className="font-bold">{Number(uploadedSummaryForView.return_qty || 0).toLocaleString('ru-RU')}</div></div>
-                    <div className="bg-gray-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-gray-500">Эквайринг/Комиссии</div><div className="font-bold">{Number(uploadedSummaryForView.acquiring_sum || 0).toLocaleString('ru-RU')}</div></div>
-                    <div className="bg-gray-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-gray-500">Комиссия эквайринга, %</div><div className="font-bold">{Number(uploadedSummaryForView.acquiring_percent || 0).toLocaleString('ru-RU', { maximumFractionDigits: 2 })}</div></div>
+                    <div className="bg-slate-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-slate-500">Заработок</div><div className="font-bold">{Number(getUploadedHeadlineProfitNet(uploadedSummaryForView)).toLocaleString('ru-RU', { maximumFractionDigits: 2 })}</div></div>
+                    <div className="bg-slate-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-slate-500">Штрафы</div><div className="font-bold">{Number(uploadedSummaryForView.fine_sum || 0).toLocaleString('ru-RU')}</div></div>
+                    <div className="bg-slate-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-slate-500">Хранение</div><div className="font-bold">{Number(uploadedSummaryForView.storage_sum || 0).toLocaleString('ru-RU')}</div></div>
+                    <div className="bg-slate-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-slate-500">Реклама WB</div><div className="font-bold">{Number(uploadedSummaryForView.withhold_sum || 0).toLocaleString('ru-RU')}</div></div>
+                    <div className="bg-slate-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-slate-500">Кол-во проданных</div><div className="font-bold">{Number(uploadedSummaryForView.sold_qty || 0).toLocaleString('ru-RU')}</div></div>
+                    <div className="bg-slate-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-slate-500">Кол-во возвратов</div><div className="font-bold">{Number(uploadedSummaryForView.return_qty || 0).toLocaleString('ru-RU')}</div></div>
+                    <div className="bg-slate-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-slate-500">Эквайринг/Комиссии</div><div className="font-bold">{Number(uploadedSummaryForView.acquiring_sum || 0).toLocaleString('ru-RU')}</div></div>
+                    <div className="bg-slate-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-slate-500">Комиссия эквайринга, %</div><div className="font-bold">{Number(uploadedSummaryForView.acquiring_percent || 0).toLocaleString('ru-RU', { maximumFractionDigits: 2 })}</div></div>
                   </div>
                   {uploadedTableRowsHidden > 0 && (
                     <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
                       Показаны первые {renderedUploadedAnalyticsRows.length.toLocaleString('ru-RU')} строк из {sortedFilteredUploadedAnalytics.length.toLocaleString('ru-RU')}. Для полного списка используйте поиск/фильтры или скачайте Excel.
                     </div>
                   )}
-                  <div className="overflow-auto max-h-[84vh] border border-gray-100 rounded-lg">
+                  <div className="overflow-auto max-h-[84vh] border border-slate-100 rounded-lg">
                     <table className="min-w-full text-sm border-separate border-spacing-0">
-                      <thead className="bg-white/95 backdrop-blur sticky top-0 z-50 text-left text-gray-600 shadow-sm">
+                      <thead className="bg-white/95 backdrop-blur sticky top-0 z-50 text-left text-slate-600 shadow-sm">
                         <tr>
-                          <th className="px-3 py-2 sticky top-0 left-0 bg-gray-50 z-[70] w-[140px] min-w-[140px] max-w-[140px] border-r border-gray-200 shadow-[2px_0_0_rgba(229,231,235,0.9)]">Фото</th>
-                          <th className="px-3 py-2 sticky top-0 left-[140px] bg-gray-50 z-[70] w-[160px] min-w-[160px] max-w-[160px] border-r border-gray-200 shadow-[2px_0_0_rgba(229,231,235,0.9)]"><button type="button" onClick={() => { setUploadedSortKey('code'); setUploadedSortDir((d) => uploadedSortKey === 'code' ? (d === 'asc' ? 'desc' : 'asc') : 'asc'); }} className="px-2 py-1 text-xs rounded-full bg-blue-600 text-white hover:bg-blue-700">Код номенклатуры</button></th>
-                          <th className="px-3 py-2 sticky top-0 left-[300px] bg-gray-50 z-[70] w-[320px] min-w-[320px] max-w-[320px] border-r border-gray-200 shadow-[2px_0_0_rgba(229,231,235,0.9)]"><button type="button" onClick={() => { setUploadedSortKey('name'); setUploadedSortDir((d) => uploadedSortKey === 'name' ? (d === 'asc' ? 'desc' : 'asc') : 'asc'); }} className="px-2 py-1 text-xs rounded-full bg-blue-600 text-white hover:bg-blue-700">Название</button></th>
-                          <th className={`px-3 py-2 sticky top-0 bg-gray-50 z-50 ${isUploadedColVisible('sales_net') ? '' : 'hidden'}`}><button type="button" onClick={() => { setUploadedSortKey('sales_net'); setUploadedSortDir((d) => uploadedSortKey === 'sales_net' ? (d === 'asc' ? 'desc' : 'asc') : 'desc'); }} className="px-2 py-1 text-xs rounded-full bg-blue-600 text-white hover:bg-blue-700">Продажи</button></th>
-                          <th className={`px-3 py-2 sticky top-0 bg-gray-50 z-50 ${isUploadedColVisible('returns_gross') ? '' : 'hidden'}`}><button type="button" onClick={() => { setUploadedSortKey('returns_gross'); setUploadedSortDir((d) => uploadedSortKey === 'returns_gross' ? (d === 'asc' ? 'desc' : 'asc') : 'desc'); }} className="px-2 py-1 text-xs rounded-full bg-blue-600 text-white hover:bg-blue-700">Возвраты</button></th>
-                          <th className={`px-3 py-2 sticky top-0 bg-gray-50 z-50 ${isUploadedColVisible('logistics_sum') ? '' : 'hidden'}`}><button type="button" onClick={() => { setUploadedSortKey('logistics_sum'); setUploadedSortDir((d) => uploadedSortKey === 'logistics_sum' ? (d === 'asc' ? 'desc' : 'asc') : 'desc'); }} className="px-2 py-1 text-xs rounded-full bg-blue-600 text-white hover:bg-blue-700">Логистика</button></th>
-                          <th className={`px-3 py-2 sticky top-0 bg-gray-50 z-50 ${isUploadedColVisible('payout_net') ? '' : 'hidden'}`}><button type="button" onClick={() => { setUploadedSortKey('payout_net'); setUploadedSortDir((d) => uploadedSortKey === 'payout_net' ? (d === 'asc' ? 'desc' : 'asc') : 'desc'); }} className="px-3 py-1 text-xs whitespace-nowrap rounded-full bg-blue-600 text-white hover:bg-blue-700">К перечислению</button></th>
-                          <th className={`px-3 py-2 sticky top-0 bg-gray-50 z-50 ${isUploadedColVisible('fine_sum') ? '' : 'hidden'}`}><button type="button" onClick={() => { setUploadedSortKey('fine_sum'); setUploadedSortDir((d) => uploadedSortKey === 'fine_sum' ? (d === 'asc' ? 'desc' : 'asc') : 'desc'); }} className="px-2 py-1 text-xs rounded-full bg-blue-600 text-white hover:bg-blue-700">Штрафы</button></th>
-                          <th className={`px-3 py-2 sticky top-0 bg-gray-50 z-50 ${isUploadedColVisible('storage_sum') ? '' : 'hidden'}`}><button type="button" onClick={() => { setUploadedSortKey('storage_sum'); setUploadedSortDir((d) => uploadedSortKey === 'storage_sum' ? (d === 'asc' ? 'desc' : 'asc') : 'desc'); }} className="px-2 py-1 text-xs rounded-full bg-blue-600 text-white hover:bg-blue-700">Хранение</button></th>
-                          <th className={`px-3 py-2 sticky top-0 bg-gray-50 z-50 ${isUploadedColVisible('withhold_sum') ? '' : 'hidden'}`}><button type="button" onClick={() => { setUploadedSortKey('withhold_sum'); setUploadedSortDir((d) => uploadedSortKey === 'withhold_sum' ? (d === 'asc' ? 'desc' : 'asc') : 'desc'); }} className="px-2 py-1 text-xs rounded-full bg-blue-600 text-white hover:bg-blue-700">Удержания</button></th>
-                          <th className={`px-3 py-2 sticky top-0 bg-gray-50 z-50 ${isUploadedColVisible('to_pay_total') ? '' : 'hidden'}`}><button type="button" onClick={() => { setUploadedSortKey('to_pay_total'); setUploadedSortDir((d) => uploadedSortKey === 'to_pay_total' ? (d === 'asc' ? 'desc' : 'asc') : 'desc'); }} className="px-3 py-1 text-xs whitespace-nowrap rounded-full bg-blue-600 text-white hover:bg-blue-700" title="Итого к оплате (WB)">Итого к оплате</button></th>
-                          <th className="px-3 py-2 sticky top-0 bg-gray-50 z-50"><button type="button" onClick={() => { setUploadedSortKey('cost'); setUploadedSortDir((d) => uploadedSortKey === 'cost' ? (d === 'asc' ? 'desc' : 'asc') : 'desc'); }} className="px-2 py-1 text-xs rounded-full bg-blue-600 text-white hover:bg-blue-700">Себестоимость</button></th>
-                          <th className="px-3 py-2 sticky top-0 bg-gray-50 z-50"><button type="button" onClick={() => { setUploadedSortKey('avg_profit'); setUploadedSortDir((d) => uploadedSortKey === 'avg_profit' ? (d === 'asc' ? 'desc' : 'asc') : 'desc'); }} className="px-2 py-1 text-xs rounded-full bg-blue-600 text-white hover:bg-blue-700">Средний заработок с ед.</button></th>
-                          <th className="px-3 py-2 sticky top-0 bg-gray-50 z-50"><button type="button" onClick={() => { setUploadedSortKey('profit_total'); setUploadedSortDir((d) => uploadedSortKey === 'profit_total' ? (d === 'asc' ? 'desc' : 'asc') : 'desc'); }} className="px-2 py-1 text-xs rounded-full bg-blue-600 text-white hover:bg-blue-700">Заработок</button></th>
-                          <th className={`px-3 py-2 sticky top-0 bg-gray-50 z-50 ${isUploadedColVisible('sold_qty') ? '' : 'hidden'}`}><button type="button" onClick={() => { setUploadedSortKey('sold_qty'); setUploadedSortDir((d) => uploadedSortKey === 'sold_qty' ? (d === 'asc' ? 'desc' : 'asc') : 'desc'); }} className="px-2 py-1 text-xs rounded-full bg-blue-600 text-white hover:bg-blue-700">Кол-во проданных</button></th>
-                          <th className={`px-3 py-2 sticky top-0 bg-gray-50 z-50 ${isUploadedColVisible('return_qty') ? '' : 'hidden'}`}><button type="button" onClick={() => { setUploadedSortKey('return_qty'); setUploadedSortDir((d) => uploadedSortKey === 'return_qty' ? (d === 'asc' ? 'desc' : 'asc') : 'desc'); }} className="px-2 py-1 text-xs rounded-full bg-blue-600 text-white hover:bg-blue-700">Кол-во возвратов</button></th>
-                          <th className={`px-3 py-2 sticky top-0 bg-gray-50 z-50 ${isUploadedColVisible('acquiring_sum') ? '' : 'hidden'}`}><button type="button" onClick={() => { setUploadedSortKey('acquiring_sum'); setUploadedSortDir((d) => uploadedSortKey === 'acquiring_sum' ? (d === 'asc' ? 'desc' : 'asc') : 'desc'); }} className="px-2 py-1 text-xs rounded-full bg-blue-600 text-white hover:bg-blue-700">Эквайринг/Комиссии</button></th>
-                          <th className={`px-3 py-2 sticky top-0 bg-gray-50 z-50 ${isUploadedColVisible('acquiring_percent') ? '' : 'hidden'}`}><button type="button" onClick={() => { setUploadedSortKey('acquiring_percent'); setUploadedSortDir((d) => uploadedSortKey === 'acquiring_percent' ? (d === 'asc' ? 'desc' : 'asc') : 'desc'); }} className="px-2 py-1 text-xs rounded-full bg-blue-600 text-white hover:bg-blue-700">Размер комиссии, %</button></th>
+                          <th className="px-3 py-2 sticky top-0 left-0 bg-slate-50 z-[70] w-[140px] min-w-[140px] max-w-[140px] border-r border-slate-200 shadow-[2px_0_0_rgba(229,231,235,0.9)]">Фото</th>
+                          <th className="px-3 py-2 sticky top-0 left-[140px] bg-slate-50 z-[70] w-[160px] min-w-[160px] max-w-[160px] border-r border-slate-200 shadow-[2px_0_0_rgba(229,231,235,0.9)]"><button type="button" onClick={() => { setUploadedSortKey('code'); setUploadedSortDir((d) => uploadedSortKey === 'code' ? (d === 'asc' ? 'desc' : 'asc') : 'asc'); }} className="px-2 py-1 text-xs rounded-full bg-blue-600 text-white hover:bg-blue-700">Код номенклатуры</button></th>
+                          <th className="px-3 py-2 sticky top-0 left-[300px] bg-slate-50 z-[70] w-[320px] min-w-[320px] max-w-[320px] border-r border-slate-200 shadow-[2px_0_0_rgba(229,231,235,0.9)]"><button type="button" onClick={() => { setUploadedSortKey('name'); setUploadedSortDir((d) => uploadedSortKey === 'name' ? (d === 'asc' ? 'desc' : 'asc') : 'asc'); }} className="px-2 py-1 text-xs rounded-full bg-blue-600 text-white hover:bg-blue-700">Название</button></th>
+                          <th className={`px-3 py-2 sticky top-0 bg-slate-50 z-50 ${isUploadedColVisible('sales_net') ? '' : 'hidden'}`}><button type="button" onClick={() => { setUploadedSortKey('sales_net'); setUploadedSortDir((d) => uploadedSortKey === 'sales_net' ? (d === 'asc' ? 'desc' : 'asc') : 'desc'); }} className="px-2 py-1 text-xs rounded-full bg-blue-600 text-white hover:bg-blue-700">Продажи</button></th>
+                          <th className={`px-3 py-2 sticky top-0 bg-slate-50 z-50 ${isUploadedColVisible('returns_gross') ? '' : 'hidden'}`}><button type="button" onClick={() => { setUploadedSortKey('returns_gross'); setUploadedSortDir((d) => uploadedSortKey === 'returns_gross' ? (d === 'asc' ? 'desc' : 'asc') : 'desc'); }} className="px-2 py-1 text-xs rounded-full bg-blue-600 text-white hover:bg-blue-700">Возвраты</button></th>
+                          <th className={`px-3 py-2 sticky top-0 bg-slate-50 z-50 ${isUploadedColVisible('logistics_sum') ? '' : 'hidden'}`}><button type="button" onClick={() => { setUploadedSortKey('logistics_sum'); setUploadedSortDir((d) => uploadedSortKey === 'logistics_sum' ? (d === 'asc' ? 'desc' : 'asc') : 'desc'); }} className="px-2 py-1 text-xs rounded-full bg-blue-600 text-white hover:bg-blue-700">Логистика</button></th>
+                          <th className={`px-3 py-2 sticky top-0 bg-slate-50 z-50 ${isUploadedColVisible('payout_net') ? '' : 'hidden'}`}><button type="button" onClick={() => { setUploadedSortKey('payout_net'); setUploadedSortDir((d) => uploadedSortKey === 'payout_net' ? (d === 'asc' ? 'desc' : 'asc') : 'desc'); }} className="px-3 py-1 text-xs whitespace-nowrap rounded-full bg-blue-600 text-white hover:bg-blue-700">К перечислению</button></th>
+                          <th className={`px-3 py-2 sticky top-0 bg-slate-50 z-50 ${isUploadedColVisible('fine_sum') ? '' : 'hidden'}`}><button type="button" onClick={() => { setUploadedSortKey('fine_sum'); setUploadedSortDir((d) => uploadedSortKey === 'fine_sum' ? (d === 'asc' ? 'desc' : 'asc') : 'desc'); }} className="px-2 py-1 text-xs rounded-full bg-blue-600 text-white hover:bg-blue-700">Штрафы</button></th>
+                          <th className={`px-3 py-2 sticky top-0 bg-slate-50 z-50 ${isUploadedColVisible('storage_sum') ? '' : 'hidden'}`}><button type="button" onClick={() => { setUploadedSortKey('storage_sum'); setUploadedSortDir((d) => uploadedSortKey === 'storage_sum' ? (d === 'asc' ? 'desc' : 'asc') : 'desc'); }} className="px-2 py-1 text-xs rounded-full bg-blue-600 text-white hover:bg-blue-700">Хранение</button></th>
+                          <th className={`px-3 py-2 sticky top-0 bg-slate-50 z-50 ${isUploadedColVisible('withhold_sum') ? '' : 'hidden'}`}><button type="button" onClick={() => { setUploadedSortKey('withhold_sum'); setUploadedSortDir((d) => uploadedSortKey === 'withhold_sum' ? (d === 'asc' ? 'desc' : 'asc') : 'desc'); }} className="px-2 py-1 text-xs rounded-full bg-blue-600 text-white hover:bg-blue-700">Удержания</button></th>
+                          <th className={`px-3 py-2 sticky top-0 bg-slate-50 z-50 ${isUploadedColVisible('to_pay_total') ? '' : 'hidden'}`}><button type="button" onClick={() => { setUploadedSortKey('to_pay_total'); setUploadedSortDir((d) => uploadedSortKey === 'to_pay_total' ? (d === 'asc' ? 'desc' : 'asc') : 'desc'); }} className="px-3 py-1 text-xs whitespace-nowrap rounded-full bg-blue-600 text-white hover:bg-blue-700" title="Итого к оплате (WB)">Итого к оплате</button></th>
+                          <th className="px-3 py-2 sticky top-0 bg-slate-50 z-50"><button type="button" onClick={() => { setUploadedSortKey('cost'); setUploadedSortDir((d) => uploadedSortKey === 'cost' ? (d === 'asc' ? 'desc' : 'asc') : 'desc'); }} className="px-2 py-1 text-xs rounded-full bg-blue-600 text-white hover:bg-blue-700">Себестоимость</button></th>
+                          <th className="px-3 py-2 sticky top-0 bg-slate-50 z-50"><button type="button" onClick={() => { setUploadedSortKey('avg_profit'); setUploadedSortDir((d) => uploadedSortKey === 'avg_profit' ? (d === 'asc' ? 'desc' : 'asc') : 'desc'); }} className="px-2 py-1 text-xs rounded-full bg-blue-600 text-white hover:bg-blue-700">Средний заработок с ед.</button></th>
+                          <th className="px-3 py-2 sticky top-0 bg-slate-50 z-50"><button type="button" onClick={() => { setUploadedSortKey('profit_total'); setUploadedSortDir((d) => uploadedSortKey === 'profit_total' ? (d === 'asc' ? 'desc' : 'asc') : 'desc'); }} className="px-2 py-1 text-xs rounded-full bg-blue-600 text-white hover:bg-blue-700">Заработок</button></th>
+                          <th className={`px-3 py-2 sticky top-0 bg-slate-50 z-50 ${isUploadedColVisible('sold_qty') ? '' : 'hidden'}`}><button type="button" onClick={() => { setUploadedSortKey('sold_qty'); setUploadedSortDir((d) => uploadedSortKey === 'sold_qty' ? (d === 'asc' ? 'desc' : 'asc') : 'desc'); }} className="px-2 py-1 text-xs rounded-full bg-blue-600 text-white hover:bg-blue-700">Кол-во проданных</button></th>
+                          <th className={`px-3 py-2 sticky top-0 bg-slate-50 z-50 ${isUploadedColVisible('return_qty') ? '' : 'hidden'}`}><button type="button" onClick={() => { setUploadedSortKey('return_qty'); setUploadedSortDir((d) => uploadedSortKey === 'return_qty' ? (d === 'asc' ? 'desc' : 'asc') : 'desc'); }} className="px-2 py-1 text-xs rounded-full bg-blue-600 text-white hover:bg-blue-700">Кол-во возвратов</button></th>
+                          <th className={`px-3 py-2 sticky top-0 bg-slate-50 z-50 ${isUploadedColVisible('acquiring_sum') ? '' : 'hidden'}`}><button type="button" onClick={() => { setUploadedSortKey('acquiring_sum'); setUploadedSortDir((d) => uploadedSortKey === 'acquiring_sum' ? (d === 'asc' ? 'desc' : 'asc') : 'desc'); }} className="px-2 py-1 text-xs rounded-full bg-blue-600 text-white hover:bg-blue-700">Эквайринг/Комиссии</button></th>
+                          <th className={`px-3 py-2 sticky top-0 bg-slate-50 z-50 ${isUploadedColVisible('acquiring_percent') ? '' : 'hidden'}`}><button type="button" onClick={() => { setUploadedSortKey('acquiring_percent'); setUploadedSortDir((d) => uploadedSortKey === 'acquiring_percent' ? (d === 'asc' ? 'desc' : 'asc') : 'desc'); }} className="px-2 py-1 text-xs rounded-full bg-blue-600 text-white hover:bg-blue-700">Размер комиссии, %</button></th>
                         </tr>
                       </thead>
                       <tbody>
@@ -22926,15 +22927,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           });
                           return (
                           <>
-                          <tr key={`${row.code}-${idx}`} className="border-t border-gray-100 hover:bg-gray-50/80 group">
-                            <td className="px-3 py-2 sticky left-0 bg-white group-hover:bg-white z-30 w-[140px] min-w-[140px] max-w-[140px] border-r border-gray-200 shadow-[2px_0_0_rgba(229,231,235,0.9)]">
+                          <tr key={`${row.code}-${idx}`} className="border-t border-slate-100 hover:bg-slate-50/80 group">
+                            <td className="px-3 py-2 sticky left-0 bg-white group-hover:bg-white z-30 w-[140px] min-w-[140px] max-w-[140px] border-r border-slate-200 shadow-[2px_0_0_rgba(229,231,235,0.9)]">
                               {getUploadedPhoto(row.code) ? (
                                 <img
                                   src={getUploadedPhoto(row.code)}
                                   alt={row.name || 'товар'}
                                   crossOrigin="anonymous"
                                   referrerPolicy="no-referrer"
-                                  className="w-32 h-40 object-contain rounded border border-gray-200 bg-white p-1 cursor-zoom-in"
+                                  className="w-32 h-40 object-contain rounded border border-slate-200 bg-white p-1 cursor-zoom-in"
                                   onClick={(e) => {
                                     const src = (e.currentTarget as HTMLImageElement).src;
                                     if (src) setUploadedPhotoPreview({ src, title: row.name || row.code || 'Фото товара' });
@@ -22965,11 +22966,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                   }}
                                 />
                               ) : (
-                                <div className="w-32 h-40 rounded border border-gray-200 bg-gray-100 text-gray-400 text-xs flex items-center justify-center">N/A</div>
+                                <div className="w-32 h-40 rounded border border-slate-200 bg-slate-100 text-slate-400 text-xs flex items-center justify-center">N/A</div>
                               )}
                             </td>
-                            <td className="px-3 py-2 sticky left-[140px] bg-white group-hover:bg-white z-30 w-[160px] min-w-[160px] max-w-[160px] border-r border-gray-200 shadow-[2px_0_0_rgba(229,231,235,0.9)]">{row.code ? <a href={`https://www.wildberries.ru/catalog/${encodeURIComponent(String(row.code))}/detail.aspx`} target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline">{row.code}</a> : '-'}</td>
-                            <td className="px-3 py-2 sticky left-[300px] bg-white group-hover:bg-white z-30 w-[320px] min-w-[320px] max-w-[320px] border-r border-gray-200 shadow-[2px_0_0_rgba(229,231,235,0.9)] align-top">
+                            <td className="px-3 py-2 sticky left-[140px] bg-white group-hover:bg-white z-30 w-[160px] min-w-[160px] max-w-[160px] border-r border-slate-200 shadow-[2px_0_0_rgba(229,231,235,0.9)]">{row.code ? <a href={`https://www.wildberries.ru/catalog/${encodeURIComponent(String(row.code))}/detail.aspx`} target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline">{row.code}</a> : '-'}</td>
+                            <td className="px-3 py-2 sticky left-[300px] bg-white group-hover:bg-white z-30 w-[320px] min-w-[320px] max-w-[320px] border-r border-slate-200 shadow-[2px_0_0_rgba(229,231,235,0.9)] align-top">
                               <div className="whitespace-normal break-words leading-5" title={row.name || ''}>{row.name || '-'}</div>
                               <div className="mt-1">
                                 <button
@@ -23009,10 +23010,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           {rowOpen && (
                             visibleSizeRows.length > 0 ? (
                               <>
-                                <tr className="border-t border-gray-100 bg-indigo-50/70">
-                                  <td className="px-3 py-2 sticky left-0 bg-indigo-50 z-20 w-[140px] min-w-[140px] max-w-[140px] border-r border-gray-200" />
-                                  <td className="px-3 py-2 sticky left-[140px] bg-indigo-50 z-20 w-[160px] min-w-[160px] max-w-[160px] border-r border-gray-200" />
-                                  <td className="px-3 py-2 sticky left-[300px] bg-indigo-50 z-20 w-[320px] min-w-[320px] max-w-[320px] border-r border-gray-200 text-xs font-semibold text-indigo-800">
+                                <tr className="border-t border-slate-100 bg-indigo-50/70">
+                                  <td className="px-3 py-2 sticky left-0 bg-indigo-50 z-20 w-[140px] min-w-[140px] max-w-[140px] border-r border-slate-200" />
+                                  <td className="px-3 py-2 sticky left-[140px] bg-indigo-50 z-20 w-[160px] min-w-[160px] max-w-[160px] border-r border-slate-200" />
+                                  <td className="px-3 py-2 sticky left-[300px] bg-indigo-50 z-20 w-[320px] min-w-[320px] max-w-[320px] border-r border-slate-200 text-xs font-semibold text-indigo-800">
                                     Размер
                                   </td>
                                   <td className={`px-3 py-2 text-xs ${isUploadedColVisible('sales_net') ? '' : 'hidden'}`}>
@@ -23084,10 +23085,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                   const avgProfitSize = soldForCalc > 0 ? ((((Number(sz?.to_pay_total || 0) / soldForCalc) - getUploadedCostValue(row)) * soldForCalc - (Number(sz?.sales_net || 0) * getCurrentUploadedTaxRate())) / soldForCalc) : 0;
                                   const profitTotalSize = soldForCalc > 0 ? (((Number(sz?.to_pay_total || 0) / soldForCalc) - getUploadedCostValue(row)) * soldForCalc - (Number(sz?.sales_net || 0) * getCurrentUploadedTaxRate())) : 0;
                                   return (
-                                    <tr key={`size-${row.code}-${idx}-${sidx}`} className="border-t border-gray-100 bg-gray-50/70">
-                                      <td className="px-3 py-2 sticky left-0 bg-gray-50 z-20 w-[140px] min-w-[140px] max-w-[140px] border-r border-gray-200" />
-                                      <td className="px-3 py-2 sticky left-[140px] bg-gray-50 z-20 w-[160px] min-w-[160px] max-w-[160px] border-r border-gray-200" />
-                                      <td className="px-3 py-2 sticky left-[300px] bg-gray-50 z-20 w-[320px] min-w-[320px] max-w-[320px] border-r border-gray-200 text-xs font-semibold text-gray-700">Размер: {String(sz?.size || 'Без размера')}</td>
+                                    <tr key={`size-${row.code}-${idx}-${sidx}`} className="border-t border-slate-100 bg-slate-50/70">
+                                      <td className="px-3 py-2 sticky left-0 bg-slate-50 z-20 w-[140px] min-w-[140px] max-w-[140px] border-r border-slate-200" />
+                                      <td className="px-3 py-2 sticky left-[140px] bg-slate-50 z-20 w-[160px] min-w-[160px] max-w-[160px] border-r border-slate-200" />
+                                      <td className="px-3 py-2 sticky left-[300px] bg-slate-50 z-20 w-[320px] min-w-[320px] max-w-[320px] border-r border-slate-200 text-xs font-semibold text-slate-700">Размер: {String(sz?.size || 'Без размера')}</td>
                                       <td className={`px-3 py-2 text-xs ${isUploadedColVisible('sales_net') ? '' : 'hidden'}`}>{Number(sz?.sales_net || 0).toLocaleString('ru-RU')}</td>
                                       <td className={`px-3 py-2 text-xs ${isUploadedColVisible('returns_gross') ? '' : 'hidden'}`}>{Number(sz?.returns_gross || 0).toLocaleString('ru-RU')}</td>
                                       <td className={`px-3 py-2 text-xs ${isUploadedColVisible('logistics_sum') ? '' : 'hidden'}`}>{Number(sz?.logistics_sum || 0).toLocaleString('ru-RU')}</td>
@@ -23096,7 +23097,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                       <td className={`px-3 py-2 text-xs ${isUploadedColVisible('storage_sum') ? '' : 'hidden'}`}>{Number(sz?.storage_sum || 0).toLocaleString('ru-RU')}</td>
                                       <td className={`px-3 py-2 text-xs ${isUploadedColVisible('withhold_sum') ? '' : 'hidden'}`}>{Number(sz?.withhold_sum || 0).toLocaleString('ru-RU')}</td>
                                       <td className={`px-3 py-2 text-xs font-medium ${isUploadedColVisible('to_pay_total') ? '' : 'hidden'} ${Number(sz?.to_pay_total || 0) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{Number(sz?.to_pay_total || 0).toLocaleString('ru-RU')}</td>
-                                      <td className="px-3 py-2 text-xs text-gray-500">{getUploadedCostValue(row).toLocaleString('ru-RU', { maximumFractionDigits: 2 })}</td>
+                                      <td className="px-3 py-2 text-xs text-slate-500">{getUploadedCostValue(row).toLocaleString('ru-RU', { maximumFractionDigits: 2 })}</td>
                                       <td className="px-3 py-2 text-xs">{Number(avgProfitSize || 0).toLocaleString('ru-RU', { maximumFractionDigits: 2 })}</td>
                                       <td className="px-3 py-2 text-xs font-medium">{Number(profitTotalSize || 0).toLocaleString('ru-RU', { maximumFractionDigits: 2 })}</td>
                                       <td className={`px-3 py-2 text-xs ${isUploadedColVisible('sold_qty') ? '' : 'hidden'}`}>{Number(sz?.sold_qty ?? (Number(sz?.sold_net_qty || 0) + Number(sz?.return_qty || 0))).toLocaleString('ru-RU')}</td>
@@ -23108,11 +23109,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                 })}
                               </>
                             ) : (
-                              <tr key={`size-empty-${row.code}-${idx}`} className="border-t border-gray-100 bg-gray-50/70">
-                                <td className="px-3 py-2 sticky left-0 bg-gray-50 z-20 w-[140px] min-w-[140px] max-w-[140px] border-r border-gray-200" />
-                                <td className="px-3 py-2 sticky left-[140px] bg-gray-50 z-20 w-[160px] min-w-[160px] max-w-[160px] border-r border-gray-200" />
-                                <td className="px-3 py-2 sticky left-[300px] bg-gray-50 z-20 w-[320px] min-w-[320px] max-w-[320px] border-r border-gray-200 text-xs text-gray-500">Нет данных в столбце «Размер»</td>
-                                <td colSpan={20} className="px-3 py-2 text-xs text-gray-400">-</td>
+                              <tr key={`size-empty-${row.code}-${idx}`} className="border-t border-slate-100 bg-slate-50/70">
+                                <td className="px-3 py-2 sticky left-0 bg-slate-50 z-20 w-[140px] min-w-[140px] max-w-[140px] border-r border-slate-200" />
+                                <td className="px-3 py-2 sticky left-[140px] bg-slate-50 z-20 w-[160px] min-w-[160px] max-w-[160px] border-r border-slate-200" />
+                                <td className="px-3 py-2 sticky left-[300px] bg-slate-50 z-20 w-[320px] min-w-[320px] max-w-[320px] border-r border-slate-200 text-xs text-slate-500">Нет данных в столбце «Размер»</td>
+                                <td colSpan={20} className="px-3 py-2 text-xs text-slate-400">-</td>
                               </tr>
                             )
                           )}
@@ -23133,17 +23134,17 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
 
           {uploadedCostEditorOpen && (
-            <div className="fixed inset-0 z-[135] bg-black/55 flex items-center justify-center p-4" onClick={() => setUploadedCostEditorOpen(false)}>
+            <div className="fixed inset-0 z-[135] bg-slate-900/55 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setUploadedCostEditorOpen(false)}>
               <div className="w-full max-w-5xl max-h-[90vh] overflow-hidden bg-white rounded-2xl shadow-2xl" onClick={(e) => e.stopPropagation()}>
-                <div className="p-4 border-b border-gray-200 flex items-center justify-between gap-3">
-                  <div className="font-semibold text-gray-900">Редактор себестоимости</div>
+                <div className="p-4 border-b border-slate-200 flex items-center justify-between gap-3">
+                  <div className="font-semibold text-slate-900">Редактор себестоимости</div>
                   <div className="flex items-center gap-2 flex-wrap justify-end">
                     <input
                       type="text"
                       value={uploadedCostEditorSearch}
                       onChange={(e) => setUploadedCostEditorSearch(e.target.value)}
                       placeholder="Поиск по коду/названию"
-                      className="w-64 px-3 py-2 text-sm border border-gray-300 rounded-lg"
+                      className="w-64 px-3 py-2 text-sm border border-slate-300 rounded-lg"
                     />
                     <select
                       value={uploadedCostEditorFilter}
@@ -23159,7 +23160,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           setUploadedCostEditorLockedKeys(null);
                         }
                       }}
-                      className="px-3 py-2 text-sm border border-gray-300 rounded-lg"
+                      className="px-3 py-2 text-sm border border-slate-300 rounded-lg"
                     >
                       <option value="all">Все товары</option>
                       <option value="with_price">С ценой</option>
@@ -23168,7 +23169,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     <button type="button" onClick={saveUploadedCostsFromEditor} disabled={uploadedSavingCosts} className="px-3 py-2 text-sm rounded-lg border border-emerald-300 text-emerald-700 hover:bg-emerald-50 disabled:opacity-60">
                       {uploadedSavingCosts ? 'Сохраняю...' : 'Сохранить'}
                     </button>
-                    <button type="button" onClick={() => setUploadedCostEditorOpen(false)} className="px-3 py-2 text-sm rounded-lg border border-gray-300 hover:bg-gray-50">Закрыть</button>
+                    <button type="button" onClick={() => setUploadedCostEditorOpen(false)} className="px-3 py-2 text-sm rounded-lg border border-slate-300 hover:bg-slate-50">Закрыть</button>
                   </div>
                 </div>
                 <div className="p-4 overflow-auto max-h-[78vh]">
@@ -23177,16 +23178,16 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       const code = String(r?.code || '').trim();
                       const editorKey = `${code}|${String(r?.name || '').trim()}`;
                       return (
-                        <div key={code} className="border border-gray-200 rounded-xl p-3 bg-white">
+                        <div key={code} className="border border-slate-200 rounded-xl p-3 bg-white">
                           <div className="flex gap-3">
                             {getUploadedPhoto(code) ? (
-                              <img src={getUploadedPhoto(code)} alt={r?.name || code} className="w-20 h-24 object-contain rounded border border-gray-200 bg-white p-1" />
+                              <img src={getUploadedPhoto(code)} alt={r?.name || code} className="w-20 h-24 object-contain rounded border border-slate-200 bg-white p-1" />
                             ) : (
-                              <div className="w-20 h-24 rounded border border-gray-200 bg-gray-100 text-gray-400 text-xs flex items-center justify-center">N/A</div>
+                              <div className="w-20 h-24 rounded border border-slate-200 bg-slate-100 text-slate-400 text-xs flex items-center justify-center">N/A</div>
                             )}
                             <div className="min-w-0 flex-1">
-                              <div className="text-xs text-gray-500">{code}</div>
-                              <div className="text-sm text-gray-900 leading-5 break-words">{r?.name || '-'}</div>
+                              <div className="text-xs text-slate-500">{code}</div>
+                              <div className="text-sm text-slate-900 leading-5 break-words">{r?.name || '-'}</div>
                               <div className="mt-2">
                                 <input
                                   type="number"
@@ -23202,7 +23203,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                       setUploadedPersistedCostByCode((prev) => ({ ...prev, [editorKey]: num }));
                                     }
                                   }}
-                                  className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm"
+                                  className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm"
                                   placeholder="Себестоимость"
                                 />
                               </div>
@@ -23234,66 +23235,66 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
             <div className="max-w-7xl mx-auto">
               <div className="mb-8 flex justify-between items-center">
                 <div>
-                  <h1 className="text-2xl font-bold text-gray-900">Отчеты</h1>
-                  <p className="text-gray-500 mt-1">Статистика и аналитика</p>
+                  <h1 className="text-2xl font-bold text-slate-900">Отчеты</h1>
+                  <p className="text-slate-500 mt-1">Статистика и аналитика</p>
                 </div>
               </div>
 
               {loadingReports ? (
-                <div className="text-center py-12 text-gray-400">Загрузка данных...</div>
+                <div className="text-center py-12 text-slate-400">Загрузка данных...</div>
               ) : (
                 <div className="space-y-8">
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     {/* Total Items */}
                     <div className="oc-card p-6">
                       <div className="flex items-center justify-between mb-4">
-                        <h3 className="text-lg font-bold text-gray-900">Собрано товаров</h3>
+                        <h3 className="text-lg font-bold text-slate-900">Собрано товаров</h3>
                         <div className="p-2 bg-indigo-50 rounded-lg">
                           <Package className="h-6 w-6 text-indigo-600" />
                         </div>
                       </div>
-                      <div className="text-3xl font-bold text-gray-900">{reportTotals.items}</div>
-                      <p className="text-sm text-gray-500 mt-1">За все время (все поставщики)</p>
+                      <div className="text-3xl font-bold text-slate-900">{reportTotals.items}</div>
+                      <p className="text-sm text-slate-500 mt-1">За все время (все поставщики)</p>
                     </div>
 
                     {/* Total Supplies */}
                     <div className="oc-card p-6">
                       <div className="flex items-center justify-between mb-4">
-                        <h3 className="text-lg font-bold text-gray-900">Всего поставок</h3>
+                        <h3 className="text-lg font-bold text-slate-900">Всего поставок</h3>
                         <div className="p-2 bg-green-50 rounded-lg">
                           <Truck className="h-6 w-6 text-green-600" />
                         </div>
                       </div>
-                      <div className="text-3xl font-bold text-gray-900">{reportTotals.supplies}</div>
-                      <p className="text-sm text-gray-500 mt-1">За все время (все поставщики)</p>
+                      <div className="text-3xl font-bold text-slate-900">{reportTotals.supplies}</div>
+                      <p className="text-sm text-slate-500 mt-1">За все время (все поставщики)</p>
                     </div>
 
                     {/* Avg Price in Stock */}
                     <div className="oc-card p-6">
                       <div className="flex items-center justify-between mb-4">
-                        <h3 className="text-lg font-bold text-gray-900">Ср. цена на складе</h3>
+                        <h3 className="text-lg font-bold text-slate-900">Ср. цена на складе</h3>
                         <div className="p-2 bg-purple-50 rounded-lg">
                           <FileSpreadsheet className="h-6 w-6 text-purple-600" />
                         </div>
                       </div>
-                      <div className="text-3xl font-bold text-gray-900">
+                      <div className="text-3xl font-bold text-slate-900">
                         {reportTotals.avgPriceInStock.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽
                       </div>
-                      <p className="text-sm text-gray-500 mt-1">За все время (все поставщики)</p>
+                      <p className="text-sm text-slate-500 mt-1">За все время (все поставщики)</p>
                     </div>
                   </div>
 
                   {/* Report by Supplier Section */}
                   <div className="oc-card p-6">
-                    <h3 className="text-lg font-bold text-gray-900 mb-6">Отчет по поставщику</h3>
+                    <h3 className="text-lg font-bold text-slate-900 mb-6">Отчет по поставщику</h3>
                     <div className={`grid gap-6 ${reportsReportResult ? 'grid-cols-1 lg:grid-cols-3' : 'grid-cols-1'}`}>
                         <div className="space-y-4">
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Поставщик</label>
+                                <label className="block text-sm font-medium text-slate-700 mb-1">Поставщик</label>
                                 <select
                                     value={reportsReportForm.supplier_id}
                                     onChange={e => setReportsReportForm({...reportsReportForm, supplier_id: e.target.value})}
-                                    className="w-full p-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                                    className="w-full p-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
                                 >
                                     <option value="">Выберите поставщика</option>
                                     {suppliers.map(s => (
@@ -23304,21 +23305,21 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">Начало периода</label>
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">Начало периода</label>
                                     <input
                                         type="date"
                                         value={reportsReportForm.start}
                                         onChange={e => setReportsReportForm({...reportsReportForm, start: e.target.value})}
-                                        className="w-full p-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                                        className="w-full p-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">Конец периода</label>
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">Конец периода</label>
                                     <input
                                         type="date"
                                         value={reportsReportForm.end}
                                         onChange={e => setReportsReportForm({...reportsReportForm, end: e.target.value})}
-                                        className="w-full p-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                                        className="w-full p-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
                                     />
                                 </div>
                             </div>
@@ -23333,35 +23334,35 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         </div>
 
                         {reportsReportResult && (
-                            <div className="lg:col-span-2 bg-gray-50 rounded-xl p-6 border border-gray-100">
-                                <h3 className="font-semibold text-gray-800 mb-4">Результаты за период</h3>
+                            <div className="lg:col-span-2 bg-slate-50 rounded-xl p-6 border border-slate-100">
+                                <h3 className="font-semibold text-slate-800 mb-4">Результаты за период</h3>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                    <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-100">
-                                        <div className="text-sm text-gray-500 mb-1">Остатки товаров</div>
+                                    <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-100">
+                                        <div className="text-sm text-slate-500 mb-1">Остатки товаров</div>
                                         <div className="text-xl font-bold text-indigo-600">
                                             {((reportsReportResult.received || 0) - (reportsReportResult.shipped || 0)).toLocaleString('ru-RU')} шт
                                         </div>
                                     </div>
-                                    <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-100">
-                                        <div className="text-sm text-gray-500 mb-1">Выплаты</div>
+                                    <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-100">
+                                        <div className="text-sm text-slate-500 mb-1">Выплаты</div>
                                         <div className="text-xl font-bold text-green-600">
                                             {(reportsReportResult.total_payment || 0).toLocaleString('ru-RU')} ₽
                                         </div>
                                     </div>
-                                    <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-100">
-                                        <div className="text-sm text-gray-500 mb-1">Короба</div>
+                                    <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-100">
+                                        <div className="text-sm text-slate-500 mb-1">Короба</div>
                                         <div className="text-xl font-bold text-blue-600">
                                             {((reportsReportResult.boxes || 0) * (reportsReportResult.avgBoxPrice || 0)).toLocaleString('ru-RU')} ₽
                                         </div>
                                     </div>
-                                    <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-100">
-                                        <div className="text-sm text-gray-500 mb-1">Упаковка</div>
+                                    <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-100">
+                                        <div className="text-sm text-slate-500 mb-1">Упаковка</div>
                                         <div className="text-xl font-bold text-orange-600">
                                             {(reportsReportResult.packaging_cost || 0).toLocaleString('ru-RU')} ₽
                                         </div>
                                     </div>
-                                    <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-100 col-span-1 sm:col-span-2">
-                                        <div className="text-sm text-gray-500 mb-1">Средняя стоимость единицы за все время</div>
+                                    <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-100 col-span-1 sm:col-span-2">
+                                        <div className="text-sm text-slate-500 mb-1">Средняя стоимость единицы за все время</div>
                                         <div className="text-xl font-bold text-purple-600">
                                             {(() => {
                                                 const stats = reportsReportResult.allTime || {};
@@ -23372,7 +23373,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                                 return shipped > 0 ? (totalCost / shipped).toLocaleString('ru-RU', { maximumFractionDigits: 2 }) : '0';
                                             })()} ₽
                                         </div>
-                                        <div className="text-xs text-gray-400 mt-1">
+                                        <div className="text-xs text-slate-400 mt-1">
                                             (Выплаты + Упаковка + Коробки) / Отгружено
                                         </div>
                                     </div>
@@ -23384,15 +23385,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                   {/* Warehouse History Section */}
                   <div className="oc-card p-6 mt-6">
-                    <h3 className="text-lg font-bold text-gray-900 mb-6">История склада и цена</h3>
+                    <h3 className="text-lg font-bold text-slate-900 mb-6">История склада и цена</h3>
                     <div className="space-y-4">
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Поставщик</label>
+                                <label className="block text-sm font-medium text-slate-700 mb-1">Поставщик</label>
                                 <select
                                     value={reportsReportForm.supplier_id}
                                     onChange={e => setReportsReportForm({...reportsReportForm, supplier_id: e.target.value})}
-                                    className="w-full p-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                                    className="w-full p-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
                                 >
                                     <option value="">Выберите поставщика</option>
                                     {suppliers.map(s => (
@@ -23401,23 +23402,23 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                 </select>
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Месяц</label>
+                                <label className="block text-sm font-medium text-slate-700 mb-1">Месяц</label>
                                 <input
                                     type="month"
                                     value={warehouseCostForm.month}
                                     onChange={e => setWarehouseCostForm({...warehouseCostForm, month: e.target.value})}
-                                    className="w-full p-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                                    className="w-full p-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
                                 />
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Стоимость</label>
+                                <label className="block text-sm font-medium text-slate-700 mb-1">Стоимость</label>
                                 <div className="flex gap-2">
                                     <input
                                         type="number"
                                         placeholder="₽"
                                         value={warehouseCostForm.cost}
                                         onChange={e => setWarehouseCostForm({...warehouseCostForm, cost: e.target.value})}
-                                        className="w-full p-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                                        className="w-full p-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
                                     />
                                     <button
                                         onClick={handleSaveWarehouseCost}
@@ -23431,22 +23432,22 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         </div>
 
                         {(reportsReportForm.supplier_id || warehouseCostHistory.length > 0) && (
-                            <div className="mt-6 border-t border-gray-100 pt-4">
+                            <div className="mt-6 border-t border-slate-100 pt-4">
                                 <div className="flex justify-between items-center mb-4">
-                                    <h5 className="font-bold text-gray-900">История ({warehouseCostHistory.length})</h5>
+                                    <h5 className="font-bold text-slate-900">История ({warehouseCostHistory.length})</h5>
                                     <button onClick={fetchWarehouseCosts} className="text-indigo-600 hover:text-indigo-800 p-1 rounded hover:bg-indigo-50" title="Обновить">
                                         <RefreshCw className="h-4 w-4" />
                                     </button>
                                 </div>
                                 {warehouseCostHistory.length === 0 ? (
-                                    <div className="text-gray-400 text-center py-4">Нет записей</div>
+                                    <div className="text-slate-400 text-center py-4">Нет записей</div>
                                 ) : (
                                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                                         {warehouseCostHistory.map(item => (
-                                            <div key={item.id} className="flex justify-between items-center bg-gray-50 p-3 rounded-lg border border-gray-100">
+                                            <div key={item.id} className="flex justify-between items-center bg-slate-50 p-3 rounded-lg border border-slate-100">
                                                 <div>
                                                     <div className="font-medium capitalize">{new Date(item.month_date).toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })}</div>
-                                                    <div className="text-gray-600">{item.cost.toLocaleString('ru-RU')} ₽</div>
+                                                    <div className="text-slate-600">{item.cost.toLocaleString('ru-RU')} ₽</div>
                                                 </div>
                                                 <div className="flex gap-1">
                                                     <button
@@ -23475,13 +23476,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                   {/* Unified Supplier Stats Table */}
                   <div className="oc-card overflow-hidden">
-                    <div className="p-6 border-b border-gray-100">
-                      <h3 className="text-lg font-bold text-gray-900">Сводная статистика по поставщикам</h3>
-                      <p className="text-sm text-gray-500 mt-1">Данные за все время</p>
+                    <div className="p-6 border-b border-slate-100">
+                      <h3 className="text-lg font-bold text-slate-900">Сводная статистика по поставщикам</h3>
+                      <p className="text-sm text-slate-500 mt-1">Данные за все время</p>
                     </div>
                     <div className="overflow-x-auto">
                       <table className="w-full text-left text-sm">
-                        <thead className="bg-gray-50 text-gray-600 font-medium border-b border-gray-100">
+                        <thead className="bg-slate-50 text-slate-600 font-medium border-b border-slate-100">
                           <tr>
                             <th className="px-6 py-4">Поставщик</th>
                             <th className="px-6 py-4 text-right">Товары на складе</th>
@@ -23492,7 +23493,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             <th className="px-6 py-4 text-right">Ср. стоимость ед.</th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-gray-100">
+                        <tbody className="divide-y divide-slate-100">
                           {suppliersAllTimeStats.map((item) => {
                             const stats = item.stats || {};
                             const stock = (stats.received || 0) - (stats.shipped || 0);
@@ -23507,10 +23508,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             const avgCost = shipped > 0 ? totalCost / shipped : 0;
 
                             return (
-                              <tr key={item.id} className="hover:bg-gray-50 transition-colors">
-                                <td className="px-6 py-4 font-medium text-gray-900">{item.name}</td>
+                              <tr key={item.id} className="hover:bg-slate-50 transition-colors">
+                                <td className="px-6 py-4 font-medium text-slate-900">{item.name}</td>
                                 <td className="px-6 py-4 text-right">
-                                  <span className={stock < 0 ? 'text-red-600 font-medium' : 'text-gray-900'}>
+                                  <span className={stock < 0 ? 'text-red-600 font-medium' : 'text-slate-900'}>
                                     {stock.toLocaleString('ru-RU')} шт.
                                   </span>
                                 </td>
@@ -23518,13 +23519,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                   {payments.toLocaleString('ru-RU')} ₽
                                 </td>
                                 <td className="px-6 py-4 text-right">
-                                  <div className="font-medium text-gray-900">{boxes} шт.</div>
-                                  <div className="text-xs text-gray-500">≈ {boxesCost.toLocaleString('ru-RU', { maximumFractionDigits: 0 })} ₽</div>
+                                  <div className="font-medium text-slate-900">{boxes} шт.</div>
+                                  <div className="text-xs text-slate-500">≈ {boxesCost.toLocaleString('ru-RU', { maximumFractionDigits: 0 })} ₽</div>
                                 </td>
                                 <td className="px-6 py-4 text-right font-medium text-orange-600">
                                   {packaging.toLocaleString('ru-RU')} ₽
                                 </td>
-                                <td className="px-6 py-4 text-right font-medium text-gray-600">
+                                <td className="px-6 py-4 text-right font-medium text-slate-600">
                                   {avgWarehousePrice.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽
                                 </td>
                                 <td className="px-6 py-4 text-right font-bold text-purple-600">
@@ -23535,7 +23536,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           })}
                           {suppliersAllTimeStats.length === 0 && (
                             <tr>
-                              <td colSpan={7} className="px-6 py-12 text-center text-gray-400">
+                              <td colSpan={7} className="px-6 py-12 text-center text-slate-400">
                                 Нет данных
                               </td>
                             </tr>
@@ -23554,14 +23555,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
             <TelegramSettingsSection>
             <div className="max-w-2xl mx-auto">
               <div className="mb-8">
-                <h1 className="text-2xl font-bold text-gray-900">Telegram Уведомления</h1>
-                <p className="text-gray-500 mt-1">Настройка отправки отчетов</p>
+                <h1 className="text-2xl font-bold text-slate-900">Telegram Уведомления</h1>
+                <p className="text-slate-500 mt-1">Настройка отправки отчетов</p>
               </div>
 
               <div className="oc-card p-6">
                 <form onSubmit={handleSendTelegram} className="space-y-6">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Bot Token (Поставки)</label>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">Bot Token (Поставки)</label>
                     <div className="flex gap-2">
                         <div className="relative flex-1">
                         <input
@@ -23569,14 +23570,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             value={telegramBotToken}
                             onChange={(e) => setTelegramBotToken(e.target.value)}
                             disabled={isTokenLocked}
-                            className={`w-full px-4 py-2.5 border rounded-lg outline-none ${isTokenLocked ? 'bg-gray-100 text-gray-500 border-gray-200 cursor-not-allowed' : 'bg-white border-indigo-300 ring-2 ring-indigo-100'}`}
+                            className={`w-full px-4 py-2.5 border rounded-lg outline-none ${isTokenLocked ? 'bg-slate-100 text-slate-500 border-slate-200 cursor-not-allowed' : 'bg-white border-indigo-300 ring-2 ring-indigo-100'}`}
                             placeholder="123456789:ABC-def123..."
                             required
                         />
                         <button
                             type="button"
                             onClick={() => setIsTokenLocked(!isTokenLocked)}
-                            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1"
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1"
                             title={isTokenLocked ? "Разблокировать" : "Заблокировать"}
                         >
                             {isTokenLocked ? <Lock className="h-5 w-5" /> : <LockOpen className="h-5 w-5" />}
@@ -23594,7 +23595,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Bot Token (Приемка)</label>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">Bot Token (Приемка)</label>
                     <div className="flex gap-2">
                         <div className="relative flex-1">
                         <input
@@ -23602,13 +23603,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             value={telegramReceptionBotToken}
                             onChange={(e) => setTelegramReceptionBotToken(e.target.value)}
                             disabled={isReceptionTokenLocked}
-                            className={`w-full px-4 py-2.5 border rounded-lg outline-none ${isReceptionTokenLocked ? 'bg-gray-100 text-gray-500 border-gray-200 cursor-not-allowed' : 'bg-white border-indigo-300 ring-2 ring-indigo-100'}`}
+                            className={`w-full px-4 py-2.5 border rounded-lg outline-none ${isReceptionTokenLocked ? 'bg-slate-100 text-slate-500 border-slate-200 cursor-not-allowed' : 'bg-white border-indigo-300 ring-2 ring-indigo-100'}`}
                             placeholder="123456789:ABC-def123..."
                         />
                         <button
                             type="button"
                             onClick={() => setIsReceptionTokenLocked(!isReceptionTokenLocked)}
-                            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1"
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1"
                             title={isReceptionTokenLocked ? "Разблокировать" : "Заблокировать"}
                         >
                             {isReceptionTokenLocked ? <Lock className="h-5 w-5" /> : <LockOpen className="h-5 w-5" />}
@@ -23626,7 +23627,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Bot Token (Логи входа)</label>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">Bot Token (Логи входа)</label>
                     <div className="flex gap-2">
                         <div className="relative flex-1">
                         <input
@@ -23634,13 +23635,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             value={telegramBotTokenFile}
                             onChange={(e) => setTelegramBotTokenFile(e.target.value)}
                             disabled={isFileTokenLocked}
-                            className={`w-full px-4 py-2.5 border rounded-lg outline-none ${isFileTokenLocked ? 'bg-gray-100 text-gray-500 border-gray-200 cursor-not-allowed' : 'bg-white border-indigo-300 ring-2 ring-indigo-100'}`}
+                            className={`w-full px-4 py-2.5 border rounded-lg outline-none ${isFileTokenLocked ? 'bg-slate-100 text-slate-500 border-slate-200 cursor-not-allowed' : 'bg-white border-indigo-300 ring-2 ring-indigo-100'}`}
                             placeholder="123456789:ABC-def123..."
                         />
                         <button
                             type="button"
                             onClick={() => setIsFileTokenLocked(!isFileTokenLocked)}
-                            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1"
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1"
                             title={isFileTokenLocked ? "Разблокировать" : "Заблокировать"}
                         >
                             {isFileTokenLocked ? <Lock className="h-5 w-5" /> : <LockOpen className="h-5 w-5" />}
@@ -23657,11 +23658,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             <Save className="h-5 w-5" />
                         </button>
                     </div>
-                    <p className="text-xs text-gray-500 mt-1">Только этот бот отправляет логи входа/выхода администраторам.</p>
+                    <p className="text-xs text-slate-500 mt-1">Только этот бот отправляет логи входа/выхода администраторам.</p>
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Bot Token Backup (Авто-выгрузка)</label>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">Bot Token Backup (Авто-выгрузка)</label>
                     <div className="flex gap-2">
                         <div className="relative flex-1">
                         <input
@@ -23669,13 +23670,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             value={backupBotToken}
                             onChange={(e) => setBackupBotToken(e.target.value)}
                             disabled={isBackupTokenLocked}
-                            className={`w-full px-4 py-2.5 border rounded-lg outline-none ${isBackupTokenLocked ? 'bg-gray-100 text-gray-500 border-gray-200 cursor-not-allowed' : 'bg-white border-indigo-300 ring-2 ring-indigo-100'}`}
+                            className={`w-full px-4 py-2.5 border rounded-lg outline-none ${isBackupTokenLocked ? 'bg-slate-100 text-slate-500 border-slate-200 cursor-not-allowed' : 'bg-white border-indigo-300 ring-2 ring-indigo-100'}`}
                             placeholder="123456789:ABC-def123..."
                         />
                         <button
                             type="button"
                             onClick={() => setIsBackupTokenLocked(!isBackupTokenLocked)}
-                            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1"
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1"
                             title={isBackupTokenLocked ? "Разблокировать" : "Заблокировать"}
                         >
                             {isBackupTokenLocked ? <Lock className="h-5 w-5" /> : <LockOpen className="h-5 w-5" />}
@@ -23693,24 +23694,24 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Восстановление базы данных</label>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">Восстановление базы данных</label>
                     <div className="flex gap-2 items-center">
                         <input
                             type="file"
                             accept=".json"
                             onChange={handleRestoreDatabase}
-                            className="block w-full text-sm text-gray-500 file:mr-4 file:py-2.5 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 border border-gray-200 rounded-lg"
+                            className="block w-full text-sm text-slate-500 file:mr-4 file:py-2.5 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 border border-slate-200 rounded-lg"
                         />
                     </div>
                     <p className="text-xs text-red-500 mt-1">Внимание: Восстановление перезапишет существующие данные!</p>
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Отправить через бота</label>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">Отправить через бота</label>
                     <select
                       value={selectedBotForManual}
                       onChange={(e) => setSelectedBotForManual(e.target.value)}
-                      className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                      className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
                     >
                       <option value="main">Основной бот (Поставки)</option>
                       <option value="reception">Бот Приемки</option>
@@ -23719,11 +23720,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Поставщик (Chat ID)</label>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">Поставщик (Chat ID)</label>
                     <select
                       value={telegramSupplierId}
                       onChange={(e) => setTelegramSupplierId(e.target.value)}
-                      className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                      className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
                       required
                     >
                       <option value="">Выберите поставщика...</option>
@@ -23736,23 +23737,23 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Сообщение</label>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">Сообщение</label>
                     <textarea
                       value={telegramMessage}
                       onChange={(e) => setTelegramMessage(e.target.value)}
-                      className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none min-h-[120px]"
+                      className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none min-h-[120px]"
                       placeholder="Введите текст сообщения..."
                     />
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Прикрепить файл</label>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">Прикрепить файл</label>
                     <div className="flex items-center gap-3">
                       <input
                         type="file"
                         ref={telegramFileRef}
                         onChange={(e) => setTelegramFile(e.target.files?.[0] || null)}
-                        className="block w-full text-sm text-gray-500 file:mr-4 file:py-2.5 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
+                        className="block w-full text-sm text-slate-500 file:mr-4 file:py-2.5 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
                       />
                     </div>
                   </div>
@@ -23793,8 +23794,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
             <div className="max-w-6xl mx-auto">
               <div className="flex justify-between items-center mb-8">
                 <div>
-                  <h1 className="text-2xl font-bold text-gray-900">Сотрудники</h1>
-                  <p className="text-gray-500 mt-1">Управление персоналом</p>
+                  <h1 className="text-2xl font-bold text-slate-900">Сотрудники</h1>
+                  <p className="text-slate-500 mt-1">Управление персоналом</p>
                 </div>
                 <button
                   onClick={() => setShowAddEmployeeModal(true)}
@@ -23807,7 +23808,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
               <div className="oc-card overflow-hidden">
                 <div className="md:hidden p-3 space-y-2">
                   {employees.length === 0 ? (
-                    <div className="py-10 text-center text-gray-400">Сотрудники не найдены</div>
+                    <div className="py-10 text-center text-slate-400">Сотрудники не найдены</div>
                   ) : (
                     employees.map(emp => (
                       <div key={`emp-mobile-${emp.id}`} className="border border-slate-200 rounded-xl p-3 bg-white">
@@ -23853,24 +23854,24 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                 <table className="hidden md:table w-full text-left">
                   <thead>
-                    <tr className="bg-gray-50 border-b border-gray-100">
-                      <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">ФИО</th>
-                      <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Роль</th>
-                      <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Логин</th>
-                      <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Пароль</th>
-                      <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Chat ID</th>
-                      <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase text-right">Действия</th>
+                    <tr className="bg-slate-50 border-b border-slate-100">
+                      <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase">ФИО</th>
+                      <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase">Роль</th>
+                      <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase">Логин</th>
+                      <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase">Пароль</th>
+                      <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase">Chat ID</th>
+                      <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase text-right">Действия</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-100">
+                  <tbody className="divide-y divide-slate-100">
                     {employees.length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="px-6 py-12 text-center text-gray-400">Сотрудники не найдены</td>
+                        <td colSpan={6} className="px-6 py-12 text-center text-slate-400">Сотрудники не найдены</td>
                       </tr>
                     ) : (
                       employees.map(emp => (
-                        <tr key={emp.id} className="hover:bg-gray-50">
-                          <td className="px-6 py-4 font-medium text-gray-900">
+                        <tr key={emp.id} className="hover:bg-slate-50">
+                          <td className="px-6 py-4 font-medium text-slate-900">
                             <div className="flex items-center">
                                 <div className={`w-2.5 h-2.5 rounded-full mr-2 ${emp.is_online ? 'bg-green-500' : 'bg-red-500'}`}></div>
                                 {emp.full_name}
@@ -23880,14 +23881,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             <span className={`px-2 py-1 rounded-full text-xs font-medium ${
                                 emp.role === 'Управляющий' ? 'bg-purple-100 text-purple-700' :
                                 emp.role === 'Менеджер' ? 'bg-blue-100 text-blue-700' :
-                                'bg-gray-100 text-gray-700'
+                                'bg-slate-100 text-slate-700'
                             }`}>
                                 {emp.role || 'Сборщик'}
                             </span>
                           </td>
-                          <td className="px-6 py-4 text-gray-600">{emp.login}</td>
-                          <td className="px-6 py-4 text-gray-600 font-mono">{emp.password}</td>
-                          <td className="px-6 py-4 text-gray-600">{emp.telegram_chat_id}</td>
+                          <td className="px-6 py-4 text-slate-600">{emp.login}</td>
+                          <td className="px-6 py-4 text-slate-600 font-mono">{emp.password}</td>
+                          <td className="px-6 py-4 text-slate-600">{emp.telegram_chat_id}</td>
                           <td className="px-6 py-4 text-right flex justify-end gap-2">
                             <button
                                 onClick={async () => {
@@ -23904,28 +23905,28 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                     navigator.clipboard.writeText(link);
                                     showToast('Ссылка для входа скопирована', 'success');
                                 }}
-                                className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg"
+                                className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg"
                                 title="Копировать ссылку для входа"
                             >
                                 <Link className="h-4 w-4" />
                             </button>
                             <button
                                 onClick={() => setShowActivityLogModal(emp)}
-                                className="p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg"
+                                className="p-2 text-slate-400 hover:text-green-600 hover:bg-green-50 rounded-lg"
                                 title="Лог действий"
                             >
                                 <FileClock className="h-4 w-4" />
                             </button>
                             <button
                                 onClick={() => setShowDevicesModal(emp)}
-                                className="p-2 text-gray-400 hover:text-violet-600 hover:bg-violet-50 rounded-lg"
+                                className="p-2 text-slate-400 hover:text-violet-600 hover:bg-violet-50 rounded-lg"
                                 title="Устройства"
                             >
                                 <Terminal className="h-4 w-4" />
                             </button>
                             <button
                                 onClick={() => setShowSendQRModal(emp)}
-                                className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg"
+                                className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg"
                                 title="Отправить QR"
                             >
                                 <QrCode className="h-4 w-4" />
@@ -23939,21 +23940,21 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             </button>
                             <button
                                 onClick={() => handleDisconnectEmployee(emp.id)}
-                                className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg"
+                                className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg"
                                 title="Отключить"
                             >
                                 <Power className="h-4 w-4" />
                             </button>
                             <button
                                 onClick={() => setEmployeeToDelete(emp)}
-                                className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg"
+                                className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg"
                                 title="Удалить"
                             >
                                 <Trash2 className="h-4 w-4" />
                             </button>
                             <button
                                 onClick={() => setEditingEmployee(emp)}
-                                className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg"
+                                className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg"
                                 title="Редактировать"
                             >
                                 <Pencil className="h-4 w-4" />
@@ -23971,12 +23972,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
           {/* Add Employee Modal */}
           {showAddEmployeeModal && (
-            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50">
               <div className="bg-white rounded-xl p-6 w-full max-w-md">
                 <h2 className="text-xl font-bold mb-4">Добавить сотрудника</h2>
                 <form onSubmit={handleAddEmployee} className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">ФИО</label>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">ФИО</label>
                     <input
                       type="text"
                       value={newEmployee.fullName}
@@ -23986,7 +23987,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Роль</label>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Роль</label>
                     <select
                       value={newEmployee.role}
                       onChange={e => setNewEmployee({...newEmployee, role: e.target.value})}
@@ -23998,7 +23999,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Логин</label>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Логин</label>
                     <input
                       type="text"
                       value={newEmployee.login}
@@ -24008,7 +24009,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Пароль</label>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Пароль</label>
                     <input
                       type="text"
                       value={newEmployee.password}
@@ -24018,7 +24019,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Telegram Chat ID</label>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Telegram Chat ID</label>
                     <input
                       type="text"
                       value={newEmployee.chatId}
@@ -24029,22 +24030,22 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   </div>
 
                   <div className="border-t pt-4 mt-4">
-                    <label className="block text-sm font-medium text-gray-700 mb-3">Доступ к разделам</label>
+                    <label className="block text-sm font-medium text-slate-700 mb-3">Доступ к разделам</label>
                     <div className="space-y-3 max-h-[40vh] overflow-y-auto pr-1">
                       {EMPLOYEE_PERMISSION_SECTIONS.map(section => (
-                        <div key={section.title} className="border border-gray-200 rounded-lg p-3 bg-gray-50/50">
-                          <div className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-2">{section.title}</div>
+                        <div key={section.title} className="border border-slate-200 rounded-lg p-3 bg-slate-50/50">
+                          <div className="text-xs font-semibold text-slate-700 uppercase tracking-wide mb-2">{section.title}</div>
                           <div className="grid grid-cols-1 gap-2">
                             {section.items.map(item => (
-                              <div key={item.id} className="flex items-center justify-between p-2 bg-white rounded-lg border border-gray-100">
-                                <span className="text-sm text-gray-700">{item.label}</span>
+                              <div key={item.id} className="flex items-center justify-between p-2 bg-white rounded-lg border border-slate-100">
+                                <span className="text-sm text-slate-700">{item.label}</span>
                                 <button
                                   type="button"
                                   onClick={() => setNewEmployee(prev => ({
                                     ...prev,
                                     permissions: { ...prev.permissions, [item.id]: !prev.permissions?.[item.id] }
                                   }))}
-                                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${newEmployee.permissions?.[item.id] ? 'bg-indigo-600' : 'bg-gray-200'}`}
+                                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${newEmployee.permissions?.[item.id] ? 'bg-indigo-600' : 'bg-slate-200'}`}
                                 >
                                   <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${newEmployee.permissions?.[item.id] ? 'translate-x-6' : 'translate-x-1'}`} />
                                 </button>
@@ -24057,7 +24058,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   </div>
 
                   <div className="flex justify-end gap-2 mt-6">
-                    <button type="button" onClick={() => setShowAddEmployeeModal(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">Отмена</button>
+                    <button type="button" onClick={() => setShowAddEmployeeModal(false)} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg">Отмена</button>
                     <button type="submit" disabled={addingEmployee} className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center">
                       {addingEmployee ? 'Добавление...' : 'Добавить'}
                     </button>
@@ -24069,13 +24070,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
           {/* Edit Employee Modal */}
           {editingEmployee && (
-            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50">
               <div className="bg-white rounded-xl p-6 w-full max-w-md">
                 <h2 className="text-xl font-bold mb-4">Редактировать сотрудника</h2>
                 <form onSubmit={handleUpdateEmployee} className="space-y-3">
                   <div className="grid grid-cols-2 gap-3">
                     <div className="col-span-2">
-                        <label className="block text-sm font-medium text-gray-700 mb-1">ФИО</label>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">ФИО</label>
                         <input
                         type="text"
                         value={editingEmployee.full_name}
@@ -24085,7 +24086,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         />
                     </div>
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Роль</label>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">Роль</label>
                         <select
                         value={editingEmployee.role || 'Сборщик'}
                         onChange={e => setEditingEmployee({...editingEmployee, role: e.target.value})}
@@ -24097,7 +24098,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         </select>
                     </div>
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Логин</label>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">Логин</label>
                         <input
                         type="text"
                         value={editingEmployee.login}
@@ -24107,7 +24108,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         />
                     </div>
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Пароль</label>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">Пароль</label>
                         <input
                         type="text"
                         value={editingEmployee.password}
@@ -24117,7 +24118,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         />
                     </div>
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Chat ID</label>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">Chat ID</label>
                         <input
                         type="text"
                         value={editingEmployee.telegram_chat_id}
@@ -24129,15 +24130,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   </div>
 
                   <div className="border-t pt-3 mt-3">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Доступ к разделам</label>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">Доступ к разделам</label>
                     <div className="space-y-3 max-h-[38vh] overflow-y-auto pr-1">
                       {EMPLOYEE_PERMISSION_SECTIONS.map(section => (
-                        <div key={section.title} className="border border-gray-200 rounded-lg p-3 bg-gray-50/50">
-                          <div className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-2">{section.title}</div>
+                        <div key={section.title} className="border border-slate-200 rounded-lg p-3 bg-slate-50/50">
+                          <div className="text-xs font-semibold text-slate-700 uppercase tracking-wide mb-2">{section.title}</div>
                           <div className="grid grid-cols-1 gap-2">
                             {section.items.map(item => (
-                              <div key={item.id} className="flex items-center justify-between p-2 bg-white rounded-lg border border-gray-100">
-                                <span className="text-sm text-gray-700">{item.label}</span>
+                              <div key={item.id} className="flex items-center justify-between p-2 bg-white rounded-lg border border-slate-100">
+                                <span className="text-sm text-slate-700">{item.label}</span>
                                 <button
                                   type="button"
                                   onClick={() => setEditingEmployee((prev: any) => ({
@@ -24147,7 +24148,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                       [item.id]: prev.permissions?.[item.id] === false ? true : false
                                     }
                                   }))}
-                                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${editingEmployee.permissions?.[item.id] !== false ? 'bg-indigo-600' : 'bg-gray-200'}`}
+                                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${editingEmployee.permissions?.[item.id] !== false ? 'bg-indigo-600' : 'bg-slate-200'}`}
                                 >
                                   <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${editingEmployee.permissions?.[item.id] !== false ? 'translate-x-6' : 'translate-x-1'}`} />
                                 </button>
@@ -24160,7 +24161,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   </div>
 
                   <div className="flex justify-end gap-2 mt-6">
-                    <button type="button" onClick={() => setEditingEmployee(null)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">Отмена</button>
+                    <button type="button" onClick={() => setEditingEmployee(null)} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg">Отмена</button>
                     <button type="submit" disabled={addingEmployee} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center">
                       {addingEmployee ? 'Сохранение...' : 'Сохранить'}
                     </button>
@@ -24172,33 +24173,33 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
           {/* Activity Log Modal */}
           {showActivityLogModal && (
-            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50">
               <div className="bg-white rounded-xl p-6 w-full max-w-4xl h-[80vh] flex flex-col">
                 <div className="flex justify-between items-center mb-6 gap-3">
                   <div>
-                    <h2 className="text-xl font-bold text-gray-900">Лог действий</h2>
-                    <p className="text-gray-500">{showActivityLogModal.full_name}</p>
+                    <h2 className="text-xl font-bold text-slate-900">Лог действий</h2>
+                    <p className="text-slate-500">{showActivityLogModal.full_name}</p>
                   </div>
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => setActivityLogsUsefulOnly((v) => !v)}
-                      className="px-3 py-1.5 text-xs rounded-lg border border-gray-300 hover:bg-gray-50"
+                      className="px-3 py-1.5 text-xs rounded-lg border border-slate-300 hover:bg-slate-50"
                     >
                       {activityLogsUsefulOnly ? 'Показать все' : 'Только полезные'}
                     </button>
-                    <button onClick={() => setShowActivityLogModal(null)} className="p-2 hover:bg-gray-100 rounded-lg">
-                      <X className="h-6 w-6 text-gray-500" />
+                    <button onClick={() => setShowActivityLogModal(null)} className="p-2 hover:bg-slate-100 rounded-lg">
+                      <X className="h-6 w-6 text-slate-500" />
                     </button>
                   </div>
                 </div>
 
                 <div className="flex-1 overflow-y-auto custom-scrollbar">
                   {loadingLogs ? (
-                    <div className="text-center py-12 text-gray-400">Загрузка...</div>
+                    <div className="text-center py-12 text-slate-400">Загрузка...</div>
                   ) : filteredActivityLogs.length === 0 ? (
-                    <div className="text-center py-12 text-gray-400">
+                    <div className="text-center py-12 text-slate-400">
                         История действий пуста
-                        <div className="text-xs mt-2 text-gray-300">ID: {showActivityLogModal.id}</div>
+                        <div className="text-xs mt-2 text-slate-300">ID: {showActivityLogModal.id}</div>
                     </div>
                   ) : (
                     <div className="space-y-6">
@@ -24209,34 +24210,34 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         return acc;
                       }, {})).map(([date, logs]: [string, any]) => (
                         <div key={date}>
-                          <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-3 sticky top-0 bg-white py-2">{date}</h3>
-                          <div className="bg-gray-50 rounded-xl border border-gray-100 overflow-hidden">
+                          <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-3 sticky top-0 bg-white py-2">{date}</h3>
+                          <div className="bg-slate-50 rounded-xl border border-slate-100 overflow-hidden">
                             {logs.map((log: any) => {
                               const change = parseEmployeeChange(log.details || '');
                               const assemblyChange = parseAssemblyChange(log.details || '');
                               const rollbackable = Boolean(change || assemblyChange);
                               const opLabel = (op: string) => op === 'create' ? 'создание' : op === 'update' ? 'изменение' : 'удаление';
                               return (
-                              <div key={log.id} className="p-4 border-b border-gray-100 last:border-0 hover:bg-white transition-colors">
+                              <div key={log.id} className="p-4 border-b border-slate-100 last:border-0 hover:bg-white transition-colors">
                                 <div className="flex justify-between items-start gap-3">
                                   <div className="min-w-0">
-                                    <div className="font-medium text-gray-900">
+                                    <div className="font-medium text-slate-900">
                                       {change ? 'Изменение карточки сотрудника' : assemblyChange ? `Сборка: ${assemblyChange.entity}` : log.action}
                                     </div>
                                     {change ? (
-                                      <div className="text-sm text-gray-600 mt-1 space-y-1">
+                                      <div className="text-sm text-slate-600 mt-1 space-y-1">
                                         <div>Операция: {opLabel(change.op)}</div>
                                         <div>Сотрудник: {change.after?.full_name || change.before?.full_name || '-'}</div>
                                         {change.op === 'update' && (
-                                          <div className="text-xs text-gray-500">Логин: {change.before?.login || '-'} → {change.after?.login || '-'}</div>
+                                          <div className="text-xs text-slate-500">Логин: {change.before?.login || '-'} → {change.after?.login || '-'}</div>
                                         )}
                                         <details className="mt-2">
                                           <summary className="cursor-pointer text-xs text-indigo-600">Подробнее</summary>
-                                          <pre className="mt-1 p-2 bg-gray-100 rounded text-[10px] overflow-auto max-h-36">{JSON.stringify({ before: change.before || null, after: change.after || null }, null, 2)}</pre>
+                                          <pre className="mt-1 p-2 bg-slate-100 rounded text-[10px] overflow-auto max-h-36">{JSON.stringify({ before: change.before || null, after: change.after || null }, null, 2)}</pre>
                                         </details>
                                       </div>
                                     ) : assemblyChange ? (
-                                      <div className="text-sm text-gray-600 mt-1 space-y-1">
+                                      <div className="text-sm text-slate-600 mt-1 space-y-1">
                                         <div className="flex flex-wrap gap-1.5">
                                           <span className="px-2 py-0.5 rounded-full text-[11px] bg-indigo-50 text-indigo-700 border border-indigo-200">Операция: {opLabel(assemblyChange.op)}</span>
                                           <span className="px-2 py-0.5 rounded-full text-[11px] bg-amber-50 text-amber-700 border border-amber-200">Секция: {assemblyChange.entity}</span>
@@ -24248,15 +24249,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                         </div>
                                         <details className="mt-2">
                                           <summary className="cursor-pointer text-xs text-indigo-600">Подробнее</summary>
-                                          <pre className="mt-1 p-2 bg-gray-100 rounded text-[10px] overflow-auto max-h-36">{JSON.stringify({ before: assemblyChange.before || null, after: assemblyChange.after || null }, null, 2)}</pre>
+                                          <pre className="mt-1 p-2 bg-slate-100 rounded text-[10px] overflow-auto max-h-36">{JSON.stringify({ before: assemblyChange.before || null, after: assemblyChange.after || null }, null, 2)}</pre>
                                         </details>
                                       </div>
                                     ) : (
-                                      <div className="text-sm text-gray-600 mt-1">{log.details}</div>
+                                      <div className="text-sm text-slate-600 mt-1">{log.details}</div>
                                     )}
                                   </div>
                                   <div className="flex flex-col items-end gap-2 shrink-0">
-                                    <div className="text-xs text-gray-400 font-mono">
+                                    <div className="text-xs text-slate-400 font-mono">
                                       {new Date(log.created_at).toLocaleTimeString('ru-RU')}
                                     </div>
                                     {assemblyChange && (
@@ -24271,7 +24272,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                       <button
                                         onClick={() => change ? rollbackEmployeeChange(log) : rollbackAssemblyChange(log)}
                                         disabled={rollingBackLogId === String(log.id)}
-                                        className={`px-2 py-1 text-xs rounded border ${rollingBackLogId === String(log.id) ? 'border-gray-200 text-gray-400' : 'border-indigo-200 text-indigo-700 hover:bg-indigo-50'}`}
+                                        className={`px-2 py-1 text-xs rounded border ${rollingBackLogId === String(log.id) ? 'border-slate-200 text-slate-400' : 'border-indigo-200 text-indigo-700 hover:bg-indigo-50'}`}
                                       >
                                         {rollingBackLogId === String(log.id) ? 'Откат…' : 'Откатить'}
                                       </button>
@@ -24291,12 +24292,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           )}
 
           {showDevicesModal && (
-            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setShowDevicesModal(null)}>
+            <div className="fixed inset-0 bg-slate-900/55 backdrop-blur-sm backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setShowDevicesModal(null)}>
               <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl p-6" onClick={(e) => e.stopPropagation()}>
                 <div className="flex items-center justify-between mb-4 gap-2">
                   <div>
-                    <h3 className="text-xl font-bold text-gray-900">Устройства</h3>
-                    <div className="text-sm text-gray-500">{showDevicesModal.full_name}</div>
+                    <h3 className="text-xl font-bold text-slate-900">Устройства</h3>
+                    <div className="text-sm text-slate-500">{showDevicesModal.full_name}</div>
                   </div>
                   <div className="flex items-center gap-2">
                     <button
@@ -24305,30 +24306,30 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     >
                       Очистить пустые входы
                     </button>
-                    <button onClick={() => setShowDevicesModal(null)} className="p-2 rounded-lg hover:bg-gray-100"><X className="h-5 w-5 text-gray-500" /></button>
+                    <button onClick={() => setShowDevicesModal(null)} className="p-2 rounded-lg hover:bg-slate-100"><X className="h-5 w-5 text-slate-500" /></button>
                   </div>
                 </div>
                 {loadingEmployeeDevices ? (
-                  <div className="py-10 text-center text-gray-400">Загрузка...</div>
+                  <div className="py-10 text-center text-slate-400">Загрузка...</div>
                 ) : employeeDevices.length === 0 ? (
-                  <div className="py-10 text-center text-gray-400">Нет данных по устройствам</div>
+                  <div className="py-10 text-center text-slate-400">Нет данных по устройствам</div>
                 ) : (
                   <div className="space-y-2 max-h-[60vh] overflow-y-auto">
                     {employeeDevices.map((d: any) => (
-                      <div key={`dev-${d.id}`} className="border rounded-xl p-3 bg-gray-50">
+                      <div key={`dev-${d.id}`} className="border rounded-xl p-3 bg-slate-50">
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0">
-                            <div className="text-sm font-medium text-gray-900">{d.platform}</div>
-                            <div className="text-xs text-gray-600 mt-0.5 break-all">{d.browser}</div>
-                            <div className="text-xs text-gray-500 mt-1">IP: {d.ip}</div>
-                            <div className="text-[11px] text-gray-400 mt-1">{new Date(d.created_at).toLocaleString('ru-RU')}</div>
+                            <div className="text-sm font-medium text-slate-900">{d.platform}</div>
+                            <div className="text-xs text-slate-600 mt-0.5 break-all">{d.browser}</div>
+                            <div className="text-xs text-slate-500 mt-1">IP: {d.ip}</div>
+                            <div className="text-[11px] text-slate-400 mt-1">{new Date(d.created_at).toLocaleString('ru-RU')}</div>
                           </div>
                           <div className="flex flex-col gap-1">
                             {d.session_id && (
                               <button
                                 onClick={() => revokeEmployeeDeviceSession(String(showDevicesModal.id), String(d.session_id))}
                                 disabled={revokingDeviceSessionId === String(d.session_id)}
-                                className={`px-2 py-1 text-xs rounded border ${revokingDeviceSessionId === String(d.session_id) ? 'border-gray-200 text-gray-400' : 'border-rose-200 text-rose-700 hover:bg-rose-50'}`}
+                                className={`px-2 py-1 text-xs rounded border ${revokingDeviceSessionId === String(d.session_id) ? 'border-slate-200 text-slate-400' : 'border-rose-200 text-rose-700 hover:bg-rose-50'}`}
                               >
                                 {revokingDeviceSessionId === String(d.session_id) ? '...' : 'Сессию'}
                               </button>
@@ -24336,7 +24337,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             <button
                               onClick={() => d.device_id && revokeEmployeeDevice(String(showDevicesModal.id), String(d.device_id))}
                               disabled={!d.device_id || revokingDeviceSessionId === String(d.device_id)}
-                              className={`px-2 py-1 text-xs rounded border ${(!d.device_id || revokingDeviceSessionId === String(d.device_id)) ? 'border-gray-200 text-gray-400 cursor-not-allowed' : 'border-violet-200 text-violet-700 hover:bg-violet-50'}`}
+                              className={`px-2 py-1 text-xs rounded border ${(!d.device_id || revokingDeviceSessionId === String(d.device_id)) ? 'border-slate-200 text-slate-400 cursor-not-allowed' : 'border-violet-200 text-violet-700 hover:bg-violet-50'}`}
                               title={d.device_id ? 'Отключить это устройство' : 'Для старых входов device_id отсутствует'}
                             >
                               {revokingDeviceSessionId === String(d.device_id) ? '...' : 'Отключить устройство'}
@@ -24353,10 +24354,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
           {/* Send QR Modal */}
           {showSendQRModal && (
-            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50">
               <div className="bg-white rounded-xl p-8 w-full max-w-sm text-center">
                 <div className="mb-6 flex justify-center">
-                  <div className="p-4 bg-white border border-gray-200 rounded-lg shadow-sm inline-block">
+                  <div className="p-4 bg-white border border-slate-200 rounded-lg shadow-sm inline-block">
                     <QRCodeSVG
                       id="employee-qr-code"
                       value={`EMPLOYEE:${showSendQRModal.id}`}
@@ -24364,14 +24365,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     />
                   </div>
                 </div>
-                <h3 className="text-xl font-bold text-gray-900 mb-2">QR код сотрудника</h3>
-                <p className="text-gray-500 mb-6">
+                <h3 className="text-xl font-bold text-slate-900 mb-2">QR код сотрудника</h3>
+                <p className="text-slate-500 mb-6">
                   <strong>{showSendQRModal.full_name}</strong>
                 </p>
                 <div className="flex gap-3 justify-center flex-wrap">
                   <button
                     onClick={() => setShowSendQRModal(null)}
-                    className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-medium"
+                    className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg font-medium"
                   >
                     Закрыть
                   </button>
@@ -24402,7 +24403,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         `);
                         printWindow?.document.close();
                     }}
-                    className="px-6 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 font-medium flex items-center"
+                    className="px-6 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 font-medium flex items-center"
                   >
                     <Printer className="h-5 w-5 mr-2" />
                     Печать
@@ -24421,15 +24422,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
           {/* Delete Confirmation Modal */}
           {productToDelete && (
-            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50">
               <div className="bg-white rounded-xl p-6 w-full max-w-sm text-center">
                 <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
                   <Trash2 className="h-6 w-6 text-red-600" />
                 </div>
-                <h3 className="text-lg font-bold text-gray-900 mb-2">Удалить товар?</h3>
-                <p className="text-gray-500 mb-6">Вы уверены, что хотите удалить "{productToDelete.name}"? Это действие нельзя отменить.</p>
+                <h3 className="text-lg font-bold text-slate-900 mb-2">Удалить товар?</h3>
+                <p className="text-slate-500 mb-6">Вы уверены, что хотите удалить "{productToDelete.name}"? Это действие нельзя отменить.</p>
                 <div className="flex gap-3 justify-center">
-                  <button onClick={() => setProductToDelete(null)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-medium">Отмена</button>
+                  <button onClick={() => setProductToDelete(null)} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg font-medium">Отмена</button>
                   <button onClick={confirmDeleteProduct} className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium">Удалить</button>
                 </div>
               </div>
@@ -24438,15 +24439,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
           {/* Delete Employee Confirmation Modal */}
           {employeeToDelete && (
-            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50">
               <div className="bg-white rounded-xl p-6 w-full max-w-sm text-center">
                 <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
                   <Trash2 className="h-6 w-6 text-red-600" />
                 </div>
-                <h3 className="text-lg font-bold text-gray-900 mb-2">Удалить сотрудника?</h3>
-                <p className="text-gray-500 mb-6">Вы уверены, что хотите удалить "{employeeToDelete.full_name}"? Это действие нельзя отменить.</p>
+                <h3 className="text-lg font-bold text-slate-900 mb-2">Удалить сотрудника?</h3>
+                <p className="text-slate-500 mb-6">Вы уверены, что хотите удалить "{employeeToDelete.full_name}"? Это действие нельзя отменить.</p>
                 <div className="flex gap-3 justify-center">
-                  <button onClick={() => setEmployeeToDelete(null)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-medium">Отмена</button>
+                  <button onClick={() => setEmployeeToDelete(null)} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg font-medium">Отмена</button>
                   <button onClick={confirmDeleteEmployee} className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium">Удалить</button>
                 </div>
               </div>
@@ -24455,15 +24456,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
           {/* Close Supply Confirmation Modal */}
           {showCloseModal && (
-            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50">
               <div className="bg-white rounded-xl p-6 w-full max-w-sm text-center">
                 <div className="w-12 h-12 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-4">
                   <CheckCircle2 className="h-6 w-6 text-indigo-600" />
                 </div>
-                <h3 className="text-lg font-bold text-gray-900 mb-2">Закрыть поставку?</h3>
-                <p className="text-gray-500 mb-6">Это отправит отчет поставщику и заблокирует редактирование.</p>
+                <h3 className="text-lg font-bold text-slate-900 mb-2">Закрыть поставку?</h3>
+                <p className="text-slate-500 mb-6">Это отправит отчет поставщику и заблокирует редактирование.</p>
                 <div className="flex gap-3 justify-center">
-                  <button onClick={() => setShowCloseModal(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-medium">Отмена</button>
+                  <button onClick={() => setShowCloseModal(false)} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg font-medium">Отмена</button>
                   <button onClick={executeCloseSupply} className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium">Закрыть</button>
                 </div>
               </div>
@@ -24472,22 +24473,22 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
           {/* Supplier History Modal */}
           {showSupplierHistory && historySupplier && (
-            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowSupplierHistory(false)}>
+            <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => setShowSupplierHistory(false)}>
               <div className="bg-white rounded-xl p-6 w-full max-w-2xl max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
                 <div className="flex justify-between items-center mb-6">
                   <div>
-                    <h2 className="text-xl font-bold text-gray-900">История {historyType === 'supplies' ? 'поставок' : 'приемок'}</h2>
-                    <p className="text-gray-500">{historySupplier.name}</p>
+                    <h2 className="text-xl font-bold text-slate-900">История {historyType === 'supplies' ? 'поставок' : 'приемок'}</h2>
+                    <p className="text-slate-500">{historySupplier.name}</p>
                   </div>
-                  <button onClick={() => setShowSupplierHistory(false)} className="p-2 hover:bg-gray-100 rounded-lg">
-                    <X className="h-6 w-6 text-gray-500" />
+                  <button onClick={() => setShowSupplierHistory(false)} className="p-2 hover:bg-slate-100 rounded-lg">
+                    <X className="h-6 w-6 text-slate-500" />
                   </button>
                 </div>
 
                 <div className="space-y-3">
                   {historyType === 'supplies' ? (
                     historySupplies.length === 0 ? (
-                      <div className="text-center py-8 text-gray-400">Нет поставок</div>
+                      <div className="text-center py-8 text-slate-400">Нет поставок</div>
                     ) : (
                       historySupplies.map(supply => (
                         <div
@@ -24500,12 +24501,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             switchTab('supplies');
                             setShowSupplierHistory(false);
                           }}
-                          className={`bg-white p-4 rounded-xl border flex justify-between items-center cursor-pointer hover:shadow-md transition-shadow ${supply.status === 'closed' ? 'border-green-200 bg-green-50' : 'border-gray-100'}`}
+                          className={`bg-white p-4 rounded-xl border flex justify-between items-center cursor-pointer hover:shadow-md transition-shadow ${supply.status === 'closed' ? 'border-green-200 bg-green-50' : 'border-slate-100'}`}
                         >
                           <div>
-                            <div className="font-bold text-gray-900">{supply.name}</div>
-                            <div className="text-sm text-gray-500 flex items-center gap-2 mt-1">
-                              <span className="bg-white px-2 py-0.5 rounded text-xs font-medium text-gray-600 border border-gray-200">
+                            <div className="font-bold text-slate-900">{supply.name}</div>
+                            <div className="text-sm text-slate-500 flex items-center gap-2 mt-1">
+                              <span className="bg-white px-2 py-0.5 rounded text-xs font-medium text-slate-600 border border-slate-200">
                                 {supply.total_items || 0} шт.
                               </span>
                               {supply.status === 'closed' ? (
@@ -24515,13 +24516,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               )}
                             </div>
                           </div>
-                          <ChevronRight className="h-5 w-5 text-gray-400" />
+                          <ChevronRight className="h-5 w-5 text-slate-400" />
                         </div>
                       ))
                     )
                   ) : (
                     historyReceptions.length === 0 ? (
-                      <div className="text-center py-8 text-gray-400">Нет приемок</div>
+                      <div className="text-center py-8 text-slate-400">Нет приемок</div>
                     ) : (
                       historyReceptions.map(reception => (
                         <div
@@ -24531,12 +24532,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             switchTab('reception');
                             setShowSupplierHistory(false);
                           }}
-                          className={`bg-white p-4 rounded-xl border flex justify-between items-center cursor-pointer hover:shadow-md transition-shadow ${reception.status === 'closed' ? 'border-green-200 bg-green-50' : 'border-gray-100'}`}
+                          className={`bg-white p-4 rounded-xl border flex justify-between items-center cursor-pointer hover:shadow-md transition-shadow ${reception.status === 'closed' ? 'border-green-200 bg-green-50' : 'border-slate-100'}`}
                         >
                           <div>
-                            <div className="font-bold text-gray-900">Приемка от {new Date(reception.created_at).toLocaleDateString()}</div>
-                            <div className="text-sm text-gray-500 flex items-center gap-2 mt-1">
-                              <span className="bg-white px-2 py-0.5 rounded text-xs font-medium text-gray-600 border border-gray-200">
+                            <div className="font-bold text-slate-900">Приемка от {new Date(reception.created_at).toLocaleDateString()}</div>
+                            <div className="text-sm text-slate-500 flex items-center gap-2 mt-1">
+                              <span className="bg-white px-2 py-0.5 rounded text-xs font-medium text-slate-600 border border-slate-200">
                                 {receptionMetaMap[String(reception.id)]?.count ?? reception.photos?.length ?? 0} фото
                               </span>
                               {reception.status === 'closed' ? (
@@ -24552,12 +24553,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                     e.stopPropagation();
                                     handleDeleteReception(reception.id);
                                 }}
-                                className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                                 title="Удалить приемку"
                             >
                                 <Trash2 className="h-5 w-5" />
                             </button>
-                            <ChevronRight className="h-5 w-5 text-gray-400" />
+                            <ChevronRight className="h-5 w-5 text-slate-400" />
                           </div>
                         </div>
                       ))
@@ -24572,8 +24573,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           {activeTab === 'database' && (
             <div className="max-w-4xl mx-auto">
               <div className="mb-8">
-                <h1 className="text-2xl font-bold text-gray-900">База данных</h1>
-                <p className="text-gray-500 mt-1">Полные бэкапы, восстановление и лог версий базы данных</p>
+                <h1 className="text-2xl font-bold text-slate-900">База данных</h1>
+                <p className="text-slate-500 mt-1">Полные бэкапы, восстановление и лог версий базы данных</p>
                 <input
                   ref={databaseRestoreInputRef}
                   type="file"
@@ -24588,8 +24589,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   <div className="w-12 h-12 bg-indigo-100 rounded-lg flex items-center justify-center mb-4">
                     <Upload className="h-6 w-6 text-indigo-600" />
                   </div>
-                  <h3 className="font-bold text-gray-900 mb-2">Восстановить базу</h3>
-                  <p className="text-sm text-gray-500 mb-4">Загрузка JSON-бэкапа и восстановление данных в Supabase</p>
+                  <h3 className="font-bold text-slate-900 mb-2">Восстановить базу</h3>
+                  <p className="text-sm text-slate-500 mb-4">Загрузка JSON-бэкапа и восстановление данных в Supabase</p>
                   <button
                     onClick={() => databaseRestoreInputRef.current?.click()}
                     className="w-full py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium text-sm"
@@ -24602,11 +24603,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center mb-4">
                     <History className="h-6 w-6 text-green-600" />
                   </div>
-                  <h3 className="font-bold text-gray-900 mb-2">История базы</h3>
-                  <p className="text-sm text-gray-500 mb-4">Последние бэкапы и лог версий базы данных</p>
+                  <h3 className="font-bold text-slate-900 mb-2">История базы</h3>
+                  <p className="text-sm text-slate-500 mb-4">Последние бэкапы и лог версий базы данных</p>
                   <button
                     onClick={() => databaseHistoryRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-                    className="w-full py-2 bg-white border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 font-medium text-sm"
+                    className="w-full py-2 bg-white border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 font-medium text-sm"
                   >
                     Открыть историю
                   </button>
@@ -24616,14 +24617,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center mb-4">
                     <Database className="h-6 w-6 text-blue-600" />
                   </div>
-                  <h3 className="font-bold text-gray-900 mb-2">Автобэкап БД</h3>
-                  <p className="text-sm text-gray-500 mb-2">{databaseBackupScheduleLabel}</p>
-                  <p className="text-xs text-gray-400 mb-4">Последний лог: {databaseLogs[0]?.date || 'пока нет записей'}</p>
+                  <h3 className="font-bold text-slate-900 mb-2">Автобэкап БД</h3>
+                  <p className="text-sm text-slate-500 mb-2">{databaseBackupScheduleLabel}</p>
+                  <p className="text-xs text-slate-400 mb-4">Последний лог: {databaseLogs[0]?.date || 'пока нет записей'}</p>
                   <div className="space-y-2">
                     <button
                       onClick={refreshDatabaseLogs}
                       disabled={databaseLogsLoading}
-                      className="w-full py-2 bg-white border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 font-medium text-sm flex items-center justify-center disabled:opacity-50"
+                      className="w-full py-2 bg-white border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 font-medium text-sm flex items-center justify-center disabled:opacity-50"
                     >
                       <RefreshCw className={`h-4 w-4 mr-2 ${databaseLogsLoading ? 'animate-spin' : ''}`} /> Обновить историю
                     </button>
@@ -24646,33 +24647,33 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
               </div>
 
               <div ref={databaseHistoryRef} className="oc-card overflow-hidden">
-                <div className="px-6 py-4 border-b border-gray-100">
-                  <h3 className="font-bold text-gray-900">Лог версий базы данных</h3>
+                <div className="px-6 py-4 border-b border-slate-100">
+                  <h3 className="font-bold text-slate-900">Лог версий базы данных</h3>
                 </div>
                 <table className="w-full text-left">
                   <thead>
-                    <tr className="bg-gray-50 border-b border-gray-100">
-                      <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Версия</th>
-                      <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Дата</th>
-                      <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Описание</th>
+                    <tr className="bg-slate-50 border-b border-slate-100">
+                      <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase">Версия</th>
+                      <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase">Дата</th>
+                      <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase">Описание</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-100">
+                  <tbody className="divide-y divide-slate-100">
                     {databaseLogs.length === 0 ? (
                       <tr>
-                        <td colSpan={3} className="px-6 py-10 text-center text-gray-400">История бэкапов пока пустая</td>
+                        <td colSpan={3} className="px-6 py-10 text-center text-slate-400">История бэкапов пока пустая</td>
                       </tr>
                     ) : databaseLogs.map((log, index) => (
-                      <tr key={`${log.created_at || log.date || 'log'}-${index}`} className="hover:bg-gray-50 align-top">
+                      <tr key={`${log.created_at || log.date || 'log'}-${index}`} className="hover:bg-slate-50 align-top">
                         <td className="px-6 py-4 font-medium text-indigo-600">{log.version}</td>
-                        <td className="px-6 py-4 text-gray-600 whitespace-nowrap">{log.date}</td>
-                        <td className="px-6 py-4 text-gray-600">
+                        <td className="px-6 py-4 text-slate-600 whitespace-nowrap">{log.date}</td>
+                        <td className="px-6 py-4 text-slate-600">
                           <div>{log.details}</div>
                           {(log.source || log.status || log.file_name) && (
-                            <div className="mt-2 flex flex-wrap gap-2 text-xs text-gray-400">
-                              {log.source && <span className="rounded-full bg-gray-100 px-2 py-1">Источник: {log.source}</span>}
-                              {log.status && <span className="rounded-full bg-gray-100 px-2 py-1">Статус: {log.status}</span>}
-                              {log.file_name && <span className="rounded-full bg-gray-100 px-2 py-1">Файл: {log.file_name}</span>}
+                            <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-400">
+                              {log.source && <span className="rounded-full bg-slate-100 px-2 py-1">Источник: {log.source}</span>}
+                              {log.status && <span className="rounded-full bg-slate-100 px-2 py-1">Статус: {log.status}</span>}
+                              {log.file_name && <span className="rounded-full bg-slate-100 px-2 py-1">Файл: {log.file_name}</span>}
                             </div>
                           )}
                         </td>
@@ -24704,7 +24705,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   {hasAssemblyButtonAccess('cw_tab_calendar') && (
                   <button
                     onClick={() => setCompletedWorkStep('CALENDAR')}
-                    className={`min-h-[44px] min-w-0 px-3 py-2 rounded-lg text-sm font-medium leading-tight text-center transition-all ${completedWorkStep === 'CALENDAR' || completedWorkStep === 'FORM' ? 'bg-white shadow-sm text-gray-900' : 'text-indigo-100/90 hover:text-white hover:bg-white/10'}`}
+                    className={`min-h-[44px] min-w-0 px-3 py-2 rounded-lg text-sm font-medium leading-tight text-center transition-all ${completedWorkStep === 'CALENDAR' || completedWorkStep === 'FORM' ? 'bg-white shadow-sm text-slate-900' : 'text-indigo-100/90 hover:text-white hover:bg-white/10'}`}
                   >
                     Календарь
                   </button>
@@ -24723,7 +24724,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   {hasAssemblyButtonAccess('cw_tab_rates') && (
                   <button
                     onClick={() => setCompletedWorkStep('RATES')}
-                    className={`min-h-[44px] min-w-0 px-3 py-2 rounded-lg text-sm font-medium leading-tight text-center transition-all ${completedWorkStep === 'RATES' ? 'bg-white shadow-sm text-gray-900' : 'text-indigo-100/90 hover:text-white hover:bg-white/10'}`}
+                    className={`min-h-[44px] min-w-0 px-3 py-2 rounded-lg text-sm font-medium leading-tight text-center transition-all ${completedWorkStep === 'RATES' ? 'bg-white shadow-sm text-slate-900' : 'text-indigo-100/90 hover:text-white hover:bg-white/10'}`}
                   >
                     Расценки
                   </button>
@@ -24731,7 +24732,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   {hasAssemblyButtonAccess('cw_tab_packaging') && (
                   <button
                     onClick={() => setCompletedWorkStep('PACKAGING')}
-                    className={`min-h-[44px] min-w-0 px-3 py-2 rounded-lg text-sm font-medium leading-tight text-center transition-all ${completedWorkStep === 'PACKAGING' ? 'bg-white shadow-sm text-gray-900' : 'text-indigo-100/90 hover:text-white hover:bg-white/10'}`}
+                    className={`min-h-[44px] min-w-0 px-3 py-2 rounded-lg text-sm font-medium leading-tight text-center transition-all ${completedWorkStep === 'PACKAGING' ? 'bg-white shadow-sm text-slate-900' : 'text-indigo-100/90 hover:text-white hover:bg-white/10'}`}
                   >
                     Упаковка
                   </button>
@@ -24739,7 +24740,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   {hasAssemblyButtonAccess('cw_tab_boxes') && (
                   <button
                     onClick={() => setCompletedWorkStep('BOXES')}
-                    className={`min-h-[44px] min-w-0 px-3 py-2 rounded-lg text-sm font-medium leading-tight text-center transition-all ${completedWorkStep === 'BOXES' ? 'bg-white shadow-sm text-gray-900' : 'text-indigo-100/90 hover:text-white hover:bg-white/10'}`}
+                    className={`min-h-[44px] min-w-0 px-3 py-2 rounded-lg text-sm font-medium leading-tight text-center transition-all ${completedWorkStep === 'BOXES' ? 'bg-white shadow-sm text-slate-900' : 'text-indigo-100/90 hover:text-white hover:bg-white/10'}`}
                   >
                     ФБС / Коробки
                   </button>
@@ -24747,7 +24748,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   {hasAssemblyButtonAccess('cw_tab_purchase') && (
                   <button
                     onClick={() => setCompletedWorkStep('PURCHASE')}
-                    className={`min-h-[44px] min-w-0 px-3 py-2 rounded-lg text-sm font-medium leading-tight text-center transition-all ${completedWorkStep === 'PURCHASE' ? 'bg-white shadow-sm text-gray-900' : 'text-indigo-100/90 hover:text-white hover:bg-white/10'}`}
+                    className={`min-h-[44px] min-w-0 px-3 py-2 rounded-lg text-sm font-medium leading-tight text-center transition-all ${completedWorkStep === 'PURCHASE' ? 'bg-white shadow-sm text-slate-900' : 'text-indigo-100/90 hover:text-white hover:bg-white/10'}`}
                   >
                     Закуп
                   </button>
@@ -24855,11 +24856,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       const rateConfig = getCwRateEmployeeConfig(String(rate.id));
                       const activeEmployees = employees.filter((employee: any) => !employee?.deleted_at);
                       return (
-                        <div key={rate.id} className="p-3 bg-gray-50 rounded-lg space-y-3">
+                        <div key={rate.id} className="p-3 bg-slate-50 rounded-lg space-y-3">
                           <div className="flex justify-between items-start gap-3 flex-wrap">
                             <div>
                               <div className="font-medium">{rate.name}</div>
-                              <div className="text-sm text-gray-500">
+                              <div className="text-sm text-slate-500">
                                 {rateConfig.useSharedPrice ? `Одна цена для всех: ${rate.price} ₽` : 'Индивидуальные цены по сотрудникам'}
                               </div>
                             </div>
@@ -24902,7 +24903,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             </div>
                           </div>
 
-                          <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                          <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
                             <input
                               type="checkbox"
                               checked={rateConfig.useSharedPrice}
@@ -24921,7 +24922,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           {!rateConfig.useSharedPrice && (
                             <div className="border border-dashed border-slate-200 rounded-xl bg-white p-3 space-y-3">
                               {activeEmployees.length === 0 ? (
-                                <div className="text-sm text-gray-500">Нет активных сотрудников для настройки индивидуальных цен.</div>
+                                <div className="text-sm text-slate-500">Нет активных сотрудников для настройки индивидуальных цен.</div>
                               ) : (
                                 <>
                                   <div className="flex flex-wrap gap-2">
@@ -24973,7 +24974,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                     {activeEmployees.map((employee: any) => (
                                       <div key={`rate-employee-${rate.id}-${employee.id}`} className="rounded-lg border border-slate-200 p-3">
-                                        <div className="text-sm font-medium text-gray-800 mb-2">{employee.full_name || employee.login || `#${employee.id}`}</div>
+                                        <div className="text-sm font-medium text-slate-800 mb-2">{employee.full_name || employee.login || `#${employee.id}`}</div>
                                         <input
                                           type="number"
                                           step="0.01"
@@ -25023,29 +25024,29 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 </div>
 
                 {cwRateHistoryModal.open && (
-                  <div className="fixed inset-0 z-[90] bg-black/50 flex items-center justify-center p-4" onClick={() => setCwRateHistoryModal({ open: false, rateId: '', rateName: '' })}>
+                  <div className="fixed inset-0 z-[90] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setCwRateHistoryModal({ open: false, rateId: '', rateName: '' })}>
                     <div className="w-full max-w-lg bg-white rounded-2xl shadow-2xl p-4 sm:p-6" onClick={(e) => e.stopPropagation()}>
                       <div className="flex items-center justify-between mb-4">
                         <div>
                           <div className="text-lg font-bold">История расценки</div>
-                          <div className="text-sm text-gray-500">{cwRateHistoryModal.rateName || '-'}</div>
+                          <div className="text-sm text-slate-500">{cwRateHistoryModal.rateName || '-'}</div>
                         </div>
-                        <button onClick={() => setCwRateHistoryModal({ open: false, rateId: '', rateName: '' })} className="p-2 hover:bg-gray-100 rounded-lg"><X className="h-5 w-5" /></button>
+                        <button onClick={() => setCwRateHistoryModal({ open: false, rateId: '', rateName: '' })} className="p-2 hover:bg-slate-100 rounded-lg"><X className="h-5 w-5" /></button>
                       </div>
                       <div className="space-y-2 max-h-[60vh] overflow-y-auto">
                         {(cwWorkRateHistory[cwRateHistoryModal.rateId] || []).length === 0 ? (
-                          <div className="text-sm text-gray-500">История изменений пока пустая.</div>
+                          <div className="text-sm text-slate-500">История изменений пока пустая.</div>
                         ) : (
                           (cwWorkRateHistory[cwRateHistoryModal.rateId] || []).slice().reverse().map((row, idx) => (
-                            <div key={`rate-h-${idx}`} className="border rounded-xl p-3 bg-gray-50 flex items-center justify-between gap-3">
+                            <div key={`rate-h-${idx}`} className="border rounded-xl p-3 bg-slate-50 flex items-center justify-between gap-3">
                               <div>
-                                <div className="text-sm text-gray-700">{new Date(row.changed_at).toLocaleString('ru-RU')}</div>
-                                {row?.name ? <div className="text-xs text-gray-500">{row.name}</div> : null}
+                                <div className="text-sm text-slate-700">{new Date(row.changed_at).toLocaleString('ru-RU')}</div>
+                                {row?.name ? <div className="text-xs text-slate-500">{row.name}</div> : null}
                               </div>
                               <div className="text-right">
                                 {(row.old_price ?? null) !== null && (row.new_price ?? null) !== null && Number(row.old_price) !== Number(row.new_price) ? (
                                   <>
-                                    <div className="text-xs text-gray-500">{Number(row.old_price || 0).toLocaleString('ru-RU')} ₽ → {Number(row.new_price || 0).toLocaleString('ru-RU')} ₽</div>
+                                    <div className="text-xs text-slate-500">{Number(row.old_price || 0).toLocaleString('ru-RU')} ₽ → {Number(row.new_price || 0).toLocaleString('ru-RU')} ₽</div>
                                     <div className="font-bold text-indigo-700">Новая: {Number(row.new_price || row.price || 0).toLocaleString('ru-RU')} ₽</div>
                                   </>
                                 ) : (
@@ -25061,17 +25062,17 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 )}
 
                 {cwRateBulkModal.open && (
-                  <div className="fixed inset-0 z-[90] bg-black/50 flex items-center justify-center p-4" onClick={() => setCwRateBulkModal({ open: false, rateId: '', rateName: '', oldPrice: '', price: '', start: new Date().toISOString().split('T')[0], end: new Date().toISOString().split('T')[0] })}>
+                  <div className="fixed inset-0 z-[90] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setCwRateBulkModal({ open: false, rateId: '', rateName: '', oldPrice: '', price: '', start: new Date().toISOString().split('T')[0], end: new Date().toISOString().split('T')[0] })}>
                     <div className="w-full max-w-lg bg-white rounded-2xl shadow-2xl p-4 sm:p-6" onClick={(e) => e.stopPropagation()}>
                       <div className="flex items-center justify-between mb-4">
                         <div>
                           <div className="text-lg font-bold">Обновить цену с даты</div>
-                          <div className="text-sm text-gray-500">{cwRateBulkModal.rateName || '-'}</div>
+                          <div className="text-sm text-slate-500">{cwRateBulkModal.rateName || '-'}</div>
                         </div>
-                        <button onClick={() => setCwRateBulkModal({ open: false, rateId: '', rateName: '', oldPrice: '', price: '', start: new Date().toISOString().split('T')[0], end: new Date().toISOString().split('T')[0] })} className="p-2 hover:bg-gray-100 rounded-lg"><X className="h-5 w-5" /></button>
+                        <button onClick={() => setCwRateBulkModal({ open: false, rateId: '', rateName: '', oldPrice: '', price: '', start: new Date().toISOString().split('T')[0], end: new Date().toISOString().split('T')[0] })} className="p-2 hover:bg-slate-100 rounded-lg"><X className="h-5 w-5" /></button>
                       </div>
                       <div className="space-y-3">
-                        <div className="text-sm text-gray-500">Текущая цена: <span className="font-semibold text-gray-700">{cwRateBulkModal.oldPrice || '0'} ₽</span></div>
+                        <div className="text-sm text-slate-500">Текущая цена: <span className="font-semibold text-slate-700">{cwRateBulkModal.oldPrice || '0'} ₽</span></div>
                         <div className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
                           Старые записи в календаре не будут пересчитаны. Новая цена начнет применяться только к новым операциям с выбранной даты.
                         </div>
@@ -25154,7 +25155,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   </div>
                   <div className="space-y-2">
                     {cwPackagingRates.map(rate => (
-                      <div key={rate.id} className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
+                      <div key={rate.id} className="flex justify-between items-center p-3 bg-slate-50 rounded-lg">
                         <span className="font-medium">{rate.name}</span>
                         <div className="flex items-center gap-4">
                           <span className="font-bold text-green-600">{rate.price} ₽</span>
@@ -25188,50 +25189,50 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-12 gap-4 sm:gap-6">
                     <div className="bg-white/95 backdrop-blur p-4 sm:p-6 rounded-2xl shadow-lg border border-slate-200 xl:col-span-3 min-h-[210px] flex flex-col justify-between">
                         <div className="flex items-center justify-between mb-4">
-                            <h3 className="text-lg font-bold text-gray-900">Коробки на складе</h3>
+                            <h3 className="text-lg font-bold text-slate-900">Коробки на складе</h3>
                             <div className="p-2 bg-indigo-50 rounded-lg">
                                 <Box className="h-6 w-6 text-indigo-600" />
                             </div>
                         </div>
-                        <div className="text-3xl font-bold text-gray-900">{boxStats.currentStock}</div>
-                        <p className="text-sm text-gray-500 mt-1">Остаток</p>
+                        <div className="text-3xl font-bold text-slate-900">{boxStats.currentStock}</div>
+                        <p className="text-sm text-slate-500 mt-1">Остаток</p>
                     </div>
                     <div className="bg-white/95 backdrop-blur p-6 rounded-2xl shadow-lg border border-slate-200 xl:col-span-3 min-h-[210px] flex flex-col justify-between">
                         <div className="flex items-center justify-between mb-4">
-                            <h3 className="text-lg font-bold text-gray-900">Всего закуплено</h3>
+                            <h3 className="text-lg font-bold text-slate-900">Всего закуплено</h3>
                             <div className="p-2 bg-green-50 rounded-lg">
                                 <Plus className="h-6 w-6 text-green-600" />
                             </div>
                         </div>
-                        <div className="text-3xl font-bold text-gray-900">{boxStats.totalAdded}</div>
-                        <p className="text-sm text-gray-500 mt-1">
+                        <div className="text-3xl font-bold text-slate-900">{boxStats.totalAdded}</div>
+                        <p className="text-sm text-slate-500 mt-1">
                             За все время • Ср. цена: {boxStats.avgPrice.toFixed(2)} ₽
                         </p>
                     </div>
                     <div className="bg-white/95 backdrop-blur p-6 rounded-2xl shadow-lg border border-slate-200 xl:col-span-3 min-h-[210px] flex flex-col justify-between">
                         <div className="flex items-center justify-between mb-4">
-                            <h3 className="text-lg font-bold text-gray-900">Использовано</h3>
+                            <h3 className="text-lg font-bold text-slate-900">Использовано</h3>
                             <div className="p-2 bg-red-50 rounded-lg">
                                 <Truck className="h-6 w-6 text-red-600" />
                             </div>
                         </div>
-                        <div className="text-3xl font-bold text-gray-900">{boxStats.totalUsed}</div>
-                        <p className="text-sm text-gray-500 mt-1">В поставках</p>
+                        <div className="text-3xl font-bold text-slate-900">{boxStats.totalUsed}</div>
+                        <p className="text-sm text-slate-500 mt-1">В поставках</p>
                     </div>
                     <div className="bg-white/95 backdrop-blur p-6 rounded-2xl shadow-lg border border-slate-200 xl:col-span-3 min-h-[210px] flex flex-col justify-between">
                         <div className="flex items-center justify-between mb-4">
-                            <h3 className="text-lg font-bold text-gray-900">Паллетирование</h3>
+                            <h3 className="text-lg font-bold text-slate-900">Паллетирование</h3>
                             <div className="p-2 bg-violet-50 rounded-lg">
                                 <Package className="h-6 w-6 text-violet-600" />
                             </div>
                         </div>
-                        <div className="text-3xl font-bold text-gray-900">{palletHistory.reduce((sum, row) => sum + Number(row.total_pallets || 0), 0)}</div>
-                        <p className="text-sm text-gray-500 mt-1">Паллет всего • {palletHistory.reduce((sum, row) => sum + Number(row.total_amount || 0), 0).toFixed(2)} ₽</p>
+                        <div className="text-3xl font-bold text-slate-900">{palletHistory.reduce((sum, row) => sum + Number(row.total_pallets || 0), 0)}</div>
+                        <p className="text-sm text-slate-500 mt-1">Паллет всего • {palletHistory.reduce((sum, row) => sum + Number(row.total_amount || 0), 0).toFixed(2)} ₽</p>
                     </div>
                     <div className="bg-white/95 backdrop-blur p-6 rounded-2xl shadow-lg border border-slate-200 md:col-span-2 xl:col-span-12">
                         <div className="flex items-center justify-between mb-4">
                             <div className="flex items-center gap-2">
-                              <h3 className="text-lg font-bold text-gray-900">Долги поставщика (ФБС + временные сотрудники)</h3>
+                              <h3 className="text-lg font-bold text-slate-900">Долги поставщика (ФБС + временные сотрудники)</h3>
                               <button type="button" onClick={() => setCwSupplierDebtCollapsed(v => !v)} className="p-1 rounded border border-slate-200 hover:bg-slate-50">
                                 <ChevronDown className={`h-4 w-4 transition-transform ${cwSupplierDebtCollapsed ? '-rotate-90' : ''}`} />
                               </button>
@@ -25257,7 +25258,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
                           <div className="rounded-lg border p-3 bg-amber-50">
-                            <div className="text-xs text-gray-600">Долг ФБС</div>
+                            <div className="text-xs text-slate-600">Долг ФБС</div>
                             <div className="text-xl font-bold text-amber-700">
                               {cwBoxHistory
                                 .filter(log => log.type === 'FBS' && String(log.supplier_id || '') === String(fbsDebtSupplierId || '') && !log.is_paid)
@@ -25266,7 +25267,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             </div>
                           </div>
                           <div className="rounded-lg border p-3 bg-rose-50">
-                            <div className="text-xs text-gray-600">Долг временных</div>
+                            <div className="text-xs text-slate-600">Долг временных</div>
                             <div className="text-xl font-bold text-rose-700">
                               {tempDebtLogs
                                 .filter(log => String(log.supplier_id || '') === String(fbsDebtSupplierId || '') && !log.is_paid)
@@ -25275,7 +25276,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             </div>
                           </div>
                           <div className="rounded-lg border p-3 bg-indigo-50">
-                            <div className="text-xs text-gray-600">Общий долг</div>
+                            <div className="text-xs text-slate-600">Общий долг</div>
                             <div className="text-xl font-bold text-indigo-700">
                               {(
                                 cwBoxHistory
@@ -25291,7 +25292,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                         <div className="space-y-2 mb-3">
                           <div className="flex items-center justify-between">
-                            <div className="text-sm font-medium text-gray-700">Распределение по реквизитам</div>
+                            <div className="text-sm font-medium text-slate-700">Распределение по реквизитам</div>
                             <button
                               onClick={() => setDebtPaymentRows(prev => [...prev, { id: getSafeId(), requisiteId: cwEmployeeRequisites[0]?.id || '', amount: '' }])}
                               className="px-2 py-1 text-xs rounded border border-indigo-300 text-indigo-700 hover:bg-indigo-50"
@@ -25415,7 +25416,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                     <div className="hidden bg-white/95 backdrop-blur p-6 rounded-2xl shadow-lg border border-slate-200">
                         <div className="flex items-center justify-between mb-4">
-                            <h3 className="text-lg font-bold text-gray-900">Долг по доставке ФБС</h3>
+                            <h3 className="text-lg font-bold text-slate-900">Долг по доставке ФБС</h3>
                             <div className="p-2 bg-amber-50 rounded-lg">
                                 <Wallet className="h-6 w-6 text-amber-600" />
                             </div>
@@ -25436,7 +25437,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             .reduce((sum, log) => sum + getFbsDeliveryAmount(log), 0)
                             .toFixed(2)} ₽
                         </div>
-                        <p className="text-sm text-gray-500 mt-1">
+                        <p className="text-sm text-slate-500 mt-1">
                           Не оплачено: {
                             cwBoxHistory.filter(log => log.type === 'FBS' && String(log.supplier_id || '') === String(fbsDebtSupplierId || '') && !log.is_paid).length
                           } записей
@@ -25522,7 +25523,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                     <div className="hidden bg-white/95 backdrop-blur p-6 rounded-2xl shadow-lg border border-slate-200">
                         <div className="flex items-center justify-between mb-4">
-                            <h3 className="text-lg font-bold text-gray-900">Долг по временным сотрудникам</h3>
+                            <h3 className="text-lg font-bold text-slate-900">Долг по временным сотрудникам</h3>
                             <div className="p-2 bg-rose-50 rounded-lg">
                                 <Users className="h-6 w-6 text-rose-600" />
                             </div>
@@ -25543,7 +25544,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             .reduce((sum, log) => sum + Number(log.earnings || 0), 0)
                             .toFixed(2)} ₽
                         </div>
-                        <p className="text-sm text-gray-500 mt-1">
+                        <p className="text-sm text-slate-500 mt-1">
                           Не оплачено: {tempDebtLogs.filter(log => String(log.supplier_id || '') === String(tempDebtSupplierId || '') && !log.is_paid).length} смен
                         </p>
 
@@ -25615,7 +25616,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                     {/* Forms */}
                   <div className="oc-card p-4 sm:p-6 mb-4">
                     <div className="flex items-center justify-between">
-                      <h3 className="font-bold text-lg text-gray-900">ФБС / Коробки</h3>
+                      <h3 className="font-bold text-lg text-slate-900">ФБС / Коробки</h3>
                       <button type="button" onClick={() => setCwBoxesFormsCollapsed(v => !v)} className="p-1 rounded border border-slate-200 hover:bg-slate-50">
                         <ChevronDown className={`h-4 w-4 transition-transform ${cwBoxesFormsCollapsed ? '-rotate-90' : ''}`} />
                       </button>
@@ -25626,7 +25627,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <h3 className="font-bold text-lg mb-4">Пополнение запаса коробок</h3>
                         <div className="grid grid-cols-1 gap-4 mb-6">
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Количество</label>
+                            <label className="block text-sm font-medium text-slate-700 mb-1">Количество</label>
                             <input
                             type="number"
                             placeholder="Шт."
@@ -25636,7 +25637,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             />
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Цена за коробку (₽)</label>
+                            <label className="block text-sm font-medium text-slate-700 mb-1">Цена за коробку (₽)</label>
                             <input
                             type="number"
                             placeholder="₽"
@@ -25647,7 +25648,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             />
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Стоимость доставки (₽)</label>
+                            <label className="block text-sm font-medium text-slate-700 mb-1">Стоимость доставки (₽)</label>
                             <input
                             type="number"
                             placeholder="₽"
@@ -25709,7 +25710,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <h3 className="font-bold text-lg mb-4">Отгрузка ФБС</h3>
                         <div className="space-y-4">
                           <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Общая сумма на доставку</label>
+                            <label className="block text-sm font-medium text-slate-700 mb-1">Общая сумма на доставку</label>
                             <input
                               type="number"
                               placeholder="₽"
@@ -25751,7 +25752,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                   />
                                 </div>
                                 <div className="flex items-center justify-between">
-                                  <div className="text-sm text-gray-600">Сумма доставки поставщика: <span className="font-semibold text-indigo-700">{rowDelivery.toFixed(2)} ₽</span></div>
+                                  <div className="text-sm text-slate-600">Сумма доставки поставщика: <span className="font-semibold text-indigo-700">{rowDelivery.toFixed(2)} ₽</span></div>
                                   <button
                                     type="button"
                                     onClick={() => setCwBoxFBSRows(prev => prev.length > 1 ? prev.filter((_, i) => i !== idx) : prev)}
@@ -25832,7 +25833,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       <div className={cwEmployeeRequisitesCollapsed ? 'hidden' : ''}>
                       <div className="space-y-3 mb-4">
                         <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">Имя</label>
+                          <label className="block text-sm font-medium text-slate-700 mb-1">Имя</label>
                           <input
                             type="text"
                             placeholder="Имя сотрудника"
@@ -25842,7 +25843,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           />
                         </div>
                         <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">Телефон</label>
+                          <label className="block text-sm font-medium text-slate-700 mb-1">Телефон</label>
                           <input
                             type="text"
                             placeholder="+7 ..."
@@ -25852,7 +25853,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           />
                         </div>
                         <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">Банк</label>
+                          <label className="block text-sm font-medium text-slate-700 mb-1">Банк</label>
                           <input
                             type="text"
                             placeholder="Название банка"
@@ -25923,23 +25924,23 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                       <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
                         {cwEmployeeRequisites.length === 0 ? (
-                          <div className="p-3 text-sm text-gray-500 border rounded-lg">Пока нет добавленных реквизитов.</div>
+                          <div className="p-3 text-sm text-slate-500 border rounded-lg">Пока нет добавленных реквизитов.</div>
                         ) : (
                           <>
                             {/* Mobile cards */}
                             <div className="space-y-2 md:hidden">
                               {cwEmployeeRequisites.map((r) => (
-                                <div key={r.id} className="border rounded-lg p-3 bg-gray-50">
-                                  <div className="font-semibold text-gray-900">{r.name}</div>
-                                  <div className="text-sm text-gray-700 mt-1">📞 {r.phone}</div>
-                                  <div className="text-sm text-gray-700">🏦 {r.bank}</div>
+                                <div key={r.id} className="border rounded-lg p-3 bg-slate-50">
+                                  <div className="font-semibold text-slate-900">{r.name}</div>
+                                  <div className="text-sm text-slate-700 mt-1">📞 {r.phone}</div>
+                                  <div className="text-sm text-slate-700">🏦 {r.bank}</div>
                                   <div className="flex gap-2 mt-3">
                                     <button
                                       onClick={() => {
                                         navigator.clipboard?.writeText(String(r.phone || ''));
                                         showToast('Телефон скопирован', 'success');
                                       }}
-                                      className="px-2 py-1 text-xs rounded border border-gray-300 hover:bg-white"
+                                      className="px-2 py-1 text-xs rounded border border-slate-300 hover:bg-white"
                                     >
                                       Копировать
                                     </button>
@@ -25975,7 +25976,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             {/* Desktop table */}
                             <div className="hidden md:block border rounded-lg overflow-hidden">
                               <table className="w-full text-sm">
-                                <thead className="bg-gray-50 sticky top-0">
+                                <thead className="bg-slate-50 sticky top-0">
                                   <tr>
                                     <th className="text-left px-3 py-2">Имя</th>
                                     <th className="text-left px-3 py-2">Телефон</th>
@@ -25996,7 +25997,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                               navigator.clipboard?.writeText(String(r.phone || ''));
                                               showToast('Телефон скопирован', 'success');
                                             }}
-                                            className="px-2 py-1 text-xs rounded border border-gray-300 hover:bg-gray-50"
+                                            className="px-2 py-1 text-xs rounded border border-slate-300 hover:bg-slate-50"
                                           >
                                             Копировать
                                           </button>
@@ -26041,7 +26042,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                   <div className="oc-card p-4 sm:p-6">
                     <div className="flex items-center justify-between gap-3 mb-3">
-                      <h4 className="font-bold text-gray-900">История коробок</h4>
+                      <h4 className="font-bold text-slate-900">История коробок</h4>
                       <button type="button" onClick={() => setCwBoxHistoryCollapsed(v => !v)} className="p-1 rounded border border-slate-200 hover:bg-slate-50">
                         <ChevronDown className={`h-4 w-4 transition-transform ${cwBoxHistoryCollapsed ? '-rotate-90' : ''}`} />
                       </button>
@@ -26080,8 +26081,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           <div key={`m-${log.id}`} className="rounded-xl border border-slate-200 p-3 bg-white shadow-sm">
                             <div className="flex items-start justify-between gap-2">
                               <div>
-                                <div className="text-xs text-gray-500">{new Date(log.created_at).toLocaleDateString()}</div>
-                                <div className="mt-1 inline-flex px-2 py-1 rounded text-xs font-medium bg-gray-100 text-gray-700">{log.type === 'FBS' ? 'ФБС' : 'Закупка'}</div>
+                                <div className="text-xs text-slate-500">{new Date(log.created_at).toLocaleDateString()}</div>
+                                <div className="mt-1 inline-flex px-2 py-1 rounded text-xs font-medium bg-slate-100 text-slate-700">{log.type === 'FBS' ? 'ФБС' : 'Закупка'}</div>
                               </div>
                               <div className="flex items-center gap-3">
                                 <button
@@ -26110,11 +26111,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             </div>
 
                             <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
-                              <div><span className="text-gray-500">Поставщик:</span><div className="font-medium">{log.supplier?.name || '-'}</div></div>
-                              <div><span className="text-gray-500">Коробки:</span><div className="font-bold">{log.quantity}</div></div>
-                              <div><span className="text-gray-500">Товары:</span><div>{log.items_quantity || '-'}</div></div>
-                              <div><span className="text-gray-500">Кто создал:</span><div>{cwBoxCreators[String(log.id)]?.employee_name || '-'}</div></div>
-                              <div><span className="text-gray-500">Доставка:</span><div>{log.type === 'FBS' ? `${getFbsDeliveryAmount(log).toFixed(2)} ₽` : (log.delivery_price ? `${log.delivery_price} ₽` : '-')}</div></div>
+                              <div><span className="text-slate-500">Поставщик:</span><div className="font-medium">{log.supplier?.name || '-'}</div></div>
+                              <div><span className="text-slate-500">Коробки:</span><div className="font-bold">{log.quantity}</div></div>
+                              <div><span className="text-slate-500">Товары:</span><div>{log.items_quantity || '-'}</div></div>
+                              <div><span className="text-slate-500">Кто создал:</span><div>{cwBoxCreators[String(log.id)]?.employee_name || '-'}</div></div>
+                              <div><span className="text-slate-500">Доставка:</span><div>{log.type === 'FBS' ? `${getFbsDeliveryAmount(log).toFixed(2)} ₽` : (log.delivery_price ? `${log.delivery_price} ₽` : '-')}</div></div>
                             </div>
 
                             {log.type === 'FBS' && (
@@ -26135,7 +26136,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                       {log.is_paid ? 'Оплачено' : 'Не оплачено'}
                                     </span>
                                     {log.is_paid && log.paid_by_supplier_id && (
-                                      <span className="text-[10px] text-gray-500">Оплатил: {suppliers.find(s => String(s.id) === String(log.paid_by_supplier_id))?.name || `#${log.paid_by_supplier_id}`}</span>
+                                      <span className="text-[10px] text-slate-500">Оплатил: {suppliers.find(s => String(s.id) === String(log.paid_by_supplier_id))?.name || `#${log.paid_by_supplier_id}`}</span>
                                     )}
                                   </div>
                                 </label>
@@ -26148,21 +26149,21 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     <div className="hidden md:block overflow-x-auto">
                         <table className="w-full text-left text-sm">
                             <thead>
-                                <tr className="bg-gray-50 border-b border-gray-100">
-                                    <th className="px-4 py-2 font-medium text-gray-500">Дата</th>
-                                    <th className="px-4 py-2 font-medium text-gray-500">Тип</th>
-                                    <th className="px-4 py-2 font-medium text-gray-500">Поставщик</th>
-                                    <th className="px-4 py-2 font-medium text-gray-500">Коробки</th>
-                                    <th className="px-4 py-2 font-medium text-gray-500">Товары</th>
-                                    <th className="px-4 py-2 font-medium text-gray-500">Цена/шт</th>
-                                    <th className="px-4 py-2 font-medium text-gray-500">Доставка</th>
-                                    <th className="px-4 py-2 font-medium text-gray-500">Эфф. цена</th>
-                                    <th className="px-4 py-2 font-medium text-gray-500">Кто создал</th>
-                                    <th className="px-4 py-2 font-medium text-gray-500">Оплата FBS</th>
-                                    <th className="px-4 py-2 font-medium text-gray-500">Действия</th>
+                                <tr className="bg-slate-50 border-b border-slate-100">
+                                    <th className="px-4 py-2 font-medium text-slate-500">Дата</th>
+                                    <th className="px-4 py-2 font-medium text-slate-500">Тип</th>
+                                    <th className="px-4 py-2 font-medium text-slate-500">Поставщик</th>
+                                    <th className="px-4 py-2 font-medium text-slate-500">Коробки</th>
+                                    <th className="px-4 py-2 font-medium text-slate-500">Товары</th>
+                                    <th className="px-4 py-2 font-medium text-slate-500">Цена/шт</th>
+                                    <th className="px-4 py-2 font-medium text-slate-500">Доставка</th>
+                                    <th className="px-4 py-2 font-medium text-slate-500">Эфф. цена</th>
+                                    <th className="px-4 py-2 font-medium text-slate-500">Кто создал</th>
+                                    <th className="px-4 py-2 font-medium text-slate-500">Оплата FBS</th>
+                                    <th className="px-4 py-2 font-medium text-slate-500">Действия</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-gray-100">
+                            <tbody className="divide-y divide-slate-100">
                                 {cwBoxHistory
                                   .filter(log => cwBoxHistorySupplierFilter === 'all' || String(log.supplier_id || '') === String(cwBoxHistorySupplierFilter))
                                   .filter(log => {
@@ -26171,7 +26172,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                     return cwBoxHistoryPaymentFilter === 'paid' ? Boolean(log.is_paid) : !Boolean(log.is_paid);
                                   })
                                   .map(log => (
-                                    <tr key={log.id} className="hover:bg-gray-50">
+                                    <tr key={log.id} className="hover:bg-slate-50">
                                         <td className="px-4 py-2">{new Date(log.created_at).toLocaleDateString()}</td>
                                         <td className="px-4 py-2">
                                             <span className={`px-2 py-1 rounded text-xs font-medium ${log.type === 'FBS' ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800'}`}>
@@ -26209,12 +26210,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                                     {log.is_paid ? 'Оплачено' : 'Не оплачено'}
                                                   </span>
                                                   {log.is_paid && log.paid_by_supplier_id && (
-                                                    <span className="text-[10px] text-gray-500">Оплатил: {suppliers.find(s => String(s.id) === String(log.paid_by_supplier_id))?.name || `#${log.paid_by_supplier_id}`}</span>
+                                                    <span className="text-[10px] text-slate-500">Оплатил: {suppliers.find(s => String(s.id) === String(log.paid_by_supplier_id))?.name || `#${log.paid_by_supplier_id}`}</span>
                                                   )}
                                                 </div>
                                               </label>
                                             ) : (
-                                              <span className="text-gray-400">-</span>
+                                              <span className="text-slate-400">-</span>
                                             )}
                                         </td>
                                         <td className="px-4 py-2">
@@ -26258,7 +26259,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     <h3 className="font-bold text-lg mb-4">Закуп упаковки</h3>
                     <div className="grid grid-cols-1 gap-4 mb-6 max-w-3xl">
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Дата покупки</label>
+                            <label className="block text-sm font-medium text-slate-700 mb-1">Дата покупки</label>
                             <input
                                 type="date"
                                 value={cwPurchaseForm.purchase_date}
@@ -26268,8 +26269,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         </div>
 
                         {cwPurchaseRows.map((r, idx) => (
-                          <div key={r.id} className="border rounded-lg p-3 bg-gray-50">
-                            <div className="text-xs text-gray-500 mb-2">Упаковка #{idx + 1}</div>
+                          <div key={r.id} className="border rounded-lg p-3 bg-slate-50">
+                            <div className="text-xs text-slate-500 mb-2">Упаковка #{idx + 1}</div>
                             <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
                               <input type="number" placeholder="Количество" value={r.quantity} onChange={(e) => setCwPurchaseRows(prev => prev.map(x => x.id === r.id ? { ...x, quantity: e.target.value } : x))} className="oc-select" />
                               <input type="text" placeholder="Размер (например 30x40)" value={r.size} onChange={(e) => setCwPurchaseRows(prev => prev.map(x => x.id === r.id ? { ...x, size: e.target.value } : x))} className="oc-select" />
@@ -26285,7 +26286,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <button
                           type="button"
                           onClick={() => setCwPurchaseRows(prev => [...prev, { id: getSafeId(), quantity: '', size: '', price: '', delivery: '' }])}
-                          className="w-full py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+                          className="w-full py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50"
                         >
                           Добавить упаковку
                         </button>
@@ -26332,25 +26333,25 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         </button>
                     </div>
 
-                    <h4 className="font-bold text-gray-900 mb-3">История закупок упаковки</h4>
+                    <h4 className="font-bold text-slate-900 mb-3">История закупок упаковки</h4>
                     <div className="mb-3 rounded-xl border border-indigo-200 bg-indigo-50 p-3 text-sm">
                       Сумма всех закупок упаковки: <span className="font-semibold text-indigo-800">{cwPurchaseHistory.reduce((s, r) => s + Number(r?.price || 0), 0).toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽</span>
                     </div>
                     <div className="overflow-x-auto">
                         <table className="w-full text-left text-sm">
                             <thead>
-                                <tr className="bg-gray-50 border-b border-gray-100">
-                                    <th className="px-4 py-2 font-medium text-gray-500">Дата</th>
-                                    <th className="px-4 py-2 font-medium text-gray-500">Количество</th>
-                                    <th className="px-4 py-2 font-medium text-gray-500">Размер</th>
-                                    <th className="px-4 py-2 font-medium text-gray-500">Цена</th>
-                                    <th className="px-4 py-2 font-medium text-gray-500">Доставка</th>
-                                    <th className="px-4 py-2 font-medium text-gray-500">Действия</th>
+                                <tr className="bg-slate-50 border-b border-slate-100">
+                                    <th className="px-4 py-2 font-medium text-slate-500">Дата</th>
+                                    <th className="px-4 py-2 font-medium text-slate-500">Количество</th>
+                                    <th className="px-4 py-2 font-medium text-slate-500">Размер</th>
+                                    <th className="px-4 py-2 font-medium text-slate-500">Цена</th>
+                                    <th className="px-4 py-2 font-medium text-slate-500">Доставка</th>
+                                    <th className="px-4 py-2 font-medium text-slate-500">Действия</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-gray-100">
+                            <tbody className="divide-y divide-slate-100">
                                 {cwPurchaseHistory.map(log => (
-                                    <tr key={log.id} className="hover:bg-gray-50">
+                                    <tr key={log.id} className="hover:bg-slate-50">
                                         <td className="px-4 py-2">{new Date(log.created_at).toLocaleDateString()}</td>
                                         <td className="px-4 py-2 font-bold">{log.quantity}</td>
                                         <td className="px-4 py-2">{log.size}</td>
@@ -26381,7 +26382,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                 ))}
                                 {cwPurchaseHistory.length === 0 && (
                                     <tr>
-                                        <td colSpan={6} className="px-4 py-8 text-center text-gray-500">
+                                        <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
                                             История пуста
                                         </td>
                                     </tr>
@@ -26398,7 +26399,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     {/* Employee Selector - Horizontal Scroll */}
                     <div className="bg-white/95 backdrop-blur p-4 rounded-2xl shadow-lg border border-slate-200 overflow-x-auto">
                       {employees.length === 0 ? (
-                        <div className="text-center text-gray-500 py-2">Нет сотрудников</div>
+                        <div className="text-center text-slate-500 py-2">Нет сотрудников</div>
                       ) : (
                         <div className="flex space-x-3 min-w-max">
                           {employees
@@ -26412,10 +26413,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               className={`px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${
                                 cwSelectedEmployee?.id === e.id
                                   ? 'bg-indigo-600 text-white shadow-md'
-                                  : 'bg-gray-50 text-gray-700 hover:bg-gray-100'
+                                  : 'bg-slate-50 text-slate-700 hover:bg-slate-100'
                               }`}
                             >
-                              <div className={`w-2 h-2 rounded-full ${e.is_online ? 'bg-green-400' : 'bg-gray-300'}`} />
+                              <div className={`w-2 h-2 rounded-full ${e.is_online ? 'bg-green-400' : 'bg-slate-300'}`} />
                               {e.full_name}
                             </button>
                           ))}
@@ -26430,10 +26431,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             <>
                                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 gap-3">
                                     <div className="flex flex-wrap items-center gap-2 sm:gap-3 w-full md:w-auto">
-                                        <h2 className="text-lg sm:text-xl font-bold text-gray-900 capitalize">
+                                        <h2 className="text-lg sm:text-xl font-bold text-slate-900 capitalize">
                                             {cwSelectedPeriod.toLocaleString('ru-RU', { month: 'long', year: 'numeric' })}
                                         </h2>
-                                        <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
+                                        <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
                                             <button onClick={() => setCwSelectedPeriod(new Date(cwSelectedPeriod.setMonth(cwSelectedPeriod.getMonth() - 1)))} className="p-1 hover:bg-white rounded-md shadow-sm transition-all"><ChevronLeft className="h-4 w-4" /></button>
                                             <button onClick={() => setCwSelectedPeriod(new Date(cwSelectedPeriod.setMonth(cwSelectedPeriod.getMonth() + 1)))} className="p-1 hover:bg-white rounded-md shadow-sm transition-all"><ChevronRight className="h-4 w-4" /></button>
                                         </div>
@@ -26444,7 +26445,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                                 onChange={e => setCwSelectedPeriod(new Date(e.target.value))}
                                                 className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
                                             />
-                                            <button className="p-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-gray-600">
+                                            <button className="p-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-slate-600">
                                                 <Calendar className="h-5 w-5" />
                                             </button>
                                         </div>
@@ -26499,7 +26500,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                                   if (!isAdminRate) return sum;
                                                   return sum + (Number(log.quantity || 0) * Number(getWorkLogSnapshotPrice(log) || 0));
                                                 }, 0);
-                                                return <><span className="text-gray-500 mr-2">Заработано (Админ):</span><span className="font-bold text-green-700 text-lg">{Math.floor(amountAdmin).toLocaleString('ru-RU')} ₽</span></>;
+                                                return <><span className="text-slate-500 mr-2">Заработано (Админ):</span><span className="font-bold text-green-700 text-lg">{Math.floor(amountAdmin).toLocaleString('ru-RU')} ₽</span></>;
                                               }
                                               const amount = cwWorkLogs.filter(log => {
                                                 if (!log.date) return false;
@@ -26509,13 +26510,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                                 const rate = cwWorkRates.find(r => r.id === log.work_rate_id);
                                                 return sum + (Number(log.quantity || 0) * Number(getWorkLogSnapshotPrice(log) || 0));
                                               }, 0);
-                                              return <><span className="text-gray-500 mr-2">Заработано:</span><span className="font-bold text-green-700 text-lg">{Math.floor(amount).toLocaleString('ru-RU')} ₽</span></>;
+                                              return <><span className="text-slate-500 mr-2">Заработано:</span><span className="font-bold text-green-700 text-lg">{Math.floor(amount).toLocaleString('ru-RU')} ₽</span></>;
                                             })()}
                                         </div>
                                         )}
-                                        <div className="bg-gray-50 px-3 py-2 rounded-lg border border-gray-100 min-w-[120px]">
-                                            <span className="text-gray-500 mr-2">Записей:</span>
-                                            <span className="font-bold text-gray-900 text-lg">
+                                        <div className="bg-slate-50 px-3 py-2 rounded-lg border border-slate-100 min-w-[120px]">
+                                            <span className="text-slate-500 mr-2">Записей:</span>
+                                            <span className="font-bold text-slate-900 text-lg">
                                             {cwWorkLogs.filter(log => {
                                                 if (!log.date) return false;
                                                 const [y, m] = log.date.split('-').map(Number);
@@ -26525,7 +26526,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                         </div>
                                     </div>
                                 </div>
-                                <div className="hidden sm:grid grid-cols-7 gap-2 mb-2 text-center text-xs font-medium text-gray-400">
+                                <div className="hidden sm:grid grid-cols-7 gap-2 mb-2 text-center text-xs font-medium text-slate-400">
                                 {['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'].map(d => <div key={d}>{d}</div>)}
                                 </div>
                                 <div className="grid grid-cols-2 sm:grid-cols-7 gap-2 sm:gap-3">
@@ -26562,9 +26563,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                             setCwSelectedDate(new Date(year, month, d));
                                             setCompletedWorkStep('FORM');
                                         }}
-                                        className={`min-h-[86px] sm:aspect-square border rounded-xl p-2 hover:border-indigo-500 cursor-pointer flex flex-col justify-between transition-all ${dayLogs.length > 0 ? 'bg-green-50 border-green-200' : 'border-gray-100'}`}
+                                        className={`min-h-[86px] sm:aspect-square border rounded-xl p-2 hover:border-indigo-500 cursor-pointer flex flex-col justify-between transition-all ${dayLogs.length > 0 ? 'bg-green-50 border-green-200' : 'border-slate-100'}`}
                                         >
-                                        <span className="text-sm font-medium text-gray-700">{d}</span>
+                                        <span className="text-sm font-medium text-slate-700">{d}</span>
                                         {dayLogs.length > 0 && (
                                             <div className="text-right">
                                             {(!currentEmployee || currentEmployee.role === 'admin') && (
@@ -26578,7 +26579,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                                 : `${Math.floor(dayTotal).toLocaleString('ru-RU')}₽`}
                                             </div>
                                             )}
-                                            <div className="text-[10px] text-gray-500">{dayCountLabel}</div>
+                                            <div className="text-[10px] text-slate-500">{dayCountLabel}</div>
                                             </div>
                                         )}
                                         </div>
@@ -26591,7 +26592,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             ) : (
                             <div className="bg-white/95 backdrop-blur p-6 rounded-2xl shadow-lg border border-slate-200">
                                 <div className="flex items-center mb-6">
-                                <button onClick={() => setCompletedWorkStep('CALENDAR')} className="mr-4 p-2 hover:bg-gray-100 rounded-full">
+                                <button onClick={() => setCompletedWorkStep('CALENDAR')} className="mr-4 p-2 hover:bg-slate-100 rounded-full">
                                     <ArrowLeft className="h-5 w-5" />
                                 </button>
                                 <h3 className="text-xl font-bold">Запись за {cwSelectedDate?.toLocaleDateString()}</h3>
@@ -26599,7 +26600,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                                 <div className="space-y-4 max-w-2xl">
                                   <div className="space-y-2">
-                                    <div className="text-sm font-medium text-gray-700">Товары/операции</div>
+                                    <div className="text-sm font-medium text-slate-700">Товары/операции</div>
                                     {cwFormItems.map((item, idx) => {
                                       const isTime = isTimeBasedWorkRate(item.work_rate_id);
                                       return (
@@ -26645,7 +26646,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                                 {cwPackagingRates.map(r => <option key={`cw-pack-${idx}-${r.id}`} value={r.name}>{r.name}</option>)}
                                               </select>
                                             ) : (
-                                              <div className="w-full p-2 border rounded-lg text-xs text-gray-500 flex items-center">Упаковка не нужна</div>
+                                              <div className="w-full p-2 border rounded-lg text-xs text-slate-500 flex items-center">Упаковка не нужна</div>
                                             )}
                                             {!isTime ? (
                                               <input
@@ -26830,11 +26831,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                     const rate = cwWorkRates.find(r => r.id === log.work_rate_id);
                                     const supplier = suppliers.find(s => s.id === log.supplier_id);
                                     return (
-                                    <div key={log.id} className="flex justify-between items-center p-3 bg-gray-50 rounded-lg text-sm">
+                                    <div key={log.id} className="flex justify-between items-center p-3 bg-slate-50 rounded-lg text-sm">
                                         <div>
                                         <span className="font-medium">{rate?.name}</span>
-                                        {supplier && <span className="ml-2 text-gray-500">({supplier.name})</span>}
-                                        <div className="text-gray-500">{isTimeBasedWorkRate(log.work_rate_id) ? `${Math.floor(Number(log.quantity || 0) / 60)}ч ${Number(log.quantity || 0) % 60}м` : `${log.quantity} шт`} • {log.packaging || 'без упаковки'}</div>
+                                        {supplier && <span className="ml-2 text-slate-500">({supplier.name})</span>}
+                                        <div className="text-slate-500">{isTimeBasedWorkRate(log.work_rate_id) ? `${Math.floor(Number(log.quantity || 0) / 60)}ч ${Number(log.quantity || 0) % 60}м` : `${log.quantity} шт`} • {log.packaging || 'без упаковки'}</div>
                                         </div>
                                         <div className="flex items-center gap-4">
                                             {(!currentEmployee || currentEmployee.role === 'admin') && (
@@ -26880,7 +26881,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                     );
                                 })}
                                 {cwWorkLogs.filter(l => l.date === cwSelectedDate.toLocaleDateString('en-CA')).length === 0 && (
-                                    <div className="text-gray-500 text-center py-4">Нет записей</div>
+                                    <div className="text-slate-500 text-center py-4">Нет записей</div>
                                 )}
                                 </div>
                             </div>
@@ -26894,7 +26895,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
               {/* Report Modal */}
               {cwReportModalOpen && (
-                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 overflow-y-auto py-4 px-2">
+                <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm backdrop-blur-sm flex items-center justify-center z-50 overflow-y-auto py-4 px-2">
                   <div className={`bg-white p-4 md:p-6 rounded-2xl shadow-2xl w-full transition-all max-h-[94vh] overflow-auto ${cwReportResult ? 'max-w-6xl' : 'max-w-2xl'}`}>
                     <h3 className="text-xl font-bold mb-4 text-slate-900">Отчет по выполненной работе</h3>
 
@@ -26944,7 +26945,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         </div>
                       </div>
                       {cwReportDatePickerOpen && (
-                        <div className="fixed inset-0 z-[80] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setCwReportDatePickerOpen(false)}>
+                        <div className="fixed inset-0 z-[80] bg-slate-900/50 backdrop-blur-sm backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setCwReportDatePickerOpen(false)}>
                           <div className="w-full max-w-xl bg-white rounded-2xl shadow-2xl p-4" onClick={(e) => e.stopPropagation()}>
                             <div className="flex items-center justify-between mb-4">
                               <div>
@@ -26958,7 +26959,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               <div className="font-semibold capitalize">{cwReportDatePickerMonth.toLocaleString('ru-RU', { month: 'long', year: 'numeric' })}</div>
                               <button type="button" onClick={() => setCwReportDatePickerMonth(new Date(cwReportDatePickerMonth.getFullYear(), cwReportDatePickerMonth.getMonth() + 1, 1))} className="p-2 rounded-lg hover:bg-slate-100"><ChevronRight className="h-4 w-4" /></button>
                             </div>
-                            <div className="grid grid-cols-7 gap-1 mb-2 text-center text-[10px] font-medium text-gray-400">{['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map((d) => <div key={`cw-r-${d}`}>{d}</div>)}</div>
+                            <div className="grid grid-cols-7 gap-1 mb-2 text-center text-[10px] font-medium text-slate-400">{['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map((d) => <div key={`cw-r-${d}`}>{d}</div>)}</div>
                             <div className="grid grid-cols-7 gap-1">
                               {(() => {
                                 const year = cwReportDatePickerMonth.getFullYear();
@@ -27032,7 +27033,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     {cwReportResult && (
                       <div className="mb-6 overflow-x-auto">
                         <table className="w-full text-sm text-left">
-                          <thead className="bg-gray-50 text-gray-700 font-medium">
+                          <thead className="bg-slate-50 text-slate-700 font-medium">
                             <tr>
                               <th className="p-3 rounded-tl-lg">Дата</th>
                               {cwReportForm.employee_id === '__ALL__' && <th className="p-3">Сотрудник</th>}
@@ -27043,9 +27044,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               <th className="p-3 rounded-tr-lg text-right">Сумма</th>
                             </tr>
                           </thead>
-                          <tbody className="divide-y divide-gray-100">
+                          <tbody className="divide-y divide-slate-100">
                             {cwReportResult.map((item, idx) => (
-                              <tr key={idx} className="hover:bg-gray-50">
+                              <tr key={idx} className="hover:bg-slate-50">
                                 <td className="p-3">{new Date(item.date).toLocaleDateString('ru-RU')}</td>
                                 {cwReportForm.employee_id === '__ALL__' && <td className="p-3">{item.employee_name || '-'}</td>}
                                 {cwReportForm.supplier_id === '__ALL__' && <td className="p-3">{item.supplier_name || '-'}</td>}
@@ -27057,11 +27058,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             ))}
                             {cwReportResult.length === 0 && (
                               <tr>
-                                <td colSpan={(cwReportForm.employee_id === '__ALL__' ? 1 : 0) + (cwReportForm.supplier_id === '__ALL__' ? 1 : 0) + 5} className="p-4 text-center text-gray-500">Нет данных за выбранный период</td>
+                                <td colSpan={(cwReportForm.employee_id === '__ALL__' ? 1 : 0) + (cwReportForm.supplier_id === '__ALL__' ? 1 : 0) + 5} className="p-4 text-center text-slate-500">Нет данных за выбранный период</td>
                               </tr>
                             )}
                           </tbody>
-                          <tfoot className="bg-gray-50 font-bold">
+                          <tfoot className="bg-slate-50 font-bold">
                             <tr>
                               <td colSpan={(cwReportForm.employee_id === '__ALL__' ? 1 : 0) + (cwReportForm.supplier_id === '__ALL__' ? 1 : 0) + 2} className="p-3 text-right">Итого:</td>
                               <td className="p-3 text-right text-slate-700">
@@ -27083,7 +27084,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           setCwReportModalOpen(false);
                           setCwReportResult(null);
                         }}
-                        className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
+                        className="px-4 py-2 border border-slate-300 rounded-lg hover:bg-slate-50"
                       >
                         Закрыть
                       </button>
@@ -27205,17 +27206,17 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
           {/* Unlock Confirmation Modal */}
           {showUnlockConfirmation && (
-            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 transition-opacity" onClick={() => setShowUnlockConfirmation(false)}>
+            <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm backdrop-blur-sm flex items-center justify-center z-50 transition-opacity" onClick={() => setShowUnlockConfirmation(false)}>
               <div className="bg-white p-8 rounded-2xl shadow-2xl w-full max-w-sm text-center transform transition-all scale-100" onClick={e => e.stopPropagation()}>
                 <div className="w-20 h-20 bg-yellow-50 rounded-full flex items-center justify-center mx-auto mb-6">
                   <LockOpen className="h-10 w-10 text-yellow-500" />
                 </div>
-                <h3 className="text-2xl font-bold text-gray-900 mb-3">Разблокировать?</h3>
-                <p className="text-gray-500 mb-8 leading-relaxed">Вы сможете редактировать содержимое поставки <span className="font-medium text-gray-900">{supplyToUnlock?.name}</span></p>
+                <h3 className="text-2xl font-bold text-slate-900 mb-3">Разблокировать?</h3>
+                <p className="text-slate-500 mb-8 leading-relaxed">Вы сможете редактировать содержимое поставки <span className="font-medium text-slate-900">{supplyToUnlock?.name}</span></p>
                 <div className="flex gap-4">
                   <button
                     onClick={() => setShowUnlockConfirmation(false)}
-                    className="flex-1 py-3 border border-gray-200 rounded-xl hover:bg-gray-50 font-semibold text-gray-700 transition-colors"
+                    className="flex-1 py-3 border border-slate-200 rounded-xl hover:bg-slate-50 font-semibold text-slate-700 transition-colors"
                   >
                     Отмена
                   </button>
@@ -27234,39 +27235,39 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
           {/* Employee Report Modal */}
           {isEmployeeReportModalOpen && (
-            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50">
               <div className="bg-white p-6 rounded-xl w-full max-w-md">
                 <div className="flex justify-between items-center mb-4">
                   <h3 className="text-xl font-bold">Отчет сотруднику</h3>
-                  <button onClick={() => setIsEmployeeReportModalOpen(false)} className="text-gray-400 hover:text-gray-600">
+                  <button onClick={() => setIsEmployeeReportModalOpen(false)} className="text-slate-400 hover:text-slate-600">
                     <X className="h-6 w-6" />
                   </button>
                 </div>
 
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Начало периода</label>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Начало периода</label>
                     <input
                       type="date"
                       value={employeeReportRange.start}
                       onChange={e => setEmployeeReportRange({...employeeReportRange, start: e.target.value})}
-                      className="w-full p-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                      className="w-full p-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Конец периода</label>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Конец периода</label>
                     <input
                       type="date"
                       value={employeeReportRange.end}
                       onChange={e => setEmployeeReportRange({...employeeReportRange, end: e.target.value})}
-                      className="w-full p-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                      className="w-full p-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
                     />
                   </div>
 
                   <div className="flex gap-3 mt-6">
                     <button
                       onClick={() => setIsEmployeeReportModalOpen(false)}
-                      className="flex-1 py-2.5 border border-gray-200 rounded-lg hover:bg-gray-50 font-medium"
+                      className="flex-1 py-2.5 border border-slate-200 rounded-lg hover:bg-slate-50 font-medium"
                     >
                       Отмена
                     </button>
@@ -27285,18 +27286,18 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
           {/* Edit Box Log Modal */}
           {editBoxLogModal.isOpen && (
-            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[60]" onClick={() => setEditBoxLogModal(prev => ({ ...prev, isOpen: false }))}>
+            <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm backdrop-blur-sm flex items-center justify-center z-[60]" onClick={() => setEditBoxLogModal(prev => ({ ...prev, isOpen: false }))}>
               <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-2xl" onClick={e => e.stopPropagation()}>
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-xl font-bold text-gray-900">Редактировать запись коробок</h3>
-                  <button onClick={() => setEditBoxLogModal(prev => ({ ...prev, isOpen: false }))} className="text-gray-400 hover:text-gray-600">
+                  <h3 className="text-xl font-bold text-slate-900">Редактировать запись коробок</h3>
+                  <button onClick={() => setEditBoxLogModal(prev => ({ ...prev, isOpen: false }))} className="text-slate-400 hover:text-slate-600">
                     <X className="h-5 w-5" />
                   </button>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Дата</label>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Дата</label>
                     <input
                       type="date"
                       value={editBoxLogModal.date}
@@ -27306,7 +27307,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Количество коробок</label>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Количество коробок</label>
                     <input
                       type="number"
                       min="1"
@@ -27317,7 +27318,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Количество товара</label>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Количество товара</label>
                     <input
                       type="number"
                       min="0"
@@ -27328,7 +27329,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Стоимость доставки (₽)</label>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Стоимость доставки (₽)</label>
                     <input
                       type="number"
                       min="0"
@@ -27340,7 +27341,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Цена за коробку (₽)</label>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Цена за коробку (₽)</label>
                     <input
                       type="number"
                       min="0"
@@ -27353,7 +27354,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Поставщик</label>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Поставщик</label>
                     <select
                       value={editBoxLogModal.supplier_id}
                       onChange={e => setEditBoxLogModal(prev => ({ ...prev, supplier_id: e.target.value }))}
@@ -27368,7 +27369,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 <div className="flex justify-end gap-3 mt-6">
                   <button
                     onClick={() => setEditBoxLogModal(prev => ({ ...prev, isOpen: false }))}
-                    className="px-4 py-2 border rounded-lg hover:bg-gray-50"
+                    className="px-4 py-2 border rounded-lg hover:bg-slate-50"
                   >
                     Отмена
                   </button>
@@ -27386,10 +27387,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
           {/* Paid-by Supplier Modal */}
           {paidByModal.isOpen && (
-            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[70]" onClick={() => setPaidByModal({ isOpen: false, target: 'temp', logId: '', supplierId: '' })}>
+            <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm backdrop-blur-sm flex items-center justify-center z-[70]" onClick={() => setPaidByModal({ isOpen: false, target: 'temp', logId: '', supplierId: '' })}>
               <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-md" onClick={e => e.stopPropagation()}>
-                <h3 className="text-lg font-bold text-gray-900 mb-3">Кто оплатил?</h3>
-                <p className="text-sm text-gray-500 mb-4">Выберите поставщика, который оплатил эту запись.</p>
+                <h3 className="text-lg font-bold text-slate-900 mb-3">Кто оплатил?</h3>
+                <p className="text-sm text-slate-500 mb-4">Выберите поставщика, который оплатил эту запись.</p>
                 <select
                   value={paidByModal.supplierId}
                   onChange={(e) => setPaidByModal(prev => ({ ...prev, supplierId: e.target.value }))}
@@ -27401,7 +27402,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 <div className="flex gap-3">
                   <button
                     onClick={() => setPaidByModal({ isOpen: false, target: 'temp', logId: '', supplierId: '' })}
-                    className="flex-1 px-4 py-2 border rounded-lg hover:bg-gray-50"
+                    className="flex-1 px-4 py-2 border rounded-lg hover:bg-slate-50"
                   >
                     Отмена
                   </button>
@@ -27418,17 +27419,17 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
           {/* Confirmation Modal */}
           {confirmModal.isOpen && (
-            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[60] transition-opacity" onClick={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}>
+            <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm backdrop-blur-sm flex items-center justify-center z-[60] transition-opacity" onClick={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}>
               <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md transform transition-all scale-100" onClick={e => e.stopPropagation()}>
                 <div className="flex items-center justify-center w-16 h-16 mx-auto bg-red-50 rounded-full mb-6">
                   <AlertCircle className="h-8 w-8 text-red-500" />
                 </div>
-                <h3 className="text-xl font-bold text-center text-gray-900 mb-3">{confirmModal.title}</h3>
-                <p className="text-center text-gray-500 mb-8 leading-relaxed">{confirmModal.message}</p>
+                <h3 className="text-xl font-bold text-center text-slate-900 mb-3">{confirmModal.title}</h3>
+                <p className="text-center text-slate-500 mb-8 leading-relaxed">{confirmModal.message}</p>
                 <div className="flex gap-4">
                   <button
                     onClick={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
-                    className="flex-1 px-6 py-3 bg-gray-50 text-gray-700 rounded-xl hover:bg-gray-100 font-semibold transition-colors"
+                    className="flex-1 px-6 py-3 bg-slate-50 text-slate-700 rounded-xl hover:bg-slate-100 font-semibold transition-colors"
                   >
                     Отмена
                   </button>
@@ -27445,28 +27446,28 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
           {/* Return Codes Modal */}
           {showReturnCodesModal && (
-            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[60] transition-opacity" onClick={() => setShowReturnCodesModal(false)}>
+            <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm backdrop-blur-sm flex items-center justify-center z-[60] transition-opacity" onClick={() => setShowReturnCodesModal(false)}>
               <div className="bg-white p-8 rounded-2xl shadow-2xl w-full max-w-lg transform transition-all scale-100" onClick={e => e.stopPropagation()}>
                 <div className="flex justify-between items-center mb-6">
-                    <h3 className="text-2xl font-bold text-gray-900">Вернуть коды</h3>
-                    <button onClick={() => setShowReturnCodesModal(false)} className="text-gray-400 hover:text-gray-600 transition-colors">
+                    <h3 className="text-2xl font-bold text-slate-900">Вернуть коды</h3>
+                    <button onClick={() => setShowReturnCodesModal(false)} className="text-slate-400 hover:text-slate-600 transition-colors">
                         <X className="w-6 h-6" />
                     </button>
                 </div>
-                <p className="text-gray-500 mb-6 text-sm leading-relaxed">
+                <p className="text-slate-500 mb-6 text-sm leading-relaxed">
                     Введите коды, которые нужно вернуть в базу (каждый с новой строки или через пробел).
                     Они будут помечены как "Возврат" и снова станут доступны.
                 </p>
                 <textarea
                     value={returnCodesInput}
                     onChange={e => setReturnCodesInput(e.target.value)}
-                    className="w-full h-48 p-4 bg-gray-50 border border-gray-200 rounded-xl mb-6 focus:ring-2 focus:ring-indigo-500 outline-none font-mono text-sm resize-none transition-all"
+                    className="w-full h-48 p-4 bg-slate-50 border border-slate-200 rounded-xl mb-6 focus:ring-2 focus:ring-indigo-500 outline-none font-mono text-sm resize-none transition-all"
                     placeholder="0102900000424601215QhW..."
                 />
                 <div className="flex justify-end gap-3">
                     <button
                         onClick={() => setShowReturnCodesModal(false)}
-                        className="px-6 py-3 text-gray-600 hover:bg-gray-100 rounded-xl font-medium transition-colors"
+                        className="px-6 py-3 text-slate-600 hover:bg-slate-100 rounded-xl font-medium transition-colors"
                     >
                         Отмена
                     </button>
@@ -27483,12 +27484,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
           {/* Temp Worker History Modal */}
           {showPalletModal && (
-            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 transition-opacity p-2 md:p-4" onClick={() => setShowPalletModal(false)}>
+            <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm backdrop-blur-sm flex items-center justify-center z-50 transition-opacity p-2 md:p-4" onClick={() => setShowPalletModal(false)}>
               <div className="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-3xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
                 <div className="p-4 md:p-6 border-b border-slate-100 flex items-center justify-between">
                   <h3 className="text-xl font-bold text-slate-900">Паллетирование</h3>
-                  <button onClick={() => setShowPalletModal(false)} className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
-                    <X className="h-5 w-5 text-gray-500" />
+                  <button onClick={() => setShowPalletModal(false)} className="p-2 hover:bg-slate-100 rounded-lg transition-colors">
+                    <X className="h-5 w-5 text-slate-500" />
                   </button>
                 </div>
 
@@ -27545,7 +27546,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       onChange={(e) => setPalletTotalAmount(e.target.value)}
                       className="oc-select"
                     />
-                    <div className="text-sm text-gray-600">
+                    <div className="text-sm text-slate-600">
                       Всего паллет: <b>{palletRows.reduce((sum, r) => sum + Number(r.pallets || 0), 0)}</b>
                     </div>
                   </div>
@@ -27607,13 +27608,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   <div className="mt-3 border rounded-lg p-3 bg-violet-50/60">
                     <div className="font-semibold text-violet-900 mb-2">История паллетирования</div>
                     {palletHistory.length === 0 ? (
-                      <div className="text-sm text-gray-500">Пока нет записей.</div>
+                      <div className="text-sm text-slate-500">Пока нет записей.</div>
                     ) : (
                       <div className="space-y-2 max-h-56 overflow-y-auto">
                         {palletHistory.slice(0, 20).map((h) => (
                           <div key={h.id} className="bg-white border rounded-lg p-2">
                             <div className="flex items-start justify-between gap-2 mb-1">
-                              <div className="text-xs text-gray-500">{new Date(h.created_at).toLocaleString('ru-RU')} • {h.total_pallets} паллет • {Number(h.total_amount).toFixed(2)} ₽</div>
+                              <div className="text-xs text-slate-500">{new Date(h.created_at).toLocaleString('ru-RU')} • {h.total_pallets} паллет • {Number(h.total_amount).toFixed(2)} ₽</div>
                               <div className="flex items-center gap-1">
                                 <button
                                   onClick={() => {
@@ -27661,25 +27662,25 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           )}
 
           {cwScheduleRulesOpen && (
-            <div className="fixed inset-0 z-[66] bg-black/50 flex items-center justify-center p-3" onClick={() => setCwScheduleRulesOpen(false)}>
+            <div className="fixed inset-0 z-[66] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-3" onClick={() => setCwScheduleRulesOpen(false)}>
               <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl p-4" onClick={(e) => e.stopPropagation()}>
-                <div className="text-lg font-bold text-gray-900 mb-3">Правила графика</div>
+                <div className="text-lg font-bold text-slate-900 mb-3">Правила графика</div>
                 <div className="space-y-3">
-                  <label className="block text-sm text-gray-700">Первое заполнение (число месяца)
+                  <label className="block text-sm text-slate-700">Первое заполнение (число месяца)
                     <input type="number" min={1} max={31} value={cwScheduleRuleStart1} onChange={(e) => setCwScheduleRuleStart1(Number(e.target.value || 1))} className="oc-input mt-1" />
                   </label>
-                  <label className="block text-sm text-gray-700">Второе заполнение (число месяца)
+                  <label className="block text-sm text-slate-700">Второе заполнение (число месяца)
                     <input type="number" min={1} max={31} value={cwScheduleRuleStart2} onChange={(e) => setCwScheduleRuleStart2(Number(e.target.value || 14))} className="oc-input mt-1" />
                   </label>
-                  <label className="flex items-center gap-2 text-sm text-gray-700">
+                  <label className="flex items-center gap-2 text-sm text-slate-700">
                     <input type="checkbox" checked={cwScheduleRuleSecondToMonthEnd} onChange={(e) => setCwScheduleRuleSecondToMonthEnd(e.target.checked)} />
                     От второго заполнения до конца месяца
                   </label>
-                  <label className="flex items-center gap-2 text-sm text-gray-700">
+                  <label className="flex items-center gap-2 text-sm text-slate-700">
                     <input type="checkbox" checked={cwScheduleRuleMutualOffEnabled} onChange={(e) => setCwScheduleRuleMutualOffEnabled(e.target.checked)} />
                     Запрет: Серёга и Юля не могут брать выходной в один день
                   </label>
-                  <label className="block text-sm text-gray-700">Максимум выходных в месяце
+                  <label className="block text-sm text-slate-700">Максимум выходных в месяце
                     <input type="number" min={0} max={31} value={cwScheduleRuleMaxOffDays} onChange={(e) => setCwScheduleRuleMaxOffDays(Number(e.target.value || 0))} className="oc-input mt-1" />
                   </label>
                   <div className="text-xs text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-2">
@@ -27687,7 +27688,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   </div>
                 </div>
                 <div className="mt-4 flex justify-end gap-2">
-                  <button onClick={() => setCwScheduleRulesOpen(false)} className="px-3 py-2 text-sm rounded border border-gray-300">Отмена</button>
+                  <button onClick={() => setCwScheduleRulesOpen(false)} className="px-3 py-2 text-sm rounded border border-slate-300">Отмена</button>
                   <button onClick={async () => { await saveScheduleRules(); setCwScheduleRulesOpen(false); showToast('Правила графика сохранены', 'success'); }} className="px-3 py-2 text-sm rounded bg-indigo-600 text-white">Сохранить</button>
                 </div>
               </div>
@@ -27695,10 +27696,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           )}
 
           {cwScheduleAutoNotifyOpen && (
-            <div className="fixed inset-0 z-[68] bg-black/50 flex items-center justify-center p-3" onClick={() => setCwScheduleAutoNotifyOpen(false)}>
+            <div className="fixed inset-0 z-[68] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-3" onClick={() => setCwScheduleAutoNotifyOpen(false)}>
               <div className="w-full max-w-lg bg-white rounded-2xl shadow-2xl p-4" onClick={(e) => e.stopPropagation()}>
-                <div className="text-lg font-bold text-gray-900 mb-1">Автоматическая рассылка</div>
-                <div className="text-xs text-gray-500 mb-3">Уведомление отправляется выбранного числа каждого месяца</div>
+                <div className="text-lg font-bold text-slate-900 mb-1">Автоматическая рассылка</div>
+                <div className="text-xs text-slate-500 mb-3">Уведомление отправляется выбранного числа каждого месяца</div>
                 <div className="flex items-center gap-2 mb-3">
                   <input type="number" min={1} max={31} value={cwScheduleAutoNotifyDateInput} onChange={(e) => setCwScheduleAutoNotifyDateInput(e.target.value)} className="oc-input" placeholder="Число месяца" />
                   <button type="button" onClick={() => { const d = Number(cwScheduleAutoNotifyDateInput || 0); if (!d || d < 1 || d > 31) return; setCwScheduleAutoNotifyDates((prev) => Array.from(new Set([...(prev || []), String(d)])).sort((a,b)=>Number(a)-Number(b))); setCwScheduleAutoNotifyDateInput('1'); }} className="px-3 py-2 text-sm rounded border border-indigo-200 text-indigo-700 inline-flex items-center gap-1"><Plus className="w-4 h-4" /> Добавить день</button>
@@ -27712,7 +27713,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   ))}
                 </div>
                 <div className="mt-4 flex justify-end gap-2">
-                  <button onClick={() => setCwScheduleAutoNotifyOpen(false)} className="px-3 py-2 text-sm rounded border border-gray-300">Отмена</button>
+                  <button onClick={() => setCwScheduleAutoNotifyOpen(false)} className="px-3 py-2 text-sm rounded border border-slate-300">Отмена</button>
                   <button onClick={async () => { await saveAutoScheduleNotifyDates(cwScheduleAutoNotifyDates); setCwScheduleAutoNotifyOpen(false); showToast('Автоматическая рассылка сохранена', 'success'); }} className="px-3 py-2 text-sm rounded bg-indigo-600 text-white">Сохранить</button>
                 </div>
               </div>
@@ -27720,9 +27721,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           )}
 
           {cwScheduleNotifyOpen && (
-            <div className="fixed inset-0 z-[67] bg-black/50 flex items-center justify-center p-3" onClick={() => setCwScheduleNotifyOpen(false)}>
+            <div className="fixed inset-0 z-[67] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-3" onClick={() => setCwScheduleNotifyOpen(false)}>
               <div className="w-full max-w-lg bg-white rounded-2xl shadow-2xl p-4" onClick={(e) => e.stopPropagation()}>
-                <div className="text-lg font-bold text-gray-900 mb-3">Напомнить о заполнении графика</div>
+                <div className="text-lg font-bold text-slate-900 mb-3">Напомнить о заполнении графика</div>
                 <div className="space-y-2">
                   {cwScheduleNotifyEmployeeIds.map((id, i) => (
                     <div key={`sched-notify-${i}`} className="flex items-center gap-2">
@@ -27742,7 +27743,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 </div>
                 <div className="mt-4 flex justify-end gap-2 flex-wrap">
                   <button onClick={() => { setCwScheduleNotifyOpen(false); setCwScheduleAutoNotifyOpen(true); }} className="px-3 py-2 text-sm rounded border border-indigo-300 text-indigo-700">Автоматическая рассылка</button>
-                  <button onClick={() => setCwScheduleNotifyOpen(false)} className="px-3 py-2 text-sm rounded border border-gray-300">Отмена</button>
+                  <button onClick={() => setCwScheduleNotifyOpen(false)} className="px-3 py-2 text-sm rounded border border-slate-300">Отмена</button>
                   <button onClick={async () => {
                     const ids = Array.from(new Set(cwScheduleNotifyEmployeeIds.map((x) => String(x || '').trim()).filter(Boolean)));
                     if (!ids.length) { showToast('Выберите сотрудников', 'error'); return; }
@@ -27765,14 +27766,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           )}
 
           {cwScheduleModalOpen && (
-            <div className="fixed inset-0 z-[65] bg-black/50 flex items-end sm:items-center justify-center p-2 sm:p-3" onClick={() => setCwScheduleModalOpen(false)}>
+            <div className="fixed inset-0 z-[65] bg-slate-900/50 backdrop-blur-sm flex items-end sm:items-center justify-center p-2 sm:p-3" onClick={() => setCwScheduleModalOpen(false)}>
               <div className="w-full max-w-3xl h-[88vh] sm:h-auto bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
                 <div className="sticky top-0 z-20 bg-white px-3 pt-2 pb-2 sm:px-4 sm:pt-4 md:px-6 md:pt-6 border-b">
-                  <div className="mx-auto mb-1.5 h-1.5 w-12 rounded-full bg-gray-300 sm:hidden" />
+                  <div className="mx-auto mb-1.5 h-1.5 w-12 rounded-full bg-slate-300 sm:hidden" />
                   <div className="flex items-center justify-between gap-2 mb-2 pr-12 md:pr-0">
                     <div>
-                      <div className="text-base sm:text-lg font-bold text-gray-900 leading-tight">График выходов</div>
-                      <div className="text-[11px] sm:text-xs text-gray-500 leading-tight">Отмечай даты, когда сотрудник выходит на работу</div>
+                      <div className="text-base sm:text-lg font-bold text-slate-900 leading-tight">График выходов</div>
+                      <div className="text-[11px] sm:text-xs text-slate-500 leading-tight">Отмечай даты, когда сотрудник выходит на работу</div>
                     </div>
                     <div className="flex items-center gap-2">
                       {String(currentEmployee?.role || '').toLowerCase() === 'admin' && (
@@ -27783,7 +27784,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       )}
                       <button
                         onClick={() => setCwScheduleModalOpen(false)}
-                        className="fixed right-4 top-4 z-30 inline-flex h-11 w-11 items-center justify-center rounded-full border border-gray-200 bg-white shadow-md hover:bg-gray-50 md:static md:h-auto md:w-auto md:rounded-lg md:border-0 md:bg-transparent md:shadow-none md:p-2"
+                        className="fixed right-4 top-4 z-30 inline-flex h-11 w-11 items-center justify-center rounded-full border border-slate-200 bg-white shadow-md hover:bg-slate-50 md:static md:h-auto md:w-auto md:rounded-lg md:border-0 md:bg-transparent md:shadow-none md:p-2"
                         aria-label="Закрыть график выходов"
                       ><X className="w-5 h-5" /></button>
                     </div>
@@ -27793,7 +27794,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 <div className="flex-1 overflow-y-auto custom-scrollbar px-3 pb-4 sm:px-4 md:px-6">
                   {String(currentEmployee?.role || '').toLowerCase() === 'admin' && hasAssemblyButtonAccess('cw_calendar_schedule_employee_pick') && (
                     <div className="mb-3 pt-1">
-                      <label className="block text-xs text-gray-500 mb-1">Сотрудник</label>
+                      <label className="block text-xs text-slate-500 mb-1">Сотрудник</label>
                       <select
                         value={cwScheduleEmployeeId}
                         onChange={async (e) => {
@@ -27815,7 +27816,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   )}
 
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-3 gap-2">
-                    <div className="font-semibold text-gray-800 capitalize text-sm sm:text-base">{cwScheduleMonth.toLocaleString('ru-RU', { month: 'long', year: 'numeric' })}</div>
+                    <div className="font-semibold text-slate-800 capitalize text-sm sm:text-base">{cwScheduleMonth.toLocaleString('ru-RU', { month: 'long', year: 'numeric' })}</div>
                     <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
                       <button
                         type="button"
@@ -27824,14 +27825,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       >
                         {cwScheduleMode === 'off' ? 'Режим: Выходные' : 'Режим: Рабочие'}
                       </button>
-                      <div className="flex gap-1 bg-gray-100 rounded-lg p-1 self-start sm:self-auto">
+                      <div className="flex gap-1 bg-slate-100 rounded-lg p-1 self-start sm:self-auto">
                         <button onClick={() => setCwScheduleMonth(new Date(cwScheduleMonth.getFullYear(), cwScheduleMonth.getMonth() - 1, 1))} className="p-1 hover:bg-white rounded"><ChevronLeft className="h-4 w-4" /></button>
                         <button onClick={() => setCwScheduleMonth(new Date(cwScheduleMonth.getFullYear(), cwScheduleMonth.getMonth() + 1, 1))} className="p-1 hover:bg-white rounded"><ChevronRight className="h-4 w-4" /></button>
                       </div>
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-7 gap-1 mb-2 text-center text-[10px] sm:text-xs font-medium text-gray-400">
+                  <div className="grid grid-cols-7 gap-1 mb-2 text-center text-[10px] sm:text-xs font-medium text-slate-400">
                     {['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map((d) => <div key={`sched-d-${d}`}>{d}</div>)}
                   </div>
                   <div className="grid grid-cols-7 gap-1 sm:gap-2">
@@ -27862,9 +27863,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                 setCwScheduleDraftDates(Array.from(new Set(next)).sort());
                               }
                             }}
-                            className={`min-h-[52px] sm:min-h-[64px] border rounded-lg sm:rounded-xl p-1 sm:p-2 text-left transition-all ${checked ? (cwScheduleMode === 'off' ? 'bg-rose-50 border-rose-300' : 'bg-blue-50 border-blue-300') : 'bg-white border-gray-200 hover:border-blue-300'} ${checked && cwScheduleLocked && String(currentEmployee?.role || '').toLowerCase() !== 'admin' ? 'opacity-90' : ''}`}
+                            className={`min-h-[52px] sm:min-h-[64px] border rounded-lg sm:rounded-xl p-1 sm:p-2 text-left transition-all ${checked ? (cwScheduleMode === 'off' ? 'bg-rose-50 border-rose-300' : 'bg-blue-50 border-blue-300') : 'bg-white border-slate-200 hover:border-blue-300'} ${checked && cwScheduleLocked && String(currentEmployee?.role || '').toLowerCase() !== 'admin' ? 'opacity-90' : ''}`}
                           >
-                            <div className="text-xs sm:text-sm font-medium text-gray-700">{d}</div>
+                            <div className="text-xs sm:text-sm font-medium text-slate-700">{d}</div>
                             {checked && <div className={`text-[9px] sm:text-[10px] mt-0.5 sm:mt-1 ${cwScheduleMode === 'off' ? 'text-rose-700' : 'text-blue-700'}`}>{cwScheduleMode === 'off' ? 'Выходной' : 'Рабочий'}</div>}
                           </button>
                         );
@@ -27878,7 +27879,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       <div className="text-sm rounded-lg border border-rose-200 bg-rose-50 text-rose-700 px-3 py-2">{cwScheduleInlineError}</div>
                     )}
                     <div className="hidden sm:flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                      <div className="text-xs text-gray-500">После сохранения отмена выхода доступна только администратору.</div>
+                      <div className="text-xs text-slate-500">После сохранения отмена выхода доступна только администратору.</div>
                       <button
                         onClick={async () => {
                           if (!cwScheduleEmployeeId) return;
@@ -27955,7 +27956,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       </button>
                     </div>
                     <div className="sm:hidden fixed inset-x-0 bottom-0 z-20 border-t bg-white/95 backdrop-blur px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-                      <div className="text-[11px] text-gray-500 mb-2">После сохранения отмена выхода доступна только администратору.</div>
+                      <div className="text-[11px] text-slate-500 mb-2">После сохранения отмена выхода доступна только администратору.</div>
                       <button
                         onClick={async () => {
                           if (!cwScheduleEmployeeId) return;
@@ -28041,7 +28042,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
             <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm flex items-end md:items-center justify-center z-50 transition-opacity p-2 md:p-3 xl:p-4" onClick={() => setShowTempWorkerHistory(false)}>
               <div className="bg-slate-50 rounded-t-3xl md:rounded-3xl shadow-2xl w-[98vw] max-w-[1500px] max-h-[94svh] 2xl:h-[92svh] flex flex-col overflow-y-auto 2xl:overflow-hidden transform transition-all scale-100 border border-white/70" onClick={e => e.stopPropagation()}>
                 <div className="sticky top-0 z-20 bg-white/90 backdrop-blur border-b border-slate-200 px-4 pt-2 pb-3 md:px-5 md:pt-4 md:pb-4 xl:px-6">
-                  <div className="mx-auto mb-1.5 h-1.5 w-12 rounded-full bg-gray-300 md:hidden" />
+                  <div className="mx-auto mb-1.5 h-1.5 w-12 rounded-full bg-slate-300 md:hidden" />
                   <div className="flex flex-col gap-4 2xl:flex-row 2xl:items-start 2xl:justify-between">
                     <div className="pr-0 md:pr-4">
                       <div className="inline-flex items-center gap-2 rounded-full bg-indigo-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-indigo-700 mb-2">
@@ -28108,10 +28109,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       </button>
                       <button
                           onClick={() => setShowTempWorkerHistory(false)}
-                          className="fixed right-4 top-4 z-30 inline-flex h-11 w-11 items-center justify-center rounded-full border border-gray-200 bg-white shadow-md hover:bg-gray-50 md:static md:h-auto md:w-auto md:rounded-lg md:border-0 md:bg-transparent md:shadow-none md:p-2"
+                          className="fixed right-4 top-4 z-30 inline-flex h-11 w-11 items-center justify-center rounded-full border border-slate-200 bg-white shadow-md hover:bg-slate-50 md:static md:h-auto md:w-auto md:rounded-lg md:border-0 md:bg-transparent md:shadow-none md:p-2"
                           aria-label="Закрыть окно истории"
                       >
-                          <X className="h-6 w-6 text-gray-500" />
+                          <X className="h-6 w-6 text-slate-500" />
                       </button>
                     </div>
                   </div>
@@ -28168,8 +28169,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     <div className="flex gap-2 min-w-max pb-1">
                       {tempUnpaidBySupplier.rows.map((r) => (
                         <div key={`temp-unpaid-mobile-${r.supplierId || 'none'}`} className="w-[220px] shrink-0 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
-                          <div className="text-sm font-medium text-gray-900 truncate" title={r.supplierName}>{r.supplierName}</div>
-                          <div className="mt-1 text-xs text-gray-500">Смен: {r.shifts}</div>
+                          <div className="text-sm font-medium text-slate-900 truncate" title={r.supplierName}>{r.supplierName}</div>
+                          <div className="mt-1 text-xs text-slate-500">Смен: {r.shifts}</div>
                           <div className="mt-2 text-sm font-bold text-rose-700">{r.amount.toFixed(2)} ₽</div>
                         </div>
                       ))}
@@ -28179,13 +28180,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                 {tempUnpaidBySupplier.rows.length > 0 && (
                   <div className="mx-3 my-4 hidden rounded-3xl border border-slate-200 bg-white p-4 shadow-sm md:mx-6 md:block">
-                    <div className="text-sm font-semibold text-gray-800 mb-2">Не оплачено по поставщикам</div>
+                    <div className="text-sm font-semibold text-slate-800 mb-2">Не оплачено по поставщикам</div>
                     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
                       {tempUnpaidBySupplier.rows.map((r) => (
-                        <div key={`temp-unpaid-${r.supplierId || 'none'}`} className="border rounded-lg p-2 bg-gray-50 flex items-center justify-between gap-2">
+                        <div key={`temp-unpaid-${r.supplierId || 'none'}`} className="border rounded-lg p-2 bg-slate-50 flex items-center justify-between gap-2">
                           <div className="min-w-0">
-                            <div className="text-sm font-medium text-gray-900 truncate" title={r.supplierName}>{r.supplierName}</div>
-                            <div className="text-xs text-gray-500">Смен: {r.shifts}</div>
+                            <div className="text-sm font-medium text-slate-900 truncate" title={r.supplierName}>{r.supplierName}</div>
+                            <div className="text-xs text-slate-500">Смен: {r.shifts}</div>
                           </div>
                           <div className="text-sm font-bold text-rose-700 whitespace-nowrap">{r.amount.toFixed(2)} ₽</div>
                         </div>
@@ -28236,8 +28237,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           <div key={`temp-mobile-${log.id}`} className="border rounded-xl p-3 bg-white shadow-sm">
                             <div className="flex items-start justify-between gap-2">
                               <div>
-                                <div className="text-sm font-semibold text-gray-900">{supplier?.name || '-'}</div>
-                                <div className="text-xs text-gray-500">{log?.date ? new Date(log.date).toLocaleDateString('ru-RU') : '-'}</div>
+                                <div className="text-sm font-semibold text-slate-900">{supplier?.name || '-'}</div>
+                                <div className="text-xs text-slate-500">{log?.date ? new Date(log.date).toLocaleDateString('ru-RU') : '-'}</div>
                               </div>
                               <div className="text-sm font-bold text-green-600">
                                 {log.earnings} ₽
@@ -28246,9 +28247,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                 )}
                               </div>
                             </div>
-                            <div className="mt-2 text-sm text-gray-800">{log.worker_name || log.worker || '-'}</div>
-                            <div className="text-xs text-gray-600 mt-1">{log.work_comment || log.comment || '-'}</div>
-                            <div className="mt-2 flex items-center justify-between text-xs text-gray-600">
+                            <div className="mt-2 text-sm text-slate-800">{log.worker_name || log.worker || '-'}</div>
+                            <div className="text-xs text-slate-600 mt-1">{log.work_comment || log.comment || '-'}</div>
+                            <div className="mt-2 flex items-center justify-between text-xs text-slate-600">
                               <span>{log.hours} ч.</span>
                               <span>{creator?.full_name || '-'}</span>
                             </div>
@@ -28262,14 +28263,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                     if (next) setTempWorkerPaymentModal({ open: true, logId: String(log.id), mode: 'pay', supplierId: '', amount: '', error: '' });
                                     else handleToggleTempWorkerPaid(log.id, false, null);
                                   }}
-                                  className="h-4 w-4 rounded border-gray-300 text-green-600 focus:ring-green-500"
+                                  className="h-4 w-4 rounded border-slate-300 text-green-600 focus:ring-green-500"
                                 />
-                                <span className={`text-xs font-medium ${getTempWorkerRemainingAmount(log) <= 0 ? 'text-green-700' : 'text-gray-500'}`}>{getTempWorkerRemainingAmount(log) <= 0 ? 'Оплачено' : 'Не оплачено'}</span>
+                                <span className={`text-xs font-medium ${getTempWorkerRemainingAmount(log) <= 0 ? 'text-green-700' : 'text-slate-500'}`}>{getTempWorkerRemainingAmount(log) <= 0 ? 'Оплачено' : 'Не оплачено'}</span>
                                 {getTempWorkerPaidAmount(log) > 0 && (
                                   <span className="text-[10px] text-emerald-700">Оплачено: {getTempWorkerPaidAmount(log).toFixed(2)} ₽</span>
                                 )}
                                 {getTempWorkerPaymentsSummary(log).map((p) => (
-                                  <span key={`temp-pay-mobile-${log.id}-${p.supplierId}`} className="text-[10px] text-gray-500">{p.supplierName}: {p.amount.toFixed(2)} ₽</span>
+                                  <span key={`temp-pay-mobile-${log.id}-${p.supplierId}`} className="text-[10px] text-slate-500">{p.supplierName}: {p.amount.toFixed(2)} ₽</span>
                                 ))}
                               </label>
                               <div className="flex items-center gap-1 flex-wrap justify-end">
@@ -28310,35 +28311,35 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       })}
                     </div>
                     {filteredTempWorkerLogs.length === 0 && (
-                      <div className="md:hidden p-10 text-center text-gray-400">История пуста</div>
+                      <div className="md:hidden p-10 text-center text-slate-400">История пуста</div>
                     )}
 
                     <div className="hidden md:block overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
                     <table className="min-w-[1060px] w-full text-left border-collapse text-sm">
-                        <thead className="bg-gray-50 sticky top-0 z-10">
+                        <thead className="bg-slate-50 sticky top-0 z-10">
                             <tr>
-                                <th className="p-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Дата</th>
-                                <th className="p-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Поставщик</th>
-                                <th className="p-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Имя рабочего</th>
-                                <th className="p-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Комментарий</th>
-                                <th className="p-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Часы</th>
-                                <th className="p-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Заработок</th>
-                                <th className="p-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Оплата</th>
-                                <th className="p-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Создал</th>
-                                <th className="p-4 text-xs font-semibold text-gray-500 uppercase tracking-wider text-right">Действия</th>
+                                <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Дата</th>
+                                <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Поставщик</th>
+                                <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Имя рабочего</th>
+                                <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Комментарий</th>
+                                <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Часы</th>
+                                <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Заработок</th>
+                                <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Оплата</th>
+                                <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Создал</th>
+                                <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-right">Действия</th>
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-gray-100">
+                        <tbody className="divide-y divide-slate-100">
                             {filteredTempWorkerLogs.map(log => {
                                 const supplier = suppliers.find(s => s.id === log.supplier_id);
                                 const creator = employees.find(e => e.id === log.created_by);
                                 return (
-                                    <tr key={log.id} className="hover:bg-gray-50 transition-colors">
-                                        <td className="p-4 text-gray-900">{log?.date ? new Date(log.date).toLocaleDateString('ru-RU') : '-'}</td>
-                                        <td className="p-4 text-gray-900 font-medium">{supplier?.name || '-'}</td>
-                                        <td className="p-4 text-gray-900">{log.worker_name || log.worker || '-'}</td>
-                                        <td className="p-4 text-gray-600 max-w-[260px] truncate" title={log.work_comment || log.comment || ''}>{log.work_comment || log.comment || '-'}</td>
-                                        <td className="p-4 text-gray-600">{log.hours} ч.</td>
+                                    <tr key={log.id} className="hover:bg-slate-50 transition-colors">
+                                        <td className="p-4 text-slate-900">{log?.date ? new Date(log.date).toLocaleDateString('ru-RU') : '-'}</td>
+                                        <td className="p-4 text-slate-900 font-medium">{supplier?.name || '-'}</td>
+                                        <td className="p-4 text-slate-900">{log.worker_name || log.worker || '-'}</td>
+                                        <td className="p-4 text-slate-600 max-w-[260px] truncate" title={log.work_comment || log.comment || ''}>{log.work_comment || log.comment || '-'}</td>
+                                        <td className="p-4 text-slate-600">{log.hours} ч.</td>
                                         <td className="p-4 font-bold text-green-600">
                                           {log.earnings} ₽
                                           {getTempWorkerPaidAmount(log) > 0 && Number(log.earnings || 0) !== getTempWorkerPaidAmount(log) && (
@@ -28355,10 +28356,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                                 if (next) setTempWorkerPaymentModal({ open: true, logId: String(log.id), mode: 'pay', supplierId: '', amount: '', error: '' });
                                                 else handleToggleTempWorkerPaid(log.id, false, null);
                                               }}
-                                              className="h-4 w-4 rounded border-gray-300 text-green-600 focus:ring-green-500"
+                                              className="h-4 w-4 rounded border-slate-300 text-green-600 focus:ring-green-500"
                                             />
                                             <div className="flex flex-col">
-                                              <span className={`text-sm font-medium ${getTempWorkerRemainingAmount(log) <= 0 ? 'text-green-700' : 'text-gray-500'}`}>
+                                              <span className={`text-sm font-medium ${getTempWorkerRemainingAmount(log) <= 0 ? 'text-green-700' : 'text-slate-500'}`}>
                                                 {getTempWorkerRemainingAmount(log) <= 0 ? 'Оплачено' : 'Не оплачено'}
                                               </span>
                                               {getTempWorkerPaidAmount(log) > 0 && (
@@ -28368,12 +28369,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                                 <button onClick={() => handleOpenEditTempWorkerPayment(log)} className="mt-1 text-[10px] text-violet-700 hover:text-violet-900 text-left">Редактировать оплату</button>
                                               )}
                                               {getTempWorkerPaymentsSummary(log).map((p) => (
-                                                <span key={`temp-pay-table-${log.id}-${p.supplierId}`} className="text-[10px] text-gray-500">{p.supplierName}: {p.amount.toFixed(2)} ₽</span>
+                                                <span key={`temp-pay-table-${log.id}-${p.supplierId}`} className="text-[10px] text-slate-500">{p.supplierName}: {p.amount.toFixed(2)} ₽</span>
                                               ))}
                                             </div>
                                           </label>
                                         </td>
-                                        <td className="p-4 text-gray-500 text-sm">{creator?.full_name || '-'}</td>
+                                        <td className="p-4 text-slate-500 text-sm">{creator?.full_name || '-'}</td>
                                         <td className="p-4 text-right">
                                           <div className="inline-flex items-center gap-2">
                                             <button
@@ -28401,9 +28402,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             })}
                             {filteredTempWorkerLogs.length === 0 && (
                                 <tr>
-                                    <td colSpan={9} className="p-12 text-center text-gray-400 flex flex-col items-center justify-center">
-                                        <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
-                                            <Clock className="w-8 h-8 text-gray-400" />
+                                    <td colSpan={9} className="p-12 text-center text-slate-400 flex flex-col items-center justify-center">
+                                        <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-4">
+                                            <Clock className="w-8 h-8 text-slate-400" />
                                         </div>
                                         <p>История пуста</p>
                                     </td>
@@ -28421,7 +28422,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
             <div className="fixed inset-0 z-[76] bg-slate-950/60 backdrop-blur-sm flex items-end md:items-center justify-center p-2 md:p-4" onClick={() => setShowTempWorkerQuickPayModal(false)}>
               <div className="bg-slate-50 rounded-t-3xl md:rounded-3xl shadow-2xl w-[98vw] max-w-5xl max-h-[92svh] 2xl:h-[82vh] flex flex-col overflow-y-auto 2xl:overflow-hidden border border-white/70" onClick={(e) => e.stopPropagation()}>
                 <div className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b border-slate-200 px-4 py-4 md:px-6">
-                  <div className="mx-auto mb-2 h-1.5 w-12 rounded-full bg-gray-300 md:hidden" />
+                  <div className="mx-auto mb-2 h-1.5 w-12 rounded-full bg-slate-300 md:hidden" />
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <div className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-emerald-700 mb-2">
@@ -28430,8 +28431,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       <h2 className="text-lg md:text-2xl font-bold text-slate-950">Быстрая оплата</h2>
                       <p className="text-xs md:text-sm text-slate-500 mt-1">Выберите поставщика-плательщика и неоплаченные смены. После подтверждения они будут полностью оплачены.</p>
                     </div>
-                    <button onClick={() => setShowTempWorkerQuickPayModal(false)} className="p-2 rounded-lg hover:bg-gray-100" aria-label="Закрыть быструю оплату">
-                      <X className="h-5 w-5 text-gray-500" />
+                    <button onClick={() => setShowTempWorkerQuickPayModal(false)} className="p-2 rounded-lg hover:bg-slate-100" aria-label="Закрыть быструю оплату">
+                      <X className="h-5 w-5 text-slate-500" />
                     </button>
                   </div>
                   <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50/80 p-3 grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-3 items-end">
@@ -28494,7 +28495,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                 <div className="p-4 md:p-6 2xl:flex-1 2xl:overflow-y-auto custom-scrollbar">
                   {tempWorkerQuickPayRows.length === 0 ? (
-                    <div className="h-full min-h-[220px] flex flex-col items-center justify-center text-center text-gray-400">
+                    <div className="h-full min-h-[220px] flex flex-col items-center justify-center text-center text-slate-400">
                       <CheckCircle2 className="h-12 w-12 mb-3 text-emerald-300" />
                       <div className="font-medium">Неоплаченных смен нет</div>
                     </div>
@@ -28514,7 +28515,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                 onChange={(e) => {
                                   setTempWorkerQuickPaySelectedIds(prev => e.target.checked ? Array.from(new Set([...prev, id])) : prev.filter((x) => x !== id));
                                 }}
-                                className="mt-1 h-5 w-5 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                                className="mt-1 h-5 w-5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
                               />
                               <div className="min-w-0 flex-1">
                                 <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-1">
@@ -28558,7 +28559,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
             <div className="fixed inset-0 z-[77] bg-slate-950/60 backdrop-blur-sm flex items-end md:items-center justify-center p-2 md:p-4" onClick={() => setShowDeliveryQuickPayModal(false)}>
               <div className="bg-slate-50 rounded-t-3xl md:rounded-3xl shadow-2xl w-[98vw] max-w-5xl max-h-[92svh] 2xl:h-[82vh] flex flex-col overflow-y-auto 2xl:overflow-hidden border border-white/70" onClick={(e) => e.stopPropagation()}>
                 <div className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b border-slate-200 px-4 py-4 md:px-6">
-                  <div className="mx-auto mb-2 h-1.5 w-12 rounded-full bg-gray-300 md:hidden" />
+                  <div className="mx-auto mb-2 h-1.5 w-12 rounded-full bg-slate-300 md:hidden" />
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <div className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-emerald-700 mb-2">
@@ -28567,8 +28568,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       <h2 className="text-lg md:text-2xl font-bold text-slate-950">Быстрая оплата</h2>
                       <p className="text-xs md:text-sm text-slate-500 mt-1">Выберите поставщика-плательщика и неоплаченные доставки. После подтверждения они будут отмечены оплаченными.</p>
                     </div>
-                    <button onClick={() => setShowDeliveryQuickPayModal(false)} className="p-2 rounded-lg hover:bg-gray-100" aria-label="Закрыть быструю оплату доставок">
-                      <X className="h-5 w-5 text-gray-500" />
+                    <button onClick={() => setShowDeliveryQuickPayModal(false)} className="p-2 rounded-lg hover:bg-slate-100" aria-label="Закрыть быструю оплату доставок">
+                      <X className="h-5 w-5 text-slate-500" />
                     </button>
                   </div>
 
@@ -28693,7 +28694,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
             <div className="fixed inset-0 z-[76] bg-slate-950/60 backdrop-blur-sm flex items-end md:items-center justify-center p-2 md:p-4" onClick={() => setShowDeliveryModal(false)}>
               <div className="bg-slate-50 rounded-t-3xl md:rounded-3xl shadow-2xl w-[98vw] max-w-6xl h-[88vh] flex flex-col overflow-hidden border border-white/70" onClick={(e) => e.stopPropagation()}>
                 <div className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b border-slate-200 px-4 py-4 md:px-6">
-                  <div className="mx-auto mb-2 h-1.5 w-12 rounded-full bg-gray-300 md:hidden" />
+                  <div className="mx-auto mb-2 h-1.5 w-12 rounded-full bg-slate-300 md:hidden" />
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <div className="inline-flex items-center gap-2 rounded-full bg-orange-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-orange-700 mb-2">
@@ -28725,8 +28726,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <FileText className="h-4 w-4" />
                         <span className="hidden sm:inline">Отчет</span>
                       </button>
-                      <button onClick={() => setShowDeliveryModal(false)} className="p-2 rounded-lg hover:bg-gray-100" aria-label="Закрыть доставки">
-                        <X className="h-5 w-5 text-gray-500" />
+                      <button onClick={() => setShowDeliveryModal(false)} className="p-2 rounded-lg hover:bg-slate-100" aria-label="Закрыть доставки">
+                        <X className="h-5 w-5 text-slate-500" />
                       </button>
                     </div>
                   </div>
@@ -28919,7 +28920,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                   <div className="space-y-2">
                     {filteredDeliveryHistory.length === 0 ? (
-                      <div className="min-h-[220px] rounded-3xl border border-dashed border-slate-200 bg-white flex flex-col items-center justify-center text-center text-gray-400">
+                      <div className="min-h-[220px] rounded-3xl border border-dashed border-slate-200 bg-white flex flex-col items-center justify-center text-center text-slate-400">
                         <Truck className="h-12 w-12 mb-3 text-orange-200" />
                         <div className="font-medium">История доставок пуста</div>
                       </div>
@@ -29126,17 +29127,17 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           )}
 
           {showDeliveryReportModal && (
-            <div className="fixed inset-0 z-[94] bg-black/50 flex items-end md:items-center justify-center p-2 md:p-4" onClick={() => setShowDeliveryReportModal(false)}>
+            <div className="fixed inset-0 z-[94] bg-slate-900/50 backdrop-blur-sm flex items-end md:items-center justify-center p-2 md:p-4" onClick={() => setShowDeliveryReportModal(false)}>
               <div className="bg-white rounded-t-3xl md:rounded-2xl shadow-2xl w-[98vw] max-w-6xl max-h-[92svh] 2xl:h-[82vh] flex flex-col overflow-y-auto 2xl:overflow-hidden" onClick={(e) => e.stopPropagation()}>
                 <div className="sticky top-0 z-10 bg-white border-b px-4 py-4 md:px-6">
-                  <div className="mx-auto mb-2 h-1.5 w-12 rounded-full bg-gray-300 md:hidden" />
+                  <div className="mx-auto mb-2 h-1.5 w-12 rounded-full bg-slate-300 md:hidden" />
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <h2 className="text-lg md:text-2xl font-bold text-gray-900">Отчет по доставкам</h2>
-                      <p className="text-xs md:text-sm text-gray-500 mt-1">Период, поставщик, доставщик, оплата и PDF по текущей выборке.</p>
+                      <h2 className="text-lg md:text-2xl font-bold text-slate-900">Отчет по доставкам</h2>
+                      <p className="text-xs md:text-sm text-slate-500 mt-1">Период, поставщик, доставщик, оплата и PDF по текущей выборке.</p>
                     </div>
-                    <button onClick={() => setShowDeliveryReportModal(false)} className="p-2 rounded-lg hover:bg-gray-100" aria-label="Закрыть отчет по доставкам">
-                      <X className="h-5 w-5 text-gray-500" />
+                    <button onClick={() => setShowDeliveryReportModal(false)} className="p-2 rounded-lg hover:bg-slate-100" aria-label="Закрыть отчет по доставкам">
+                      <X className="h-5 w-5 text-slate-500" />
                     </button>
                   </div>
 
@@ -29246,63 +29247,63 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                 <div className="p-4 md:p-6 space-y-4 2xl:flex-1 2xl:overflow-y-auto custom-scrollbar">
                   {deliveryReportGrouped.groups.length === 0 ? (
-                    <div className="h-full min-h-[220px] flex flex-col items-center justify-center text-center text-gray-400">
+                    <div className="h-full min-h-[220px] flex flex-col items-center justify-center text-center text-slate-400">
                       <Truck className="h-12 w-12 mb-3 text-orange-200" />
                       <div className="font-medium">За выбранный период доставок нет</div>
                     </div>
                   ) : deliveryReportGrouped.groups.map((group) => {
                     const deliveriesCount = new Set(group.rows.map((row: any) => row.deliveryId)).size;
                     return (
-                      <div key={'delivery-report-group-' + group.supplierId} className="rounded-2xl border border-gray-200 overflow-hidden bg-white">
-                        <div className="bg-gray-50 px-4 py-3 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+                      <div key={'delivery-report-group-' + group.supplierId} className="rounded-2xl border border-slate-200 overflow-hidden bg-white">
+                        <div className="bg-slate-50 px-4 py-3 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
                           <div>
-                            <div className="font-bold text-gray-900">{group.supplierName}</div>
-                            <div className="text-xs text-gray-500">Доставок: {deliveriesCount} • Коробок: {Math.floor(group.boxes).toLocaleString('ru-RU')}</div>
+                            <div className="font-bold text-slate-900">{group.supplierName}</div>
+                            <div className="text-xs text-slate-500">Доставок: {deliveriesCount} • Коробок: {Math.floor(group.boxes).toLocaleString('ru-RU')}</div>
                           </div>
-                          <div className="text-sm font-semibold text-gray-700">
+                          <div className="text-sm font-semibold text-slate-700">
                             Оплачено: <span className="text-emerald-700">{group.paid.toFixed(2)} ₽</span>
-                            <span className="mx-2 text-gray-300">/</span>
+                            <span className="mx-2 text-slate-300">/</span>
                             Не оплачено: <span className="text-rose-700">{group.unpaid.toFixed(2)} ₽</span>
                           </div>
                         </div>
 
-                        <div className="md:hidden divide-y divide-gray-100">
+                        <div className="md:hidden divide-y divide-slate-100">
                           {group.rows.map((row: any, rowIndex: number) => (
                             <div key={'delivery-report-mobile-' + row.deliveryId + '-' + rowIndex} className="p-3 text-sm">
                               <div className="flex items-start justify-between gap-2">
                                 <div>
-                                  <div className="font-medium text-gray-900">{row.courier || 'Доставщик'}</div>
-                                  <div className="text-xs text-gray-500">{row?.date ? new Date(String(row.date) + 'T12:00:00').toLocaleDateString('ru-RU') : '—'} • {Math.floor(Number(row.boxes || 0)).toLocaleString('ru-RU')} кор.</div>
+                                  <div className="font-medium text-slate-900">{row.courier || 'Доставщик'}</div>
+                                  <div className="text-xs text-slate-500">{row?.date ? new Date(String(row.date) + 'T12:00:00').toLocaleDateString('ru-RU') : '—'} • {Math.floor(Number(row.boxes || 0)).toLocaleString('ru-RU')} кор.</div>
                                 </div>
                                 <div className="font-bold text-orange-700 whitespace-nowrap">{Number(row.amount || 0).toFixed(2)} ₽</div>
                               </div>
-                              <div className="mt-1 text-xs text-gray-500">Статус: {row.is_paid ? 'Оплачено' : 'Не оплачено'} • Кто оплатил: {row.paidByText || '—'}</div>
+                              <div className="mt-1 text-xs text-slate-500">Статус: {row.is_paid ? 'Оплачено' : 'Не оплачено'} • Кто оплатил: {row.paidByText || '—'}</div>
                             </div>
                           ))}
                         </div>
 
                         <table className="hidden md:table w-full text-left text-sm">
-                          <thead className="bg-white border-b border-gray-100">
+                          <thead className="bg-white border-b border-slate-100">
                             <tr>
-                              <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Дата</th>
-                              <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Доставщик</th>
-                              <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Коробки</th>
-                              <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Сумма поставщика</th>
-                              <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Сумма доставки</th>
-                              <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Статус</th>
-                              <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Кто оплатил</th>
+                              <th className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Дата</th>
+                              <th className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Доставщик</th>
+                              <th className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Коробки</th>
+                              <th className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Сумма поставщика</th>
+                              <th className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Сумма доставки</th>
+                              <th className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Статус</th>
+                              <th className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Кто оплатил</th>
                             </tr>
                           </thead>
-                          <tbody className="divide-y divide-gray-100">
+                          <tbody className="divide-y divide-slate-100">
                             {group.rows.map((row: any, rowIndex: number) => (
-                              <tr key={'delivery-report-row-' + row.deliveryId + '-' + rowIndex} className="hover:bg-gray-50">
+                              <tr key={'delivery-report-row-' + row.deliveryId + '-' + rowIndex} className="hover:bg-slate-50">
                                 <td className="px-4 py-2 whitespace-nowrap">{row?.date ? new Date(String(row.date) + 'T12:00:00').toLocaleDateString('ru-RU') : '—'}</td>
-                                <td className="px-4 py-2 font-medium text-gray-900">{row.courier || 'Доставщик'}</td>
+                                <td className="px-4 py-2 font-medium text-slate-900">{row.courier || 'Доставщик'}</td>
                                 <td className="px-4 py-2">{Math.floor(Number(row.boxes || 0)).toLocaleString('ru-RU')}</td>
                                 <td className="px-4 py-2 font-semibold text-orange-700">{Number(row.amount || 0).toFixed(2)} ₽</td>
-                                <td className="px-4 py-2 text-gray-600">{Number(row.totalDeliveryAmount || 0).toFixed(2)} ₽</td>
+                                <td className="px-4 py-2 text-slate-600">{Number(row.totalDeliveryAmount || 0).toFixed(2)} ₽</td>
                                 <td className={'px-4 py-2 font-semibold ' + (row.is_paid ? 'text-emerald-700' : 'text-rose-700')}>{row.is_paid ? 'Оплачено' : 'Не оплачено'}</td>
-                                <td className="px-4 py-2 text-gray-600 max-w-[260px] truncate" title={row.paidByText || ''}>{row.paidByText || '—'}</td>
+                                <td className="px-4 py-2 text-slate-600 max-w-[260px] truncate" title={row.paidByText || ''}>{row.paidByText || '—'}</td>
                               </tr>
                             ))}
                           </tbody>
@@ -29448,17 +29449,17 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           )}
 
           {showGeneralReportModal && (
-            <div className="fixed inset-0 z-[76] bg-black/50 flex items-end md:items-center justify-center p-2 md:p-4" onClick={() => setShowGeneralReportModal(false)}>
+            <div className="fixed inset-0 z-[76] bg-slate-900/50 backdrop-blur-sm flex items-end md:items-center justify-center p-2 md:p-4" onClick={() => setShowGeneralReportModal(false)}>
               <div className="bg-white rounded-t-3xl md:rounded-2xl shadow-2xl w-[98vw] max-w-6xl max-h-[92svh] 2xl:h-[82vh] flex flex-col overflow-y-auto 2xl:overflow-hidden" onClick={(e) => e.stopPropagation()}>
                 <div className="sticky top-0 z-10 bg-white border-b px-4 py-4 md:px-6">
-                  <div className="mx-auto mb-2 h-1.5 w-12 rounded-full bg-gray-300 md:hidden" />
+                  <div className="mx-auto mb-2 h-1.5 w-12 rounded-full bg-slate-300 md:hidden" />
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <h2 className="text-lg md:text-2xl font-bold text-gray-900">Общий отчет</h2>
-                      <p className="text-xs md:text-sm text-gray-500 mt-1">Временные сотрудники, доставки и выполненная работа в одном отчете.</p>
+                      <h2 className="text-lg md:text-2xl font-bold text-slate-900">Общий отчет</h2>
+                      <p className="text-xs md:text-sm text-slate-500 mt-1">Временные сотрудники, доставки и выполненная работа в одном отчете.</p>
                     </div>
-                    <button onClick={() => setShowGeneralReportModal(false)} className="p-2 rounded-lg hover:bg-gray-100" aria-label="Закрыть общий отчет">
-                      <X className="h-5 w-5 text-gray-500" />
+                    <button onClick={() => setShowGeneralReportModal(false)} className="p-2 rounded-lg hover:bg-slate-100" aria-label="Закрыть общий отчет">
+                      <X className="h-5 w-5 text-slate-500" />
                     </button>
                   </div>
                   <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50/80 p-3 md:p-4">
@@ -29537,25 +29538,25 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 </div>
 
                 <div className="p-4 md:p-6 space-y-4 2xl:flex-1 2xl:overflow-y-auto custom-scrollbar">
-                  <div className="rounded-2xl border border-gray-200 overflow-hidden bg-white">
-                    <div className="bg-gray-50 px-4 py-3 font-bold text-gray-900">Отчет по временным сотрудникам</div>
+                  <div className="rounded-2xl border border-slate-200 overflow-hidden bg-white">
+                    <div className="bg-slate-50 px-4 py-3 font-bold text-slate-900">Отчет по временным сотрудникам</div>
                     {generalTempWorkerRows.length === 0 ? (
-                      <div className="p-4 text-sm text-gray-500">Нет данных</div>
+                      <div className="p-4 text-sm text-slate-500">Нет данных</div>
                     ) : (
                       <table className="w-full text-left text-sm">
-                        <thead className="bg-white border-b border-gray-100">
+                        <thead className="bg-white border-b border-slate-100">
                           <tr>
-                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Дата</th>
-                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Сотрудник</th>
-                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Поставщик</th>
-                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Работа</th>
-                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Часы</th>
-                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Заработано</th>
-                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Кто оплатил</th>
-                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Не оплачено</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Дата</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Сотрудник</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Поставщик</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Работа</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Часы</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Заработано</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Кто оплатил</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Не оплачено</th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-gray-100">
+                        <tbody className="divide-y divide-slate-100">
                           {generalTempWorkerRows.slice(0, 80).map((row: any) => (
                             <tr key={`general-temp-${row.id}`}>
                               <td className="px-4 py-2 whitespace-nowrap">{row?.date ? new Date(String(row.date) + 'T12:00:00').toLocaleDateString('ru-RU') : '—'}</td>
@@ -29564,7 +29565,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               <td className="px-4 py-2 max-w-[320px] truncate">{row.work_comment || row.comment || '—'}</td>
                               <td className="px-4 py-2">{Number(row.hours || 0).toFixed(2)}</td>
                               <td className="px-4 py-2 text-emerald-700 font-semibold">{Number(row.earnings || 0).toFixed(2)} ₽</td>
-                              <td className="px-4 py-2 text-gray-600 max-w-[260px] truncate" title={row.paidByText || ''}>{row.paidByText || '—'}</td>
+                              <td className="px-4 py-2 text-slate-600 max-w-[260px] truncate" title={row.paidByText || ''}>{row.paidByText || '—'}</td>
                               <td className="px-4 py-2 text-rose-700">{Number(row.remainingAmount || 0).toFixed(2)} ₽</td>
                             </tr>
                           ))}
@@ -29573,23 +29574,23 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     )}
                   </div>
 
-                  <div className="rounded-2xl border border-gray-200 overflow-hidden bg-white">
-                    <div className="bg-gray-50 px-4 py-3 font-bold text-gray-900">Отчет по доставке</div>
+                  <div className="rounded-2xl border border-slate-200 overflow-hidden bg-white">
+                    <div className="bg-slate-50 px-4 py-3 font-bold text-slate-900">Отчет по доставке</div>
                     {generalDeliveryRows.length === 0 ? (
-                      <div className="p-4 text-sm text-gray-500">Нет данных</div>
+                      <div className="p-4 text-sm text-slate-500">Нет данных</div>
                     ) : (
                       <table className="w-full text-left text-sm">
-                        <thead className="bg-white border-b border-gray-100">
+                        <thead className="bg-white border-b border-slate-100">
                           <tr>
-                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Дата</th>
-                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Доставщик</th>
-                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Поставщик</th>
-                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Коробки</th>
-                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Сумма</th>
-                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Статус</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Дата</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Доставщик</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Поставщик</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Коробки</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Сумма</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Статус</th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-gray-100">
+                        <tbody className="divide-y divide-slate-100">
                           {generalDeliveryRows.slice(0, 80).map((row: any, idx: number) => (
                             <tr key={`general-delivery-${row.deliveryId}-${idx}`}>
                               <td className="px-4 py-2 whitespace-nowrap">{row?.date ? new Date(String(row.date) + 'T12:00:00').toLocaleDateString('ru-RU') : '—'}</td>
@@ -29605,23 +29606,23 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     )}
                   </div>
 
-                  <div className="rounded-2xl border border-gray-200 overflow-hidden bg-white">
-                    <div className="bg-gray-50 px-4 py-3 font-bold text-gray-900">Отчет по выполненной работе</div>
+                  <div className="rounded-2xl border border-slate-200 overflow-hidden bg-white">
+                    <div className="bg-slate-50 px-4 py-3 font-bold text-slate-900">Отчет по выполненной работе</div>
                     {generalReportCwRows.length === 0 ? (
-                      <div className="p-4 text-sm text-gray-500">Нет данных</div>
+                      <div className="p-4 text-sm text-slate-500">Нет данных</div>
                     ) : (
                       <table className="w-full text-left text-sm">
-                        <thead className="bg-white border-b border-gray-100">
+                        <thead className="bg-white border-b border-slate-100">
                           <tr>
-                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Дата</th>
-                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Сотрудник</th>
-                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Поставщик</th>
-                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Вид работы</th>
-                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Кол-во</th>
-                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Сумма</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Дата</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Сотрудник</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Поставщик</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Вид работы</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Кол-во</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Сумма</th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-gray-100">
+                        <tbody className="divide-y divide-slate-100">
                           {generalReportCwRows.slice(0, 80).map((row: any, idx: number) => (
                             <tr key={`general-cw-${idx}`}>
                               <td className="px-4 py-2 whitespace-nowrap">{row?.date ? new Date(String(row.date) + 'T12:00:00').toLocaleDateString('ru-RU') : '—'}</td>
@@ -29642,17 +29643,17 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           )}
 
           {showTempWorkerReportModal && (
-            <div className="fixed inset-0 z-[75] bg-black/50 flex items-end md:items-center justify-center p-2 md:p-4" onClick={() => setShowTempWorkerReportModal(false)}>
+            <div className="fixed inset-0 z-[75] bg-slate-900/50 backdrop-blur-sm flex items-end md:items-center justify-center p-2 md:p-4" onClick={() => setShowTempWorkerReportModal(false)}>
               <div className="bg-white rounded-t-3xl md:rounded-2xl shadow-2xl w-[98vw] max-w-6xl max-h-[92svh] 2xl:h-[82vh] flex flex-col overflow-y-auto 2xl:overflow-hidden" onClick={(e) => e.stopPropagation()}>
                 <div className="sticky top-0 z-10 bg-white border-b px-4 py-4 md:px-6">
-                  <div className="mx-auto mb-2 h-1.5 w-12 rounded-full bg-gray-300 md:hidden" />
+                  <div className="mx-auto mb-2 h-1.5 w-12 rounded-full bg-slate-300 md:hidden" />
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <h2 className="text-lg md:text-2xl font-bold text-gray-900">Отчет о временном сотруднике</h2>
-                      <p className="text-xs md:text-sm text-gray-500 mt-1">Выберите период и поставщика — отчет покажет список работ по выбранному поставщику или по всем.</p>
+                      <h2 className="text-lg md:text-2xl font-bold text-slate-900">Отчет о временном сотруднике</h2>
+                      <p className="text-xs md:text-sm text-slate-500 mt-1">Выберите период и поставщика — отчет покажет список работ по выбранному поставщику или по всем.</p>
                     </div>
-                    <button onClick={() => setShowTempWorkerReportModal(false)} className="p-2 rounded-lg hover:bg-gray-100" aria-label="Закрыть отчет">
-                      <X className="h-5 w-5 text-gray-500" />
+                    <button onClick={() => setShowTempWorkerReportModal(false)} className="p-2 rounded-lg hover:bg-slate-100" aria-label="Закрыть отчет">
+                      <X className="h-5 w-5 text-slate-500" />
                     </button>
                   </div>
                   <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50/80 p-3 md:p-4">
@@ -29800,64 +29801,64 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                 <div className="p-4 md:p-6 space-y-4 2xl:flex-1 2xl:overflow-y-auto custom-scrollbar">
                   {tempWorkerReportGrouped.groups.length === 0 ? (
-                    <div className="h-full min-h-[220px] flex flex-col items-center justify-center text-center text-gray-400">
-                      <FileText className="h-12 w-12 mb-3 text-gray-300" />
+                    <div className="h-full min-h-[220px] flex flex-col items-center justify-center text-center text-slate-400">
+                      <FileText className="h-12 w-12 mb-3 text-slate-300" />
                       <div className="font-medium">За выбранный период работ нет</div>
                     </div>
                   ) : tempWorkerReportGrouped.groups.map((group) => (
-                    <div key={`temp-report-group-${group.supplierId}`} className="rounded-2xl border border-gray-200 overflow-hidden bg-white">
-                      <div className="bg-gray-50 px-4 py-3 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+                    <div key={`temp-report-group-${group.supplierId}`} className="rounded-2xl border border-slate-200 overflow-hidden bg-white">
+                      <div className="bg-slate-50 px-4 py-3 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
                         <div>
-                          <div className="font-bold text-gray-900">{group.supplierName}</div>
-                          <div className="text-xs text-gray-500">Работ: {group.rows.length} • Часы: {group.hours.toFixed(2)}</div>
+                          <div className="font-bold text-slate-900">{group.supplierName}</div>
+                          <div className="text-xs text-slate-500">Работ: {group.rows.length} • Часы: {group.hours.toFixed(2)}</div>
                         </div>
-                        <div className="text-sm font-semibold text-gray-700">
+                        <div className="text-sm font-semibold text-slate-700">
                           Заработано: <span className="text-emerald-700">{group.earnings.toFixed(2)} ₽</span>
-                          <span className="mx-2 text-gray-300">/</span>
+                          <span className="mx-2 text-slate-300">/</span>
                           Не оплачено: <span className="text-rose-700">{group.remaining.toFixed(2)} ₽</span>
                         </div>
                       </div>
 
-                      <div className="md:hidden divide-y divide-gray-100">
+                      <div className="md:hidden divide-y divide-slate-100">
                         {group.rows.map((row: any) => (
                           <div key={`temp-report-mobile-${row.id}`} className="p-3 text-sm">
                             <div className="flex items-start justify-between gap-2">
                               <div>
-                                <div className="font-medium text-gray-900">{row.worker_name || row.worker || 'Без имени'}</div>
-                                <div className="text-xs text-gray-500">{row?.date ? new Date(`${row.date}T12:00:00`).toLocaleDateString('ru-RU') : '—'} • {Number(row.hours || 0).toFixed(2)} ч.</div>
+                                <div className="font-medium text-slate-900">{row.worker_name || row.worker || 'Без имени'}</div>
+                                <div className="text-xs text-slate-500">{row?.date ? new Date(`${row.date}T12:00:00`).toLocaleDateString('ru-RU') : '—'} • {Number(row.hours || 0).toFixed(2)} ч.</div>
                               </div>
                               <div className="font-bold text-emerald-700 whitespace-nowrap">{Number(row.earnings || 0).toFixed(2)} ₽</div>
                             </div>
-                            <div className="mt-1 text-xs text-gray-600">{row.work_comment || row.comment || 'Без комментария'}</div>
-                            <div className="mt-1 text-xs text-gray-500">Факт оплаты: {Number(row.paidAmount || 0).toFixed(2)} ₽ • Не оплачено: {Number(row.remainingAmount || 0).toFixed(2)} ₽</div>
-                            <div className="mt-1 text-xs text-gray-500">Кто оплатил: {row.paidByText || '—'}</div>
+                            <div className="mt-1 text-xs text-slate-600">{row.work_comment || row.comment || 'Без комментария'}</div>
+                            <div className="mt-1 text-xs text-slate-500">Факт оплаты: {Number(row.paidAmount || 0).toFixed(2)} ₽ • Не оплачено: {Number(row.remainingAmount || 0).toFixed(2)} ₽</div>
+                            <div className="mt-1 text-xs text-slate-500">Кто оплатил: {row.paidByText || '—'}</div>
                           </div>
                         ))}
                       </div>
 
                       <table className="hidden md:table w-full text-left text-sm">
-                        <thead className="bg-white border-b border-gray-100">
+                        <thead className="bg-white border-b border-slate-100">
                           <tr>
-                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Дата</th>
-                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Сотрудник</th>
-                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Работа</th>
-                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Часы</th>
-                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Заработано</th>
-                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Факт оплаты</th>
-                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Кто оплатил</th>
-                            <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Не оплачено</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Дата</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Сотрудник</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Работа</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Часы</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Заработано</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Факт оплаты</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Кто оплатил</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Не оплачено</th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-gray-100">
+                        <tbody className="divide-y divide-slate-100">
                           {group.rows.map((row: any) => (
-                            <tr key={`temp-report-row-${row.id}`} className="hover:bg-gray-50">
+                            <tr key={`temp-report-row-${row.id}`} className="hover:bg-slate-50">
                               <td className="px-4 py-2 whitespace-nowrap">{row?.date ? new Date(`${row.date}T12:00:00`).toLocaleDateString('ru-RU') : '—'}</td>
-                              <td className="px-4 py-2 font-medium text-gray-900">{row.worker_name || row.worker || 'Без имени'}</td>
-                              <td className="px-4 py-2 text-gray-600 max-w-[360px] truncate" title={row.work_comment || row.comment || ''}>{row.work_comment || row.comment || '—'}</td>
+                              <td className="px-4 py-2 font-medium text-slate-900">{row.worker_name || row.worker || 'Без имени'}</td>
+                              <td className="px-4 py-2 text-slate-600 max-w-[360px] truncate" title={row.work_comment || row.comment || ''}>{row.work_comment || row.comment || '—'}</td>
                               <td className="px-4 py-2">{Number(row.hours || 0).toFixed(2)}</td>
                               <td className="px-4 py-2 font-semibold text-emerald-700">{Number(row.earnings || 0).toFixed(2)} ₽</td>
                               <td className="px-4 py-2 text-violet-700">{Number(row.paidAmount || 0).toFixed(2)} ₽</td>
-                              <td className="px-4 py-2 text-gray-600 max-w-[260px] truncate" title={row.paidByText || ''}>{row.paidByText || '—'}</td>
+                              <td className="px-4 py-2 text-slate-600 max-w-[260px] truncate" title={row.paidByText || ''}>{row.paidByText || '—'}</td>
                               <td className="px-4 py-2 text-rose-700">{Number(row.remainingAmount || 0).toFixed(2)} ₽</td>
                             </tr>
                           ))}
@@ -29871,9 +29872,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           )}
 
           {tempWorkerPaymentModal.open && (
-            <div className="fixed inset-0 z-[80] bg-black/50 flex items-center justify-center p-4" onClick={() => setTempWorkerPaymentModal({ open: false, logId: '', mode: 'pay', supplierId: '', amount: '', error: '' })}>
+            <div className="fixed inset-0 z-[80] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setTempWorkerPaymentModal({ open: false, logId: '', mode: 'pay', supplierId: '', amount: '', error: '' })}>
               <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl p-4 sm:p-6" onClick={(e) => e.stopPropagation()}>
-                <div className="flex items-center justify-between gap-3 mb-4"><div className="text-lg font-bold">{tempWorkerPaymentModal.mode === 'extra' ? 'Доплата' : tempWorkerPaymentModal.mode === 'edit' ? 'Редактировать оплату' : 'Оплата записи'}</div><button onClick={() => setTempWorkerPaymentModal({ open: false, logId: '', mode: 'pay', supplierId: '', amount: '', error: '' })} className="px-3 py-2 rounded-lg border border-gray-300 hover:bg-gray-50">Закрыть</button></div>
+                <div className="flex items-center justify-between gap-3 mb-4"><div className="text-lg font-bold">{tempWorkerPaymentModal.mode === 'extra' ? 'Доплата' : tempWorkerPaymentModal.mode === 'edit' ? 'Редактировать оплату' : 'Оплата записи'}</div><button onClick={() => setTempWorkerPaymentModal({ open: false, logId: '', mode: 'pay', supplierId: '', amount: '', error: '' })} className="px-3 py-2 rounded-lg border border-slate-300 hover:bg-slate-50">Закрыть</button></div>
                 <div className="space-y-3">
                   {(() => {
                     const log = (tempWorkerLogs || []).find((x: any) => String(x.id) === String(tempWorkerPaymentModal.logId));
@@ -29933,7 +29934,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           )}
 
           {showTempWorkerAddNameModal && (
-            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[65]" onClick={() => setShowTempWorkerAddNameModal(false)}>
+            <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm backdrop-blur-sm flex items-center justify-center z-[65]" onClick={() => setShowTempWorkerAddNameModal(false)}>
               <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-2xl" onClick={(e) => e.stopPropagation()}>
                 <h3 className="text-lg font-bold mb-3">Новый временный сотрудник</h3>
                 <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-2">
@@ -29945,13 +29946,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   <div className="px-3 py-2 bg-slate-50 text-sm font-medium text-slate-700">Созданные сотрудники</div>
                   <div className="max-h-64 overflow-auto divide-y">
                     {!tempWorkersList.length ? (
-                      <div className="p-3 text-sm text-gray-500">Список пуст</div>
+                      <div className="p-3 text-sm text-slate-500">Список пуст</div>
                     ) : tempWorkersList.map((n, i) => (
                       <div key={`tw-item-${i}`} className="p-2 flex items-center gap-2 justify-between">
                         {tempWorkerEditIndex === i ? (
                           <input value={tempWorkerEditName} onChange={(e) => setTempWorkerEditName(e.target.value)} className="oc-input" />
                         ) : (
-                          <div className="text-sm text-gray-800">{n}</div>
+                          <div className="text-sm text-slate-800">{n}</div>
                         )}
                         <div className="flex items-center gap-2 shrink-0">
                           {tempWorkerEditIndex === i ? (
@@ -29979,7 +29980,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           )}
 
           {showTempWorkerAddTemplateModal && (
-            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[65]" onClick={() => setShowTempWorkerAddTemplateModal(false)}>
+            <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm backdrop-blur-sm flex items-center justify-center z-[65]" onClick={() => setShowTempWorkerAddTemplateModal(false)}>
               <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
                 <h3 className="text-lg font-bold mb-3">Новый шаблон комментария</h3>
                 <textarea value={tempWorkerNewTemplate} onChange={(e) => setTempWorkerNewTemplate(e.target.value)} className="oc-input" rows={4} placeholder="Введите текст шаблона" />
@@ -29993,48 +29994,48 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
           {/* Add Temp Worker Log Modal */}
           {showTempWorkerModal && (
-            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[60] transition-opacity" onClick={() => setShowTempWorkerModal(false)}>
+            <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm backdrop-blur-sm flex items-center justify-center z-[60] transition-opacity" onClick={() => setShowTempWorkerModal(false)}>
               <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md transform transition-all scale-100" onClick={e => e.stopPropagation()}>
                 <div className="flex justify-between items-center mb-6">
-                    <h2 className="text-xl font-bold text-gray-900">Добавить смену</h2>
-                    <button onClick={() => setShowTempWorkerModal(false)} className="text-gray-400 hover:text-gray-600 transition-colors">
+                    <h2 className="text-xl font-bold text-slate-900">Добавить смену</h2>
+                    <button onClick={() => setShowTempWorkerModal(false)} className="text-slate-400 hover:text-slate-600 transition-colors">
                         <X className="w-6 h-6" />
                     </button>
                 </div>
                 <form onSubmit={handleAddTempWorkerLog} className="space-y-5">
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1.5">Поставщик</label>
+                        <label className="block text-sm font-medium text-slate-700 mb-1.5">Поставщик</label>
                         <div className="relative">
                             <select
                                 value={tempWorkerForm.supplier_id}
                                 onChange={e => setTempWorkerForm({...tempWorkerForm, supplier_id: e.target.value})}
-                                className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 appearance-none transition-all"
+                                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 appearance-none transition-all"
                                 required
                             >
                                 <option value="">Выберите поставщика...</option>
                                 {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                             </select>
-                            <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-gray-500">
+                            <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-500">
                                 <ChevronDown className="w-4 h-4" />
                             </div>
                         </div>
                     </div>
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1.5">Дата работы</label>
+                        <label className="block text-sm font-medium text-slate-700 mb-1.5">Дата работы</label>
                         <input
                             type="date"
                             value={tempWorkerForm.date}
                             onChange={e => setTempWorkerForm({...tempWorkerForm, date: e.target.value})}
-                            className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+                            className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
                             required
                         />
                     </div>
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1.5">Имя рабочего</label>
+                        <label className="block text-sm font-medium text-slate-700 mb-1.5">Имя рабочего</label>
                         <select
                             value={tempWorkerForm.worker_name}
                             onChange={e => setTempWorkerForm({...tempWorkerForm, worker_name: e.target.value})}
-                            className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 appearance-none transition-all"
+                            className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 appearance-none transition-all"
                             required
                         >
                             <option value="">Выберите сотрудника...</option>
@@ -30042,7 +30043,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         </select>
                     </div>
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1.5">Комментарий (что было сделано)</label>
+                        <label className="block text-sm font-medium text-slate-700 mb-1.5">Комментарий (что было сделано)</label>
                         {!!tempWorkerCommentTemplates.length && (
                           <div className="mb-2 flex flex-wrap gap-2">
                             {tempWorkerCommentTemplates.map((t, i) => (
@@ -30053,31 +30054,31 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <textarea
                             value={tempWorkerForm.work_comment}
                             onChange={e => setTempWorkerForm({...tempWorkerForm, work_comment: e.target.value})}
-                            className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+                            className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
                             rows={3}
                             placeholder="Кратко опишите выполненную работу"
                         />
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1.5">Часы</label>
+                            <label className="block text-sm font-medium text-slate-700 mb-1.5">Часы</label>
                             <input
                                 type="number"
                                 step="0.5"
                                 value={tempWorkerForm.hours}
                                 onChange={e => setTempWorkerForm({...tempWorkerForm, hours: e.target.value})}
-                                className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+                                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
                                 required
                                 placeholder="0"
                             />
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1.5">Заработок (₽)</label>
+                            <label className="block text-sm font-medium text-slate-700 mb-1.5">Заработок (₽)</label>
                             <input
                                 type="number"
                                 value={tempWorkerForm.earnings}
                                 onChange={e => setTempWorkerForm({...tempWorkerForm, earnings: e.target.value})}
-                                className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+                                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
                                 required
                                 placeholder="0"
                             />
@@ -30085,7 +30086,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     </div>
 
                     <div className="flex justify-end gap-3 mt-8">
-                        <button type="button" onClick={() => setShowTempWorkerModal(false)} className="px-5 py-2.5 text-gray-600 hover:bg-gray-100 rounded-xl font-medium transition-colors">Отмена</button>
+                        <button type="button" onClick={() => setShowTempWorkerModal(false)} className="px-5 py-2.5 text-slate-600 hover:bg-slate-100 rounded-xl font-medium transition-colors">Отмена</button>
                         <button type="submit" disabled={!hasAssemblyButtonAccess('temp_shift_add')} className={`px-5 py-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 font-medium shadow-lg shadow-indigo-200 transition-all ${!hasAssemblyButtonAccess('temp_shift_add') ? 'opacity-50 cursor-not-allowed' : ''}`}>Добавить</button>
                     </div>
                 </form>
@@ -30095,21 +30096,21 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
           {/* Edit Temp Worker Log Modal */}
           {showTempWorkerEditModal && (
-            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[70] transition-opacity" onClick={() => setShowTempWorkerEditModal(false)}>
+            <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm backdrop-blur-sm flex items-center justify-center z-[70] transition-opacity" onClick={() => setShowTempWorkerEditModal(false)}>
               <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md transform transition-all scale-100" onClick={e => e.stopPropagation()}>
                 <div className="flex justify-between items-center mb-6">
-                    <h2 className="text-xl font-bold text-gray-900">Редактировать смену</h2>
-                    <button onClick={() => setShowTempWorkerEditModal(false)} className="text-gray-400 hover:text-gray-600 transition-colors">
+                    <h2 className="text-xl font-bold text-slate-900">Редактировать смену</h2>
+                    <button onClick={() => setShowTempWorkerEditModal(false)} className="text-slate-400 hover:text-slate-600 transition-colors">
                         <X className="w-6 h-6" />
                     </button>
                 </div>
                 <form onSubmit={handleUpdateTempWorkerLog} className="space-y-5">
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1.5">Поставщик</label>
+                        <label className="block text-sm font-medium text-slate-700 mb-1.5">Поставщик</label>
                         <select
                           value={tempWorkerEditForm.supplier_id}
                           onChange={e => setTempWorkerEditForm({...tempWorkerEditForm, supplier_id: e.target.value})}
-                          className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
+                          className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
                           required
                         >
                           <option value="">Выберите поставщика...</option>
@@ -30117,59 +30118,59 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         </select>
                     </div>
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1.5">Дата работы</label>
+                        <label className="block text-sm font-medium text-slate-700 mb-1.5">Дата работы</label>
                         <input
                           type="date"
                           value={tempWorkerEditForm.date}
                           onChange={e => setTempWorkerEditForm({...tempWorkerEditForm, date: e.target.value})}
-                          className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
+                          className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
                           required
                         />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1.5">Имя рабочего</label>
+                      <label className="block text-sm font-medium text-slate-700 mb-1.5">Имя рабочего</label>
                       <input
                         type="text"
                         value={tempWorkerEditForm.worker_name}
                         onChange={e => setTempWorkerEditForm({...tempWorkerEditForm, worker_name: e.target.value})}
-                        className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
+                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
                         required
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1.5">Комментарий</label>
+                      <label className="block text-sm font-medium text-slate-700 mb-1.5">Комментарий</label>
                       <textarea
                         value={tempWorkerEditForm.work_comment}
                         onChange={e => setTempWorkerEditForm({...tempWorkerEditForm, work_comment: e.target.value})}
-                        className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
+                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
                         rows={3}
                       />
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1.5">Часы</label>
+                        <label className="block text-sm font-medium text-slate-700 mb-1.5">Часы</label>
                         <input
                           type="number"
                           step="0.5"
                           value={tempWorkerEditForm.hours}
                           onChange={e => setTempWorkerEditForm({...tempWorkerEditForm, hours: e.target.value})}
-                          className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
+                          className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
                           required
                         />
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1.5">Заработок (₽)</label>
+                        <label className="block text-sm font-medium text-slate-700 mb-1.5">Заработок (₽)</label>
                         <input
                           type="number"
                           value={tempWorkerEditForm.earnings}
                           onChange={e => setTempWorkerEditForm({...tempWorkerEditForm, earnings: e.target.value})}
-                          className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
+                          className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
                           required
                         />
                       </div>
                     </div>
                     <div className="flex justify-end gap-3 mt-8">
-                      <button type="button" onClick={() => setShowTempWorkerEditModal(false)} className="px-5 py-2.5 text-gray-600 hover:bg-gray-100 rounded-xl font-medium transition-colors">Отмена</button>
+                      <button type="button" onClick={() => setShowTempWorkerEditModal(false)} className="px-5 py-2.5 text-slate-600 hover:bg-slate-100 rounded-xl font-medium transition-colors">Отмена</button>
                       <button type="submit" disabled={!hasAssemblyButtonAccess('temp_shift_edit')} className={`px-5 py-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 font-medium shadow-lg shadow-indigo-200 transition-all ${!hasAssemblyButtonAccess('temp_shift_edit') ? 'opacity-50 cursor-not-allowed' : ''}`}>Сохранить</button>
                     </div>
                 </form>

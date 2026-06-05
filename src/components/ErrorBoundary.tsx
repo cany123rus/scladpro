@@ -29,16 +29,16 @@ class ErrorBoundary extends Component<Props, State> {
   public render() {
     if (this.state.hasError) {
       return (
-        <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
+        <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
           <div className="bg-white p-8 rounded-xl shadow-lg max-w-2xl w-full border border-red-100">
             <h1 className="text-2xl font-bold text-red-600 mb-4">Что-то пошло не так</h1>
-            <p className="text-gray-600 mb-6">Произошла ошибка в приложении. Пожалуйста, покажите этот экран разработчику.</p>
+            <p className="text-slate-600 mb-6">Произошла ошибка в приложении. Пожалуйста, покажите этот экран разработчику.</p>
             
-            <div className="bg-gray-100 p-4 rounded-lg overflow-auto max-h-96 mb-6">
+            <div className="bg-slate-100 p-4 rounded-lg overflow-auto max-h-96 mb-6">
               <p className="font-mono text-sm text-red-800 font-bold mb-2">
                 {this.state.error?.toString()}
               </p>
-              <pre className="font-mono text-xs text-gray-700 whitespace-pre-wrap">
+              <pre className="font-mono text-xs text-slate-700 whitespace-pre-wrap">
                 {this.state.errorInfo?.componentStack}
               </pre>
             </div>

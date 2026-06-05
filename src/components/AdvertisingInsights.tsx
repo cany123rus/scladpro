@@ -185,8 +185,8 @@ export const AdvertisingInsights = () => {
   return (
     <div className="max-w-7xl mx-auto px-2 md:px-4">
       <div className="mb-4">
-        <h1 className="text-2xl font-bold text-gray-900">Реклама</h1>
-        <p className="text-gray-500">Аналитика ключевых фраз WB из листов статистики. Режим автопилота: dry-run (без автоизменений в WB).</p>
+        <h1 className="text-2xl font-bold text-slate-900">Реклама</h1>
+        <p className="text-slate-500">Аналитика ключевых фраз WB из листов статистики. Режим автопилота: dry-run (без автоизменений в WB).</p>
       </div>
 
       <div className="bg-white rounded-xl border p-4 mb-4">
@@ -196,42 +196,42 @@ export const AdvertisingInsights = () => {
             <input type="file" accept=".xlsx,.xls" className="hidden" onChange={(e) => handleFile(e.target.files?.[0])} />
           </label>
           <div className="flex items-center gap-2">
-            <span className="text-sm text-gray-600">Целевой CTR, %</span>
+            <span className="text-sm text-slate-600">Целевой CTR, %</span>
             <input value={targetCtr} onChange={(e) => setTargetCtr(e.target.value)} className="w-20 p-2 border rounded" />
           </div>
         </div>
-        {sourceInfo && <div className="mt-2 text-xs text-gray-500">{sourceInfo}</div>}
+        {sourceInfo && <div className="mt-2 text-xs text-slate-500">{sourceInfo}</div>}
         {error && <div className="mt-3 text-sm text-red-600">{error}</div>}
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
-        <div className="bg-white border rounded-xl p-3"><div className="text-xs text-gray-500">Показы</div><div className="font-bold">{summary.impressions}</div></div>
-        <div className="bg-white border rounded-xl p-3"><div className="text-xs text-gray-500">Клики</div><div className="font-bold">{summary.clicks}</div></div>
-        <div className="bg-white border rounded-xl p-3"><div className="text-xs text-gray-500">Расход</div><div className="font-bold">{summary.spend.toFixed(2)} ₽</div></div>
-        <div className="bg-white border rounded-xl p-3"><div className="text-xs text-gray-500">CTR</div><div className="font-bold">{summary.ctr.toFixed(2)}%</div></div>
-        <div className="bg-white border rounded-xl p-3"><div className="text-xs text-gray-500">CPC</div><div className="font-bold">{summary.cpc.toFixed(2)} ₽</div></div>
+        <div className="bg-white border rounded-xl p-3"><div className="text-xs text-slate-500">Показы</div><div className="font-bold">{summary.impressions}</div></div>
+        <div className="bg-white border rounded-xl p-3"><div className="text-xs text-slate-500">Клики</div><div className="font-bold">{summary.clicks}</div></div>
+        <div className="bg-white border rounded-xl p-3"><div className="text-xs text-slate-500">Расход</div><div className="font-bold">{summary.spend.toFixed(2)} ₽</div></div>
+        <div className="bg-white border rounded-xl p-3"><div className="text-xs text-slate-500">CTR</div><div className="font-bold">{summary.ctr.toFixed(2)}%</div></div>
+        <div className="bg-white border rounded-xl p-3"><div className="text-xs text-slate-500">CPC</div><div className="font-bold">{summary.cpc.toFixed(2)} ₽</div></div>
       </div>
 
       <div className="bg-white border rounded-xl p-4 mb-4">
-        <div className="font-semibold text-gray-900 mb-2">Что сделать сегодня</div>
-        {topActions.length === 0 ? <div className="text-sm text-gray-500">Загрузите отчет, чтобы получить рекомендации.</div> : (
+        <div className="font-semibold text-slate-900 mb-2">Что сделать сегодня</div>
+        {topActions.length === 0 ? <div className="text-sm text-slate-500">Загрузите отчет, чтобы получить рекомендации.</div> : (
           <ul className="space-y-1 text-sm">{topActions.map((a, i) => <li key={i}>• {a}</li>)}</ul>
         )}
       </div>
 
       <div className="bg-white border rounded-xl p-4 mb-4">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-2">
-          <div className="font-semibold text-gray-900">Telegram дайджест (dry-run)</div>
+          <div className="font-semibold text-slate-900">Telegram дайджест (dry-run)</div>
           <div className="flex gap-2">
-            <button onClick={copyDigest} className="inline-flex items-center px-3 py-1.5 text-sm rounded border hover:bg-gray-50"><Copy className="h-4 w-4 mr-1"/>Скопировать дайджест</button>
-            <button onClick={exportRecommendationsExcel} disabled={!rows.length} className={`inline-flex items-center px-3 py-1.5 text-sm rounded text-white ${rows.length ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-gray-300 cursor-not-allowed'}`}><FileSpreadsheet className="h-4 w-4 mr-1"/>Экспорт рекомендаций</button>
+            <button onClick={copyDigest} className="inline-flex items-center px-3 py-1.5 text-sm rounded border hover:bg-slate-50"><Copy className="h-4 w-4 mr-1"/>Скопировать дайджест</button>
+            <button onClick={exportRecommendationsExcel} disabled={!rows.length} className={`inline-flex items-center px-3 py-1.5 text-sm rounded text-white ${rows.length ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-slate-300 cursor-not-allowed'}`}><FileSpreadsheet className="h-4 w-4 mr-1"/>Экспорт рекомендаций</button>
           </div>
         </div>
-        <textarea value={telegramDigest} readOnly className="w-full min-h-[120px] p-3 border rounded text-sm bg-gray-50" />
+        <textarea value={telegramDigest} readOnly className="w-full min-h-[120px] p-3 border rounded text-sm bg-slate-50" />
       </div>
 
       <div className="bg-white border rounded-xl overflow-hidden">
-        <div className="grid grid-cols-[1.2fr_repeat(6,0.7fr)_1fr_1.4fr] gap-2 px-3 py-2 bg-gray-50 text-xs font-semibold text-gray-600">
+        <div className="grid grid-cols-[1.2fr_repeat(6,0.7fr)_1fr_1.4fr] gap-2 px-3 py-2 bg-slate-50 text-xs font-semibold text-slate-600">
           <div>Ключевая фраза</div><div>Показы</div><div>Клики</div><div>Заказы</div><div>CTR%</div><div>CPC</div><div>Расход</div><div>Рекомендация</div><div>Действие в WB</div>
         </div>
         <div className="max-h-[58vh] overflow-auto">
@@ -250,10 +250,10 @@ export const AdvertisingInsights = () => {
                 {(r.recommendation.includes('Отключить') || r.recommendation.includes('минус')) && <span className="inline-flex items-center text-rose-700"><AlertTriangle className="h-3 w-3 mr-1" />{r.recommendation}</span>}
                 {(r.recommendation === 'Наблюдать' || r.recommendation.includes('Проверить')) && <span className="inline-flex items-center text-slate-600"><Target className="h-3 w-3 mr-1" />{r.recommendation}</span>}
               </div>
-              <div className="text-xs text-gray-700">{r.wbAction}</div>
+              <div className="text-xs text-slate-700">{r.wbAction}</div>
             </div>
           ))}
-          {rows.length === 0 && <div className="p-6 text-sm text-gray-500">Пока нет данных. Загрузите отчёт WB.</div>}
+          {rows.length === 0 && <div className="p-6 text-sm text-slate-500">Пока нет данных. Загрузите отчёт WB.</div>}
         </div>
       </div>
     </div>

@@ -82,14 +82,14 @@ export default function SharedAnalytics() {
     return base;
   }, [payload, sortKey, sortDir]);
 
-  if (loading) return <div className="min-h-screen flex items-center justify-center text-gray-500">Загрузка отчёта…</div>;
+  if (loading) return <div className="min-h-screen flex items-center justify-center text-slate-500">Загрузка отчёта…</div>;
   if (error) return <div className="min-h-screen flex items-center justify-center text-red-600">{error}</div>;
 
   return (
-    <div className="min-h-screen bg-gray-50 p-2 md:p-4">
-      <div className="w-full mx-auto bg-white rounded-xl border border-gray-200 p-3 md:p-4">
+    <div className="min-h-screen bg-slate-50 p-2 md:p-4">
+      <div className="w-full mx-auto bg-white rounded-xl border border-slate-200 p-3 md:p-4">
         <div className="flex items-center justify-between gap-2">
-          <h1 className="text-xl font-semibold text-gray-900">{payload?.title || 'Аналитика WB'}</h1>
+          <h1 className="text-xl font-semibold text-slate-900">{payload?.title || 'Аналитика WB'}</h1>
           <button
             type="button"
             onClick={() => {
@@ -102,35 +102,35 @@ export default function SharedAnalytics() {
           </button>
         </div>
         <div className="flex flex-wrap items-center gap-2 mt-1">
-          <div className="text-sm text-gray-600">
+          <div className="text-sm text-slate-600">
             Период: {payload?.period_start ? new Date(payload.period_start).toLocaleDateString('ru-RU') : '—'} — {payload?.period_end ? new Date(payload.period_end).toLocaleDateString('ru-RU') : '—'}
           </div>
         </div>
 
         {payload?.summary && (
           <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
-            <div className="bg-gray-50 rounded-lg p-2 min-w-[135px]"><div className="text-xs text-gray-500">Номенклатур</div><div className="font-bold">{Number(payload.summary.items || 0).toLocaleString('ru-RU')}</div></div>
-            <div className="bg-gray-50 rounded-lg p-2 min-w-[135px]"><div className="text-xs text-gray-500">Продажи</div><div className="font-bold">{Number(payload.summary.sales_net || 0).toLocaleString('ru-RU')}</div></div>
-            <div className="bg-gray-50 rounded-lg p-2 min-w-[135px]"><div className="text-xs text-gray-500">Возвраты</div><div className="font-bold">{Number(payload.summary.returns_gross || 0).toLocaleString('ru-RU')}</div></div>
-            <div className="bg-gray-50 rounded-lg p-2 min-w-[135px]"><div className="text-xs text-gray-500">Логистика</div><div className="font-bold">{Number(payload.summary.logistics_sum || 0).toLocaleString('ru-RU')}</div></div>
-            <div className="bg-gray-50 rounded-lg p-2 min-w-[135px]"><div className="text-xs text-gray-500">К перечислению</div><div className="font-bold">{Number(payload.summary.payout_net || 0).toLocaleString('ru-RU')}</div></div>
-            <div className="bg-gray-50 rounded-lg p-2 min-w-[135px]"><div className="text-xs text-gray-500">Штрафы</div><div className="font-bold">{Number(payload.summary.fine_sum || 0).toLocaleString('ru-RU')}</div></div>
-            <div className="bg-gray-50 rounded-lg p-2 min-w-[135px]"><div className="text-xs text-gray-500">Хранение</div><div className="font-bold">{Number(payload.summary.storage_sum || 0).toLocaleString('ru-RU')}</div></div>
-            <div className="bg-gray-50 rounded-lg p-2 min-w-[135px]"><div className="text-xs text-gray-500">Реклама WB</div><div className="font-bold">{Number(payload.summary.withhold_sum || 0).toLocaleString('ru-RU')}</div></div>
-            <div className="bg-gray-50 rounded-lg p-2 min-w-[135px]"><div className="text-xs text-gray-500">Итого к оплате</div><div className="font-bold">{Number(payload.summary.to_pay_total || 0).toLocaleString('ru-RU')}</div></div>
-            <div className="bg-gray-50 rounded-lg p-2 min-w-[135px]"><div className="text-xs text-gray-500">Налоги</div><div className="font-bold">{Number(payload.summary.tax_sum || 0).toLocaleString('ru-RU', { maximumFractionDigits: 2 })}</div></div>
-            <div className="bg-gray-50 rounded-lg p-2 min-w-[135px]"><div className="text-xs text-gray-500">Доп траты</div><div className="font-bold">{Number(payload.summary.extra_costs || 0).toLocaleString('ru-RU', { maximumFractionDigits: 2 })}</div></div>
-            <div className="bg-gray-50 rounded-lg p-2 min-w-[135px]"><div className="text-xs text-gray-500">Заработок</div><div className="font-bold">{Number((payload.summary.headline_profit ?? payload.summary.profit_total) || 0).toLocaleString('ru-RU', { maximumFractionDigits: 2 })}</div></div>
-            <div className="bg-gray-50 rounded-lg p-2 min-w-[135px]"><div className="text-xs text-gray-500">Кол-во проданных</div><div className="font-bold">{Number(payload.summary.sold_qty || 0).toLocaleString('ru-RU')}</div></div>
-            <div className="bg-gray-50 rounded-lg p-2 min-w-[135px]"><div className="text-xs text-gray-500">Кол-во возвратов</div><div className="font-bold">{Number(payload.summary.return_qty || 0).toLocaleString('ru-RU')}</div></div>
-            <div className="bg-gray-50 rounded-lg p-2 min-w-[135px]"><div className="text-xs text-gray-500">Эквайринг/Комиссии</div><div className="font-bold">{Number(payload.summary.acquiring_sum || 0).toLocaleString('ru-RU')}</div></div>
-            <div className="bg-gray-50 rounded-lg p-2 min-w-[135px]"><div className="text-xs text-gray-500">Размер комиссии, %</div><div className="font-bold">{Number(payload.summary.acquiring_percent || 0).toLocaleString('ru-RU', { maximumFractionDigits: 2 })}</div></div>
+            <div className="bg-slate-50 rounded-lg p-2 min-w-[135px]"><div className="text-xs text-slate-500">Номенклатур</div><div className="font-bold">{Number(payload.summary.items || 0).toLocaleString('ru-RU')}</div></div>
+            <div className="bg-slate-50 rounded-lg p-2 min-w-[135px]"><div className="text-xs text-slate-500">Продажи</div><div className="font-bold">{Number(payload.summary.sales_net || 0).toLocaleString('ru-RU')}</div></div>
+            <div className="bg-slate-50 rounded-lg p-2 min-w-[135px]"><div className="text-xs text-slate-500">Возвраты</div><div className="font-bold">{Number(payload.summary.returns_gross || 0).toLocaleString('ru-RU')}</div></div>
+            <div className="bg-slate-50 rounded-lg p-2 min-w-[135px]"><div className="text-xs text-slate-500">Логистика</div><div className="font-bold">{Number(payload.summary.logistics_sum || 0).toLocaleString('ru-RU')}</div></div>
+            <div className="bg-slate-50 rounded-lg p-2 min-w-[135px]"><div className="text-xs text-slate-500">К перечислению</div><div className="font-bold">{Number(payload.summary.payout_net || 0).toLocaleString('ru-RU')}</div></div>
+            <div className="bg-slate-50 rounded-lg p-2 min-w-[135px]"><div className="text-xs text-slate-500">Штрафы</div><div className="font-bold">{Number(payload.summary.fine_sum || 0).toLocaleString('ru-RU')}</div></div>
+            <div className="bg-slate-50 rounded-lg p-2 min-w-[135px]"><div className="text-xs text-slate-500">Хранение</div><div className="font-bold">{Number(payload.summary.storage_sum || 0).toLocaleString('ru-RU')}</div></div>
+            <div className="bg-slate-50 rounded-lg p-2 min-w-[135px]"><div className="text-xs text-slate-500">Реклама WB</div><div className="font-bold">{Number(payload.summary.withhold_sum || 0).toLocaleString('ru-RU')}</div></div>
+            <div className="bg-slate-50 rounded-lg p-2 min-w-[135px]"><div className="text-xs text-slate-500">Итого к оплате</div><div className="font-bold">{Number(payload.summary.to_pay_total || 0).toLocaleString('ru-RU')}</div></div>
+            <div className="bg-slate-50 rounded-lg p-2 min-w-[135px]"><div className="text-xs text-slate-500">Налоги</div><div className="font-bold">{Number(payload.summary.tax_sum || 0).toLocaleString('ru-RU', { maximumFractionDigits: 2 })}</div></div>
+            <div className="bg-slate-50 rounded-lg p-2 min-w-[135px]"><div className="text-xs text-slate-500">Доп траты</div><div className="font-bold">{Number(payload.summary.extra_costs || 0).toLocaleString('ru-RU', { maximumFractionDigits: 2 })}</div></div>
+            <div className="bg-slate-50 rounded-lg p-2 min-w-[135px]"><div className="text-xs text-slate-500">Заработок</div><div className="font-bold">{Number((payload.summary.headline_profit ?? payload.summary.profit_total) || 0).toLocaleString('ru-RU', { maximumFractionDigits: 2 })}</div></div>
+            <div className="bg-slate-50 rounded-lg p-2 min-w-[135px]"><div className="text-xs text-slate-500">Кол-во проданных</div><div className="font-bold">{Number(payload.summary.sold_qty || 0).toLocaleString('ru-RU')}</div></div>
+            <div className="bg-slate-50 rounded-lg p-2 min-w-[135px]"><div className="text-xs text-slate-500">Кол-во возвратов</div><div className="font-bold">{Number(payload.summary.return_qty || 0).toLocaleString('ru-RU')}</div></div>
+            <div className="bg-slate-50 rounded-lg p-2 min-w-[135px]"><div className="text-xs text-slate-500">Эквайринг/Комиссии</div><div className="font-bold">{Number(payload.summary.acquiring_sum || 0).toLocaleString('ru-RU')}</div></div>
+            <div className="bg-slate-50 rounded-lg p-2 min-w-[135px]"><div className="text-xs text-slate-500">Размер комиссии, %</div><div className="font-bold">{Number(payload.summary.acquiring_percent || 0).toLocaleString('ru-RU', { maximumFractionDigits: 2 })}</div></div>
           </div>
         )}
 
-        <div className="mt-4 overflow-auto border border-gray-100 rounded-lg max-h-[86vh]">
+        <div className="mt-4 overflow-auto border border-slate-100 rounded-lg max-h-[86vh]">
           <table className="min-w-full text-sm border-separate border-spacing-0">
-            <thead className="bg-gray-50 sticky top-0 z-10">
+            <thead className="bg-slate-50 sticky top-0 z-10">
               <tr>
                 <th className="px-3 py-2 text-left">Фото</th>
                 <th className="px-3 py-2 text-left"><button type="button" onClick={() => { setSortKey('code'); setSortDir((d) => sortKey === 'code' ? (d === 'asc' ? 'desc' : 'asc') : 'asc'); }} className="hover:underline">Код</button></th>
@@ -168,13 +168,13 @@ export default function SharedAnalytics() {
                   : '';
                 return (
                   <Fragment key={rowKey}>
-                    <tr className="border-t border-gray-100">
+                    <tr className="border-t border-slate-100">
                       <td className="px-3 py-2">
                         {currentPhoto ? (
                           <img
                             src={currentPhoto}
                             alt={r?.name || 'товар'}
-                            className="w-32 h-40 object-cover rounded border border-gray-200"
+                            className="w-32 h-40 object-cover rounded border border-slate-200"
                             loading="lazy"
                             referrerPolicy="no-referrer"
                             onError={() => {
@@ -186,7 +186,7 @@ export default function SharedAnalytics() {
                             }}
                           />
                         ) : (
-                          <div className="w-32 h-40 rounded border border-gray-200 bg-gray-100" />
+                          <div className="w-32 h-40 rounded border border-slate-200 bg-slate-100" />
                         )}
                       </td>
                       <td className="px-3 py-2">{r?.code ? <a href={`https://www.wildberries.ru/catalog/${encodeURIComponent(String(r.code))}/detail.aspx`} target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline">{r.code}</a> : '—'}</td>
@@ -219,9 +219,9 @@ export default function SharedAnalytics() {
                       <td className="px-3 py-2">{Number(r?.acquiring_percent || 0).toLocaleString('ru-RU', { maximumFractionDigits: 2 })}</td>
                     </tr>
                     {isOpen && sizeList.map((s: any, idx: number) => (
-                      <tr key={`${rowKey}-size-${idx}`} className="border-t border-gray-100 bg-gray-50">
+                      <tr key={`${rowKey}-size-${idx}`} className="border-t border-slate-100 bg-slate-50">
                         <td className="px-3 py-2" />
-                        <td className="px-3 py-2 text-xs font-semibold text-gray-700" colSpan={2}>Размер: {String(s?.size || '—')}</td>
+                        <td className="px-3 py-2 text-xs font-semibold text-slate-700" colSpan={2}>Размер: {String(s?.size || '—')}</td>
                         <td className="px-3 py-2 text-xs">{Number(s?.sales_net || 0).toLocaleString('ru-RU')}</td>
                         <td className="px-3 py-2 text-xs">{Number(s?.returns_gross || 0).toLocaleString('ru-RU')}</td>
                         <td className="px-3 py-2 text-xs">{Number(s?.logistics_sum || 0).toLocaleString('ru-RU')}</td>
@@ -243,7 +243,7 @@ export default function SharedAnalytics() {
                 );
               })}
               {rows.length === 0 && (
-                <tr><td className="px-3 py-6 text-gray-500" colSpan={18}>Нет данных</td></tr>
+                <tr><td className="px-3 py-6 text-slate-500" colSpan={18}>Нет данных</td></tr>
               )}
             </tbody>
           </table>

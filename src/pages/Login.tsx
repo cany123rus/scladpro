@@ -498,22 +498,22 @@ export default function Login() {
   }, [scanning]);
 
   return (
-    <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-xl p-6 md:p-8 w-full max-w-md relative">
         <div className="flex flex-col items-center mb-8">
           <div className="w-20 h-20 bg-indigo-50 rounded-full flex items-center justify-center mb-4 overflow-hidden">
              <img src="/site-icon.jpg" alt="Logo" className="w-full h-full object-cover" />
           </div>
-          <h1 className="text-3xl font-bold text-gray-900 mb-1">СкладПро</h1>
-          <p className="text-gray-500">Вход в систему</p>
+          <h1 className="text-3xl font-bold text-slate-900 mb-1">СкладПро</h1>
+          <p className="text-slate-500">Вход в систему</p>
         </div>
 
-        <div className="bg-gray-100 p-1 rounded-xl flex mb-8">
+        <div className="bg-slate-100 p-1 rounded-xl flex mb-8">
           <button
             className={`flex-1 py-2 text-sm font-medium rounded-lg transition-all ${
               mode === 'password' 
-                ? 'bg-white text-gray-900 shadow-sm' 
-                : 'text-gray-500 hover:text-gray-700'
+                ? 'bg-white text-slate-900 shadow-sm' 
+                : 'text-slate-500 hover:text-slate-700'
             }`}
             onClick={() => setMode('password')}
           >
@@ -525,8 +525,8 @@ export default function Login() {
           <button
             className={`flex-1 py-2 text-sm font-medium rounded-lg transition-all ${
               mode === 'qr' 
-                ? 'bg-white text-gray-900 shadow-sm' 
-                : 'text-gray-500 hover:text-gray-700'
+                ? 'bg-white text-slate-900 shadow-sm' 
+                : 'text-slate-500 hover:text-slate-700'
             }`}
             onClick={() => setMode('qr')}
           >
@@ -547,14 +547,14 @@ export default function Login() {
         {mode === 'password' ? (
           <form onSubmit={handleLogin} className="space-y-5">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">Логин</label>
+              <label className="block text-sm font-medium text-slate-700 mb-1.5">Логин</label>
               <div className="relative">
-                <User className="absolute left-3.5 top-3.5 h-5 w-5 text-gray-400" />
+                <User className="absolute left-3.5 top-3.5 h-5 w-5 text-slate-400" />
                 <input
                   type="text"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="pl-11 w-full p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all"
+                  className="pl-11 w-full p-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all"
                   placeholder="Введите логин или email"
                   autoComplete="username"
                   required
@@ -562,21 +562,21 @@ export default function Login() {
               </div>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">Пароль</label>
+              <label className="block text-sm font-medium text-slate-700 mb-1.5">Пароль</label>
               <div className="relative">
-                <Lock className="absolute left-3.5 top-3.5 h-5 w-5 text-gray-400" />
+                <Lock className="absolute left-3.5 top-3.5 h-5 w-5 text-slate-400" />
                 <input
                   type={showPassword ? "text" : "password"}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="pl-11 pr-10 w-full p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all"
+                  className="pl-11 pr-10 w-full p-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all"
                   placeholder="Введите пароль"
                   required
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-3.5 text-gray-400 hover:text-gray-600"
+                  className="absolute right-3 top-3.5 text-slate-400 hover:text-slate-600"
                 >
                   {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
                 </button>
@@ -612,9 +612,9 @@ export default function Login() {
               autoComplete="off"
             />
 
-            <div className="text-center text-gray-500 text-sm mb-4">
+            <div className="text-center text-slate-500 text-sm mb-4">
               Сканируйте QR-код сканером или нажмите кнопку для использования камеры
-              {lastScanned && <div className="mt-2 text-xs text-gray-400 font-mono">Скан: {lastScanned}</div>}
+              {lastScanned && <div className="mt-2 text-xs text-slate-400 font-mono">Скан: {lastScanned}</div>}
               {qrDebug && <div className="mt-2 text-xs text-indigo-500 font-medium">{qrDebug}</div>}
             </div>
             
@@ -635,9 +635,9 @@ export default function Login() {
       {scanning && (
         <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
           <div className="bg-white rounded-2xl overflow-hidden max-w-lg w-full relative shadow-2xl">
-            <div className="p-4 bg-gray-900 text-white flex justify-between items-center">
+            <div className="p-4 bg-slate-900 text-white flex justify-between items-center">
               <h3 className="font-medium">Сканирование QR-кода</h3>
-              <button onClick={() => setScanning(false)} className="text-gray-400 hover:text-white transition-colors">
+              <button onClick={() => setScanning(false)} className="text-slate-400 hover:text-white transition-colors">
                 <X className="h-6 w-6" />
               </button>
             </div>

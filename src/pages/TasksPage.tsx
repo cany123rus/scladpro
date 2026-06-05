@@ -43,7 +43,7 @@ export default function TasksPage() {
     >
       <div className="max-w-7xl mx-auto w-full">
         <div className="max-w-full mx-auto px-4 h-full">
-          <React.Suspense fallback={<div className="p-4 text-sm text-gray-500">Загрузка задач...</div>}>
+          <React.Suspense fallback={<div className="p-4 text-sm text-slate-500">Загрузка задач...</div>}>
             <Tasks />
           </React.Suspense>
         </div>

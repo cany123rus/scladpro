@@ -6,7 +6,7 @@
 
 @layer base {
   body {
-    @apply font-sans text-gray-900 antialiased;
+    @apply font-sans text-slate-900 antialiased;
     background: radial-gradient(1200px 600px at 10% -10%, #e0e7ff 0%, rgba(224,231,255,0) 60%), radial-gradient(1000px 500px at 100% 0%, #dbeafe 0%, rgba(219,234,254,0) 55%), #f8fafc;
   }
 

@@ -65,7 +65,7 @@ const normalizeBossName = (name?: string | null) => {
 };
 
 const GripIcon = memo(() => (
-  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-gray-400">
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-slate-400">
     <circle cx="5" cy="3" r="1.5" fill="currentColor" />
     <circle cx="11" cy="3" r="1.5" fill="currentColor" />
     <circle cx="5" cy="8" r="1.5" fill="currentColor" />
@@ -104,22 +104,22 @@ const SortableTaskItem = memo(({ task, onToggleComplete, onDelete, onEdit, taskA
   };
 
   return (
-    <div ref={setNodeRef} style={style} className={`relative bg-white py-3 pr-3 pl-10 rounded-lg shadow-sm border border-gray-200 mb-2 group ${task.is_completed ? 'opacity-70' : ''}`} {...attributes} {...listeners}>
-      <div className="absolute left-3 top-3 cursor-grab active:cursor-grabbing text-gray-400 hover:text-gray-600">
+    <div ref={setNodeRef} style={style} className={`relative bg-white py-3 pr-3 pl-10 rounded-lg shadow-sm border border-slate-200 mb-2 group ${task.is_completed ? 'opacity-70' : ''}`} {...attributes} {...listeners}>
+      <div className="absolute left-3 top-3 cursor-grab active:cursor-grabbing text-slate-400 hover:text-slate-600">
         <GripIcon />
       </div>
 
       <div className="absolute right-2 top-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-        <button onClick={() => onEdit(task)} className="text-gray-300 hover:text-indigo-500">
+        <button onClick={() => onEdit(task)} className="text-slate-300 hover:text-indigo-500">
           <Pencil className="w-4 h-4" />
         </button>
-        <button onClick={() => onDelete(task.id)} className="text-gray-300 hover:text-red-500">
+        <button onClick={() => onDelete(task.id)} className="text-slate-300 hover:text-red-500">
           <Trash2 className="w-4 h-4" />
         </button>
       </div>
 
       <div className="min-w-0 pr-5">
-        <div className={`text-sm font-medium text-gray-900 whitespace-normal break-words leading-relaxed ${task.is_completed ? 'line-through text-gray-500' : ''}`}>{task.content}</div>
+        <div className={`text-sm font-medium text-slate-900 whitespace-normal break-words leading-relaxed ${task.is_completed ? 'line-through text-slate-500' : ''}`}>{task.content}</div>
         {taskAssemblyFile?.url ? (
           <a
             href={taskAssemblyFile.url}
@@ -143,12 +143,12 @@ const SortableTaskItem = memo(({ task, onToggleComplete, onDelete, onEdit, taskA
             )}
           </div>
         )}
-        <div className="flex flex-wrap gap-2 mt-2 text-xs text-gray-500">
-          <div className="flex items-center gap-1 bg-gray-50 px-1.5 py-0.5 rounded">
+        <div className="flex flex-wrap gap-2 mt-2 text-xs text-slate-500">
+          <div className="flex items-center gap-1 bg-slate-50 px-1.5 py-0.5 rounded">
             <Calendar className="w-3 h-3" />
             {new Date(task.is_completed ? (task.completed_at || task.created_at) : task.created_at).toLocaleDateString('ru-RU')}
           </div>
-          {task.quantity !== null && task.quantity > 0 && <div className="flex items-center gap-1 bg-gray-50 px-1.5 py-0.5 rounded"><span className="font-bold">{task.quantity}</span> шт.</div>}
+          {task.quantity !== null && task.quantity > 0 && <div className="flex items-center gap-1 bg-slate-50 px-1.5 py-0.5 rounded"><span className="font-bold">{task.quantity}</span> шт.</div>}
         </div>
 
         <div className="mt-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-2 flex-wrap">
@@ -201,7 +201,7 @@ const TaskColumn = memo(({ col, tasks, loading, onToggleComplete, onDelete, onEd
       </div>
       <div className="p-2 flex-1 min-h-[100px]">
         {loading ? (
-          <div className="h-full flex items-center justify-center text-gray-400">Загрузка...</div>
+          <div className="h-full flex items-center justify-center text-slate-400">Загрузка...</div>
         ) : (
           <SortableContext items={tasks.map(t => t.id)} strategy={verticalListSortingStrategy}>
             {tasks.map(task => {
@@ -214,7 +214,7 @@ const TaskColumn = memo(({ col, tasks, loading, onToggleComplete, onDelete, onEd
             })}
           </SortableContext>
         )}
-        {!loading && tasks.length === 0 && <div className="h-full flex items-center justify-center text-gray-400 text-sm italic py-4">Нет задач</div>}
+        {!loading && tasks.length === 0 && <div className="h-full flex items-center justify-center text-slate-400 text-sm italic py-4">Нет задач</div>}
       </div>
     </div>
   );
@@ -701,21 +701,21 @@ export const Tasks = () => {
     if (pendingAssignedTasks.length > 0) setShowAssignedModal(true);
   }, [pendingAssignedTasks.length]);
 
-  if (loading) return <div className="p-8 text-center text-gray-500">Загрузка задач...</div>;
+  if (loading) return <div className="p-8 text-center text-slate-500">Загрузка задач...</div>;
 
   return (
     <div className="space-y-6">
       {showAssignedModal && pendingAssignedTasks.length > 0 && (
-        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setShowAssignedModal(false)}>
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setShowAssignedModal(false)}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[80vh] overflow-auto p-5" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-lg font-bold text-gray-900">Назначенные вам задачи</h3>
-              <button onClick={() => setShowAssignedModal(false)} className="p-2 rounded-lg hover:bg-gray-100"><X className="w-4 h-4" /></button>
+              <h3 className="text-lg font-bold text-slate-900">Назначенные вам задачи</h3>
+              <button onClick={() => setShowAssignedModal(false)} className="p-2 rounded-lg hover:bg-slate-100"><X className="w-4 h-4" /></button>
             </div>
             <div className="space-y-2">
               {pendingAssignedTasks.map((task) => (
-                <div key={`assigned-${task.id}`} className="border border-gray-200 rounded-xl p-3">
-                  <div className="text-sm font-medium text-gray-900">{task.content}</div>
+                <div key={`assigned-${task.id}`} className="border border-slate-200 rounded-xl p-3">
+                  <div className="text-sm font-medium text-slate-900">{task.content}</div>
                   <div className="mt-2">
                     <button onClick={() => toggleAcceptTask(task)} className="px-3 py-1.5 text-xs font-medium rounded-lg">Взять задачу в работу</button>
                   </div>
@@ -787,11 +787,11 @@ export const Tasks = () => {
       </form>
 
       {editingTask && (
-        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setEditingTask(null)}>
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setEditingTask(null)}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-5" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-lg font-bold text-gray-900">Редактирование задачи</h3>
-              <button onClick={() => setEditingTask(null)} className="p-2 rounded-lg hover:bg-gray-100"><X className="w-4 h-4"/></button>
+              <h3 className="text-lg font-bold text-slate-900">Редактирование задачи</h3>
+              <button onClick={() => setEditingTask(null)} className="p-2 rounded-lg hover:bg-slate-100"><X className="w-4 h-4"/></button>
             </div>
             <div className="space-y-3">
               <input value={editTaskForm.content} onChange={(e) => setEditTaskForm((p) => ({ ...p, content: e.target.value }))} className="oc-input" placeholder="Текст задачи" />
@@ -825,7 +825,7 @@ export const Tasks = () => {
         <DragOverlay>
           {activeId ? (
             <div className="bg-white p-3 rounded-lg shadow-lg border border-indigo-200 opacity-90 rotate-2 cursor-grabbing">
-              <div className="font-medium text-gray-900">{tasks.find(t => t.id === activeId)?.content}</div>
+              <div className="font-medium text-slate-900">{tasks.find(t => t.id === activeId)?.content}</div>
             </div>
           ) : null}
         </DragOverlay>

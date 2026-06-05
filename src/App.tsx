@@ -8,16 +8,15 @@ const Dashboard = lazy(() => import('./pages/Dashboard'));
 const SharedAnalytics = lazy(() => import('./pages/SharedAnalytics'));
 const TasksPage = lazy(() => import('./pages/TasksPage'));
 import { DASHBOARD_TAB_IDS, DEFAULT_DASHBOARD_TAB, isDashboardTabId } from './constants/dashboardTabs';
+import { PageSkeleton } from './components/Skeleton';
 
-const PageFallback = () => (
-  <div className="min-h-screen flex items-center justify-center text-slate-500">Загрузка...</div>
-);
+const PageFallback = () => <PageSkeleton />;
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const { session, loading } = useAuth();
   const employee = localStorage.getItem('current_employee');
-  
-  if (loading) return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
+
+  if (loading) return <PageSkeleton />;
   if (!session && !employee) return <Navigate to="/login" />;
   return <>{children}</>;
 };

@@ -164,7 +164,7 @@ const Sticker = ({ variant, honestSignCode, supplierName }: { variant: ProductVa
 
                     {/* Supplier Name */}
                     {supplierName && (
-                        <div className="text-[6px] font-bold mb-1 truncate text-gray-700">
+                        <div className="text-[6px] font-bold mb-1 truncate text-slate-700">
                             {supplierName}
                         </div>
                     )}
@@ -204,7 +204,7 @@ const Sticker = ({ variant, honestSignCode, supplierName }: { variant: ProductVa
 
       {/* Supplier Name */}
       {supplierName && (
-        <div className="w-full text-center text-[8px] mb-0.5 shrink-0 font-bold truncate px-1 text-gray-700">
+        <div className="w-full text-center text-[8px] mb-0.5 shrink-0 font-bold truncate px-1 text-slate-700">
             {supplierName}
         </div>
       )}
@@ -1416,10 +1416,10 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
     ? Math.max(520, Math.min(1200, window.innerHeight - 220))
     : 700;
   const ProductTabletCard = useCallback(({ variant }: { variant: ProductVariant }) => (
-    <div className="h-full overflow-hidden rounded-xl border border-gray-200 bg-white p-3 shadow-sm">
+    <div className="h-full overflow-hidden rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
       <div className="flex h-full gap-3">
         <div className="w-20 shrink-0">
-          <div className="h-28 w-20 overflow-hidden rounded-lg border border-gray-200 bg-gray-100 shadow-sm">
+          <div className="h-28 w-20 overflow-hidden rounded-lg border border-slate-200 bg-slate-100 shadow-sm">
             {variant.product.photos?.[0]?.c246x328 ? (
               <img
                 src={variant.product.photos[0].c246x328}
@@ -1428,7 +1428,7 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
                 onClick={() => setSelectedImage(variant.product.photos[0].big || variant.product.photos[0].c516x688 || variant.product.photos[0].c246x328)}
               />
             ) : (
-              <div className="flex h-full items-center justify-center text-gray-400"><ImageIcon className="h-6 w-6" /></div>
+              <div className="flex h-full items-center justify-center text-slate-400"><ImageIcon className="h-6 w-6" /></div>
             )}
           </div>
           <div className="mt-2 flex justify-center gap-1.5">
@@ -1437,10 +1437,10 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
           </div>
         </div>
         <div className="flex min-w-0 flex-1 flex-col">
-          <div className="line-clamp-2 text-sm font-semibold leading-5 text-gray-900" title={variant.product.title}>{variant.product.title || 'Без названия'}</div>
+          <div className="line-clamp-2 text-sm font-semibold leading-5 text-slate-900" title={variant.product.title}>{variant.product.title || 'Без названия'}</div>
           <div className="mt-1 flex flex-wrap gap-1.5">
-            <span className="rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-500">ID: {variant.product.nmID}</span>
-            {variant.product.vendorCode && <span className="rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-500">Арт: {variant.product.vendorCode}</span>}
+            <span className="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-500">ID: {variant.product.nmID}</span>
+            {variant.product.vendorCode && <span className="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-500">Арт: {variant.product.vendorCode}</span>}
           </div>
           <input
             type="text"
@@ -1453,13 +1453,13 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
             placeholder="Номер модели"
             title="Номер модели общий для всех размеров этой карточки WB"
           />
-          <div className="mt-2 grid grid-cols-[1fr_auto] gap-2 text-xs text-gray-600">
+          <div className="mt-2 grid grid-cols-[1fr_auto] gap-2 text-xs text-slate-600">
             <div className="min-w-0 truncate">Цвет: {localLabelEdits[variant.id]?.color || getColor(variant.product)}</div>
             <span className="rounded bg-indigo-50 px-2 py-0.5 font-bold text-indigo-700">{localLabelEdits[variant.id]?.size || variant.size.techSize}</span>
           </div>
-          <div className="mt-1 truncate font-mono text-xs text-gray-500">{variant.barcode || '-'}</div>
+          <div className="mt-1 truncate font-mono text-xs text-slate-500">{variant.barcode || '-'}</div>
           <div className="mt-auto flex items-center justify-end gap-2 pt-3">
-            <button onClick={() => updateQuantity(variant.id, -1)} className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-gray-100 text-gray-600"><Minus className="h-5 w-5" /></button>
+            <button onClick={() => updateQuantity(variant.id, -1)} className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-slate-100 text-slate-600"><Minus className="h-5 w-5" /></button>
             <input
               type="text"
               inputMode="numeric"
@@ -1472,9 +1472,9 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
                   (e.target as HTMLInputElement).blur();
                 }
               }}
-              className="h-11 w-16 rounded-lg border border-gray-300 p-1 text-center text-base outline-none focus:ring-2 focus:ring-indigo-500"
+              className="h-11 w-16 rounded-lg border border-slate-300 p-1 text-center text-base outline-none focus:ring-2 focus:ring-indigo-500"
             />
-            <button onClick={() => updateQuantity(variant.id, 1)} className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-gray-100 text-gray-600"><Plus className="h-5 w-5" /></button>
+            <button onClick={() => updateQuantity(variant.id, 1)} className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-slate-100 text-slate-600"><Plus className="h-5 w-5" /></button>
           </div>
         </div>
       </div>
@@ -1487,9 +1487,9 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
 
     return (
       <div style={style} className="px-2">
-        <div className="grid grid-cols-[64px_1fr_96px_120px_160px_160px_120px] items-center gap-2 hover:bg-gray-50 transition-colors group border-b border-gray-100 px-2">
+        <div className="grid grid-cols-[64px_1fr_96px_120px_160px_160px_120px] items-center gap-2 hover:bg-slate-50 transition-colors group border-b border-slate-100 px-2">
           <div className="p-2">
-            <div className="w-12 h-16 bg-gray-100 rounded-lg overflow-hidden border border-gray-200 shadow-sm">
+            <div className="w-12 h-16 bg-slate-100 rounded-lg overflow-hidden border border-slate-200 shadow-sm">
               {variant.product.photos?.[0]?.c246x328 ? (
                 <img
                   src={variant.product.photos[0].c246x328}
@@ -1498,15 +1498,15 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
                   onClick={() => setSelectedImage(variant.product.photos[0].big || variant.product.photos[0].c516x688 || variant.product.photos[0].c246x328)}
                 />
               ) : (
-                <div className="flex items-center justify-center h-full text-gray-400"><ImageIcon className="h-6 w-6" /></div>
+                <div className="flex items-center justify-center h-full text-slate-400"><ImageIcon className="h-6 w-6" /></div>
               )}
             </div>
           </div>
           <div className="min-w-0">
-            <div className="font-medium text-gray-900 truncate group-hover:text-indigo-600 transition-colors" title={variant.product.title}>{variant.product.title || 'Без названия'}</div>
+            <div className="font-medium text-slate-900 truncate group-hover:text-indigo-600 transition-colors" title={variant.product.title}>{variant.product.title || 'Без названия'}</div>
             <div className="flex items-center gap-2 mt-1 flex-wrap">
-              <span className="text-xs text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">ID: {variant.product.nmID}</span>
-              {variant.product.vendorCode && <span className="text-xs text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">Арт: {variant.product.vendorCode}</span>}
+              <span className="text-xs text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">ID: {variant.product.nmID}</span>
+              {variant.product.vendorCode && <span className="text-xs text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">Арт: {variant.product.vendorCode}</span>}
             </div>
             <input
               type="text"
@@ -1520,11 +1520,11 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
               title="Номер модели общий для всех размеров этой карточки WB"
             />
           </div>
-          <div className="text-sm text-gray-700">{localLabelEdits[variant.id]?.color || getColor(variant.product)}</div>
+          <div className="text-sm text-slate-700">{localLabelEdits[variant.id]?.color || getColor(variant.product)}</div>
           <div><span className="font-bold text-sm bg-indigo-50 text-indigo-700 px-2 py-1 rounded">{localLabelEdits[variant.id]?.size || variant.size.techSize}</span></div>
-          <div><span className="font-mono text-sm text-gray-600 bg-gray-50 px-2 py-1 rounded border border-gray-200">{variant.barcode || '-'}</span></div>
+          <div><span className="font-mono text-sm text-slate-600 bg-slate-50 px-2 py-1 rounded border border-slate-200">{variant.barcode || '-'}</span></div>
           <div className="flex items-center justify-center gap-2">
-            <button onClick={() => updateQuantity(variant.id, -1)} className="p-1.5 rounded-full hover:bg-gray-100 text-gray-500 transition-colors"><Minus className="h-4 w-4" /></button>
+            <button onClick={() => updateQuantity(variant.id, -1)} className="p-1.5 rounded-full hover:bg-slate-100 text-slate-500 transition-colors"><Minus className="h-4 w-4" /></button>
             <input
               type="text"
               inputMode="numeric"
@@ -1537,9 +1537,9 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
                   (e.target as HTMLInputElement).blur();
                 }
               }}
-              className="w-16 text-center p-1 border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500 outline-none"
+              className="w-16 text-center p-1 border border-slate-300 rounded-md focus:ring-2 focus:ring-indigo-500 outline-none"
             />
-            <button onClick={() => updateQuantity(variant.id, 1)} className="p-1.5 rounded-full hover:bg-gray-100 text-gray-500 transition-colors"><Plus className="h-4 w-4" /></button>
+            <button onClick={() => updateQuantity(variant.id, 1)} className="p-1.5 rounded-full hover:bg-slate-100 text-slate-500 transition-colors"><Plus className="h-4 w-4" /></button>
           </div>
           <div className="flex justify-center gap-1">
             <button onClick={() => openEditModal(variant)} className="inline-flex items-center justify-center w-8 h-8 rounded-md border border-amber-200 text-amber-700 hover:bg-amber-50 transition-colors" title="Редактировать локально"><Pencil className="h-4 w-4" /></button>
@@ -1551,14 +1551,14 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
   }, [filteredVariants, quantities, handleQuantityInput, commitQuantity, updateQuantity, localLabelEdits, openEditModal]);
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl shadow-sm flex flex-col 2xl:h-[calc(100vh-8rem)]">
-      <div className="p-4 border-b border-gray-200 bg-white z-10 flex flex-col gap-4 no-print">
+    <div className="bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col 2xl:h-[calc(100vh-8rem)]">
+      <div className="p-4 border-b border-slate-200 bg-white z-10 flex flex-col gap-4 no-print">
         <div className="flex flex-col 2xl:flex-row justify-between items-start 2xl:items-center gap-3">
-            <h2 className="text-xl md:text-2xl font-bold text-gray-900">Товары Wildberries <span className="text-gray-500 text-base md:text-lg font-normal">({filteredVariants.length})</span></h2>
+            <h2 className="text-xl md:text-2xl font-bold text-slate-900">Товары Wildberries <span className="text-slate-500 text-base md:text-lg font-normal">({filteredVariants.length})</span></h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 2xl:flex gap-2 w-full 2xl:w-auto">
                 <button 
                     onClick={() => setShowFilters(!showFilters)}
-                    className={`flex min-w-0 items-center justify-center px-3 py-2 min-h-[44px] border rounded-lg transition-colors text-xs sm:text-sm 2xl:text-base leading-tight text-center whitespace-normal ${showFilters ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'}`}
+                    className={`flex min-w-0 items-center justify-center px-3 py-2 min-h-[44px] border rounded-lg transition-colors text-xs sm:text-sm 2xl:text-base leading-tight text-center whitespace-normal ${showFilters ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'}`}
                 >
                     <Filter className="h-4 w-4 mr-1.5 shrink-0" />
                     Фильтры
@@ -1566,7 +1566,7 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
                 <button 
                     onClick={() => fetchAllProducts(undefined, true)}
                     disabled={loading}
-                    className="flex min-w-0 items-center justify-center px-3 py-2 min-h-[44px] bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 text-xs sm:text-sm 2xl:text-base leading-tight text-center whitespace-normal"
+                    className="flex min-w-0 items-center justify-center px-3 py-2 min-h-[44px] bg-white border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors disabled:opacity-50 text-xs sm:text-sm 2xl:text-base leading-tight text-center whitespace-normal"
                 >
                     <RefreshCw className={`h-4 w-4 mr-1.5 shrink-0 ${loading ? 'animate-spin' : ''}`} />
                     Обновить
@@ -1595,7 +1595,7 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
                 <button
                     onClick={() => handlePrint(true)}
                     disabled={printCount === 0}
-                    className={`flex min-w-0 items-center justify-center px-3 py-2 min-h-[44px] rounded-lg text-white transition-colors text-xs sm:text-sm 2xl:text-base leading-tight text-center whitespace-normal ${printCount > 0 ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-gray-300 cursor-not-allowed'}`}
+                    className={`flex min-w-0 items-center justify-center px-3 py-2 min-h-[44px] rounded-lg text-white transition-colors text-xs sm:text-sm 2xl:text-base leading-tight text-center whitespace-normal ${printCount > 0 ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-slate-300 cursor-not-allowed'}`}
                 >
                     <Printer className="h-4 w-4 mr-1.5 shrink-0" />
                     Печать из кэша ({printCount})
@@ -1603,7 +1603,7 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
                 <button 
                     onClick={() => handlePrint(false)}
                     disabled={printCount === 0}
-                    className={`flex min-w-0 items-center justify-center px-3 py-2 min-h-[44px] rounded-lg text-white transition-colors text-xs sm:text-sm 2xl:text-base leading-tight text-center whitespace-normal ${printCount > 0 ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-gray-300 cursor-not-allowed'}`}
+                    className={`flex min-w-0 items-center justify-center px-3 py-2 min-h-[44px] rounded-lg text-white transition-colors text-xs sm:text-sm 2xl:text-base leading-tight text-center whitespace-normal ${printCount > 0 ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-slate-300 cursor-not-allowed'}`}
                 >
                     <Printer className="h-4 w-4 mr-1.5 shrink-0" />
                     Печать онлайн ({printCount})
@@ -1617,7 +1617,7 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
             </div>
         </div>
 
-        <div className="text-xs text-gray-500">
+        <div className="text-xs text-slate-500">
           Кэш печати: {printCachePreparedAt ? `готов (${new Date(printCachePreparedAt).toLocaleString('ru-RU')})` : 'не подготовлен'}
         </div>
         {printCacheStatus && (
@@ -1628,35 +1628,35 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
 
         {/* Filters Panel */}
         {showFilters && (
-            <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1.5 uppercase tracking-wide">Поставщик</label>
+                    <label className="block text-xs font-medium text-slate-500 mb-1.5 uppercase tracking-wide">Поставщик</label>
                     <select 
                         value={selectedSupplierId}
                         onChange={(e) => setSelectedSupplierId(e.target.value)}
-                        className="w-full p-2 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                        className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
                     >
                         <option value="">Все поставщики</option>
                         {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                     </select>
                 </div>
                 <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1.5 uppercase tracking-wide">Бренд</label>
+                    <label className="block text-xs font-medium text-slate-500 mb-1.5 uppercase tracking-wide">Бренд</label>
                     <select 
                         value={selectedBrand}
                         onChange={(e) => setSelectedBrand(e.target.value)}
-                        className="w-full p-2 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                        className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
                     >
                         <option value="">Все бренды</option>
                         {brands.map(b => <option key={b} value={b}>{b}</option>)}
                     </select>
                 </div>
                 <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1.5 uppercase tracking-wide">Категория</label>
+                    <label className="block text-xs font-medium text-slate-500 mb-1.5 uppercase tracking-wide">Категория</label>
                     <select 
                         value={selectedCategory}
                         onChange={(e) => setSelectedCategory(e.target.value)}
-                        className="w-full p-2 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                        className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
                     >
                         <option value="">Все категории</option>
                         {categories.map(c => <option key={c} value={c}>{c}</option>)}
@@ -1667,13 +1667,13 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
 
         {/* Search Bar - Full Width */}
         <div className="relative w-full">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400" />
             <input 
               type="text" 
               placeholder="Поиск по названию, артикулу, баркоду или ID..." 
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm"
+              className="w-full pl-9 pr-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm"
             />
         </div>
       </div>
@@ -1689,9 +1689,9 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
       {/* Mobile Cards */}
       <div className="no-print md:hidden p-3 space-y-3">
         {filteredVariants.map((variant) => (
-          <div key={variant.id} className="border border-gray-200 rounded-lg p-3 bg-white shadow-sm">
+          <div key={variant.id} className="border border-slate-200 rounded-lg p-3 bg-white shadow-sm">
             <div className="flex gap-3">
-              <div className="w-16 h-20 bg-gray-100 rounded-lg overflow-hidden border border-gray-200 shrink-0">
+              <div className="w-16 h-20 bg-slate-100 rounded-lg overflow-hidden border border-slate-200 shrink-0">
                 {variant.product.photos?.[0]?.c246x328 ? (
                   <img
                     src={variant.product.photos[0].c246x328}
@@ -1700,12 +1700,12 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
                     onClick={() => setSelectedImage(variant.product.photos[0].big || variant.product.photos[0].c516x688 || variant.product.photos[0].c246x328)}
                   />
                 ) : (
-                  <div className="flex items-center justify-center h-full text-gray-400"><ImageIcon className="h-5 w-5" /></div>
+                  <div className="flex items-center justify-center h-full text-slate-400"><ImageIcon className="h-5 w-5" /></div>
                 )}
               </div>
               <div className="min-w-0 flex-1">
-                <div className="font-medium text-gray-900 text-sm line-clamp-2">{variant.product.title || 'Без названия'}</div>
-                <div className="text-xs text-gray-500 mt-1">ID: {variant.product.nmID} • Арт: {variant.product.vendorCode || '-'}</div>
+                <div className="font-medium text-slate-900 text-sm line-clamp-2">{variant.product.title || 'Без названия'}</div>
+                <div className="text-xs text-slate-500 mt-1">ID: {variant.product.nmID} • Арт: {variant.product.vendorCode || '-'}</div>
                 <input
                   type="text"
                   defaultValue={getModelNumber(variant)}
@@ -1717,8 +1717,8 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
                   placeholder="Номер модели"
                   title="Номер модели общий для всех размеров этой карточки WB"
                 />
-                <div className="text-xs text-gray-600 mt-1">Цвет: {localLabelEdits[variant.id]?.color || getColor(variant.product)} • Размер: {localLabelEdits[variant.id]?.size || variant.size.techSize}</div>
-                <div className="text-xs font-mono text-gray-600 mt-1 break-all">{variant.barcode || '-'}</div>
+                <div className="text-xs text-slate-600 mt-1">Цвет: {localLabelEdits[variant.id]?.color || getColor(variant.product)} • Размер: {localLabelEdits[variant.id]?.size || variant.size.techSize}</div>
+                <div className="text-xs font-mono text-slate-600 mt-1 break-all">{variant.barcode || '-'}</div>
               </div>
             </div>
             <div className="mt-3 flex items-center justify-between">
@@ -1734,7 +1734,7 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
                 </a>
               </div>
               <div className="flex items-center gap-2">
-                <button onClick={() => updateQuantity(variant.id, -1)} className="p-2 rounded-full bg-gray-100"><Minus className="h-4 w-4" /></button>
+                <button onClick={() => updateQuantity(variant.id, -1)} className="p-2 rounded-full bg-slate-100"><Minus className="h-4 w-4" /></button>
                 <input
                   type="text"
                   inputMode="numeric"
@@ -1747,25 +1747,25 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
                       (e.target as HTMLInputElement).blur();
                     }
                   }}
-                  className="w-14 text-center p-1 border border-gray-300 rounded-md"
+                  className="w-14 text-center p-1 border border-slate-300 rounded-md"
                 />
-                <button onClick={() => updateQuantity(variant.id, 1)} className="p-2 rounded-full bg-gray-100"><Plus className="h-4 w-4" /></button>
+                <button onClick={() => updateQuantity(variant.id, 1)} className="p-2 rounded-full bg-slate-100"><Plus className="h-4 w-4" /></button>
               </div>
             </div>
           </div>
         ))}
         {filteredVariants.length === 0 && !loading && (
-          <div className="p-8 text-center text-gray-500 text-sm">Товары не найдены. Проверьте фильтры или нажмите «Обновить».</div>
+          <div className="p-8 text-center text-slate-500 text-sm">Товары не найдены. Проверьте фильтры или нажмите «Обновить».</div>
         )}
         {loading && (
-          <div className="p-8 text-center text-gray-500"><Loader2 className="h-7 w-7 mx-auto animate-spin text-indigo-600" /></div>
+          <div className="p-8 text-center text-slate-500"><Loader2 className="h-7 w-7 mx-auto animate-spin text-indigo-600" /></div>
         )}
       </div>
 
       {/* Tablet Cards (virtualized) */}
       <div className="no-print hidden md:grid md:grid-cols-1 lg:grid-cols-2 2xl:hidden gap-3 p-3">
-        {loading && <div className="p-12 text-center text-gray-500"><Loader2 className="h-8 w-8 mx-auto animate-spin text-indigo-600" /><p className="mt-2">Загрузка товаров...</p></div>}
-        {!loading && filteredVariants.length === 0 && <div className="p-12 text-center text-gray-500"><Package className="h-12 w-12 mx-auto mb-4 text-gray-300" /><p className="text-lg font-medium">Товары не найдены</p></div>}
+        {loading && <div className="p-12 text-center text-slate-500"><Loader2 className="h-8 w-8 mx-auto animate-spin text-indigo-600" /><p className="mt-2">Загрузка товаров...</p></div>}
+        {!loading && filteredVariants.length === 0 && <div className="p-12 text-center text-slate-500"><Package className="h-12 w-12 mx-auto mb-4 text-slate-300" /><p className="text-lg font-medium">Товары не найдены</p></div>}
         {!loading && filteredVariants.map((variant) => (
           <div key={variant.id} className="h-[292px]">
             <ProductTabletCard variant={variant} />
@@ -1775,11 +1775,11 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
 
       {/* Table View (virtualized) */}
       <div className="no-print hidden 2xl:block px-2 pb-2">
-        <div className="grid grid-cols-[64px_1fr_96px_120px_160px_160px_120px] items-center gap-2 bg-gray-50 border-y border-gray-200 px-4 py-3 text-sm font-medium text-gray-500">
+        <div className="grid grid-cols-[64px_1fr_96px_120px_160px_160px_120px] items-center gap-2 bg-slate-50 border-y border-slate-200 px-4 py-3 text-sm font-medium text-slate-500">
           <div>Фото</div><div>Наименование</div><div>Цвет</div><div>Размер</div><div>Баркод</div><div className="text-center">Количество</div><div className="text-center">Действия</div>
         </div>
-        {loading && <div className="p-12 text-center text-gray-500"><Loader2 className="h-8 w-8 mx-auto animate-spin text-indigo-600" /><p className="mt-2">Загрузка товаров...</p></div>}
-        {!loading && filteredVariants.length === 0 && <div className="p-12 text-center text-gray-500"><Package className="h-12 w-12 mx-auto mb-4 text-gray-300" /><p className="text-lg font-medium">Товары не найдены</p></div>}
+        {loading && <div className="p-12 text-center text-slate-500"><Loader2 className="h-8 w-8 mx-auto animate-spin text-indigo-600" /><p className="mt-2">Загрузка товаров...</p></div>}
+        {!loading && filteredVariants.length === 0 && <div className="p-12 text-center text-slate-500"><Package className="h-12 w-12 mx-auto mb-4 text-slate-300" /><p className="text-lg font-medium">Товары не найдены</p></div>}
         {!loading && filteredVariants.length > 0 && (
           <List height={desktopListHeight} itemCount={filteredVariants.length} itemSize={desktopRowHeight} width="100%">
             {VirtualizedRow}
@@ -1795,10 +1795,10 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
       </div>
 
       {editingVariant && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setEditingVariant(null)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4" onClick={() => setEditingVariant(null)}>
           <div className="bg-white rounded-xl p-5 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-lg font-bold mb-3">Локальное редактирование</h3>
-            <p className="text-xs text-gray-500 mb-3">Изменения только на этом устройстве, без записи в БД.</p>
+            <p className="text-xs text-slate-500 mb-3">Изменения только на этом устройстве, без записи в БД.</p>
             <div className="space-y-3">
               <input type="text" value={editDraft.article} onChange={(e) => setEditDraft(prev => ({ ...prev, article: e.target.value }))} className="w-full p-2 border rounded" placeholder="Артикул" />
               <div className="grid grid-cols-2 gap-2">
@@ -1823,7 +1823,7 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
           <div className="relative max-w-4xl max-h-[90vh] w-full h-full flex items-center justify-center">
             <button 
               onClick={() => setSelectedImage(null)}
-              className="absolute -top-12 right-0 text-white hover:text-gray-300 transition-colors"
+              className="absolute -top-12 right-0 text-white hover:text-slate-300 transition-colors"
             >
               <X className="h-8 w-8" />
             </button>

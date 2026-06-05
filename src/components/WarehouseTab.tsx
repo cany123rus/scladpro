@@ -257,8 +257,8 @@ export const WarehouseTab = (props: Props) => {
   return (
     <div className="max-w-full mx-auto px-4">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Склад</h1>
-        <p className="text-gray-500 mt-1">Интерактивная карта. Нажми на стеллаж, чтобы открыть его полки.</p>
+        <h1 className="text-2xl font-bold text-slate-900">Склад</h1>
+        <p className="text-slate-500 mt-1">Интерактивная карта. Нажми на стеллаж, чтобы открыть его полки.</p>
       </div>
 
       <div className="mb-5 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
@@ -459,9 +459,9 @@ export const WarehouseTab = (props: Props) => {
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-3 gap-3 items-end">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Поиск: Артикул</label>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Поиск: Артикул</label>
             <div className="flex gap-2">
-              <select value={pendingArticle} onChange={(e) => { setPendingArticle(e.target.value); setPendingSize(''); setPendingColor(''); }} className="px-3 py-2 border border-gray-300 rounded-lg w-full">
+              <select value={pendingArticle} onChange={(e) => { setPendingArticle(e.target.value); setPendingSize(''); setPendingColor(''); }} className="px-3 py-2 border border-slate-300 rounded-lg w-full">
                 <option value="">Выберите артикул</option>
                 {warehouseSearchOptions.articles.map((v) => <option key={v} value={v}>{v}</option>)}
               </select>
@@ -469,9 +469,9 @@ export const WarehouseTab = (props: Props) => {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Поиск: Размер</label>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Поиск: Размер</label>
             <div className="flex gap-2 mb-2">
-              <select value={pendingSize} onChange={(e) => setPendingSize(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-lg w-full" disabled={selectedArticles.length === 0}>
+              <select value={pendingSize} onChange={(e) => setPendingSize(e.target.value)} className="px-3 py-2 border border-slate-300 rounded-lg w-full" disabled={selectedArticles.length === 0}>
                 <option value="">{selectedArticles.length === 0 ? 'Сначала выберите артикул' : 'Выберите размер'}</option>
                 {dependentSizeOptions.map((v) => <option key={v} value={v}>{v}</option>)}
               </select>
@@ -500,9 +500,9 @@ export const WarehouseTab = (props: Props) => {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Поиск: Цвет</label>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Поиск: Цвет</label>
             <div className="flex gap-2 mb-2">
-              <select value={pendingColor} onChange={(e) => setPendingColor(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-lg w-full" disabled={selectedArticles.length === 0}>
+              <select value={pendingColor} onChange={(e) => setPendingColor(e.target.value)} className="px-3 py-2 border border-slate-300 rounded-lg w-full" disabled={selectedArticles.length === 0}>
                 <option value="">{selectedArticles.length === 0 ? 'Сначала выберите артикул' : 'Выберите цвет'}</option>
                 {dependentColorOptions.map((v) => <option key={v} value={v}>{v}</option>)}
               </select>
@@ -537,7 +537,7 @@ export const WarehouseTab = (props: Props) => {
             <button onClick={clearSearch} className="inline-flex h-9 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50">Очистить</button>
           </div>
 
-          <div className="text-xs text-gray-500 mb-2">Текущий поиск (размер и цвет напротив артикула):</div>
+          <div className="text-xs text-slate-500 mb-2">Текущий поиск (размер и цвет напротив артикула):</div>
 
           <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-2 space-y-2">
             {currentSearchByArticle.length > 0 ? (
@@ -547,10 +547,10 @@ export const WarehouseTab = (props: Props) => {
                     <div className="text-xs font-semibold text-indigo-700 min-w-[120px]">Арт: {row.article}</div>
                     <button onClick={() => removeFromSearch('article', row.article)} className="text-xs px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 hover:bg-indigo-200">Удалить</button>
                   </div>
-                  <div className="mt-1 text-xs text-gray-700">
+                  <div className="mt-1 text-xs text-slate-700">
                     <span className="font-medium text-emerald-700">Размеры:</span> {row.sizes.length ? row.sizes.join(', ') : '—'}
                   </div>
-                  <div className="mt-0.5 text-xs text-gray-700">
+                  <div className="mt-0.5 text-xs text-slate-700">
                     <span className="font-medium text-amber-700">Цвета:</span> {row.colors.length ? row.colors.join(', ') : '—'}
                   </div>
                 </div>
@@ -582,7 +582,7 @@ export const WarehouseTab = (props: Props) => {
               <select
                 value={warehouseShareEmployeeId}
                 onChange={(e) => setWarehouseShareEmployeeId(e.target.value)}
-                className="px-3 py-2 border border-gray-300 rounded-lg w-full text-sm"
+                className="px-3 py-2 border border-slate-300 rounded-lg w-full text-sm"
               >
                 <option value="">{warehouseShareEmployees.length ? 'Выберите сотрудника для Telegram' : 'Сотрудники не загружены'}</option>
                 {warehouseShareEmployees.map((emp) => (
@@ -617,7 +617,7 @@ export const WarehouseTab = (props: Props) => {
               ))}
             </div>
           ) : (
-            <div className="text-sm text-gray-500">Ничего не найдено (или фильтр не выбран).</div>
+            <div className="text-sm text-slate-500">Ничего не найдено (или фильтр не выбран).</div>
           )}
         </div>
       </div>
@@ -651,13 +651,13 @@ export const WarehouseTab = (props: Props) => {
         {rackFillMode && <div className="text-xs text-slate-500 mt-2">Режим выбора включён: кликай по стеллажам на карте для выбора. Цвет стеллажа показывает поставщика.</div>}
       </div>
 
-      <div className="bg-white border border-gray-200 rounded-2xl p-4 md:p-6 shadow-sm" style={{ backgroundImage: 'linear-gradient(to right, rgba(148,163,184,0.12) 1px, transparent 1px), linear-gradient(to bottom, rgba(148,163,184,0.12) 1px, transparent 1px)', backgroundSize: '28px 28px' }}>
+      <div className="bg-white border border-slate-200 rounded-2xl p-4 md:p-6 shadow-sm" style={{ backgroundImage: 'linear-gradient(to right, rgba(148,163,184,0.12) 1px, transparent 1px), linear-gradient(to bottom, rgba(148,163,184,0.12) 1px, transparent 1px)', backgroundSize: '28px 28px' }}>
         <div className="space-y-4">
           {warehouseRows.map((row) => (
-            <div key={row.rowLetter} className="bg-white/80 backdrop-blur rounded-xl border border-gray-200 p-3">
+            <div key={row.rowLetter} className="bg-white/80 backdrop-blur rounded-xl border border-slate-200 p-3">
               <div className="flex items-center justify-between mb-2">
-                <h2 className="text-sm md:text-base font-semibold text-gray-900">{row.rowTitle}</h2>
-                <span className="text-xs text-gray-500">{row.racks.length} стеллажей</span>
+                <h2 className="text-sm md:text-base font-semibold text-slate-900">{row.rowTitle}</h2>
+                <span className="text-xs text-slate-500">{row.racks.length} стеллажей</span>
               </div>
 
               <div className="flex flex-wrap gap-2">
@@ -697,13 +697,13 @@ export const WarehouseTab = (props: Props) => {
       </div>
 
       {selectedWarehouseRack && (
-        <div className="mt-5 bg-white border border-gray-200 rounded-2xl p-4 shadow-sm">
+        <div className="mt-5 bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
           <div className="flex items-center justify-between mb-3">
             <div>
-              <div className="text-xs text-gray-500">{selectedWarehouseRack.rowTitle}</div>
-              <div className="text-lg font-semibold text-gray-900">Стеллаж {selectedWarehouseRack.rackName}</div>
+              <div className="text-xs text-slate-500">{selectedWarehouseRack.rowTitle}</div>
+              <div className="text-lg font-semibold text-slate-900">Стеллаж {selectedWarehouseRack.rackName}</div>
             </div>
-            <button onClick={() => setSelectedWarehouseRack(null)} className="px-3 py-1.5 rounded-lg border border-gray-300 text-sm text-gray-600 hover:bg-gray-50">Закрыть</button>
+            <button onClick={() => setSelectedWarehouseRack(null)} className="px-3 py-1.5 rounded-lg border border-slate-300 text-sm text-slate-600 hover:bg-slate-50">Закрыть</button>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">

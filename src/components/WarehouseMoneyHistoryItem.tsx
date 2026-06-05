@@ -17,8 +17,8 @@ export function WarehouseMoneyHistoryItem({ row, isAdmin, onDelete }: Props) {
   return (
     <div className="p-3 flex items-center justify-between gap-3 text-sm">
       <div>
-        <div className="font-medium text-gray-900">{row.comment || 'Без комментария'}</div>
-        <div className="text-xs text-gray-500">{new Date(row.created_at).toLocaleString('ru-RU')}</div>
+        <div className="font-medium text-slate-900">{row.comment || 'Без комментария'}</div>
+        <div className="text-xs text-slate-500">{new Date(row.created_at).toLocaleString('ru-RU')}</div>
       </div>
       <div className="flex items-center gap-2">
         <div className={`font-bold ${Number(row.amount) >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
