@@ -14,6 +14,7 @@ const Tasks = React.lazy(() => import('../components/Tasks').then((m) => ({ defa
 const WarehouseTab = React.lazy(() => import('../components/WarehouseTab').then((m) => ({ default: m.WarehouseTab })));
 const AdvertisingInsights = React.lazy(() => import('../components/AdvertisingInsights').then((m) => ({ default: m.AdvertisingInsights })));
 const CamerasTab = React.lazy(() => import('../components/CamerasTab').then((m) => ({ default: m.CamerasTab })));
+const AdminPanel = React.lazy(() => import('./AdminPanel').then((m) => ({ default: m.AdminPanel })));
 import { SectionSkeleton } from '../components/Skeleton';
 import { confirmDialog } from '../components/ConfirmDialog';
 import { storeCurrentEmployee } from '../utils/employeeStorage';
@@ -1250,6 +1251,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [showAssemblyAccessModal, setShowAssemblyAccessModal] = useState(false);
   const [assemblyButtonAccess, setAssemblyButtonAccess] = useState<Record<string, ButtonAccessConfig>>({});
   const [assemblyButtonAccessLoaded, setAssemblyButtonAccessLoaded] = useState(false);
+  // Role-based section visibility: { [roleKey]: { [tabId]: 'allow' | 'deny' } }.
+  // Personal employee.permissions[tabId] overrides the role default.
+  const [sectionRoleAccess, setSectionRoleAccess] = useState<Record<string, Record<string, 'allow' | 'deny'>>>({});
+  const [sectionRoleAccessLoaded, setSectionRoleAccessLoaded] = useState(false);
+  const [adminPanelSection, setAdminPanelSection] = useState<'sections-emp' | 'sections-role' | 'buttons' | 'employees'>('sections-emp');
   const [selectedAccessEmployeeId, setSelectedAccessEmployeeId] = useState('');
 
   const fetchTempWorkerLogs = async () => {
@@ -9743,6 +9749,94 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     loadAssemblyAccess();
   }, []);
 
+  useEffect(() => {
+    const loadSectionRoleAccess = async () => {
+      try {
+        const { data } = await supabase
+          .from('app_settings')
+          .select('value')
+          .eq('key', 'section_access_by_role_v1')
+          .limit(1);
+        const row = Array.isArray(data) ? data[0] : null;
+        const parsed = row?.value ? (typeof row.value === 'string' ? JSON.parse(row.value) : row.value) : {};
+        if (parsed && typeof parsed === 'object') setSectionRoleAccess(parsed);
+      } catch {}
+      finally { setSectionRoleAccessLoaded(true); }
+    };
+    loadSectionRoleAccess();
+  }, []);
+
+  const updateSectionRoleAccess = (roleKey: string, tabId: string, rule: 'allow' | 'deny') => {
+    setSectionRoleAccess((prev) => {
+      const next = { ...(prev || {}) };
+      const forRole = { ...(next[roleKey] || {}) };
+      forRole[tabId] = rule;
+      next[roleKey] = forRole;
+      return next;
+    });
+  };
+
+  const saveSectionRoleAccess = async (data?: Record<string, Record<string, 'allow' | 'deny'>>) => {
+    try {
+      const raw = JSON.stringify(data || sectionRoleAccess || {});
+      const { data: updated, error: updErr } = await supabase
+        .from('app_settings')
+        .update({ value: raw })
+        .eq('key', 'section_access_by_role_v1')
+        .select('key');
+      if (updErr) throw updErr;
+      if (!updated || updated.length === 0) {
+        const { error: insErr } = await supabase
+          .from('app_settings')
+          .insert({ key: 'section_access_by_role_v1', value: raw });
+        if (insErr) throw insErr;
+      }
+      showToast('Доступ к разделам по ролям сохранён', 'success');
+    } catch (e: any) {
+      showToast('Ошибка сохранения доступа: ' + (e?.message || 'неизвестно'), 'error');
+    }
+  };
+
+  // Effective section visibility: personal permission wins, then role default.
+  const isSectionVisibleFor = useCallback((tabId: string, employee: any) => {
+    if (!employee) return true;
+    const roleKey = normalizeRoleKey(employee.role || employee.login);
+    if (roleKey === 'admin') return true;
+    if (tabId === 'admin') return false;
+    const personal = employee.permissions ? employee.permissions[tabId] : undefined;
+    if (personal === false) return false;
+    if (personal === true) return true;
+    const roleRule = sectionRoleAccess[roleKey]?.[tabId];
+    if (roleRule === 'deny') return false;
+    return true;
+  }, [sectionRoleAccess]);
+
+  // Persist a single employee's section permission (used by the admin matrix).
+  const saveEmployeeSectionPermission = async (employeeId: string, tabId: string, visible: boolean) => {
+    const emp = employees.find((e: any) => String(e.id) === String(employeeId));
+    if (!emp) return;
+    const nextPermissions = { ...(emp.permissions || {}), [tabId]: visible };
+    try {
+      const { error } = await supabase
+        .from('employees')
+        .update({ permissions: nextPermissions })
+        .eq('id', employeeId);
+      if (error) throw error;
+      setEmployees((prev: any[]) => prev.map((e) => String(e.id) === String(employeeId) ? { ...e, permissions: nextPermissions } : e));
+    } catch (e: any) {
+      showToast('Ошибка сохранения доступа сотрудника: ' + (e?.message || 'неизвестно'), 'error');
+    }
+  };
+
+  const adminRoleKeys = useMemo(() => {
+    const set = new Set<string>();
+    (employees || []).forEach((e: any) => {
+      const rk = normalizeRoleKey(e.role || e.login);
+      if (rk && rk !== 'admin') set.add(rk);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'ru'));
+  }, [employees]);
+
 
   const [editedTokens, setEditedTokens] = useState<{[key: string]: string}>({});
 
@@ -16366,6 +16460,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     { id: 'telegram', icon: Send, label: 'Telegram' },
     { id: 'employees', icon: UserCog, label: 'Сотрудники' },
     { id: 'database', icon: Database, label: 'База данных' },
+    { id: 'admin', icon: Settings, label: 'Администрирование' },
   ], []);
 
   const warehouseRows = useMemo(() => {
@@ -17073,9 +17168,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         <nav className="flex-1 px-4 space-y-1 mt-4">
           {menuItems.map((item) => {
             if (currentEmployee) {
-              if (item.id === 'database') {
-                if (!currentEmployee.can_access_database) return null;
-              } else if (currentEmployee.permissions && currentEmployee.permissions[item.id] === false) {
+              const roleKey = normalizeRoleKey(currentEmployee.role || currentEmployee.login);
+              if (item.id === 'admin') {
+                if (roleKey !== 'admin') return null;
+              } else if (item.id === 'database') {
+                if (roleKey !== 'admin' && !currentEmployee.can_access_database) return null;
+              } else if (!isSectionVisibleFor(item.id, currentEmployee)) {
                 return null;
               }
             }
@@ -24467,6 +24565,35 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
               databaseBackupLoading={databaseBackupLoading}
               databaseDownloadLoading={databaseDownloadLoading}
             />
+          )}
+
+          {activeTab === 'admin' && normalizeRoleKey(currentEmployee?.role || currentEmployee?.login) === 'admin' && (
+            <React.Suspense fallback={<SectionSkeleton />}>
+              <AdminPanel
+                section={adminPanelSection}
+                setSection={setAdminPanelSection}
+                employees={employees}
+                sectionGroups={EMPLOYEE_PERMISSION_SECTIONS}
+                roleKeys={adminRoleKeys}
+                sectionRoleAccess={sectionRoleAccess}
+                updateSectionRoleAccess={updateSectionRoleAccess}
+                saveSectionRoleAccess={saveSectionRoleAccess}
+                saveEmployeeSectionPermission={saveEmployeeSectionPermission}
+                groupedAssemblyButtons={groupedAssemblyButtons}
+                assemblyAccessEmployeeSearch={assemblyAccessEmployeeSearch}
+                setAssemblyAccessEmployeeSearch={setAssemblyAccessEmployeeSearch}
+                assemblyAccessSearch={assemblyAccessSearch}
+                setAssemblyAccessSearch={setAssemblyAccessSearch}
+                isButtonVisibleForEmployee={isButtonVisibleForEmployee}
+                updateAssemblyAccessEmployee={updateAssemblyAccessEmployee}
+                setAssemblyGroupRule={setAssemblyGroupRule}
+                saveAssemblyAccess={saveAssemblyAccess}
+                onEditEmployee={(emp) => setEditingEmployee(emp)}
+                onShowLogs={(emp) => setShowActivityLogModal(emp)}
+                onShowDevices={(emp) => setShowDevicesModal(emp)}
+                onSendQR={(emp) => setShowSendQRModal(emp)}
+              />
+            </React.Suspense>
           )}
 
           {/* COMPLETED WORK TAB */}
