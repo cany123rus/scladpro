@@ -3093,6 +3093,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       setTempWorkerPaymentsMap(nextMap);
       setTempWorkerLogs(prev => prev.map((log: any) => ids.includes(String(log.id)) ? { ...log, is_paid: true, paid_by_supplier_id: tempWorkerQuickPayPayerSupplierId || null } : log));
       setTempWorkerQuickPaySelectedIds([]);
+
+      // Списываем деньги со склада плательщика (ИП Власенко → Саша, ИП Криштафович → Леха).
+      const workerNames = Array.from(new Set(rows.map((log: any) => String(log?.worker_name || log?.worker || '').trim()).filter(Boolean)));
+      await deductWarehouseMoneyForDeliveryPayment(
+        tempWorkerQuickPayPayerSupplierId,
+        total,
+        `Оплата временным сотрудникам: ${workerNames.join(', ') || 'смены'} — ${rows.length} шт.`
+      );
+
       showToast(`Оплачено смен: ${rows.length}`, 'success');
     } catch (error: any) {
       console.error('Quick temp worker pay error:', error);
@@ -28909,7 +28918,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         className="oc-input h-11 rounded-xl bg-white text-sm"
                       >
                         <option value="">Выберите поставщика</option>
-                        {suppliers.map((s) => (
+                        {deliveryPayerSuppliers.map((s) => (
                           <option key={`quick-pay-payer-${s.id}`} value={String(s.id)}>{s.name}</option>
                         ))}
                       </select>

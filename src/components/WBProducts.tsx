@@ -235,6 +235,10 @@ const useMediaQuery = (query: string) => {
   return matches;
 };
 
+// Cache Roboto font base64 across prints — re-fetching from the CDN on every
+// print is the main "очень долго грузит" cause, especially on tablets/слабый сети.
+const wbFontBase64Cache: Record<string, string> = {};
+
 const WB_PRODUCTS_BROWSER_CACHE_KEY = 'wb_products_browser_cache_v1';
 const WB_PRINT_CODES_CACHE_KEY = 'wb_print_codes_cache_v1';
 const WB_PRINT_PENDING_SYNC_KEY = 'wb_print_pending_codes_sync_v1';
@@ -1058,20 +1062,21 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
       
       try {
           await Promise.all(fontUrls.map(async (font) => {
-            const res = await fetch(font.url);
-            if (!res.ok) throw new Error(`Failed to load ${font.url}`);
-            const blob = await res.blob();
-            const reader = new FileReader();
-            await new Promise<void>((resolve, reject) => {
-                reader.onloadend = () => {
-                    const base64 = (reader.result as string).split(',')[1];
-                    doc.addFileToVFS(font.name + '-' + font.style + '.ttf', base64);
-                    doc.addFont(font.name + '-' + font.style + '.ttf', font.name, font.style);
-                    resolve();
-                };
+            let base64 = wbFontBase64Cache[font.url];
+            if (!base64) {
+              const res = await fetch(font.url);
+              if (!res.ok) throw new Error(`Failed to load ${font.url}`);
+              const blob = await res.blob();
+              base64 = await new Promise<string>((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
                 reader.onerror = reject;
                 reader.readAsDataURL(blob);
-            });
+              });
+              wbFontBase64Cache[font.url] = base64;
+            }
+            doc.addFileToVFS(font.name + '-' + font.style + '.ttf', base64);
+            doc.addFont(font.name + '-' + font.style + '.ttf', font.name, font.style);
           }));
           doc.setFont('Roboto');
       } catch (e) {
@@ -1226,7 +1231,20 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
       }
 
       const blobUrl = doc.output('bloburl');
-      if (preview) {
+      if (!isDesktopView) {
+        // Планшет/мобильный: iframe с blob внутри popup на этих браузерах (особенно
+        // iOS Safari) часто не отображается и «висит». Открываем PDF напрямую в
+        // нативном просмотрщике — файл показывается сразу. ПК-поведение не меняем.
+        if (preview) {
+          try {
+            preview.location.href = blobUrl as string;
+          } catch {
+            doc.save(`wb-stickers-${Date.now()}.pdf`);
+          }
+        } else {
+          doc.save(`wb-stickers-${Date.now()}.pdf`);
+        }
+      } else if (preview) {
         preview.document.write(`
           <html>
             <head><title>Предпросмотр печати</title></head>
