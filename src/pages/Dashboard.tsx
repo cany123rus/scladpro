@@ -1190,6 +1190,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     date: new Date().toISOString().split('T')[0],
     worker_name: '',
     work_comment: '',
+    quantity: '',
     earnings: '',
     hours: ''
   });
@@ -1199,6 +1200,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     date: new Date().toISOString().split('T')[0],
     worker_name: '',
     work_comment: '',
+    quantity: '',
     earnings: '',
     hours: ''
   });
@@ -1259,7 +1261,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   // Personal employee.permissions[tabId] overrides the role default.
   const [sectionRoleAccess, setSectionRoleAccess] = useState<Record<string, Record<string, 'allow' | 'deny'>>>({});
   const [sectionRoleAccessLoaded, setSectionRoleAccessLoaded] = useState(false);
-  const [adminPanelSection, setAdminPanelSection] = useState<'sections-emp' | 'sections-role' | 'buttons' | 'employees' | 'bots' | 'finance'>('sections-emp');
+  const [adminPanelSection, setAdminPanelSection] = useState<'sections-emp' | 'sections-role' | 'buttons' | 'employees' | 'bots' | 'finance' | 'assembly'>('sections-emp');
   const [selectedAccessEmployeeId, setSelectedAccessEmployeeId] = useState('');
 
   const fetchTempWorkerLogs = async () => {
@@ -2633,7 +2635,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
   const handleDownloadGeneralReportExcel = async () => {
     try {
-      const temp = generalTempWorkerRows.map((r: any) => ({ 'Дата': xlsxDate(r.date), 'Сотрудник': r.worker_name || r.worker || 'Без имени', 'Поставщик': r.supplierName || '-', 'Работа': r.work_comment || r.comment || '-', 'Часы': Number(r.hours || 0), 'Заработано': Number(r.earnings || 0), 'Кто оплатил': String(r.paidByText || '-').replace(/₽/g, 'руб.'), 'Не оплачено': Number(r.remainingAmount || 0) }));
+      const temp = generalTempWorkerRows.map((r: any) => ({ 'Дата': xlsxDate(r.date), 'Сотрудник': r.worker_name || r.worker || 'Без имени', 'Поставщик': r.supplierName || '-', 'Тип работы': r.work_comment || r.comment || '-', 'Кол-во': Number(r.quantity || 0), 'Часы': Number(r.hours || 0), 'Заработано': Number(r.earnings || 0), 'Кто оплатил': String(r.paidByText || '-').replace(/₽/g, 'руб.'), 'Не оплачено': Number(r.remainingAmount || 0) }));
       const delivery = generalDeliveryRows.map((r: any) => ({ 'Дата': xlsxDate(r.date), 'Доставщик': r.courier || '-', 'Поставщик': r.supplierName || '-', 'Коробки': Number(r.boxes || 0), 'Сумма': Number(r.amount || 0), 'Статус': r.is_paid ? 'Оплачено' : 'Не оплачено', 'Кто оплатил': r.paidByText || '-' }));
       const cw = generalReportCwRows.map((r: any) => ({ 'Дата': xlsxDate(r.date), 'Сотрудник': r.employee_name || '-', 'Поставщик': r.supplier_name || '-', 'Вид работы': r.work_name || '-', 'Кол-во': Number(r.quantity || 0), 'Цена': Number(r.price || 0), 'Сумма': Number(r.total || 0) }));
       const sheets = [
@@ -2672,7 +2674,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     try {
       const rows: any[] = [];
       tempWorkerReportGrouped.groups.forEach((g: any) => g.rows.forEach((r: any) => rows.push({
-        'Поставщик': g.supplierName, 'Дата': xlsxDate(r.date), 'Сотрудник': r.worker_name || r.worker || 'Без имени', 'Работа': r.work_comment || r.comment || '-', 'Часы': Number(r.hours || 0), 'Заработано': Number(r.earnings || 0), 'Факт оплаты': Number(r.paidAmount || 0), 'Кто оплатил': String(r.paidByText || '-').replace(/₽/g, 'руб.'), 'Не оплачено': Number(r.remainingAmount || 0),
+        'Поставщик': g.supplierName, 'Дата': xlsxDate(r.date), 'Сотрудник': r.worker_name || r.worker || 'Без имени', 'Тип работы': r.work_comment || r.comment || '-', 'Кол-во (собрано)': Number(r.quantity || 0), 'Часы': Number(r.hours || 0), 'Заработано': Number(r.earnings || 0), 'Факт оплаты': Number(r.paidAmount || 0), 'Кто оплатил': String(r.paidByText || '-').replace(/₽/g, 'руб.'), 'Не оплачено': Number(r.remainingAmount || 0),
       })));
       await downloadWorkbook(`otchet_vremennye_${tempWorkerReportForm.start_date || 'start'}_${tempWorkerReportForm.end_date || 'end'}.xlsx`, [{ name: 'Временные', rows: rows.length ? rows : [{ 'Нет данных': '' }] }]);
     } catch (e: any) {
@@ -2806,12 +2808,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       y = drawBand(y, 'ЗП временные', [16, 185, 129]);
       baseTable({
         startY: y,
-        head: [['Дата', 'Сотрудник', 'Поставщик', 'Работа', 'Часы', 'Заработано', 'Кто оплатил', 'Не оплачено']],
+        head: [['Дата', 'Сотрудник', 'Поставщик', 'Тип работы', 'Кол-во', 'Часы', 'Заработано', 'Кто оплатил', 'Не оплачено']],
         body: generalTempWorkerRows.map((row: any) => [
           dateRu(row.date),
           row.worker_name || row.worker || 'Без имени',
           row.supplierName || '-',
           row.work_comment || row.comment || '-',
+          Number(row.quantity || 0).toLocaleString('ru-RU'),
           Number(row.hours || 0).toFixed(2),
           money(row.earnings),
           String(row.paidByText || '-').replace(/₽/g, 'руб.'),
@@ -3023,12 +3026,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
       const body: any[] = [];
       tempWorkerReportGrouped.groups.forEach((group) => {
-        body.push([{ content: `${group.supplierName} — работ: ${group.rows.length}, часы: ${group.hours.toFixed(2)}, оплачено: ${money(group.earnings)}, не оплачено: ${money(group.remaining)}`, colSpan: 8, styles: { fillColor: [241, 245, 249], fontStyle: 'normal', textColor: [15, 23, 42] } }]);
+        const groupQty = group.rows.reduce((s: number, r: any) => s + Number(r.quantity || 0), 0);
+        body.push([{ content: `${group.supplierName} — работ: ${group.rows.length}, кол-во: ${groupQty.toLocaleString('ru-RU')}, часы: ${group.hours.toFixed(2)}, оплачено: ${money(group.earnings)}, не оплачено: ${money(group.remaining)}`, colSpan: 9, styles: { fillColor: [241, 245, 249], fontStyle: 'normal', textColor: [15, 23, 42] } }]);
         group.rows.forEach((row: any) => {
           body.push([
             row?.date ? new Date(`${row.date}T12:00:00`).toLocaleDateString('ru-RU') : '-',
             row.worker_name || row.worker || 'Без имени',
             row.work_comment || row.comment || '-',
+            Number(row.quantity || 0).toLocaleString('ru-RU'),
             Number(row.hours || 0).toFixed(2),
             money(row.earnings),
             money(row.paidAmount),
@@ -3040,19 +3045,20 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
       (lazyLibs.autoTable as any)(doc, {
         startY: mY,
-        head: [['Дата', 'Сотрудник', 'Работа', 'Часы', 'Заработано', 'Факт оплаты', 'Кто оплатил', 'Не оплачено']],
+        head: [['Дата', 'Сотрудник', 'Тип работы', 'Кол-во', 'Часы', 'Заработано', 'Факт оплаты', 'Кто оплатил', 'Не оплачено']],
         body,
         ...reportTableStyles([16, 185, 129]),
         didDrawPage: reportFooter(doc, 'СкладПро · ЗП временные'),
         columnStyles: {
           0: { cellWidth: 20 },
-          1: { cellWidth: 32 },
-          2: { cellWidth: 66 },
-          3: { cellWidth: 16, halign: 'right' },
-          4: { cellWidth: 24, halign: 'right' },
-          5: { cellWidth: 24, halign: 'right' },
-          6: { cellWidth: 54 },
-          7: { cellWidth: 24, halign: 'right' },
+          1: { cellWidth: 30 },
+          2: { cellWidth: 54 },
+          3: { cellWidth: 18, halign: 'right' },
+          4: { cellWidth: 14, halign: 'right' },
+          5: { cellWidth: 22, halign: 'right' },
+          6: { cellWidth: 22, halign: 'right' },
+          7: { cellWidth: 50 },
+          8: { cellWidth: 22, halign: 'right' },
         },
       });
 
@@ -3083,6 +3089,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
             date: tempWorkerForm.date,
             worker_name: tempWorkerForm.worker_name.trim(),
             work_comment: tempWorkerForm.work_comment.trim(),
+            quantity: Number(tempWorkerForm.quantity || 0),
             earnings: parseFloat(tempWorkerForm.earnings),
             hours: parseFloat(tempWorkerForm.hours),
             created_by: createdBy
@@ -3115,6 +3122,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
             date: new Date().toISOString().split('T')[0],
             worker_name: '',
             work_comment: '',
+            quantity: '',
             earnings: '',
             hours: ''
         });
@@ -3132,6 +3140,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       date: log.date || new Date().toISOString().split('T')[0],
       worker_name: log.worker_name || log.worker || '',
       work_comment: log.work_comment || log.comment || '',
+      quantity: String(log.quantity ?? ''),
       earnings: String(log.earnings ?? ''),
       hours: String(log.hours ?? ''),
     });
@@ -3152,6 +3161,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         date: tempWorkerEditForm.date,
         worker_name: tempWorkerEditForm.worker_name.trim(),
         work_comment: tempWorkerEditForm.work_comment.trim(),
+        quantity: Number(tempWorkerEditForm.quantity || 0),
         earnings: parseFloat(tempWorkerEditForm.earnings),
         hours: parseFloat(tempWorkerEditForm.hours),
       };
@@ -3336,6 +3346,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [salaryPayOwner, setSalaryPayOwner] = useState<WarehouseMoneyOwner>('sasha');
   const [salaryPayRows, setSalaryPayRows] = useState<Array<{ employee_id: string; employee_name: string; amount: number; lines: any[] }>>([]);
   const [salaryPaySelectedIds, setSalaryPaySelectedIds] = useState<string[]>([]);
+  const [salaryPayFines, setSalaryPayFines] = useState<Array<{ amount: string; comment: string }>>([]);
   const [salaryPayLoading, setSalaryPayLoading] = useState(false);
   const [salaryPaySaving, setSalaryPaySaving] = useState(false);
   const [salaryPayExpanded, setSalaryPayExpanded] = useState<string[]>([]);
@@ -4217,7 +4228,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     const period = cwSalaryPeriods.find((p) => p.key === salaryPayPeriodKey);
     const ownerTitle = getSupplierNameForOwner(salaryPayOwner);
     const total = selected.reduce((s, r) => s + r.amount, 0);
-    if (!(await confirmDialog({ title: 'Выплата ЗП', tone: 'primary', confirmText: 'Оплатить', message: `Оплатить ЗП?\nСотрудников: ${selected.length}\nСумма: ${total.toFixed(2)} ₽\nОплата: ${ownerTitle}` }))) return;
+    const fines = salaryPayFines.filter((f) => Number(f.amount) > 0);
+    const finesTotal = fines.reduce((s, f) => s + Number(f.amount || 0), 0);
+    const netTotal = Math.max(0, total - finesTotal);
+    if (!(await confirmDialog({ title: 'Выплата ЗП', tone: 'primary', confirmText: 'Оплатить', message: `Оплатить ЗП?\nСотрудников: ${selected.length}\nСумма: ${total.toFixed(2)} ₽${finesTotal > 0 ? `\nШтрафы/прочее: −${finesTotal.toFixed(2)} ₽\nК выплате: ${netTotal.toFixed(2)} ₽` : ''}\nОплата: ${ownerTitle}` }))) return;
     setSalaryPaySaving(true);
     try {
       for (const r of selected) {
@@ -4242,15 +4256,25 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           type: 'manual',
         }]);
       }
+      // Fines/прочее: вернуть удержанную сумму на склад (net spend = ЗП − штрафы).
+      if (finesTotal > 0) {
+        const finesText = fines.map((f) => `${Number(f.amount).toLocaleString('ru-RU')}₽${f.comment ? ` (${f.comment.trim()})` : ''}`).join('; ');
+        await supabase.from('warehouse_money_log').insert([{
+          amount: Math.abs(finesTotal),
+          comment: buildWarehouseMoneyStoredComment(salaryPayOwner, `Штрафы/прочее (удержано из ЗП): ${finesText}`),
+          type: 'manual',
+        }]);
+      }
       await fetchCwWarehouseMoneyHistory();
       await loadPaymentReports();
       notifyWriteoff({
-        amount: total,
+        amount: netTotal,
         ownerTitle,
-        comment: `Оплата ЗП${period ? ` (${period.label})` : ''}: ${selected.map((r) => r.employee_name).join(', ')}`,
+        comment: `Оплата ЗП${period ? ` (${period.label})` : ''}: ${selected.map((r) => r.employee_name).join(', ')}${finesTotal > 0 ? ` | штрафы −${finesTotal.toLocaleString('ru-RU')}₽` : ''}`,
         by: currentEmployee?.full_name || currentEmployee?.login,
       });
-      showToast(`Оплачено ЗП: ${selected.length}`, 'success');
+      setSalaryPayFines([]);
+      showToast(`Оплачено ЗП: ${selected.length}${finesTotal > 0 ? ` (с учётом штрафов)` : ''}`, 'success');
       setShowSalaryPayModal(false);
       setSalaryPaySelectedIds([]);
     } catch (e: any) {
@@ -10118,7 +10142,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       items: [
         { id: 'honest_sign', label: 'ЧЗ / Печать' },
         { id: 'tasks', label: 'Задачи' },
-        { id: 'telegram', label: 'Telegram' },
       ]
     },
     {
@@ -16628,7 +16651,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     { id: 'analytics', icon: BarChart2, label: 'Аналитика' },
     { id: 'advertising', icon: Wallet, label: 'Реклама' },
     { id: 'barters', icon: Link, label: 'Бартеры / Внешняя реклама' },
-    { id: 'telegram', icon: Send, label: 'Telegram' },
     { id: 'employees', icon: UserCog, label: 'Сотрудники' },
     { id: 'database', icon: Database, label: 'База данных' },
     { id: 'admin', icon: Settings, label: 'АдминПанель' },
@@ -28217,7 +28239,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           className="min-h-[44px] w-full 2xl:w-auto rounded-2xl border border-slate-200 bg-white px-3.5 py-2 text-sm font-semibold leading-tight text-slate-700 shadow-sm transition-all hover:border-slate-300 hover:bg-slate-50 hover:shadow-md inline-flex items-center justify-center gap-2"
                       >
                           <Plus className="w-4 h-4 shrink-0" />
-                          <span className="text-center">Шаблон комментария</span>
+                          <span className="text-center">Тип работы</span>
                       </button>
                       <button
                           onClick={async () => {
@@ -29346,8 +29368,33 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     );
                   })}
                 </div>
+                {/* Штрафы / прочие удержания */}
+                <div className="border-t border-slate-100 p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="text-sm font-semibold text-slate-700">Штрафы / прочее</div>
+                    <button type="button" onClick={() => setSalaryPayFines((p) => [...p, { amount: '', comment: '' }])} className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 px-3 py-1.5 text-xs font-medium text-rose-700 hover:bg-rose-50"><Plus className="h-3.5 w-3.5" /> Добавить</button>
+                  </div>
+                  {salaryPayFines.length === 0 ? (
+                    <p className="text-xs text-slate-400">Необязательно. Сумма штрафов вычитается из общей суммы к выплате.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {salaryPayFines.map((f, i) => (
+                        <div key={`fine-${i}`} className="flex items-center gap-2">
+                          <input type="number" min="0" value={f.amount} onChange={(e) => setSalaryPayFines((p) => p.map((x, idx) => idx === i ? { ...x, amount: e.target.value } : x))} placeholder="Сумма ₽" className="oc-input h-10 w-32" />
+                          <input type="text" value={f.comment} onChange={(e) => setSalaryPayFines((p) => p.map((x, idx) => idx === i ? { ...x, comment: e.target.value } : x))} placeholder="Комментарий (за что)" className="oc-input h-10 flex-1" />
+                          <button type="button" onClick={() => setSalaryPayFines((p) => p.filter((_, idx) => idx !== i))} className="rounded-lg border border-slate-200 p-2 text-slate-400 hover:bg-rose-50 hover:text-rose-600"><Trash2 className="h-4 w-4" /></button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {(() => {
+                  const sel = salaryPayRows.filter((r) => salaryPaySelectedIds.includes(r.employee_id)).reduce((s, r) => s + r.amount, 0);
+                  const fines = salaryPayFines.reduce((s, f) => s + (Number(f.amount) || 0), 0);
+                  const net = Math.max(0, sel - fines);
+                  return (
                 <div className="flex items-center justify-between gap-2 border-t border-slate-100 p-4">
-                  <div className="text-sm text-slate-600">Выбрано: <span className="font-bold text-slate-900">{salaryPaySelectedIds.length}</span> • Сумма: <span className="font-bold text-emerald-700">{salaryPayRows.filter((r) => salaryPaySelectedIds.includes(r.employee_id)).reduce((s, r) => s + r.amount, 0).toLocaleString('ru-RU')} ₽</span></div>
+                  <div className="text-sm text-slate-600">Выбрано: <span className="font-bold text-slate-900">{salaryPaySelectedIds.length}</span> • Сумма: <span className="font-bold text-slate-700">{sel.toLocaleString('ru-RU')} ₽</span>{fines > 0 && <> − штраф <span className="font-bold text-rose-600">{fines.toLocaleString('ru-RU')} ₽</span> = <span className="font-bold text-emerald-700">{net.toLocaleString('ru-RU')} ₽</span></>}</div>
                   <div className="flex gap-2">
                     <button type="button" onClick={() => setShowSalaryPayModal(false)} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50">Отмена</button>
                     <button
@@ -29361,6 +29408,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     </button>
                   </div>
                 </div>
+                ); })()}
               </div>
             </div>
           )}
@@ -30435,8 +30483,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           {showTempWorkerAddTemplateModal && (
             <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm backdrop-blur-sm flex items-center justify-center z-[65]" onClick={() => setShowTempWorkerAddTemplateModal(false)}>
               <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
-                <h3 className="text-lg font-bold mb-3">Новый шаблон комментария</h3>
-                <textarea value={tempWorkerNewTemplate} onChange={(e) => setTempWorkerNewTemplate(e.target.value)} className="oc-input" rows={4} placeholder="Введите текст шаблона" />
+                <h3 className="text-lg font-bold mb-3">Новый тип работы</h3>
+                <textarea value={tempWorkerNewTemplate} onChange={(e) => setTempWorkerNewTemplate(e.target.value)} className="oc-input" rows={2} placeholder="Например: Сборка ФБО, Сборка ФБС, Упаковка…" />
                 <div className="mt-4 flex justify-end gap-2">
                   <button type="button" onClick={() => setShowTempWorkerAddTemplateModal(false)} className="px-4 py-2 rounded-lg border">Отмена</button>
                   <button type="button" onClick={async () => { const text = String(tempWorkerNewTemplate || '').trim(); if (!text) return; await saveTempWorkerCommentTemplates([...(tempWorkerCommentTemplates || []), text]); setTempWorkerNewTemplate(''); setShowTempWorkerAddTemplateModal(false); showToast('Шаблон сохранен', 'success'); }} className="px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">Сохранить</button>
@@ -30496,20 +30544,30 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         </select>
                     </div>
                     <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1.5">Комментарий (что было сделано)</label>
-                        {!!tempWorkerCommentTemplates.length && (
-                          <div className="mb-2 flex flex-wrap gap-2">
-                            {tempWorkerCommentTemplates.map((t, i) => (
-                              <button key={`tw-tpl-${i}`} type="button" onClick={() => setTempWorkerForm({...tempWorkerForm, work_comment: t})} className="px-2 py-1 text-xs rounded border border-indigo-200 text-indigo-700 hover:bg-indigo-50">{t}</button>
-                            ))}
-                          </div>
-                        )}
-                        <textarea
+                        <label className="block text-sm font-medium text-slate-700 mb-1.5">Тип работы</label>
+                        <select
                             value={tempWorkerForm.work_comment}
                             onChange={e => setTempWorkerForm({...tempWorkerForm, work_comment: e.target.value})}
                             className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
-                            rows={3}
-                            placeholder="Кратко опишите выполненную работу"
+                        >
+                            <option value="">Выберите тип работы…</option>
+                            {tempWorkerCommentTemplates.map((t, i) => (
+                              <option key={`tw-tpl-opt-${i}`} value={t}>{t}</option>
+                            ))}
+                        </select>
+                        {!tempWorkerCommentTemplates.length && (
+                          <p className="mt-1 text-xs text-slate-400">Добавьте типы работ кнопкой «+ Тип работы» в истории смен.</p>
+                        )}
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1.5">Количество (собрано)</label>
+                        <input
+                            type="number"
+                            min="0"
+                            value={tempWorkerForm.quantity}
+                            onChange={e => setTempWorkerForm({...tempWorkerForm, quantity: e.target.value})}
+                            className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+                            placeholder="0"
                         />
                     </div>
                     <div className="grid grid-cols-2 gap-4">
@@ -30591,15 +30649,31 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-slate-700 mb-1.5">Комментарий</label>
-                      <textarea
+                      <label className="block text-sm font-medium text-slate-700 mb-1.5">Тип работы</label>
+                      <select
                         value={tempWorkerEditForm.work_comment}
                         onChange={e => setTempWorkerEditForm({...tempWorkerEditForm, work_comment: e.target.value})}
                         className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
-                        rows={3}
-                      />
+                      >
+                        <option value="">Выберите тип работы…</option>
+                        {tempWorkerCommentTemplates.map((t, i) => (<option key={`twe-tpl-${i}`} value={t}>{t}</option>))}
+                        {tempWorkerEditForm.work_comment && !tempWorkerCommentTemplates.includes(tempWorkerEditForm.work_comment) && (
+                          <option value={tempWorkerEditForm.work_comment}>{tempWorkerEditForm.work_comment}</option>
+                        )}
+                      </select>
                     </div>
                     <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1.5">Количество</label>
+                        <input
+                          type="number"
+                          min="0"
+                          value={tempWorkerEditForm.quantity}
+                          onChange={e => setTempWorkerEditForm({...tempWorkerEditForm, quantity: e.target.value})}
+                          className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
+                          placeholder="0"
+                        />
+                      </div>
                       <div>
                         <label className="block text-sm font-medium text-slate-700 mb-1.5">Часы</label>
                         <input

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Settings, Layers, ShieldCheck, UserCog, Search, Check, Save, Pencil, History, Smartphone, Send, Bot, Wallet, TrendingDown, TrendingUp } from 'lucide-react';
+import { Settings, Layers, ShieldCheck, UserCog, Search, Check, Save, Pencil, History, Smartphone, Send, Bot, Wallet, TrendingDown, TrendingUp, Box } from 'lucide-react';
 import { getEmpAvatarColor, getEmpInitials, normalizeRoleKey, getWarehouseMoneyOwner, getWarehouseMoneyDisplayComment, WAREHOUSE_MONEY_OWNERS } from './dashboardHelpers';
 import { supabase } from '../lib/supabase';
 import { telegramService } from '../services/telegram.service';
@@ -18,7 +18,7 @@ type SectionItem = { id: string; label: string };
 type SectionGroup = { title: string; items: SectionItem[] };
 type AssemblyGroup = { title: string; items: ReadonlyArray<{ id: string; label: string }> };
 
-type AdminSection = 'sections-emp' | 'sections-role' | 'buttons' | 'employees' | 'bots' | 'finance';
+type AdminSection = 'sections-emp' | 'sections-role' | 'buttons' | 'employees' | 'bots' | 'finance' | 'assembly';
 
 const money = (v: number) => Math.round(Number(v || 0)).toLocaleString('ru-RU') + ' ₽';
 const spendCategory = (comment: string): string => {
@@ -223,6 +223,57 @@ export function AdminPanel(props: AdminPanelProps) {
     return { ownerBalance, income, spend, totalBalance, monthList, catList, maxMonth };
   }, [financeRows]);
 
+  // ── Assembly (сборка) daily quantities: temp (ФБО/ФБС) + staff ────
+  const [asmLoaded, setAsmLoaded] = useState(false);
+  const [asmTempRows, setAsmTempRows] = useState<any[]>([]);
+  const [asmStaffRows, setAsmStaffRows] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (section !== 'assembly' || asmLoaded) return;
+    (async () => {
+      try {
+        const since = new Date(); since.setDate(since.getDate() - 29);
+        const sinceStr = since.toISOString().slice(0, 10);
+        const [tempRes, staffRes] = await Promise.all([
+          supabase.from('temporary_workers_logs').select('date, quantity, work_comment').is('deleted_at', null).gte('date', sinceStr),
+          supabase.from('work_logs').select('date, quantity, work_rates(name)').is('deleted_at', null).gte('date', sinceStr),
+        ]);
+        setAsmTempRows(Array.isArray(tempRes.data) ? tempRes.data : []);
+        setAsmStaffRows(Array.isArray(staffRes.data) ? staffRes.data : []);
+      } catch (e: any) {
+        notify('Ошибка загрузки сборки: ' + (e?.message || 'неизвестно'), 'error');
+      } finally {
+        setAsmLoaded(true);
+      }
+    })();
+  }, [section, asmLoaded]);
+
+  const assembly = useMemo(() => {
+    const days = new Map<string, { temp: number; staff: number }>();
+    for (let i = 29; i >= 0; i--) {
+      const d = new Date(); d.setDate(d.getDate() - i);
+      days.set(d.toISOString().slice(0, 10), { temp: 0, staff: 0 });
+    }
+    asmTempRows.forEach((r) => {
+      const dk = String(r.date || '').slice(0, 10);
+      const wc = String(r.work_comment || '').toLowerCase();
+      if (!days.has(dk)) return;
+      if (wc.includes('фбо') || wc.includes('фбс')) days.get(dk)!.temp += Number(r.quantity || 0);
+    });
+    asmStaffRows.forEach((r) => {
+      const dk = String(r.date || '').slice(0, 10);
+      const rate = String(r.work_rates?.name || '').toLowerCase();
+      if (!days.has(dk)) return;
+      if (rate.includes('врем') || rate.includes('час') || rate.includes('time')) return; // exclude time-based
+      days.get(dk)!.staff += Number(r.quantity || 0);
+    });
+    const list = Array.from(days.entries());
+    const maxDay = Math.max(1, ...list.map(([, v]) => v.temp + v.staff));
+    const totalTemp = list.reduce((s, [, v]) => s + v.temp, 0);
+    const totalStaff = list.reduce((s, [, v]) => s + v.staff, 0);
+    return { list, maxDay, totalTemp, totalStaff };
+  }, [asmTempRows, asmStaffRows]);
+
   const staffEmployees = useMemo(() => (employees || []).filter((e) => !isAdminEmp(e)), [employees]);
   const allSections = useMemo(() => sectionGroups.flatMap((g) => g.items), [sectionGroups]);
 
@@ -260,6 +311,7 @@ export function AdminPanel(props: AdminPanelProps) {
         <SubTab active={section === 'buttons'} onClick={() => setSection('buttons')} icon={Check} label="Права кнопок" />
         <SubTab active={section === 'employees'} onClick={() => setSection('employees')} icon={UserCog} label="Сотрудники" />
         <SubTab active={section === 'finance'} onClick={() => setSection('finance')} icon={Wallet} label="Финансы" />
+        <SubTab active={section === 'assembly'} onClick={() => setSection('assembly')} icon={Box} label="Сборка" />
         <SubTab active={section === 'bots'} onClick={() => setSection('bots')} icon={Bot} label="Боты" />
       </div>
 
@@ -476,25 +528,33 @@ export function AdminPanel(props: AdminPanelProps) {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {/* Monthly chart */}
+              {/* Monthly chart — modern grouped columns */}
               <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                <h3 className="font-bold text-slate-900 mb-4">Динамика по месяцам</h3>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="font-bold text-slate-900">Динамика по месяцам</h3>
+                  <div className="flex items-center gap-3 text-xs">
+                    <span className="inline-flex items-center gap-1.5 text-slate-500"><span className="h-2.5 w-2.5 rounded-sm bg-emerald-500" /> Поступления</span>
+                    <span className="inline-flex items-center gap-1.5 text-slate-500"><span className="h-2.5 w-2.5 rounded-sm bg-rose-500" /> Списания</span>
+                  </div>
+                </div>
                 {finance.monthList.length === 0 ? (
                   <div className="text-sm text-slate-400 text-center py-8">Нет данных</div>
                 ) : (
-                  <div className="space-y-3">
-                    {finance.monthList.map(([mk, v]) => (
-                      <div key={mk}>
-                        <div className="flex justify-between text-xs text-slate-500 mb-1">
-                          <span>{mk}</span>
-                          <span><span className="text-emerald-600">+{money(v.income)}</span> · <span className="text-rose-600">−{money(v.spend)}</span></span>
+                  <div className="flex items-end justify-between gap-3 h-52 pt-4">
+                    {finance.monthList.map(([mk, v]) => {
+                      const ih = Math.round((v.income / finance.maxMonth) * 160);
+                      const sh = Math.round((v.spend / finance.maxMonth) * 160);
+                      const label = (() => { const [y, m] = mk.split('-'); return `${m}.${String(y).slice(2)}`; })();
+                      return (
+                        <div key={mk} className="flex-1 flex flex-col items-center gap-1.5 group">
+                          <div className="flex items-end gap-1 h-[160px]">
+                            <div className="w-3.5 sm:w-4 rounded-t-md bg-gradient-to-t from-emerald-500 to-emerald-400 transition-all hover:opacity-80" style={{ height: `${Math.max(v.income > 0 ? 3 : 0, ih)}px` }} title={`Поступило: ${money(v.income)}`} />
+                            <div className="w-3.5 sm:w-4 rounded-t-md bg-gradient-to-t from-rose-500 to-rose-400 transition-all hover:opacity-80" style={{ height: `${Math.max(v.spend > 0 ? 3 : 0, sh)}px` }} title={`Списано: ${money(v.spend)}`} />
+                          </div>
+                          <span className="text-[10px] text-slate-400">{label}</span>
                         </div>
-                        <div className="space-y-1">
-                          <div className="h-2 rounded-full bg-emerald-100 overflow-hidden"><div className="h-full bg-emerald-500" style={{ width: `${(v.income / finance.maxMonth) * 100}%` }} /></div>
-                          <div className="h-2 rounded-full bg-rose-100 overflow-hidden"><div className="h-full bg-rose-500" style={{ width: `${(v.spend / finance.maxMonth) * 100}%` }} /></div>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -544,6 +604,63 @@ export function AdminPanel(props: AdminPanelProps) {
                 })}
                 {!financeRows.length && <div className="px-5 py-10 text-center text-slate-400 text-sm">Операций нет</div>}
               </div>
+            </div>
+          </div>
+        )
+      )}
+
+      {/* ASSEMBLY */}
+      {section === 'assembly' && (
+        !asmLoaded ? (
+          <div className="oc-card p-6 text-center text-slate-400">Загрузка…</div>
+        ) : (
+          <div className="space-y-5">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="text-xs font-medium text-slate-500 flex items-center gap-1"><Box className="h-3.5 w-3.5 text-amber-500" /> Временные (ФБО/ФБС), 30 дн.</div>
+                <div className="text-2xl font-extrabold text-amber-600 mt-1">{assembly.totalTemp.toLocaleString('ru-RU')}</div>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="text-xs font-medium text-slate-500 flex items-center gap-1"><Box className="h-3.5 w-3.5 text-indigo-500" /> Сотрудники, 30 дн.</div>
+                <div className="text-2xl font-extrabold text-indigo-600 mt-1">{assembly.totalStaff.toLocaleString('ru-RU')}</div>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="text-xs font-medium text-slate-500">Всего собрано, 30 дн.</div>
+                <div className="text-2xl font-extrabold text-slate-900 mt-1">{(assembly.totalTemp + assembly.totalStaff).toLocaleString('ru-RU')}</div>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-bold text-slate-900">Собрано по дням (последние 30 дней)</h3>
+                <div className="flex items-center gap-3 text-xs">
+                  <span className="inline-flex items-center gap-1.5 text-slate-500"><span className="h-2.5 w-2.5 rounded-sm bg-indigo-500" /> Сотрудники</span>
+                  <span className="inline-flex items-center gap-1.5 text-slate-500"><span className="h-2.5 w-2.5 rounded-sm bg-amber-400" /> Временные</span>
+                </div>
+              </div>
+              <div className="flex items-end gap-[3px] h-56 pt-4 overflow-x-auto">
+                {assembly.list.map(([dk, v]) => {
+                  const total = v.temp + v.staff;
+                  const h = Math.round((total / assembly.maxDay) * 190);
+                  const staffH = total > 0 ? Math.round((v.staff / total) * h) : 0;
+                  const tempH = h - staffH;
+                  const dd = dk.slice(8, 10);
+                  return (
+                    <div key={dk} className="flex-1 min-w-[14px] flex flex-col items-center gap-1 group" title={`${dk}\nСотрудники: ${v.staff}\nВременные: ${v.temp}\nВсего: ${total}`}>
+                      <div className="w-full flex flex-col justify-end h-[190px]">
+                        {total > 0 && (
+                          <>
+                            <div className="w-full bg-amber-400 rounded-t-sm" style={{ height: `${tempH}px` }} />
+                            <div className="w-full bg-indigo-500" style={{ height: `${staffH}px` }} />
+                          </>
+                        )}
+                      </div>
+                      <span className="text-[9px] text-slate-400">{dd}</span>
+                    </div>
+                  );
+                })}
+              </div>
+              <p className="mt-3 text-[11px] text-slate-400">Временные: типы работ с «ФБО»/«ФБС». Сотрудники: все типы работ кроме повременных. Количество берётся из поля «Количество» смен и из работ сотрудников.</p>
             </div>
           </div>
         )

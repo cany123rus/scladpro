@@ -15,7 +15,6 @@ export const DASHBOARD_TAB_IDS = [
   'analytics',
   'advertising',
   'barters',
-  'telegram',
   'employees',
   'database',
   'admin',
