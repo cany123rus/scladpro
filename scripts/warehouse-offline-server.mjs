@@ -15,6 +15,10 @@ const staticDir = process.env.WAREHOUSE_OFFLINE_STATIC_DIR
   : path.join(rootDir, 'dist');
 const port = Number(process.env.WAREHOUSE_OFFLINE_PORT || 8787);
 const host = process.env.WAREHOUSE_OFFLINE_HOST || '0.0.0.0';
+// Optional shared secret. If set, every /api/* request must send a matching
+// `x-warehouse-token` header. Leave unset to keep the previous open behaviour.
+const authToken = String(process.env.WAREHOUSE_OFFLINE_TOKEN || '').trim();
+const HONEST_SIGN_SEEN_CAP = Number(process.env.WAREHOUSE_OFFLINE_HS_CAP || 50000);
 
 const staticMimeTypes = {
   '.html': 'text/html; charset=utf-8',
@@ -76,7 +80,7 @@ const send = (res, status, body) => {
   res.writeHead(status, {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Access-Control-Request-Private-Network',
+    'Access-Control-Allow-Headers': 'Content-Type, x-warehouse-token, Access-Control-Request-Private-Network',
     'Access-Control-Allow-Private-Network': 'true',
     'Vary': 'Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Access-Control-Request-Private-Network',
     'Content-Type': 'application/json; charset=utf-8',
@@ -113,6 +117,15 @@ const server = http.createServer(async (req, res) => {
 
     const url = new URL(req.url || '/', 'http://' + (req.headers.host || 'localhost'));
 
+    // Token gate for all API endpoints (no-op when WAREHOUSE_OFFLINE_TOKEN unset).
+    if (authToken && url.pathname.startsWith('/api/')) {
+      const provided = String(req.headers['x-warehouse-token'] || '').trim();
+      if (provided !== authToken) {
+        send(res, 401, { error: 'Неверный токен доступа к локальному серверу' });
+        return;
+      }
+    }
+
     if (req.method === 'GET' && url.pathname === '/api/warehouse-offline/health') {
       const db = await readJson();
       const snapshot = db.snapshot || {};
@@ -139,16 +152,32 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && url.pathname === '/api/warehouse-offline/snapshot') {
-      const snapshot = await readBody(req);
+      const incoming = await readBody(req);
       const db = await readJson();
+      const baseVersion = incoming && Object.prototype.hasOwnProperty.call(incoming, '__baseVersion')
+        ? Number(incoming.__baseVersion)
+        : null;
+      // Optimistic concurrency: reject stale writes so a tab with an old base
+      // cannot clobber a snapshot another tab/device already updated.
+      if (baseVersion != null && Number.isFinite(baseVersion) && baseVersion !== (db.version || 1)) {
+        send(res, 409, { error: 'Снапшот был обновлён другим клиентом. Обновите offline-базу заново.', version: db.version || 1 });
+        return;
+      }
+      const snapshot = { ...(incoming || {}) };
+      delete snapshot.__baseVersion;
+      // Cap the honestSignSeen list so the snapshot file cannot grow without bound.
+      if (Array.isArray(snapshot.honestSignSeen) && snapshot.honestSignSeen.length > HONEST_SIGN_SEEN_CAP) {
+        snapshot.honestSignSeen = snapshot.honestSignSeen.slice(-HONEST_SIGN_SEEN_CAP);
+      }
       const updatedAt = new Date().toISOString();
       db.updatedAt = updatedAt;
+      db.version = (db.version || 1) + 1;
       db.snapshot = {
-        ...(snapshot || {}),
-        createdAt: snapshot?.createdAt || updatedAt,
+        ...snapshot,
+        createdAt: snapshot.createdAt || updatedAt,
       };
       await saveDb(db);
-      send(res, 200, { ok: true, updatedAt });
+      send(res, 200, { ok: true, updatedAt, version: db.version });
       return;
     }
 
@@ -194,6 +223,26 @@ const server = http.createServer(async (req, res) => {
       db.fboScans.synced = [...moved, ...(db.fboScans.synced || [])].slice(0, 5000);
       await saveDb(db);
       send(res, 200, { ok: true, synced: moved.length });
+      return;
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/warehouse-offline/fbo-scans/move-conflicts') {
+      const body = await readBody(req);
+      const rows = Array.isArray(body?.rows) ? body.rows : [];
+      const errById = new Map(rows.map((r) => [String(r?.id || '').trim(), String(r?.error || 'Конфликт синхронизации')]).filter(([id]) => id));
+      const db = await readJson();
+      db.fboScans = db.fboScans || { pending: [], synced: [], conflicts: [] };
+      const pending = db.fboScans.pending || [];
+      const moved = [];
+      db.fboScans.pending = pending.filter((row) => {
+        const id = String(row?.id || '');
+        if (!errById.has(id)) return true;
+        moved.push({ ...row, status: 'conflict', error: errById.get(id), conflictedAt: new Date().toISOString() });
+        return false;
+      });
+      db.fboScans.conflicts = [...moved, ...(db.fboScans.conflicts || [])].slice(0, 5000);
+      await saveDb(db);
+      send(res, 200, { ok: true, moved: moved.length });
       return;
     }
 

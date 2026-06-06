@@ -262,6 +262,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [warehouseOfflineStatus, setWarehouseOfflineStatus] = useState<WarehouseOfflineStatus | null>(null);
   const [warehouseOfflineBusy, setWarehouseOfflineBusy] = useState(false);
   const [warehouseOfflineSnapshot, setWarehouseOfflineSnapshot] = useState<WarehouseOfflineSnapshot | null>(null);
+  const warehouseOfflineSyncingRef = useRef(false);
 
   // Supplier History Modal State
   const [showSupplierHistory, setShowSupplierHistory] = useState(false);
@@ -4934,7 +4935,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
   const saveWarehouseOfflineSnapshotState = async (snapshot: WarehouseOfflineSnapshot) => {
     const normalized = { ...snapshot, createdAt: snapshot.createdAt || new Date().toISOString() };
-    await warehouseOfflineClient.saveSnapshot(normalized);
+    await warehouseOfflineClient.saveSnapshot(normalized, warehouseOfflineStatus?.version);
     wbSkuIndexRef.current = {};
     supplierProductsIndexRef.current = {};
     setWarehouseOfflineSnapshot(normalized);
@@ -5044,7 +5045,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         return null;
       }
 
-      await warehouseOfflineClient.saveSnapshot(snapshot);
+      await warehouseOfflineClient.saveSnapshot(snapshot, warehouseOfflineStatus?.version);
       wbSkuIndexRef.current = {};
       supplierProductsIndexRef.current = {};
       setWarehouseOfflineSnapshot(snapshot);
@@ -5060,36 +5061,86 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     }
   };
 
-  const syncWarehouseOfflineScans = async () => {
+  const syncWarehouseOfflineScans = async (silent = false) => {
+    if (warehouseOfflineSyncingRef.current) return;
+    warehouseOfflineSyncingRef.current = true;
     setWarehouseOfflineBusy(true);
     try {
       const scans = await warehouseOfflineClient.getFboScans();
       const pending = (scans.pending || []) as any[];
       if (!pending.length) {
-        showToast('Нет локальных FBO-сканов для синхронизации', 'info');
+        if (!silent) showToast('Нет локальных FBO-сканов для синхронизации', 'info');
         await checkWarehouseOfflineServer(false);
         return;
       }
 
-      const payload = pending.map((row) => ({
-        box_id: row.box_id || row.boxId,
-        product_id: row.product_id || row.productId,
-        honest_sign_code: row.honest_sign_code || row.code,
-      })).filter((row) => row.box_id && row.product_id && row.honest_sign_code);
+      // Each pending scan carries its local id -> used as offline_scan_id so a
+      // retry after a partial failure is idempotent (unique index in DB).
+      const rows = pending
+        .map((row) => ({
+          offlineId: String(row.id || ''),
+          box_id: row.box_id || row.boxId,
+          product_id: row.product_id || row.productId,
+          honest_sign_code: row.honest_sign_code || row.code,
+        }))
+        .filter((row) => row.offlineId && row.box_id && row.product_id && row.honest_sign_code);
 
-      if (!payload.length) throw new Error('В локальной очереди нет корректных строк для отправки');
+      if (!rows.length) throw new Error('В локальной очереди нет корректных строк для отправки');
 
-      const { error } = await supabase.from('supply_items').insert(payload);
-      if (error) throw error;
-      await syncScannedCodesToUnifiedBase(payload.map((row) => row.honest_sign_code), currentSupply?.supplier_id);
-      await warehouseOfflineClient.markFboScansSynced(pending.map((row) => String(row.id || '')).filter(Boolean));
+      const toPayload = (r: typeof rows[number]) => ({
+        box_id: r.box_id,
+        product_id: r.product_id,
+        honest_sign_code: r.honest_sign_code,
+        offline_scan_id: r.offlineId,
+      });
+
+      const syncedIds: string[] = [];
+      const syncedCodes: string[] = [];
+      const conflicts: Array<{ id: string; error?: string }> = [];
+
+      // Try the whole batch first (fast path). On any error fall back to
+      // per-row upserts so one bad row cannot block the rest.
+      const batch = await supabase
+        .from('supply_items')
+        .upsert(rows.map(toPayload), { onConflict: 'offline_scan_id', ignoreDuplicates: true });
+
+      if (!batch.error) {
+        rows.forEach((r) => { syncedIds.push(r.offlineId); syncedCodes.push(r.honest_sign_code); });
+      } else {
+        for (const r of rows) {
+          const { error } = await supabase
+            .from('supply_items')
+            .upsert([toPayload(r)], { onConflict: 'offline_scan_id', ignoreDuplicates: true });
+          if (error) {
+            conflicts.push({ id: r.offlineId, error: error.message || 'Ошибка вставки' });
+          } else {
+            syncedIds.push(r.offlineId);
+            syncedCodes.push(r.honest_sign_code);
+          }
+        }
+      }
+
+      if (syncedCodes.length) {
+        await syncScannedCodesToUnifiedBase(syncedCodes, currentSupply?.supplier_id);
+        await warehouseOfflineClient.markFboScansSynced(syncedIds);
+      }
+      if (conflicts.length) {
+        await warehouseOfflineClient.moveFboScansToConflicts(conflicts).catch(() => undefined);
+      }
+
       await checkWarehouseOfflineServer(false);
       if (currentBox?.id) await fetchBoxItems(currentBox.id);
       if (currentSupply?.id) await fetchSupplyStats(currentSupply.id);
-      showToast('Синхронизировано FBO-сканов: ' + payload.length, 'success');
+
+      if (conflicts.length) {
+        showToast(`Синхронизировано: ${syncedIds.length}, конфликтов: ${conflicts.length} (см. очередь)`, 'warning');
+      } else if (syncedIds.length || !silent) {
+        showToast('Синхронизировано FBO-сканов: ' + syncedIds.length, 'success');
+      }
     } catch (e: any) {
-      showToast('Ошибка синхронизации offline-сканов: ' + (e?.message || 'неизвестно'), 'error');
+      if (!silent) showToast('Ошибка синхронизации offline-сканов: ' + (e?.message || 'неизвестно'), 'error');
     } finally {
+      warehouseOfflineSyncingRef.current = false;
       setWarehouseOfflineBusy(false);
     }
   };
@@ -5099,6 +5150,33 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       checkWarehouseOfflineServer(false).catch(() => undefined);
       loadWarehouseOfflineSnapshot(true).catch(() => undefined);
     }
+  }, [activeTab, warehouseOfflineEnabled]);
+
+  // Periodic heartbeat + auto-sync of the offline queue while the supplies tab
+  // is open. Keeps the online/offline badge fresh and flushes pending scans as
+  // soon as the local server is reachable, without a manual button press.
+  useEffect(() => {
+    if (activeTab !== 'supplies' || !warehouseOfflineEnabled) return;
+    let stopped = false;
+
+    const tick = async () => {
+      if (stopped) return;
+      const status = await checkWarehouseOfflineServer(false).catch(() => null);
+      if (stopped) return;
+      if (status?.ok && Number(status?.pendingScans || 0) > 0 && !warehouseOfflineSyncingRef.current) {
+        await syncWarehouseOfflineScans(true).catch(() => undefined);
+      }
+    };
+
+    const onOnline = () => { tick().catch(() => undefined); };
+    const intervalId = window.setInterval(() => { tick().catch(() => undefined); }, 20000);
+    window.addEventListener('online', onOnline);
+
+    return () => {
+      stopped = true;
+      window.clearInterval(intervalId);
+      window.removeEventListener('online', onOnline);
+    };
   }, [activeTab, warehouseOfflineEnabled]);
 
   useEffect(() => {
@@ -17321,7 +17399,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         </button>
                         <button
                           type="button"
-                          onClick={syncWarehouseOfflineScans}
+                          onClick={() => syncWarehouseOfflineScans(false)}
                           disabled={warehouseOfflineBusy}
                           className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 text-sm font-medium text-white shadow-sm shadow-emerald-600/20 transition-all hover:bg-emerald-700 hover:shadow-md active:scale-[0.98] disabled:opacity-50"
                         >
@@ -17689,7 +17767,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           </button>
                           <button
                             type="button"
-                            onClick={syncWarehouseOfflineScans}
+                            onClick={() => syncWarehouseOfflineScans(false)}
                             disabled={warehouseOfflineBusy}
                             className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
                           >

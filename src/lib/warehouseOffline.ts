@@ -22,7 +22,16 @@ export type WarehouseOfflineSnapshot = {
 
 const OFFLINE_URL_KEY = 'warehouse_offline_server_url_v1';
 const OFFLINE_ENABLED_KEY = 'warehouse_offline_enabled_v1';
+const OFFLINE_TOKEN_KEY = 'warehouse_offline_token_v1';
 const FALLBACK_OFFLINE_URL = 'http://localhost:8787';
+const DEFAULT_REQUEST_TIMEOUT_MS = 8000;
+
+export const getWarehouseOfflineToken = () => String(localStorage.getItem(OFFLINE_TOKEN_KEY) || '').trim();
+export const setWarehouseOfflineToken = (token: string) => {
+  const clean = String(token || '').trim();
+  if (clean) localStorage.setItem(OFFLINE_TOKEN_KEY, clean);
+  else localStorage.removeItem(OFFLINE_TOKEN_KEY);
+};
 
 const isLoopbackOfflineUrl = (url: string) => {
   try {
@@ -75,18 +84,42 @@ export const setWarehouseOfflineEnabled = (enabled: boolean) => {
   localStorage.setItem(OFFLINE_ENABLED_KEY, enabled ? '1' : '0');
 };
 
-const request = async <T>(path: string, init: RequestInit = {}): Promise<T> => {
+class OfflineStaleSnapshotError extends Error {
+  version?: number;
+  constructor(message: string, version?: number) {
+    super(message);
+    this.name = 'OfflineStaleSnapshotError';
+    this.version = version;
+  }
+}
+export { OfflineStaleSnapshotError };
+
+const request = async <T>(path: string, init: RequestInit = {}, timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS): Promise<T> => {
   const baseUrl = getWarehouseOfflineUrl();
-  const res = await fetch(`${baseUrl}${path}`, {
-    ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init.headers || {}),
-    },
-  });
+  const token = getWarehouseOfflineToken();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), Math.max(1000, timeoutMs));
+  let res: Response;
+  try {
+    res = await fetch(`${baseUrl}${path}`, {
+      ...init,
+      signal: controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { 'x-warehouse-token': token } : {}),
+        ...(init.headers || {}),
+      },
+    });
+  } catch (e: any) {
+    clearTimeout(timer);
+    if (e?.name === 'AbortError') throw new Error(`Локальный сервер не ответил за ${Math.round(timeoutMs / 1000)} с`);
+    throw e;
+  }
+  clearTimeout(timer);
   const text = await res.text();
   const body = text ? JSON.parse(text) : null;
   if (!res.ok) {
+    if (res.status === 409) throw new OfflineStaleSnapshotError(body?.error || 'Offline snapshot устарел', body?.version);
     throw new Error(body?.error || `Offline server error: ${res.status}`);
   }
   return body as T;
@@ -94,18 +127,21 @@ const request = async <T>(path: string, init: RequestInit = {}): Promise<T> => {
 
 export const warehouseOfflineClient = {
   async health() {
-    return request<WarehouseOfflineStatus>('/api/warehouse-offline/health');
+    // Health must respond fast so the UI badge does not hang on a dead server.
+    return request<WarehouseOfflineStatus>('/api/warehouse-offline/health', {}, 4000);
   },
 
   async getSnapshot() {
-    return request<WarehouseOfflineSnapshot | null>('/api/warehouse-offline/snapshot');
+    return request<WarehouseOfflineSnapshot | null>('/api/warehouse-offline/snapshot', {}, 20000);
   },
 
-  async saveSnapshot(snapshot: WarehouseOfflineSnapshot) {
-    return request<{ ok: true; updatedAt: string }>('/api/warehouse-offline/snapshot', {
+  // baseVersion: the version the client last saw. The server rejects (409) if it
+  // changed meanwhile, preventing one tab from clobbering a newer snapshot.
+  async saveSnapshot(snapshot: WarehouseOfflineSnapshot, baseVersion?: number) {
+    return request<{ ok: true; updatedAt: string; version: number }>('/api/warehouse-offline/snapshot', {
       method: 'POST',
-      body: JSON.stringify(snapshot),
-    });
+      body: JSON.stringify(baseVersion != null ? { ...snapshot, __baseVersion: baseVersion } : snapshot),
+    }, 20000);
   },
 
   async enqueueFboScan(scan: unknown) {
@@ -130,6 +166,15 @@ export const warehouseOfflineClient = {
     return request<{ ok: true; deleted: number }>('/api/warehouse-offline/fbo-scans/delete-box', {
       method: 'POST',
       body: JSON.stringify({ boxId }),
+    });
+  },
+
+  // Move pending scans that could not be inserted (e.g. server rejected the row)
+  // into the conflicts bucket so they are not retried blindly.
+  async moveFboScansToConflicts(rows: Array<{ id: string; error?: string }>) {
+    return request<{ ok: true; moved: number }>('/api/warehouse-offline/fbo-scans/move-conflicts', {
+      method: 'POST',
+      body: JSON.stringify({ rows }),
     });
   },
 };

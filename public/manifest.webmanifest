@@ -1,0 +1,14 @@
+{
+  "name": "СкладПро",
+  "short_name": "СкладПро",
+  "description": "Складская система: приёмка, поставки, FBO, печать этикеток",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#4f46e5",
+  "icons": [
+    { "src": "/site-icon.jpg", "sizes": "192x192", "type": "image/jpeg", "purpose": "any" },
+    { "src": "/site-icon.jpg", "sizes": "512x512", "type": "image/jpeg", "purpose": "any" }
+  ]
+}
