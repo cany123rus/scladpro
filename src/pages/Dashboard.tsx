@@ -1196,7 +1196,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   });
   // Multi-line "add shift" model: several positions (different workers / goods /
   // prices) added in one go. Each line: worker, type, qty×price OR hours×price.
-  const makeTempLine = () => ({ worker_name: '', work_comment: '', isTime: false, quantity: '', price: '', hours: '' });
+  const makeTempLine = () => ({ supplier_id: '', worker_name: '', work_comment: '', isTime: false, quantity: '', price: '', hours: '' });
   const [tempWorkerLines, setTempWorkerLines] = useState<any[]>([makeTempLine()]);
   const tempLineEarnings = (l: any) => l.isTime ? (Number(l.hours || 0) * Number(l.price || 0)) : (Number(l.quantity || 0) * Number(l.price || 0));
   const [tempWorkerEditForm, setTempWorkerEditForm] = useState({
@@ -2723,27 +2723,45 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     return { aList, aMax: Math.max(1, ...aList.map(([, v]) => v.temp + v.staff)), aTotalTemp: aList.reduce((s, [, v]) => s + v.temp, 0), aTotalStaff: aList.reduce((s, [, v]) => s + v.staff, 0) };
   };
 
-  // Draw the assembly bar chart in a jsPDF doc; returns the y below the chart.
+  // Draw a modern assembly bar chart in a jsPDF doc; returns the y below it.
   const drawAssemblyChartPdf = (doc: any, yStart: number, data: { aList: [string, { temp: number; staff: number }][]; aMax: number; aTotalTemp: number; aTotalStaff: number }) => {
     const pageW = doc.internal.pageSize.getWidth();
     const sf = (rgb: number[]) => doc.setFillColor(rgb[0], rgb[1], rgb[2]);
     const st = (rgb: number[]) => doc.setTextColor(rgb[0], rgb[1], rgb[2]);
+    const total = data.aTotalStaff + data.aTotalTemp;
+    // Title band
     sf([124, 58, 237]); doc.roundedRect(10, yStart, pageW - 20, 7, 1.5, 1.5, 'F');
     st([255, 255, 255]); doc.setFontSize(9.5);
-    doc.text(`Собрано по дням — сотрудники: ${data.aTotalStaff.toLocaleString('ru-RU')}, временные: ${data.aTotalTemp.toLocaleString('ru-RU')}, всего: ${(data.aTotalStaff + data.aTotalTemp).toLocaleString('ru-RU')}`, 13, yStart + 5);
-    const top = yStart + 10; const chartH = 26; const bottom = top + chartH;
-    const innerW = pageW - 24; const bw = innerW / Math.max(1, data.aList.length);
+    doc.text('Собрано по дням', 13, yStart + 5);
+    doc.setFontSize(8);
+    doc.text(`сотрудники ${data.aTotalStaff.toLocaleString('ru-RU')}  •  временные ${data.aTotalTemp.toLocaleString('ru-RU')}  •  всего ${total.toLocaleString('ru-RU')}`, pageW - 13, yStart + 5, { align: 'right' });
+
+    const top = yStart + 12; const chartH = 34; const bottom = top + chartH;
+    const left = 12; const innerW = pageW - 24;
+    // Card background + horizontal gridlines
+    sf([248, 250, 252]); doc.roundedRect(left, top - 2, innerW, chartH + 10, 2, 2, 'F');
+    doc.setDrawColor(226, 232, 240); doc.setLineWidth(0.1);
+    for (let g = 0; g <= 4; g++) { const gy = bottom - (chartH * g) / 4; doc.line(left + 2, gy, left + innerW - 2, gy); }
+
+    const n = Math.max(1, data.aList.length);
+    const slot = innerW / n;
+    const iw = Math.min(7, Math.max(2, slot - 1.6));
     data.aList.forEach(([dk, v], i) => {
-      const total = v.temp + v.staff; const barH = (total / data.aMax) * chartH;
-      const staffH = total > 0 ? (v.staff / total) * barH : 0; const tempH = barH - staffH;
-      const bx = 12 + i * bw; const iw = Math.max(1.2, bw - 1);
-      sf([79, 70, 229]); doc.rect(bx, bottom - staffH, iw, staffH, 'F');
-      sf([245, 158, 11]); doc.rect(bx, bottom - staffH - tempH, iw, tempH, 'F');
-      if (i % 5 === 0) { st([148, 163, 184]); doc.setFontSize(5); doc.text(dk.slice(8, 10) + '.' + dk.slice(5, 7), bx, bottom + 3); }
+      const t = v.temp + v.staff;
+      const barH = (t / data.aMax) * chartH;
+      const staffH = t > 0 ? (v.staff / t) * barH : 0; const tempH = barH - staffH;
+      const cx = left + i * slot + slot / 2; const bx = cx - iw / 2;
+      if (staffH > 0) { sf([79, 70, 229]); doc.rect(bx, bottom - staffH, iw, staffH, 'F'); }
+      if (tempH > 0) { sf([245, 158, 11]); doc.rect(bx, bottom - staffH - tempH, iw, tempH, 'F'); }
+      // qty above bar
+      if (t > 0) { st([71, 85, 105]); doc.setFontSize(4.6); doc.text(String(t), cx, bottom - barH - 1.2, { align: 'center' }); }
+      // day label under each bar
+      st([100, 116, 139]); doc.setFontSize(4.6); doc.text(dk.slice(8, 10), cx, bottom + 4, { align: 'center' });
     });
-    st([79, 70, 229]); doc.setFontSize(6); doc.text('■ сотрудники', pageW - 60, top + 2);
-    st([245, 158, 11]); doc.text('■ временные', pageW - 35, top + 2);
-    return bottom + 8;
+    // Legend
+    sf([79, 70, 229]); doc.rect(pageW - 64, top - 0.5, 2.2, 2.2, 'F'); st([100, 116, 139]); doc.setFontSize(6); doc.text('сотрудники', pageW - 61, top + 1.4);
+    sf([245, 158, 11]); doc.rect(pageW - 34, top - 0.5, 2.2, 2.2, 'F'); doc.text('временные', pageW - 31, top + 1.4);
+    return bottom + 12;
   };
 
   const handleDownloadGeneralReportExcel = async () => {
@@ -3210,16 +3228,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
   const handleAddTempWorkerLog = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!tempWorkerForm.supplier_id) { showToast('Выберите поставщика', 'error'); return; }
     const createdBy = user?.id || currentEmployee?.id;
     if (!createdBy) { showToast('Ошибка: не удалось определить пользователя', 'error'); return; }
 
-    // Build a payload per valid line (worker + non-zero earnings).
+    // Build a payload per valid line (supplier + worker + non-zero earnings).
     const payloads = tempWorkerLines
       .map((l) => {
         const earnings = tempLineEarnings(l);
         return {
-          supplier_id: tempWorkerForm.supplier_id,
+          supplier_id: l.supplier_id || '',
           date: tempWorkerForm.date,
           worker_name: String(l.worker_name || '').trim(),
           work_comment: String(l.work_comment || '').trim(),
@@ -3229,10 +3246,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           created_by: createdBy,
         };
       })
-      .filter((p) => p.worker_name && p.earnings > 0);
+      .filter((p) => p.supplier_id && p.worker_name && p.earnings > 0);
 
     if (!payloads.length) {
-      showToast('Заполните хотя бы одну строку: сотрудник, количество/часы и цена', 'error');
+      showToast('Заполните хотя бы одну строку: поставщик, сотрудник, количество/часы и цена', 'error');
       return;
     }
 
@@ -23421,6 +23438,28 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     </div>
                   </div>
 
+                  {/* Assembly infographic cards */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+                    <div className="relative overflow-hidden rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                      <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-amber-400 to-orange-500" />
+                      <div className="flex items-center justify-between mb-2"><span className="text-sm font-medium text-slate-500">Собрано — временные</span><div className="p-2 bg-amber-50 rounded-xl"><Box className="h-5 w-5 text-amber-600" /></div></div>
+                      <div className="text-3xl font-extrabold text-amber-600">{assemblyDaily.totalTemp.toLocaleString('ru-RU')}</div>
+                      <p className="text-xs text-slate-400 mt-1">ФБО/ФБС · 30 дней</p>
+                    </div>
+                    <div className="relative overflow-hidden rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                      <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-indigo-500 to-violet-500" />
+                      <div className="flex items-center justify-between mb-2"><span className="text-sm font-medium text-slate-500">Собрано — сотрудники</span><div className="p-2 bg-indigo-50 rounded-xl"><Box className="h-5 w-5 text-indigo-600" /></div></div>
+                      <div className="text-3xl font-extrabold text-indigo-600">{assemblyDaily.totalStaff.toLocaleString('ru-RU')}</div>
+                      <p className="text-xs text-slate-400 mt-1">кроме повременных/ПИК · 30 дней</p>
+                    </div>
+                    <div className="relative overflow-hidden rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                      <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-emerald-500 to-teal-500" />
+                      <div className="flex items-center justify-between mb-2"><span className="text-sm font-medium text-slate-500">Собрано — вместе</span><div className="p-2 bg-emerald-50 rounded-xl"><Box className="h-5 w-5 text-emerald-600" /></div></div>
+                      <div className="text-3xl font-extrabold text-emerald-600">{(assemblyDaily.totalTemp + assemblyDaily.totalStaff).toLocaleString('ru-RU')}</div>
+                      <p className="text-xs text-slate-400 mt-1">общее количество · 30 дней</p>
+                    </div>
+                  </div>
+
                   {/* Assembly daily chart */}
                   <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
                     <div className="flex items-center justify-between mb-4">
@@ -30658,23 +30697,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 </div>
                 <form onSubmit={handleAddTempWorkerLog} className="space-y-5">
                     <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1.5">Поставщик</label>
-                        <div className="relative">
-                            <select
-                                value={tempWorkerForm.supplier_id}
-                                onChange={e => setTempWorkerForm({...tempWorkerForm, supplier_id: e.target.value})}
-                                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 appearance-none transition-all"
-                                required
-                            >
-                                <option value="">Выберите поставщика...</option>
-                                {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                            </select>
-                            <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-500">
-                                <ChevronDown className="w-4 h-4" />
-                            </div>
-                        </div>
-                    </div>
-                    <div>
                         <label className="block text-sm font-medium text-slate-700 mb-1.5">Дата работы</label>
                         <input
                             type="date"
@@ -30702,7 +30724,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                 )}
                               </div>
                             </div>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                              <select value={line.supplier_id} onChange={e => upd({ supplier_id: e.target.value })} className="p-2.5 bg-white border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-500">
+                                <option value="">Поставщик…</option>
+                                {suppliers.map((s) => <option key={`twl-s-${idx}-${s.id}`} value={s.id}>{s.name}</option>)}
+                              </select>
                               <select value={line.worker_name} onChange={e => upd({ worker_name: e.target.value })} className="p-2.5 bg-white border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-500">
                                 <option value="">Сотрудник…</option>
                                 {tempWorkersList.map((n) => <option key={`twl-n-${idx}-${n}`} value={n}>{n}</option>)}

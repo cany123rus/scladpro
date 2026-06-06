@@ -231,6 +231,7 @@ export function AdminPanel(props: AdminPanelProps) {
   const [asmTempRows, setAsmTempRows] = useState<any[]>([]);
   const [asmStaffRows, setAsmStaffRows] = useState<any[]>([]);
   const [asmSelectedDay, setAsmSelectedDay] = useState<string>('');
+  const [asmDetailSort, setAsmDetailSort] = useState<{ field: 'qty' | 'who' | 'type'; dir: 'asc' | 'desc' }>({ field: 'qty', dir: 'desc' });
 
   useEffect(() => {
     if (section !== 'assembly') return;
@@ -303,9 +304,15 @@ export function AdminPanel(props: AdminPanelProps) {
       const qty = Number(r.quantity || 0); if (qty <= 0) return;
       rows.push({ who: empNameById.get(String(r.employee_id)) || 'Сотрудник', kind: 'Сотрудник', type: String(r.work_rates?.name || ''), qty });
     });
-    rows.sort((a, b) => b.qty - a.qty);
+    const { field, dir } = asmDetailSort;
+    const mul = dir === 'asc' ? 1 : -1;
+    rows.sort((a, b) => {
+      if (field === 'qty') return (a.qty - b.qty) * mul;
+      if (field === 'who') return a.who.localeCompare(b.who, 'ru') * mul;
+      return a.type.localeCompare(b.type, 'ru') * mul;
+    });
     return { rows, total: rows.reduce((s, r) => s + r.qty, 0) };
-  }, [asmSelectedDay, asmTempRows, asmStaffRows, empNameById]);
+  }, [asmSelectedDay, asmTempRows, asmStaffRows, empNameById, asmDetailSort]);
 
   const staffEmployees = useMemo(() => (employees || []).filter((e) => !isAdminEmp(e)), [employees]);
   const allSections = useMemo(() => sectionGroups.flatMap((g) => g.items), [sectionGroups]);
@@ -726,8 +733,19 @@ export function AdminPanel(props: AdminPanelProps) {
                   <div className="px-5 py-8 text-center text-slate-400 text-sm">В этот день сборки не было</div>
                 ) : (
                   <table className="w-full text-left text-sm">
-                    <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
-                      <tr><th className="px-5 py-2.5">Кто</th><th className="px-5 py-2.5">Категория</th><th className="px-5 py-2.5">Тип работы</th><th className="px-5 py-2.5 text-right">Количество</th></tr>
+                    <thead className="bg-slate-50 text-slate-500 text-xs uppercase select-none">
+                      {(() => {
+                        const sortBtn = (field: 'who' | 'type' | 'qty') => () => setAsmDetailSort((p) => ({ field, dir: p.field === field && p.dir === 'desc' ? 'asc' : 'desc' }));
+                        const arw = (field: string) => asmDetailSort.field === field ? (asmDetailSort.dir === 'desc' ? ' ↓' : ' ↑') : '';
+                        return (
+                          <tr>
+                            <th className="px-5 py-2.5 cursor-pointer hover:text-slate-700" onClick={sortBtn('who')}>Кто{arw('who')}</th>
+                            <th className="px-5 py-2.5">Категория</th>
+                            <th className="px-5 py-2.5 cursor-pointer hover:text-slate-700" onClick={sortBtn('type')}>Тип работы{arw('type')}</th>
+                            <th className="px-5 py-2.5 text-right cursor-pointer hover:text-slate-700" onClick={sortBtn('qty')}>Количество{arw('qty')}</th>
+                          </tr>
+                        );
+                      })()}
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {asmDayDetail.rows.map((r, i) => (
