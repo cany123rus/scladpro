@@ -1,0 +1,14 @@
+name = "supabase-proxy"
+main = "src/worker.js"
+compatibility_date = "2024-11-01"
+account_id = "47a28b007518b1c4ec242c5d80067bbe"
+
+# Реф проекта Supabase (можно поменять, не трогая код).
+[vars]
+UPSTREAM = "https://blygwkxjogmioebutiwn.supabase.co"
+
+# Свой домен для воркера. custom_domain=true → wrangler сам создаст DNS-запись и
+# выпустит SSL-сертификат на sb.scladpro.ru.
+[[routes]]
+pattern = "sb.scladpro.ru"
+custom_domain = true
