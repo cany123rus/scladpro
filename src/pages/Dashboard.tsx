@@ -48,7 +48,7 @@ import {
   buildFboScanProductCard, WAREHOUSE_MONEY_LEHA_PREFIX, WAREHOUSE_MONEY_OWNERS, getEmptyWarehouseMoneyForms,
   getDefaultWarehouseMoneyFilters, getWarehouseMoneyOwner, getWarehouseMoneyDisplayComment,
   buildWarehouseMoneyStoredComment, DELIVERY_PAYER_OWNER_RULES, getDeliveryPayerOwner, isDeliveryPayerSupplier,
-  ASSEMBLY_BUTTONS, normalizeRoleKey, ruToEn, fixLayout,
+  ASSEMBLY_BUTTONS, FINANCIAL_DEFAULT_DENY_BUTTONS, normalizeRoleKey, ruToEn, fixLayout,
 } from './dashboardHelpers';
 import type {
   WarehouseMoneyOwner, WarehouseMoneyFilter, WarehouseMoneyFormState, WarehouseMoneyFilterState, WarehouseMoneyLog,
@@ -9651,7 +9651,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     if (byRole === 'allow') return true;
     if (byRole === 'deny') return false;
 
-    return true;
+    // Financial buttons are hidden unless explicitly granted; normal buttons
+    // are visible by default.
+    return !FINANCIAL_DEFAULT_DENY_BUTTONS.has(buttonId);
   }, [assemblyButtonAccess, assemblyButtonAccessLoaded, currentEmployee]);
 
   const getCalendarEmployeeRule = useCallback((employee: any): AccessRule => {
@@ -26475,7 +26477,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                         >
                                             Временные сотрудники
                                         </button>
-                                        {(!currentEmployee || ['admin', 'Менеджер', 'Управляющий'].includes(currentEmployee.role)) && (
+                                        {hasAssemblyButtonAccess('cw_calendar_salary_pay') && (
                                           <button
                                             onClick={openSalaryPayModal}
                                             className="bg-emerald-50 px-3 py-2 rounded-lg border border-emerald-100 text-emerald-700 font-bold hover:bg-emerald-100 transition-colors text-xs sm:text-sm inline-flex items-center gap-1.5"

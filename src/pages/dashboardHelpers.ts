@@ -403,7 +403,15 @@ export const ASSEMBLY_BUTTONS = [
   { id: 'cw_form_edit', label: 'Сборка: Форма - Редактировать запись' },
   { id: 'cw_form_delete', label: 'Сборка: Форма - Удалить запись' },
   { id: 'cw_box_log_edit_submit', label: 'Сборка: Коробки - Сохранить редактирование записи' },
+  { id: 'cw_calendar_salary_pay', label: 'Сборка: Календарь - Оплата ЗП (финансовая)' },
 ] as const;
+
+// Financial / sensitive buttons. Unlike normal buttons (visible by default),
+// these are HIDDEN by default for non-admins and must be explicitly granted in
+// the Admin Panel → "Права кнопок". Admins always see them.
+export const FINANCIAL_DEFAULT_DENY_BUTTONS = new Set<string>([
+  'cw_calendar_salary_pay',
+]);
 
 export const normalizeRoleKey = (role?: string | null) => String(role || '').trim().toLowerCase();
 
