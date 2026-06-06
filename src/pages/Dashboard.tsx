@@ -2504,6 +2504,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     return m;
   }, [employees]);
 
+  // "Тип/Кол-во" label for temp-worker logs, e.g. "ФБО 200".
+  const tempTypeQty = (log: any) => {
+    const t = String(log?.work_comment || log?.comment || '').trim() || '-';
+    const q = Number(log?.quantity || 0);
+    return q > 0 ? `${t} ${q.toLocaleString('ru-RU')}` : t;
+  };
+
   const assemblyDaily = useMemo(() => {
     const days = new Map<string, { temp: number; staff: number; people: Record<string, number> }>();
     for (let i = 29; i >= 0; i--) {
@@ -28582,7 +28589,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               </div>
                             </div>
                             <div className="mt-2 text-sm text-slate-800">{log.worker_name || log.worker || '-'}</div>
-                            <div className="text-xs text-slate-600 mt-1">{log.work_comment || log.comment || '-'}</div>
+                            <div className="text-xs text-slate-600 mt-1 font-medium">{tempTypeQty(log)}</div>
                             <div className="mt-2 flex items-center justify-between text-xs text-slate-600">
                               <span>{log.hours} ч.</span>
                               <span>{creator?.full_name || '-'}</span>
@@ -28655,7 +28662,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                 <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Дата</th>
                                 <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Поставщик</th>
                                 <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Имя рабочего</th>
-                                <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Комментарий</th>
+                                <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Тип/Кол-во</th>
                                 <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Часы</th>
                                 <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Заработок</th>
                                 <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Оплата</th>
@@ -28672,7 +28679,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                         <td className="p-4 text-slate-900">{log?.date ? new Date(log.date).toLocaleDateString('ru-RU') : '-'}</td>
                                         <td className="p-4 text-slate-900 font-medium">{supplier?.name || '-'}</td>
                                         <td className="p-4 text-slate-900">{log.worker_name || log.worker || '-'}</td>
-                                        <td className="p-4 text-slate-600 max-w-[260px] truncate" title={log.work_comment || log.comment || ''}>{log.work_comment || log.comment || '-'}</td>
+                                        <td className="p-4 text-slate-600 max-w-[260px] truncate font-medium" title={tempTypeQty(log)}>{tempTypeQty(log)}</td>
                                         <td className="p-4 text-slate-600">{log.hours} ч.</td>
                                         <td className="p-4 font-bold text-green-600">
                                           {log.earnings} ₽
@@ -28859,7 +28866,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                 <div className="mt-1 text-sm text-slate-600">
                                   {log?.date ? new Date(`${log.date}T12:00:00`).toLocaleDateString('ru-RU') : '—'} • {supplier?.name || 'Без поставщика'} • {Number(log.hours || 0).toFixed(2)} ч.
                                 </div>
-                                <div className="mt-1 text-xs text-slate-500">{log.work_comment || log.comment || 'Без комментария'}</div>
+                                <div className="mt-1 text-xs text-slate-500 font-medium">{tempTypeQty(log)}</div>
                               </div>
                             </div>
                           </label>
@@ -30189,7 +30196,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             <th className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Дата</th>
                             <th className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Сотрудник</th>
                             <th className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Поставщик</th>
-                            <th className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Работа</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Тип/Кол-во</th>
                             <th className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Часы</th>
                             <th className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Заработано</th>
                             <th className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Кто оплатил</th>
@@ -30202,7 +30209,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               <td className="px-4 py-2 whitespace-nowrap">{row?.date ? new Date(String(row.date) + 'T12:00:00').toLocaleDateString('ru-RU') : '—'}</td>
                               <td className="px-4 py-2 font-medium">{row.worker_name || row.worker || 'Без имени'}</td>
                               <td className="px-4 py-2">{row.supplierName || '-'}</td>
-                              <td className="px-4 py-2 max-w-[320px] truncate">{row.work_comment || row.comment || '—'}</td>
+                              <td className="px-4 py-2 max-w-[320px] truncate">{tempTypeQty(row)}</td>
                               <td className="px-4 py-2">{Number(row.hours || 0).toFixed(2)}</td>
                               <td className="px-4 py-2 text-emerald-700 font-semibold">{Number(row.earnings || 0).toFixed(2)} ₽</td>
                               <td className="px-4 py-2 text-slate-600 max-w-[260px] truncate" title={row.paidByText || ''}>{row.paidByText || '—'}</td>
@@ -30477,7 +30484,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               </div>
                               <div className="font-bold text-emerald-700 whitespace-nowrap">{Number(row.earnings || 0).toFixed(2)} ₽</div>
                             </div>
-                            <div className="mt-1 text-xs text-slate-600">{row.work_comment || row.comment || 'Без комментария'}</div>
+                            <div className="mt-1 text-xs text-slate-600 font-medium">{tempTypeQty(row)}</div>
                             <div className="mt-1 text-xs text-slate-500">Факт оплаты: {Number(row.paidAmount || 0).toFixed(2)} ₽ • Не оплачено: {Number(row.remainingAmount || 0).toFixed(2)} ₽</div>
                             <div className="mt-1 text-xs text-slate-500">Кто оплатил: {row.paidByText || '—'}</div>
                           </div>
@@ -30489,7 +30496,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           <tr>
                             <th className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Дата</th>
                             <th className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Сотрудник</th>
-                            <th className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Работа</th>
+                            <th className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Тип/Кол-во</th>
                             <th className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Часы</th>
                             <th className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Заработано</th>
                             <th className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Факт оплаты</th>
@@ -30502,7 +30509,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             <tr key={`temp-report-row-${row.id}`} className="hover:bg-slate-50">
                               <td className="px-4 py-2 whitespace-nowrap">{row?.date ? new Date(`${row.date}T12:00:00`).toLocaleDateString('ru-RU') : '—'}</td>
                               <td className="px-4 py-2 font-medium text-slate-900">{row.worker_name || row.worker || 'Без имени'}</td>
-                              <td className="px-4 py-2 text-slate-600 max-w-[360px] truncate" title={row.work_comment || row.comment || ''}>{row.work_comment || row.comment || '—'}</td>
+                              <td className="px-4 py-2 text-slate-600 max-w-[360px] truncate" title={row.work_comment || row.comment || ''}>{tempTypeQty(row)}</td>
                               <td className="px-4 py-2">{Number(row.hours || 0).toFixed(2)}</td>
                               <td className="px-4 py-2 font-semibold text-emerald-700">{Number(row.earnings || 0).toFixed(2)} ₽</td>
                               <td className="px-4 py-2 text-violet-700">{Number(row.paidAmount || 0).toFixed(2)} ₽</td>
