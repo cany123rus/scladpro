@@ -15670,15 +15670,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       barcodeW: 29,
       barcodeH: 7,
       barcodeTextY: 38.35,
-      dmXpx: 14,
-      dmYpx: 11,
-      dmTextXpx: 14,
-      dmTextYpx: 224,
-      textXpx: 238,
-      textYpx: 14,
-      barcodeXpx: 238,
-      barcodeYpx: 231,
-      barcodeTextYpx: 316,
+      dmXpx: 19,
+      dmYpx: 15,
+      dmTextXpx: 19,
+      dmTextYpx: 302,
+      textXpx: 321,
+      textYpx: 19,
+      barcodeXpx: 321,
+      barcodeYpx: 312,
+      barcodeTextYpx: 427,
     },
     withoutChz: {
       barcodeW: 53,
@@ -15688,11 +15688,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       titleGap: 0,
       textFont: 8.4,
       dataGap: 2.65,
-      barcodeXpx: 17,
-      barcodeYpx: 11,
-      barcodeTextYpx: 112,
-      textXpx: 20,
-      textYpx: 133,
+      barcodeXpx: 23,
+      barcodeYpx: 15,
+      barcodeTextYpx: 151,
+      textXpx: 27,
+      textYpx: 180,
     },
     fboBoxes: {
       barcodeW: 52,
@@ -15701,30 +15701,30 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       supplierFont: 8,
       codeFont: 9,
       footerFont: 7,
-      numberXpx: 273,
-      numberYpx: 56,
-      supplierXpx: 273,
-      supplierYpx: 104,
-      barcodeXpx: 28,
-      barcodeYpx: 123,
-      codeXpx: 273,
-      codeYpx: 274,
-      footerXpx: 273,
-      footerYpx: 322,
+      numberXpx: 369,
+      numberYpx: 76,
+      supplierXpx: 369,
+      supplierYpx: 140,
+      barcodeXpx: 38,
+      barcodeYpx: 166,
+      codeXpx: 369,
+      codeYpx: 370,
+      footerXpx: 369,
+      footerYpx: 435,
     },
     nameSequence: {
       numberFont: 28,
       nameFont: 11,
-      numberXpx: 273,
-      numberYpx: 168,
-      nameXpx: 273,
-      nameYpx: 316,
+      numberXpx: 369,
+      numberYpx: 227,
+      nameXpx: 369,
+      nameYpx: 427,
     }
   });
 
   const [wbDragState, setWbDragState] = useState<any>(null);
-  const PREVIEW_SCALE_X = 546 / 58;
-  const PREVIEW_SCALE_Y = 378 / 40;
+  const PREVIEW_SCALE_X = 737 / 58;
+  const PREVIEW_SCALE_Y = 510 / 40;
   const PT_TO_MM = 0.3528;
   const mmToPreviewX = (mm: number) => mm * PREVIEW_SCALE_X;
   const mmToPreviewY = (mm: number) => mm * PREVIEW_SCALE_Y;
@@ -19263,9 +19263,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                   <div className="space-y-4">
                     <div className={wbLayoutTemplate === 'withChz' ? '' : 'hidden'}>
-                      <div className="mx-auto rounded-2xl p-2 w-[546px] h-[378px] bg-white relative overflow-hidden ring-1 ring-slate-200 shadow-md">
+                      <div className="wb-preview-frame mx-auto rounded-2xl p-3 w-[737px] h-[510px] max-w-full bg-white relative overflow-hidden ring-1 ring-slate-200 shadow-[0_14px_40px_-16px_rgba(15,23,42,0.35)]">
+                        <div className="pointer-events-none absolute inset-0 rounded-2xl" style={{ backgroundImage: 'linear-gradient(rgba(148,163,184,0.10) 1px, transparent 1px), linear-gradient(90deg, rgba(148,163,184,0.10) 1px, transparent 1px)', backgroundSize: '24px 24px' }} />
+                        <span className="pointer-events-none absolute right-2 bottom-2 rounded-full bg-slate-900/70 px-2 py-0.5 text-[10px] font-medium text-white">58 × 40 мм</span>
                         <div
-                          className="absolute border-2 border-indigo-300 rounded bg-slate-50 flex items-center justify-center text-[10px] text-slate-600 cursor-move"
+                          className="absolute rounded-lg border-2 border-indigo-400/70 bg-indigo-50/60 backdrop-blur-[1px] flex items-center justify-center text-[10px] font-medium text-indigo-700 shadow-sm cursor-move transition hover:ring-2 hover:ring-indigo-300/70"
                           onMouseDown={(e) => startWbBlockDrag(e, 'withChz', 'dmXpx', 'dmYpx', wbLayoutEditor.withChz.dmXpx, wbLayoutEditor.withChz.dmYpx)}
                           style={{
                             left: `${wbLayoutEditor.withChz.dmXpx}px`,
@@ -19277,7 +19279,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           QR/DataMatrix
                         </div>
 
-                        <div className="absolute text-slate-900 border-2 border-emerald-300 rounded px-2 py-1 bg-white/70 cursor-move" onMouseDown={(e) => startWbBlockDrag(e, 'withChz', 'textXpx', 'textYpx', wbLayoutEditor.withChz.textXpx, wbLayoutEditor.withChz.textYpx)} style={{ left: `${wbLayoutEditor.withChz.textXpx}px`, top: `${wbLayoutEditor.withChz.textYpx}px`, right: '10px', fontSize: `${ptToPreviewPx(wbLayoutEditor.withChz.titleFont)}px`, lineHeight: 1.05, fontWeight: 700 }}>
+                        <div className="absolute text-slate-900 rounded-lg border-2 border-emerald-400/70 px-2 py-1 bg-emerald-50/50 backdrop-blur-[1px] shadow-sm cursor-move transition hover:ring-2 hover:ring-emerald-300/70" onMouseDown={(e) => startWbBlockDrag(e, 'withChz', 'textXpx', 'textYpx', wbLayoutEditor.withChz.textXpx, wbLayoutEditor.withChz.textYpx)} style={{ left: `${wbLayoutEditor.withChz.textXpx}px`, top: `${wbLayoutEditor.withChz.textYpx}px`, right: '12px', fontSize: `${ptToPreviewPx(wbLayoutEditor.withChz.titleFont)}px`, lineHeight: 1.05, fontWeight: 700 }}>
                           Костюм мужской домашний
                         </div>
                         <div className="absolute text-slate-800" style={{ left: `${wbLayoutEditor.withChz.textXpx + 2}px`, top: `${wbLayoutEditor.withChz.textYpx + mmToPreviewY(4.0 + wbLayoutEditor.withChz.titleGap)}px`, fontSize: `${ptToPreviewPx(wbLayoutEditor.withChz.textFont)}px` }}>Артикул: 232759650</div>
@@ -19286,12 +19288,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <div className="absolute text-slate-800" style={{ left: `${wbLayoutEditor.withChz.textXpx + 2}px`, top: `${wbLayoutEditor.withChz.textYpx + mmToPreviewY(4.0 + wbLayoutEditor.withChz.titleGap + wbLayoutEditor.withChz.dataGap * 3)}px`, fontSize: `${ptToPreviewPx(wbLayoutEditor.withChz.textFont)}px` }}>Цвет: графит</div>
                         <div className="absolute text-slate-800" style={{ left: `${wbLayoutEditor.withChz.textXpx + 2}px`, top: `${wbLayoutEditor.withChz.textYpx + mmToPreviewY(4.0 + wbLayoutEditor.withChz.titleGap + wbLayoutEditor.withChz.dataGap * 4)}px`, fontSize: `${ptToPreviewPx(wbLayoutEditor.withChz.textFont)}px` }}>Поставщик: ИП Власенко_И_А</div>
 
-                        <div className="absolute text-[11px] text-slate-700 border border-amber-300 rounded px-1 bg-white/70 cursor-move" onMouseDown={(e) => startWbBlockDrag(e, 'withChz', 'dmTextXpx', 'dmTextYpx', wbLayoutEditor.withChz.dmTextXpx, wbLayoutEditor.withChz.dmTextYpx)} style={{ left: `${wbLayoutEditor.withChz.dmTextXpx}px`, top: `${wbLayoutEditor.withChz.dmTextYpx}px`, width: `${Math.max(90, wbLayoutEditor.withChz.dmSize * PREVIEW_SCALE_X)}px` }}>
+                        <div className="absolute text-[11px] font-medium text-amber-700 rounded-md border border-amber-400/70 px-1.5 py-0.5 bg-amber-50/60 backdrop-blur-[1px] shadow-sm cursor-move transition hover:ring-2 hover:ring-amber-300/70 truncate" onMouseDown={(e) => startWbBlockDrag(e, 'withChz', 'dmTextXpx', 'dmTextYpx', wbLayoutEditor.withChz.dmTextXpx, wbLayoutEditor.withChz.dmTextYpx)} style={{ left: `${wbLayoutEditor.withChz.dmTextXpx}px`, top: `${wbLayoutEditor.withChz.dmTextYpx}px`, width: `${Math.max(120, wbLayoutEditor.withChz.dmSize * PREVIEW_SCALE_X)}px` }}>
                           01046240600993100000...
                         </div>
 
                         <div
-                          className="absolute border-2 border-dashed border-fuchsia-400 rounded flex items-center justify-center text-[12px] text-slate-600 cursor-move"
+                          className="absolute rounded-lg border-2 border-dashed border-fuchsia-400/80 bg-fuchsia-50/40 backdrop-blur-[1px] flex items-center justify-center text-[12px] font-medium text-fuchsia-700 shadow-sm cursor-move transition hover:ring-2 hover:ring-fuchsia-300/70"
                           onMouseDown={(e) => startWbBlockDrag(e, 'withChz', 'barcodeXpx', 'barcodeYpx', wbLayoutEditor.withChz.barcodeXpx, wbLayoutEditor.withChz.barcodeYpx)}
                           style={{
                             left: `${wbLayoutEditor.withChz.barcodeXpx}px`,
@@ -19302,14 +19304,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         >
                           Штрихкод
                         </div>
-                        <div className="absolute text-black font-bold border border-cyan-300 rounded px-1 bg-white/70 cursor-move" onMouseDown={(e) => startWbBlockDrag(e, 'withChz', 'barcodeXpx', 'barcodeTextYpx', wbLayoutEditor.withChz.barcodeXpx, wbLayoutEditor.withChz.barcodeTextYpx)} style={{ left: `${wbLayoutEditor.withChz.barcodeXpx}px`, top: `${wbLayoutEditor.withChz.barcodeTextYpx}px`, width: `${wbLayoutEditor.withChz.barcodeW * PREVIEW_SCALE_X}px`, textAlign: 'center', fontSize: '20px' }}>
+                        <div className="absolute text-black font-bold rounded-md border border-cyan-400/70 px-1 bg-cyan-50/50 backdrop-blur-[1px] shadow-sm cursor-move transition hover:ring-2 hover:ring-cyan-300/70" onMouseDown={(e) => startWbBlockDrag(e, 'withChz', 'barcodeXpx', 'barcodeTextYpx', wbLayoutEditor.withChz.barcodeXpx, wbLayoutEditor.withChz.barcodeTextYpx)} style={{ left: `${wbLayoutEditor.withChz.barcodeXpx}px`, top: `${wbLayoutEditor.withChz.barcodeTextYpx}px`, width: `${wbLayoutEditor.withChz.barcodeW * PREVIEW_SCALE_X}px`, textAlign: 'center', fontSize: '20px' }}>
                           2042797303856
                         </div>
                       </div>
                     </div>
 
                     <div className={wbLayoutTemplate === 'withoutChz' ? '' : 'hidden'}>
-                      <div className="mx-auto rounded-2xl p-2 w-[546px] h-[378px] bg-white relative overflow-hidden ring-1 ring-slate-200 shadow-md">
+                      <div className="wb-preview-frame mx-auto rounded-2xl p-3 w-[737px] h-[510px] max-w-full bg-white relative overflow-hidden ring-1 ring-slate-200 shadow-[0_14px_40px_-16px_rgba(15,23,42,0.35)]">
                         <div
                           className="absolute border-2 border-dashed border-fuchsia-400 rounded flex items-center justify-center text-[12px] text-slate-600 cursor-move"
                           onMouseDown={(e) => startWbBlockDrag(e, 'withoutChz', 'barcodeXpx', 'barcodeYpx', wbLayoutEditor.withoutChz.barcodeXpx, wbLayoutEditor.withoutChz.barcodeYpx)}
@@ -19340,7 +19342,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     </div>
 
                     <div className={wbLayoutTemplate === 'fboBoxes' ? '' : 'hidden'}>
-                      <div className="mx-auto rounded-2xl p-2 w-[546px] h-[378px] bg-white relative overflow-hidden ring-1 ring-slate-200 shadow-md">
+                      <div className="wb-preview-frame mx-auto rounded-2xl p-3 w-[737px] h-[510px] max-w-full bg-white relative overflow-hidden ring-1 ring-slate-200 shadow-[0_14px_40px_-16px_rgba(15,23,42,0.35)]">
                         <div className="absolute text-black font-bold border border-cyan-300 rounded px-1 bg-white/70 cursor-move" onMouseDown={(e) => startWbBlockDrag(e, 'fboBoxes', 'numberXpx', 'numberYpx', wbLayoutEditor.fboBoxes.numberXpx, wbLayoutEditor.fboBoxes.numberYpx)} style={{ left: `${wbLayoutEditor.fboBoxes.numberXpx - mmToPreviewX(6)}px`, top: `${wbLayoutEditor.fboBoxes.numberYpx}px`, width: `${mmToPreviewX(12)}px`, textAlign: 'center', fontSize: `${ptToPreviewPx(wbLayoutEditor.fboBoxes.numberFont)}px` }}>
                           1/120
                         </div>
@@ -19360,7 +19362,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     </div>
 
                     <div className={wbLayoutTemplate === 'nameSequence' ? '' : 'hidden'}>
-                      <div className="mx-auto rounded-2xl p-2 w-[546px] h-[378px] bg-white relative overflow-hidden ring-1 ring-slate-200 shadow-md">
+                      <div className="wb-preview-frame mx-auto rounded-2xl p-3 w-[737px] h-[510px] max-w-full bg-white relative overflow-hidden ring-1 ring-slate-200 shadow-[0_14px_40px_-16px_rgba(15,23,42,0.35)]">
                         <div className="absolute text-black font-bold border border-cyan-300 rounded px-1 bg-white/70 cursor-move" onMouseDown={(e) => startWbBlockDrag(e, 'nameSequence', 'numberXpx', 'numberYpx', wbLayoutEditor.nameSequence.numberXpx, wbLayoutEditor.nameSequence.numberYpx)} style={{ left: `${wbLayoutEditor.nameSequence.numberXpx - mmToPreviewX(8)}px`, top: `${wbLayoutEditor.nameSequence.numberYpx}px`, width: `${mmToPreviewX(16)}px`, textAlign: 'center', fontSize: `${ptToPreviewPx(wbLayoutEditor.nameSequence.numberFont)}px` }}>
                           1
                         </div>
