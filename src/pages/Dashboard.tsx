@@ -2637,21 +2637,95 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         : (suppliers.find((s: any) => String(s.id) === String(generalReportForm.paid_by_supplier_id))?.name || '-');
       const paidStatusLabel = generalReportForm.paid_status === 'paid' ? 'Оплачено' : generalReportForm.paid_status === 'unpaid' ? 'Не оплачено' : 'Все статусы';
 
-      doc.setFontSize(14);
-      doc.text('Общий отчет', 14, 14);
-      doc.setFontSize(9);
-      doc.text(`Период: ${dateRu(generalReportForm.start_date)} — ${dateRu(generalReportForm.end_date)}`, 14, 21);
-      doc.text(`Поставщик: ${supplierLabel} • Исполнитель/доставщик: ${personLabel}`, 14, 27);
-      doc.text(`Кто оплатил: ${paidByLabel} • Статус оплаты: ${paidStatusLabel}`, 14, 33);
-      doc.text(`Итого: временные ${money(generalReportTotals.tempEarned)}, доставки ${money(generalReportTotals.deliveryAmount)}, выполненная работа ${money(generalReportTotals.cwAmount)}`, 14, 39);
-      doc.text(`Общий итог всех отчетов: ${money(generalReportTotals.totalAmount)}`, 14, 45);
+      const pageW = doc.internal.pageSize.getWidth();
+      const pageH = doc.internal.pageSize.getHeight();
+      const setFill = (rgb: number[]) => doc.setFillColor(rgb[0], rgb[1], rgb[2]);
+      const setText = (rgb: number[]) => doc.setTextColor(rgb[0], rgb[1], rgb[2]);
 
-      let y = 53;
-      (lazyLibs.autoTable as any)(doc, {
+      // ── Header banner ──────────────────────────────────────────────
+      setFill([15, 23, 42]);
+      doc.rect(0, 0, pageW, 30, 'F');
+      setFill([79, 70, 229]);
+      doc.rect(0, 30, pageW, 1.4, 'F');
+      setText([255, 255, 255]);
+      doc.setFontSize(20);
+      doc.text('Общий отчёт', 12, 15);
+      doc.setFontSize(9);
+      setText([199, 210, 254]);
+      doc.text('СкладПро · сводный финансовый отчёт', 12, 22);
+      doc.setFontSize(10);
+      setText([226, 232, 240]);
+      doc.text(`Период: ${dateRu(generalReportForm.start_date)} — ${dateRu(generalReportForm.end_date)}`, pageW - 12, 14, { align: 'right' });
+      doc.setFontSize(8);
+      setText([148, 163, 184]);
+      doc.text(`Сформировано: ${new Date().toLocaleString('ru-RU')}`, pageW - 12, 21, { align: 'right' });
+
+      // ── Filters line ───────────────────────────────────────────────
+      doc.setFontSize(8.5);
+      setText([71, 85, 105]);
+      doc.text(`Поставщик: ${supplierLabel}    •    Исполнитель/доставщик: ${personLabel}`, 12, 39);
+      doc.text(`Кто оплатил: ${paidByLabel}    •    Статус оплаты: ${paidStatusLabel}`, 12, 44);
+
+      // ── KPI chips ──────────────────────────────────────────────────
+      const chips = [
+        { label: 'Временные', value: money(generalReportTotals.tempEarned), rgb: [79, 70, 229] },
+        { label: 'Доставки', value: money(generalReportTotals.deliveryAmount), rgb: [13, 148, 136] },
+        { label: 'Выполненная работа', value: money(generalReportTotals.cwAmount), rgb: [124, 58, 237] },
+        { label: 'ОБЩИЙ ИТОГ', value: money(generalReportTotals.totalAmount), rgb: [15, 23, 42] },
+      ];
+      const chipGap = 4;
+      const chipW = (pageW - 24 - chipGap * 3) / 4;
+      let cx = 12;
+      const chipY = 49;
+      chips.forEach((c) => {
+        setFill(c.rgb);
+        doc.roundedRect(cx, chipY, chipW, 16, 2, 2, 'F');
+        setText([226, 232, 240]);
+        doc.setFontSize(7);
+        doc.text(c.label.toUpperCase(), cx + 4, chipY + 6);
+        setText([255, 255, 255]);
+        doc.setFontSize(11);
+        doc.text(String(c.value), cx + 4, chipY + 13);
+        cx += chipW + chipGap;
+      });
+
+      const drawFooter = (data: any) => {
+        const page = data?.pageNumber || doc.internal.getNumberOfPages();
+        doc.setFont('Roboto', 'normal');
+        doc.setFontSize(7);
+        setText([148, 163, 184]);
+        doc.text('СкладПро · общий отчёт', 12, pageH - 6);
+        doc.text(`Стр. ${page}`, pageW - 12, pageH - 6, { align: 'right' });
+      };
+
+      const baseTable = (cfg: any, startY: number, headRgb: number[]) => {
+        (lazyLibs.autoTable as any)(doc, {
+          startY,
+          theme: 'striped',
+          styles: { font: 'Roboto', fontSize: 7.5, cellPadding: 2, overflow: 'linebreak', lineColor: [226, 232, 240], lineWidth: 0.1 },
+          headStyles: { font: 'Roboto', fillColor: headRgb, textColor: 255, fontStyle: 'normal', fontSize: 8 },
+          alternateRowStyles: { fillColor: [248, 250, 252] },
+          margin: { left: 10, right: 10 },
+          didDrawPage: drawFooter,
+          ...cfg,
+        });
+      };
+
+      const drawBand = (y: number, title: string, rgb: number[]) => {
+        setFill(rgb);
+        doc.roundedRect(10, y, pageW - 20, 7, 1.5, 1.5, 'F');
+        setText([255, 255, 255]);
+        doc.setFontSize(9.5);
+        doc.text(title, 13, y + 5);
+        return y + 9;
+      };
+
+      let y = 70;
+      y = drawBand(y, 'Отчёт по временным сотрудникам', [79, 70, 229]);
+      baseTable({
         startY: y,
-        head: [['Отчет по временным сотрудникам', 'Дата', 'Сотрудник', 'Поставщик', 'Работа', 'Часы', 'Заработано', 'Кто оплатил', 'Не оплачено']],
+        head: [['Дата', 'Сотрудник', 'Поставщик', 'Работа', 'Часы', 'Заработано', 'Кто оплатил', 'Не оплачено']],
         body: generalTempWorkerRows.map((row: any) => [
-          '',
           dateRu(row.date),
           row.worker_name || row.worker || 'Без имени',
           row.supplierName || '-',
@@ -2661,17 +2735,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           String(row.paidByText || '-').replace(/₽/g, 'руб.'),
           money(row.remainingAmount),
         ]),
-        styles: { font: 'Roboto', fontSize: 7.5, cellPadding: 1.5, overflow: 'linebreak' },
-        headStyles: { font: 'Roboto', fillColor: [15, 23, 42], textColor: 255, fontStyle: 'normal' },
-        margin: { left: 10, right: 10 },
-      });
-      y = ((doc as any).lastAutoTable?.finalY || y) + 8;
+      }, y, [79, 70, 229]);
+      y = ((doc as any).lastAutoTable?.finalY || y) + 9;
 
-      (lazyLibs.autoTable as any)(doc, {
+      y = drawBand(y, 'Отчёт по доставке', [13, 148, 136]);
+      baseTable({
         startY: y,
-        head: [['Отчет по доставке', 'Дата', 'Доставщик', 'Поставщик', 'Коробки', 'Сумма', 'Статус', 'Кто оплатил']],
+        head: [['Дата', 'Доставщик', 'Поставщик', 'Коробки', 'Сумма', 'Статус', 'Кто оплатил']],
         body: generalDeliveryRows.map((row: any) => [
-          '',
           dateRu(row.date),
           row.courier || '-',
           row.supplierName || '-',
@@ -2680,17 +2751,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           row.is_paid ? 'Оплачено' : 'Не оплачено',
           row.paidByText || '-',
         ]),
-        styles: { font: 'Roboto', fontSize: 7.5, cellPadding: 1.5, overflow: 'linebreak' },
-        headStyles: { font: 'Roboto', fillColor: [30, 64, 175], textColor: 255, fontStyle: 'normal' },
-        margin: { left: 10, right: 10 },
-      });
-      y = ((doc as any).lastAutoTable?.finalY || y) + 8;
+      }, y, [13, 148, 136]);
+      y = ((doc as any).lastAutoTable?.finalY || y) + 9;
 
-      (lazyLibs.autoTable as any)(doc, {
+      y = drawBand(y, 'Отчёт по выполненной работе', [124, 58, 237]);
+      baseTable({
         startY: y,
-        head: [['Отчет по выполненной работе', 'Дата', 'Сотрудник', 'Поставщик', 'Вид работы', 'Кол-во', 'Цена', 'Сумма']],
+        head: [['Дата', 'Сотрудник', 'Поставщик', 'Вид работы', 'Кол-во', 'Цена', 'Сумма']],
         body: generalReportCwRows.map((row: any) => [
-          '',
           dateRu(row.date),
           row.employee_name || '-',
           row.supplier_name || '-',
@@ -2699,10 +2767,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           money(row.price),
           money(row.total),
         ]),
-        styles: { font: 'Roboto', fontSize: 7.5, cellPadding: 1.5, overflow: 'linebreak' },
-        headStyles: { font: 'Roboto', fillColor: [79, 70, 229], textColor: 255, fontStyle: 'normal' },
-        margin: { left: 10, right: 10 },
-      });
+      }, y, [124, 58, 237]);
 
       const safeName = `obschiy_otchet_${generalReportForm.start_date || 'start'}_${generalReportForm.end_date || 'end'}`.replace(/[^a-zA-Z0-9_\-.]+/g, '_');
       doc.save(`${safeName}.pdf`);
