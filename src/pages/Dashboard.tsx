@@ -19412,12 +19412,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     { key: 'nameSequence', label: 'Номер + имя' },
                   ] as const).filter(({ key }) => key === wbLayoutTemplate).map(({ key }) => (
                     <div key={`pdfprev-${key}`}>
-                      <div className="mx-auto w-[464px] max-w-full aspect-[58/40] rounded-2xl ring-1 ring-slate-200 shadow-md bg-white overflow-hidden">
+                      <div className="relative mx-auto w-[464px] max-w-full aspect-[58/40] rounded-2xl ring-1 ring-slate-200 shadow-md bg-white overflow-hidden">
                         {wbLayoutPdfPreviews[key] ? (
                           <iframe
                             title={`pdf-${key}`}
                             src={`${wbLayoutPdfPreviews[key]}#toolbar=0&navpanes=0&scrollbar=0&view=Fit`}
-                            className="w-full h-full border-0"
+                            scrolling="no"
+                            className="absolute top-0 left-0 border-0"
+                            style={{ width: 'calc(100% + 20px)', height: 'calc(100% + 20px)' }}
                           />
                         ) : (
                           <div className="flex h-full items-center justify-center text-xs text-slate-400">Готовлю PDF…</div>
