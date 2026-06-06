@@ -1256,7 +1256,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   // Personal employee.permissions[tabId] overrides the role default.
   const [sectionRoleAccess, setSectionRoleAccess] = useState<Record<string, Record<string, 'allow' | 'deny'>>>({});
   const [sectionRoleAccessLoaded, setSectionRoleAccessLoaded] = useState(false);
-  const [adminPanelSection, setAdminPanelSection] = useState<'sections-emp' | 'sections-role' | 'buttons' | 'employees'>('sections-emp');
+  const [adminPanelSection, setAdminPanelSection] = useState<'sections-emp' | 'sections-role' | 'buttons' | 'employees' | 'bots'>('sections-emp');
   const [selectedAccessEmployeeId, setSelectedAccessEmployeeId] = useState('');
 
   const fetchTempWorkerLogs = async () => {
@@ -1873,6 +1873,26 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   };
 
   // Auto write-off the paid amount from the payer's "Деньги на складе" balance.
+  // Send a writeoff notification to the admin via the dedicated writeoff bot.
+  const notifyWriteoff = async (params: { amount: number; ownerTitle?: string; comment?: string; by?: string }) => {
+    try {
+      const token = String(writeoffBotToken || '').trim();
+      const chat = String(writeoffAdminChatId || '').trim();
+      if (!token || !chat) return;
+      const lines = [
+        '💸 Списание со склада',
+        `Сумма: ${Math.abs(Number(params.amount || 0)).toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽`,
+        params.ownerTitle ? `Счёт: ${params.ownerTitle}` : '',
+        params.comment ? `Назначение: ${params.comment}` : '',
+        params.by ? `Кто провёл: ${params.by}` : '',
+        `Время: ${new Date().toLocaleString('ru-RU')}`,
+      ].filter(Boolean);
+      await telegramService.sendMessage(token, chat, lines.join('\n'));
+    } catch (e) {
+      console.warn('writeoff notify failed', e);
+    }
+  };
+
   const deductWarehouseMoneyForDeliveryPayment = async (payerSupplierId: string, total: number, comment: string) => {
     const payer = suppliers.find((s: any) => String(s.id) === String(payerSupplierId));
     const owner = getDeliveryPayerOwner(payer?.name || '');
@@ -1885,6 +1905,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       }]);
       if (error) throw error;
       await fetchCwWarehouseMoneyHistory();
+      notifyWriteoff({ amount: total, ownerTitle: getSupplierNameForOwner(owner), comment, by: currentEmployee?.full_name || currentEmployee?.login });
     } catch (e: any) {
       console.warn('warehouse money writeoff failed', e);
       showToast('Оплата прошла, но списание со склада не удалось: ' + (e?.message || 'неизвестно'), 'warning');
@@ -3757,6 +3778,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       return;
     }
 
+    if (mode === 'writeoff') {
+      const ownerTitle = WAREHOUSE_MONEY_OWNERS.find((o) => o.id === owner)?.title || owner;
+      notifyWriteoff({ amount, ownerTitle, comment: form.comment, by: currentEmployee?.full_name || currentEmployee?.login });
+    }
+
     setCwWarehouseMoneyForms((prev) => ({
       ...prev,
       [owner]: { amount: '', comment: '' },
@@ -4164,6 +4190,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       }
       await fetchCwWarehouseMoneyHistory();
       await loadPaymentReports();
+      notifyWriteoff({
+        amount: total,
+        ownerTitle,
+        comment: `Оплата ЗП${period ? ` (${period.label})` : ''}: ${selected.map((r) => r.employee_name).join(', ')}`,
+        by: currentEmployee?.full_name || currentEmployee?.login,
+      });
       showToast(`Оплачено ЗП: ${selected.length}`, 'success');
       setShowSalaryPayModal(false);
       setSalaryPaySelectedIds([]);
@@ -8404,6 +8436,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   // Telegram State
   const [telegramBotToken, setTelegramBotToken] = useState('');
   const [telegramBotTokenFile, setTelegramBotTokenFile] = useState('');
+  const [writeoffBotToken, setWriteoffBotToken] = useState('');
+  const [writeoffAdminChatId, setWriteoffAdminChatId] = useState('498924112');
   const [isTokenLocked, setIsTokenLocked] = useState(true);
   const [telegramSupplierId, setTelegramSupplierId] = useState('');
   const [telegramMessage, setTelegramMessage] = useState('');
@@ -8590,7 +8624,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         const { data } = await supabase
           .from('app_settings')
           .select('key, value')
-          .in('key', ['telegram_bot_token', 'telegram_reception_bot_token', 'telegram_login_logs_bot_token', 'telegram_bot_token_file', 'backup_bot_token', 'database_backup_logs']);
+          .in('key', ['telegram_bot_token', 'telegram_reception_bot_token', 'telegram_login_logs_bot_token', 'telegram_bot_token_file', 'backup_bot_token', 'telegram_writeoff_bot_token', 'telegram_writeoff_admin_chat_id', 'database_backup_logs']);
 
         if (data) {
             data.forEach(setting => {
@@ -8598,6 +8632,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 if (setting.key === 'telegram_reception_bot_token') setTelegramReceptionBotToken(setting.value);
                 if (setting.key === 'telegram_login_logs_bot_token') setTelegramBotTokenFile(setting.value);
                 if (setting.key === 'backup_bot_token') setBackupBotToken(setting.value);
+                if (setting.key === 'telegram_writeoff_bot_token') setWriteoffBotToken(setting.value);
+                if (setting.key === 'telegram_writeoff_admin_chat_id' && setting.value) setWriteoffAdminChatId(setting.value);
                 if (setting.key === 'database_backup_logs') {
                     try {
                         const parsed = typeof setting.value === 'string' ? JSON.parse(setting.value) : setting.value;
@@ -24679,6 +24715,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
               <AdminPanel
                 section={adminPanelSection}
                 setSection={setAdminPanelSection}
+                showToast={showToast}
                 employees={employees}
                 sectionGroups={EMPLOYEE_PERMISSION_SECTIONS}
                 roleKeys={adminRoleKeys}
