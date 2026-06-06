@@ -16844,6 +16844,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     }
   };
 
+  // Выбранный шаблон в конструкторе этикеток (вкладки).
+  const [wbLayoutTemplate, setWbLayoutTemplate] = useState<'withChz' | 'withoutChz' | 'fboBoxes' | 'nameSequence'>('withChz');
+
   // Живой PDF-предпросмотр (1-в-1 с печатью) для конструктора этикеток.
   const [wbLayoutPdfPreviews, setWbLayoutPdfPreviews] = useState<Record<string, string>>({});
   const wbLayoutPdfPreviewUrlsRef = useRef<string[]>([]);
@@ -19913,63 +19916,63 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     <div className="font-bold text-slate-900">Макеты печати WB (4 шаблона)</div>
                     <div className="text-xs text-slate-500">Двигай ползунки и блоки в превью. Эти настройки напрямую влияют на печать в разделе «Товары WB».</div>
 
-                    <div className="grid grid-cols-1 lg:grid-cols-4 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div className="p-3 bg-white rounded-xl border border-slate-200 shadow-sm">
                         <div className="text-xs font-bold mb-2 text-slate-700">С ЧЗ (QR + штрихкод)</div>
-                        <label className="text-xs">Размер QR/DataMatrix: {wbLayoutEditor.withChz.dmSize.toFixed(1)} мм</label>
-                        <input type="range" min={18} max={25} step={0.1} value={wbLayoutEditor.withChz.dmSize} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, withChz: { ...prev.withChz, dmSize: Number(e.target.value) } }))} className="w-full" />
-                        <label className="text-xs">Размер заголовка: {wbLayoutEditor.withChz.titleFont.toFixed(1)}</label>
-                        <input type="range" min={7} max={10} step={0.1} value={wbLayoutEditor.withChz.titleFont} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, withChz: { ...prev.withChz, titleFont: Number(e.target.value) } }))} className="w-full" />
-                        <label className="text-xs">Отступ после названия: {wbLayoutEditor.withChz.titleGap.toFixed(1)} мм</label>
-                        <input type="range" min={0} max={3} step={0.1} value={wbLayoutEditor.withChz.titleGap} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, withChz: { ...prev.withChz, titleGap: Number(e.target.value) } }))} className="w-full" />
-                        <label className="text-xs">Отступ строк данных: {wbLayoutEditor.withChz.dataGap.toFixed(2)} мм</label>
-                        <input type="range" min={1.6} max={4} step={0.05} value={wbLayoutEditor.withChz.dataGap} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, withChz: { ...prev.withChz, dataGap: Number(e.target.value) } }))} className="w-full" />
-                        <label className="text-xs">Размер текста: {wbLayoutEditor.withChz.textFont.toFixed(1)}</label>
-                        <input type="range" min={6} max={8} step={0.1} value={wbLayoutEditor.withChz.textFont} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, withChz: { ...prev.withChz, textFont: Number(e.target.value) } }))} className="w-full" />
-                        <label className="text-xs">Штрихкод ширина: {wbLayoutEditor.withChz.barcodeW.toFixed(1)} мм</label>
-                        <input type="range" min={24} max={34} step={0.1} value={wbLayoutEditor.withChz.barcodeW} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, withChz: { ...prev.withChz, barcodeW: Number(e.target.value) } }))} className="w-full" />
-                        <label className="text-xs">Штрихкод высота: {wbLayoutEditor.withChz.barcodeH.toFixed(1)} мм</label>
-                        <input type="range" min={5.5} max={10} step={0.1} value={wbLayoutEditor.withChz.barcodeH} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, withChz: { ...prev.withChz, barcodeH: Number(e.target.value) } }))} className="w-full" />
-                        <label className="text-xs">Цифры штрихкода Y: {wbLayoutEditor.withChz.barcodeTextY.toFixed(2)}</label>
-                        <input type="range" min={35} max={39.5} step={0.05} value={wbLayoutEditor.withChz.barcodeTextY} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, withChz: { ...prev.withChz, barcodeTextY: Number(e.target.value), barcodeTextYpx: mmToPreviewY(Number(e.target.value)) } }))} className="w-full" />
+                        <label className="mt-2 block text-[11px] font-medium text-slate-500">Размер QR/DataMatrix: {wbLayoutEditor.withChz.dmSize.toFixed(1)} мм</label>
+                        <input type="range" min={18} max={25} step={0.1} value={wbLayoutEditor.withChz.dmSize} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, withChz: { ...prev.withChz, dmSize: Number(e.target.value) } }))} className="w-full accent-indigo-600 cursor-pointer" />
+                        <label className="mt-2 block text-[11px] font-medium text-slate-500">Размер заголовка: {wbLayoutEditor.withChz.titleFont.toFixed(1)}</label>
+                        <input type="range" min={7} max={10} step={0.1} value={wbLayoutEditor.withChz.titleFont} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, withChz: { ...prev.withChz, titleFont: Number(e.target.value) } }))} className="w-full accent-indigo-600 cursor-pointer" />
+                        <label className="mt-2 block text-[11px] font-medium text-slate-500">Отступ после названия: {wbLayoutEditor.withChz.titleGap.toFixed(1)} мм</label>
+                        <input type="range" min={0} max={3} step={0.1} value={wbLayoutEditor.withChz.titleGap} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, withChz: { ...prev.withChz, titleGap: Number(e.target.value) } }))} className="w-full accent-indigo-600 cursor-pointer" />
+                        <label className="mt-2 block text-[11px] font-medium text-slate-500">Отступ строк данных: {wbLayoutEditor.withChz.dataGap.toFixed(2)} мм</label>
+                        <input type="range" min={1.6} max={4} step={0.05} value={wbLayoutEditor.withChz.dataGap} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, withChz: { ...prev.withChz, dataGap: Number(e.target.value) } }))} className="w-full accent-indigo-600 cursor-pointer" />
+                        <label className="mt-2 block text-[11px] font-medium text-slate-500">Размер текста: {wbLayoutEditor.withChz.textFont.toFixed(1)}</label>
+                        <input type="range" min={6} max={8} step={0.1} value={wbLayoutEditor.withChz.textFont} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, withChz: { ...prev.withChz, textFont: Number(e.target.value) } }))} className="w-full accent-indigo-600 cursor-pointer" />
+                        <label className="mt-2 block text-[11px] font-medium text-slate-500">Штрихкод ширина: {wbLayoutEditor.withChz.barcodeW.toFixed(1)} мм</label>
+                        <input type="range" min={24} max={34} step={0.1} value={wbLayoutEditor.withChz.barcodeW} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, withChz: { ...prev.withChz, barcodeW: Number(e.target.value) } }))} className="w-full accent-indigo-600 cursor-pointer" />
+                        <label className="mt-2 block text-[11px] font-medium text-slate-500">Штрихкод высота: {wbLayoutEditor.withChz.barcodeH.toFixed(1)} мм</label>
+                        <input type="range" min={5.5} max={10} step={0.1} value={wbLayoutEditor.withChz.barcodeH} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, withChz: { ...prev.withChz, barcodeH: Number(e.target.value) } }))} className="w-full accent-indigo-600 cursor-pointer" />
+                        <label className="mt-2 block text-[11px] font-medium text-slate-500">Цифры штрихкода Y: {wbLayoutEditor.withChz.barcodeTextY.toFixed(2)}</label>
+                        <input type="range" min={35} max={39.5} step={0.05} value={wbLayoutEditor.withChz.barcodeTextY} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, withChz: { ...prev.withChz, barcodeTextY: Number(e.target.value), barcodeTextYpx: mmToPreviewY(Number(e.target.value)) } }))} className="w-full accent-indigo-600 cursor-pointer" />
                       </div>
 
                       <div className="p-3 bg-white rounded-xl border border-slate-200 shadow-sm">
                         <div className="text-xs font-bold mb-2 text-slate-700">Без ЧЗ (только штрихкод)</div>
-                        <label className="text-xs">Штрихкод ширина: {wbLayoutEditor.withoutChz.barcodeW.toFixed(1)} мм</label>
-                        <input type="range" min={46} max={56} step={0.1} value={wbLayoutEditor.withoutChz.barcodeW} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, withoutChz: { ...prev.withoutChz, barcodeW: Number(e.target.value) } }))} className="w-full" />
-                        <label className="text-xs">Штрихкод высота: {wbLayoutEditor.withoutChz.barcodeH.toFixed(1)} мм</label>
-                        <input type="range" min={7} max={12} step={0.1} value={wbLayoutEditor.withoutChz.barcodeH} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, withoutChz: { ...prev.withoutChz, barcodeH: Number(e.target.value) } }))} className="w-full" />
-                        <label className="text-xs">Цифры штрихкода Y: {wbLayoutEditor.withoutChz.barcodeTextY.toFixed(2)}</label>
-                        <input type="range" min={13} max={16.5} step={0.05} value={wbLayoutEditor.withoutChz.barcodeTextY} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, withoutChz: { ...prev.withoutChz, barcodeTextY: Number(e.target.value), barcodeTextYpx: mmToPreviewY(Number(e.target.value)) } }))} className="w-full" />
-                        <label className="text-xs">Размер заголовка: {wbLayoutEditor.withoutChz.titleFont.toFixed(1)}</label>
-                        <input type="range" min={7.5} max={10} step={0.1} value={wbLayoutEditor.withoutChz.titleFont} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, withoutChz: { ...prev.withoutChz, titleFont: Number(e.target.value) } }))} className="w-full" />
-                        <label className="text-xs">Отступ после названия: {wbLayoutEditor.withoutChz.titleGap.toFixed(1)} мм</label>
-                        <input type="range" min={0} max={3} step={0.1} value={wbLayoutEditor.withoutChz.titleGap} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, withoutChz: { ...prev.withoutChz, titleGap: Number(e.target.value) } }))} className="w-full" />
-                        <label className="text-xs">Отступ строк данных: {wbLayoutEditor.withoutChz.dataGap.toFixed(2)} мм</label>
-                        <input type="range" min={1.8} max={4.5} step={0.05} value={wbLayoutEditor.withoutChz.dataGap} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, withoutChz: { ...prev.withoutChz, dataGap: Number(e.target.value) } }))} className="w-full" />
-                        <label className="text-xs">Размер текста: {wbLayoutEditor.withoutChz.textFont.toFixed(1)}</label>
-                        <input type="range" min={7} max={9.5} step={0.1} value={wbLayoutEditor.withoutChz.textFont} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, withoutChz: { ...prev.withoutChz, textFont: Number(e.target.value) } }))} className="w-full" />
+                        <label className="mt-2 block text-[11px] font-medium text-slate-500">Штрихкод ширина: {wbLayoutEditor.withoutChz.barcodeW.toFixed(1)} мм</label>
+                        <input type="range" min={46} max={56} step={0.1} value={wbLayoutEditor.withoutChz.barcodeW} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, withoutChz: { ...prev.withoutChz, barcodeW: Number(e.target.value) } }))} className="w-full accent-indigo-600 cursor-pointer" />
+                        <label className="mt-2 block text-[11px] font-medium text-slate-500">Штрихкод высота: {wbLayoutEditor.withoutChz.barcodeH.toFixed(1)} мм</label>
+                        <input type="range" min={7} max={12} step={0.1} value={wbLayoutEditor.withoutChz.barcodeH} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, withoutChz: { ...prev.withoutChz, barcodeH: Number(e.target.value) } }))} className="w-full accent-indigo-600 cursor-pointer" />
+                        <label className="mt-2 block text-[11px] font-medium text-slate-500">Цифры штрихкода Y: {wbLayoutEditor.withoutChz.barcodeTextY.toFixed(2)}</label>
+                        <input type="range" min={13} max={16.5} step={0.05} value={wbLayoutEditor.withoutChz.barcodeTextY} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, withoutChz: { ...prev.withoutChz, barcodeTextY: Number(e.target.value), barcodeTextYpx: mmToPreviewY(Number(e.target.value)) } }))} className="w-full accent-indigo-600 cursor-pointer" />
+                        <label className="mt-2 block text-[11px] font-medium text-slate-500">Размер заголовка: {wbLayoutEditor.withoutChz.titleFont.toFixed(1)}</label>
+                        <input type="range" min={7.5} max={10} step={0.1} value={wbLayoutEditor.withoutChz.titleFont} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, withoutChz: { ...prev.withoutChz, titleFont: Number(e.target.value) } }))} className="w-full accent-indigo-600 cursor-pointer" />
+                        <label className="mt-2 block text-[11px] font-medium text-slate-500">Отступ после названия: {wbLayoutEditor.withoutChz.titleGap.toFixed(1)} мм</label>
+                        <input type="range" min={0} max={3} step={0.1} value={wbLayoutEditor.withoutChz.titleGap} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, withoutChz: { ...prev.withoutChz, titleGap: Number(e.target.value) } }))} className="w-full accent-indigo-600 cursor-pointer" />
+                        <label className="mt-2 block text-[11px] font-medium text-slate-500">Отступ строк данных: {wbLayoutEditor.withoutChz.dataGap.toFixed(2)} мм</label>
+                        <input type="range" min={1.8} max={4.5} step={0.05} value={wbLayoutEditor.withoutChz.dataGap} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, withoutChz: { ...prev.withoutChz, dataGap: Number(e.target.value) } }))} className="w-full accent-indigo-600 cursor-pointer" />
+                        <label className="mt-2 block text-[11px] font-medium text-slate-500">Размер текста: {wbLayoutEditor.withoutChz.textFont.toFixed(1)}</label>
+                        <input type="range" min={7} max={9.5} step={0.1} value={wbLayoutEditor.withoutChz.textFont} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, withoutChz: { ...prev.withoutChz, textFont: Number(e.target.value) } }))} className="w-full accent-indigo-600 cursor-pointer" />
                       </div>
 
                       <div className="p-3 bg-white rounded-xl border border-slate-200 shadow-sm">
                         <div className="text-xs font-bold mb-2 text-slate-700">Короба FBO</div>
-                        <label className="text-xs">Штрихкод ширина: {wbLayoutEditor.fboBoxes.barcodeW.toFixed(1)} мм</label>
-                        <input type="range" min={40} max={54} step={0.1} value={wbLayoutEditor.fboBoxes.barcodeW} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, fboBoxes: { ...prev.fboBoxes, barcodeW: Number(e.target.value) } }))} className="w-full" />
-                        <label className="text-xs">Штрихкод высота: {wbLayoutEditor.fboBoxes.barcodeH.toFixed(1)} мм</label>
-                        <input type="range" min={9} max={16} step={0.1} value={wbLayoutEditor.fboBoxes.barcodeH} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, fboBoxes: { ...prev.fboBoxes, barcodeH: Number(e.target.value) } }))} className="w-full" />
-                        <label className="text-xs">Размер номера: {wbLayoutEditor.fboBoxes.numberFont.toFixed(1)}</label>
-                        <input type="range" min={8} max={14} step={0.1} value={wbLayoutEditor.fboBoxes.numberFont} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, fboBoxes: { ...prev.fboBoxes, numberFont: Number(e.target.value) } }))} className="w-full" />
-                        <label className="text-xs">Размер кода: {wbLayoutEditor.fboBoxes.codeFont.toFixed(1)}</label>
-                        <input type="range" min={7} max={12} step={0.1} value={wbLayoutEditor.fboBoxes.codeFont} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, fboBoxes: { ...prev.fboBoxes, codeFont: Number(e.target.value) } }))} className="w-full" />
+                        <label className="mt-2 block text-[11px] font-medium text-slate-500">Штрихкод ширина: {wbLayoutEditor.fboBoxes.barcodeW.toFixed(1)} мм</label>
+                        <input type="range" min={40} max={54} step={0.1} value={wbLayoutEditor.fboBoxes.barcodeW} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, fboBoxes: { ...prev.fboBoxes, barcodeW: Number(e.target.value) } }))} className="w-full accent-indigo-600 cursor-pointer" />
+                        <label className="mt-2 block text-[11px] font-medium text-slate-500">Штрихкод высота: {wbLayoutEditor.fboBoxes.barcodeH.toFixed(1)} мм</label>
+                        <input type="range" min={9} max={16} step={0.1} value={wbLayoutEditor.fboBoxes.barcodeH} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, fboBoxes: { ...prev.fboBoxes, barcodeH: Number(e.target.value) } }))} className="w-full accent-indigo-600 cursor-pointer" />
+                        <label className="mt-2 block text-[11px] font-medium text-slate-500">Размер номера: {wbLayoutEditor.fboBoxes.numberFont.toFixed(1)}</label>
+                        <input type="range" min={8} max={14} step={0.1} value={wbLayoutEditor.fboBoxes.numberFont} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, fboBoxes: { ...prev.fboBoxes, numberFont: Number(e.target.value) } }))} className="w-full accent-indigo-600 cursor-pointer" />
+                        <label className="mt-2 block text-[11px] font-medium text-slate-500">Размер кода: {wbLayoutEditor.fboBoxes.codeFont.toFixed(1)}</label>
+                        <input type="range" min={7} max={12} step={0.1} value={wbLayoutEditor.fboBoxes.codeFont} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, fboBoxes: { ...prev.fboBoxes, codeFont: Number(e.target.value) } }))} className="w-full accent-indigo-600 cursor-pointer" />
                       </div>
 
                       <div className="p-3 bg-white rounded-xl border border-slate-200 shadow-sm">
                         <div className="text-xs font-bold mb-2 text-slate-700">Номер + имя</div>
-                        <label className="text-xs">Размер номера: {wbLayoutEditor.nameSequence.numberFont.toFixed(1)}</label>
-                        <input type="range" min={18} max={34} step={0.1} value={wbLayoutEditor.nameSequence.numberFont} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, nameSequence: { ...prev.nameSequence, numberFont: Number(e.target.value) } }))} className="w-full" />
-                        <label className="text-xs">Размер имени: {wbLayoutEditor.nameSequence.nameFont.toFixed(1)}</label>
-                        <input type="range" min={8} max={16} step={0.1} value={wbLayoutEditor.nameSequence.nameFont} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, nameSequence: { ...prev.nameSequence, nameFont: Number(e.target.value) } }))} className="w-full" />
+                        <label className="mt-2 block text-[11px] font-medium text-slate-500">Размер номера: {wbLayoutEditor.nameSequence.numberFont.toFixed(1)}</label>
+                        <input type="range" min={18} max={34} step={0.1} value={wbLayoutEditor.nameSequence.numberFont} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, nameSequence: { ...prev.nameSequence, numberFont: Number(e.target.value) } }))} className="w-full accent-indigo-600 cursor-pointer" />
+                        <label className="mt-2 block text-[11px] font-medium text-slate-500">Размер имени: {wbLayoutEditor.nameSequence.nameFont.toFixed(1)}</label>
+                        <input type="range" min={8} max={16} step={0.1} value={wbLayoutEditor.nameSequence.nameFont} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, nameSequence: { ...prev.nameSequence, nameFont: Number(e.target.value) } }))} className="w-full accent-indigo-600 cursor-pointer" />
                         <div className="mt-3 rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-600">
                           Макет для быстрой печати последовательности: сверху номер, снизу имя пользователя.
                         </div>
