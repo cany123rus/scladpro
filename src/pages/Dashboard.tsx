@@ -2285,10 +2285,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         : (tempWorkerPaidFilter === 'paid' ? getTempWorkerRemainingAmount(log) <= 0 : getTempWorkerRemainingAmount(log) > 0);
       return bySupplier && byPaid;
     });
+    const dayTs = (r: any) => { const v = String(r?.date || r?.created_at || ''); return new Date(v.length === 10 ? v + 'T00:00:00' : v).getTime() || 0; };
     return rows.sort((a: any, b: any) => {
-      const at = new Date(String(a?.work_date || a?.created_at || '')).getTime();
-      const bt = new Date(String(b?.work_date || b?.created_at || '')).getTime();
-      return tempWorkerDateSort === 'asc' ? at - bt : bt - at;
+      const at = dayTs(a); const bt = dayTs(b);
+      if (at !== bt) return tempWorkerDateSort === 'asc' ? at - bt : bt - at;
+      // tie-breaker: keep newest entry first within the same day
+      return (new Date(String(b?.created_at || '')).getTime() || 0) - (new Date(String(a?.created_at || '')).getTime() || 0);
     });
     // tempWorkerPaymentsMap is read via getTempWorkerRemainingAmount (paid filter) —
     // must be a dependency or the list shows stale paid/unpaid state on first load.
@@ -2694,6 +2696,51 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
   const xlsxDate = (v: string) => v ? new Date(`${v}T12:00:00`).toLocaleDateString('ru-RU') : '-';
 
+  // Fetch + aggregate assembled quantities per day (temp ФБО/ФБС + staff non-time/Пик).
+  const buildAssemblyDailyForPdf = async (startStr?: string, endStr?: string) => {
+    const end = String(endStr || new Date().toISOString().slice(0, 10));
+    const startDef = new Date(); startDef.setDate(startDef.getDate() - 29);
+    const start = String(startStr || startDef.toISOString().slice(0, 10));
+    let tempData: any[] = []; let staffData: any[] = [];
+    try {
+      const [tr, sr] = await Promise.all([
+        supabase.from('temporary_workers_logs').select('date, quantity, work_comment').is('deleted_at', null).gte('date', start).lte('date', end),
+        supabase.from('work_logs').select('date, quantity, work_rates(name)').is('deleted_at', null).gte('date', start).lte('date', end),
+      ]);
+      tempData = tr.data || []; staffData = sr.data || [];
+    } catch { /* ignore */ }
+    const days = new Map<string, { temp: number; staff: number }>();
+    const sD = new Date(start + 'T00:00:00'); const eD = new Date(end + 'T00:00:00');
+    for (let d = new Date(sD); d <= eD; d.setDate(d.getDate() + 1)) days.set(d.toISOString().slice(0, 10), { temp: 0, staff: 0 });
+    tempData.forEach((r: any) => { const dk = String(r.date || '').slice(0, 10); if (days.has(dk) && isAssemblyTempType(r.work_comment)) days.get(dk)!.temp += Number(r.quantity || 0); });
+    staffData.forEach((r: any) => { const dk = String(r.date || '').slice(0, 10); if (!days.has(dk) || isAssemblyExcludedStaffRate(r.work_rates?.name)) return; days.get(dk)!.staff += Number(r.quantity || 0); });
+    const aList = Array.from(days.entries());
+    return { aList, aMax: Math.max(1, ...aList.map(([, v]) => v.temp + v.staff)), aTotalTemp: aList.reduce((s, [, v]) => s + v.temp, 0), aTotalStaff: aList.reduce((s, [, v]) => s + v.staff, 0) };
+  };
+
+  // Draw the assembly bar chart in a jsPDF doc; returns the y below the chart.
+  const drawAssemblyChartPdf = (doc: any, yStart: number, data: { aList: [string, { temp: number; staff: number }][]; aMax: number; aTotalTemp: number; aTotalStaff: number }) => {
+    const pageW = doc.internal.pageSize.getWidth();
+    const sf = (rgb: number[]) => doc.setFillColor(rgb[0], rgb[1], rgb[2]);
+    const st = (rgb: number[]) => doc.setTextColor(rgb[0], rgb[1], rgb[2]);
+    sf([124, 58, 237]); doc.roundedRect(10, yStart, pageW - 20, 7, 1.5, 1.5, 'F');
+    st([255, 255, 255]); doc.setFontSize(9.5);
+    doc.text(`Собрано по дням — сотрудники: ${data.aTotalStaff.toLocaleString('ru-RU')}, временные: ${data.aTotalTemp.toLocaleString('ru-RU')}, всего: ${(data.aTotalStaff + data.aTotalTemp).toLocaleString('ru-RU')}`, 13, yStart + 5);
+    const top = yStart + 10; const chartH = 26; const bottom = top + chartH;
+    const innerW = pageW - 24; const bw = innerW / Math.max(1, data.aList.length);
+    data.aList.forEach(([dk, v], i) => {
+      const total = v.temp + v.staff; const barH = (total / data.aMax) * chartH;
+      const staffH = total > 0 ? (v.staff / total) * barH : 0; const tempH = barH - staffH;
+      const bx = 12 + i * bw; const iw = Math.max(1.2, bw - 1);
+      sf([79, 70, 229]); doc.rect(bx, bottom - staffH, iw, staffH, 'F');
+      sf([245, 158, 11]); doc.rect(bx, bottom - staffH - tempH, iw, tempH, 'F');
+      if (i % 5 === 0) { st([148, 163, 184]); doc.setFontSize(5); doc.text(dk.slice(8, 10) + '.' + dk.slice(5, 7), bx, bottom + 3); }
+    });
+    st([79, 70, 229]); doc.setFontSize(6); doc.text('■ сотрудники', pageW - 60, top + 2);
+    st([245, 158, 11]); doc.text('■ временные', pageW - 35, top + 2);
+    return bottom + 8;
+  };
+
   const handleDownloadGeneralReportExcel = async () => {
     try {
       const temp = generalTempWorkerRows.map((r: any) => ({ 'Дата': xlsxDate(r.date), 'Сотрудник': r.worker_name || r.worker || 'Без имени', 'Поставщик': r.supplierName || '-', 'Тип работы': r.work_comment || r.comment || '-', 'Кол-во': Number(r.quantity || 0), 'Часы': Number(r.hours || 0), 'Заработано': Number(r.earnings || 0), 'Кто оплатил': String(r.paidByText || '-').replace(/₽/g, 'руб.'), 'Не оплачено': Number(r.remainingAmount || 0) }));
@@ -2881,47 +2928,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         return y + 9;
       };
 
-      // Assembly daily chart (last 30 days): staff + temp (ФБО/ФБС)
-      let asmTemp: any[] = []; let asmStaff: any[] = [];
-      try {
-        const since = new Date(); since.setDate(since.getDate() - 29);
-        const s = since.toISOString().slice(0, 10);
-        const [tr, sr] = await Promise.all([
-          supabase.from('temporary_workers_logs').select('date, quantity, work_comment').is('deleted_at', null).gte('date', s),
-          supabase.from('work_logs').select('date, quantity, work_rates(name)').is('deleted_at', null).gte('date', s),
-        ]);
-        asmTemp = tr.data || []; asmStaff = sr.data || [];
-      } catch { /* ignore */ }
-      const aDays = new Map<string, { temp: number; staff: number }>();
-      for (let i = 29; i >= 0; i--) { const d = new Date(); d.setDate(d.getDate() - i); aDays.set(d.toISOString().slice(0, 10), { temp: 0, staff: 0 }); }
-      asmTemp.forEach((r: any) => { const dk = String(r.date || '').slice(0, 10); if (aDays.has(dk) && isAssemblyTempType(r.work_comment)) aDays.get(dk)!.temp += Number(r.quantity || 0); });
-      asmStaff.forEach((r: any) => { const dk = String(r.date || '').slice(0, 10); if (!aDays.has(dk) || isAssemblyExcludedStaffRate(r.work_rates?.name)) return; aDays.get(dk)!.staff += Number(r.quantity || 0); });
-      const aList = Array.from(aDays.entries());
-      const aMax = Math.max(1, ...aList.map(([, v]) => v.temp + v.staff));
-      const aTotalTemp = aList.reduce((s, [, v]) => s + v.temp, 0);
-      const aTotalStaff = aList.reduce((s, [, v]) => s + v.staff, 0);
-
-      let y = 70;
-      y = drawBand(y, `Сборка по дням (30 дней) — сотрудники: ${aTotalStaff.toLocaleString('ru-RU')}, временные: ${aTotalTemp.toLocaleString('ru-RU')}`, [124, 58, 237]);
-      const chartTop = y + 1;
-      const chartH = 28;
-      const chartBottom = chartTop + chartH;
-      const innerW = pageW - 24;
-      const bw = innerW / aList.length;
-      aList.forEach(([dk, v], i) => {
-        const total = v.temp + v.staff;
-        const barH = (total / aMax) * chartH;
-        const staffH = total > 0 ? (v.staff / total) * barH : 0;
-        const tempH = barH - staffH;
-        const bx = 12 + i * bw;
-        const iw = Math.max(1.2, bw - 1);
-        setFill([79, 70, 229]); doc.rect(bx, chartBottom - staffH, iw, staffH, 'F');
-        setFill([245, 158, 11]); doc.rect(bx, chartBottom - staffH - tempH, iw, tempH, 'F');
-        if (i % 5 === 0) { setText([148, 163, 184]); doc.setFontSize(5); doc.text(dk.slice(8, 10) + '.' + dk.slice(5, 7), bx, chartBottom + 3); }
-      });
-      setText([79, 70, 229]); doc.setFontSize(6); doc.text('■ сотрудники', pageW - 60, chartTop + 2);
-      setText([245, 158, 11]); doc.text('■ временные', pageW - 35, chartTop + 2);
-      y = chartBottom + 8;
+      // Assembly daily chart (report period or last 30 days)
+      const asmData = await buildAssemblyDailyForPdf(generalReportForm.start_date, generalReportForm.end_date);
+      let y = drawAssemblyChartPdf(doc, 70, asmData);
 
       y = drawBand(y, 'ЗП временные', [16, 185, 129]);
       baseTable({
@@ -3041,6 +3050,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         { label: 'Кол-во', value: totalQuantity.toLocaleString('ru-RU'), rgb: [13, 148, 136] },
         { label: 'Итого', value: money(totalAmount), rgb: [15, 23, 42] },
       ]);
+      const asmCwData = await buildAssemblyDailyForPdf(cwReportForm.start_date, cwReportForm.end_date);
+      mY = drawAssemblyChartPdf(doc, mY, asmCwData);
 
       const head = [
         'Дата',
@@ -3135,12 +3146,16 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         `Поставщик работ: ${supplierLabel}    •    Сотрудник: ${workerLabel}`,
         `Кто оплатил: ${paidByLabel}    •    Статус: ${paidStatusLabel}`,
       ]);
+      const tempQtyTotal = tempWorkerReportGrouped.groups.reduce((s: number, g: any) => s + g.rows.reduce((q: number, r: any) => q + Number(r.quantity || 0), 0), 0);
       mY = drawKpiChips(doc, mY, [
         { label: 'Работ', value: String(tempWorkerReportGrouped.totalRows), rgb: [37, 99, 235] },
+        { label: 'Собрано', value: tempQtyTotal.toLocaleString('ru-RU'), rgb: [245, 158, 11] },
         { label: 'Часы', value: tempWorkerReportGrouped.totalHours.toFixed(2), rgb: [13, 148, 136] },
         { label: 'Заработано', value: money(tempWorkerReportGrouped.totalEarnings), rgb: [16, 185, 129] },
         { label: 'Не оплачено', value: money(tempWorkerReportGrouped.totalRemaining), rgb: [225, 29, 72] },
       ]);
+      const asmTempData = await buildAssemblyDailyForPdf(tempWorkerReportForm.start_date, tempWorkerReportForm.end_date);
+      mY = drawAssemblyChartPdf(doc, mY, asmTempData);
 
       const body: any[] = [];
       tempWorkerReportGrouped.groups.forEach((group) => {
