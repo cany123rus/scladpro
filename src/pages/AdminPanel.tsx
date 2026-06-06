@@ -232,6 +232,8 @@ export function AdminPanel(props: AdminPanelProps) {
   const [asmStaffRows, setAsmStaffRows] = useState<any[]>([]);
   const [asmSelectedDay, setAsmSelectedDay] = useState<string>('');
   const [asmDetailSort, setAsmDetailSort] = useState<{ field: 'qty' | 'who' | 'type'; dir: 'asc' | 'desc' }>({ field: 'qty', dir: 'desc' });
+  const [asmFullDetail, setAsmFullDetail] = useState(false);
+  const [asmSuppliers, setAsmSuppliers] = useState<Map<string, string>>(new Map());
 
   useEffect(() => {
     if (section !== 'assembly') return;
@@ -240,12 +242,16 @@ export function AdminPanel(props: AdminPanelProps) {
       setAsmLoading(true);
       try {
         const [tempRes, staffRes] = await Promise.all([
-          supabase.from('temporary_workers_logs').select('date, quantity, work_comment, worker_name').is('deleted_at', null).gte('date', asmFrom).lte('date', asmTo),
-          supabase.from('work_logs').select('date, quantity, employee_id, work_rates(name)').is('deleted_at', null).gte('date', asmFrom).lte('date', asmTo),
+          supabase.from('temporary_workers_logs').select('date, quantity, work_comment, worker_name, supplier_id, hours, earnings').is('deleted_at', null).gte('date', asmFrom).lte('date', asmTo),
+          supabase.from('work_logs').select('date, quantity, employee_id, supplier_id, hours, earnings, work_rates(name)').is('deleted_at', null).gte('date', asmFrom).lte('date', asmTo),
         ]);
         if (cancelled) return;
         setAsmTempRows(Array.isArray(tempRes.data) ? tempRes.data : []);
         setAsmStaffRows(Array.isArray(staffRes.data) ? staffRes.data : []);
+        try {
+          const { data: sup } = await supabase.from('suppliers').select('id, name');
+          if (!cancelled) { const m = new Map<string, string>(); (sup || []).forEach((s: any) => m.set(String(s.id), s.name || '—')); setAsmSuppliers(m); }
+        } catch { /* ignore */ }
       } catch (e: any) {
         if (!cancelled) notify('Ошибка загрузки сборки: ' + (e?.message || 'неизвестно'), 'error');
       } finally {
@@ -293,17 +299,19 @@ export function AdminPanel(props: AdminPanelProps) {
 
   const asmDayDetail = useMemo(() => {
     if (!asmSelectedDay) return null;
-    const rows: Array<{ who: string; kind: string; type: string; qty: number }> = [];
+    const rows: Array<{ who: string; kind: string; type: string; qty: number; supplier: string; hours: number; earnings: number }> = [];
+    const typeQty = (type: string, qty: number) => (qty > 0 ? `${type} ${qty}` : type);
     asmTempRows.forEach((r) => {
       if (String(r.date || '').slice(0, 10) !== asmSelectedDay || !isAssemblyTempType(r.work_comment)) return;
       const qty = Number(r.quantity || 0); if (qty <= 0) return;
-      rows.push({ who: r.worker_name || 'Без имени', kind: 'Временный', type: String(r.work_comment || ''), qty });
+      rows.push({ who: r.worker_name || 'Без имени', kind: 'Временный', type: String(r.work_comment || ''), qty, supplier: asmSuppliers.get(String(r.supplier_id)) || '—', hours: Number(r.hours || 0), earnings: Number(r.earnings || 0) });
     });
     asmStaffRows.forEach((r) => {
       if (String(r.date || '').slice(0, 10) !== asmSelectedDay || isAssemblyExcludedStaffRate(r.work_rates?.name)) return;
       const qty = Number(r.quantity || 0); if (qty <= 0) return;
-      rows.push({ who: empNameById.get(String(r.employee_id)) || 'Сотрудник', kind: 'Сотрудник', type: String(r.work_rates?.name || ''), qty });
+      rows.push({ who: empNameById.get(String(r.employee_id)) || 'Сотрудник', kind: 'Сотрудник', type: String(r.work_rates?.name || ''), qty, supplier: asmSuppliers.get(String(r.supplier_id)) || '—', hours: Number(r.hours || 0), earnings: Number(r.earnings || 0) });
     });
+    void typeQty;
     const { field, dir } = asmDetailSort;
     const mul = dir === 'asc' ? 1 : -1;
     rows.sort((a, b) => {
@@ -312,7 +320,7 @@ export function AdminPanel(props: AdminPanelProps) {
       return a.type.localeCompare(b.type, 'ru') * mul;
     });
     return { rows, total: rows.reduce((s, r) => s + r.qty, 0) };
-  }, [asmSelectedDay, asmTempRows, asmStaffRows, empNameById, asmDetailSort]);
+  }, [asmSelectedDay, asmTempRows, asmStaffRows, empNameById, asmDetailSort, asmSuppliers]);
 
   const staffEmployees = useMemo(() => (employees || []).filter((e) => !isAdminEmp(e)), [employees]);
   const allSections = useMemo(() => sectionGroups.flatMap((g) => g.items), [sectionGroups]);
@@ -727,7 +735,13 @@ export function AdminPanel(props: AdminPanelProps) {
               <div className="rounded-2xl border border-indigo-200 bg-white shadow-sm overflow-hidden">
                 <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
                   <h3 className="font-bold text-slate-900">Детализация за {new Date(asmSelectedDay + 'T12:00:00').toLocaleDateString('ru-RU')}</h3>
-                  <span className="text-sm text-slate-500">Всего собрано: <b className="text-slate-900">{asmDayDetail.total.toLocaleString('ru-RU')}</b></span>
+                  <div className="flex items-center gap-4">
+                    <label className="inline-flex items-center gap-2 cursor-pointer select-none text-sm text-slate-600">
+                      <input type="checkbox" checked={asmFullDetail} onChange={(e) => setAsmFullDetail(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
+                      Полная детализация
+                    </label>
+                    <span className="text-sm text-slate-500">Всего собрано: <b className="text-slate-900">{asmDayDetail.total.toLocaleString('ru-RU')}</b></span>
+                  </div>
                 </div>
                 {asmDayDetail.rows.length === 0 ? (
                   <div className="px-5 py-8 text-center text-slate-400 text-sm">В этот день сборки не было</div>
@@ -739,9 +753,12 @@ export function AdminPanel(props: AdminPanelProps) {
                         const arw = (field: string) => asmDetailSort.field === field ? (asmDetailSort.dir === 'desc' ? ' ↓' : ' ↑') : '';
                         return (
                           <tr>
-                            <th className="px-5 py-2.5 cursor-pointer hover:text-slate-700" onClick={sortBtn('who')}>Кто{arw('who')}</th>
+                            <th className="px-5 py-2.5 cursor-pointer hover:text-slate-700" onClick={sortBtn('who')}>Сотрудник{arw('who')}</th>
                             <th className="px-5 py-2.5">Категория</th>
-                            <th className="px-5 py-2.5 cursor-pointer hover:text-slate-700" onClick={sortBtn('type')}>Тип работы{arw('type')}</th>
+                            {asmFullDetail && <th className="px-5 py-2.5">Поставщик</th>}
+                            <th className="px-5 py-2.5 cursor-pointer hover:text-slate-700" onClick={sortBtn('type')}>{asmFullDetail ? 'Тип/Кол-во' : 'Тип работы'}{arw('type')}</th>
+                            {asmFullDetail && <th className="px-5 py-2.5 text-right">Часы</th>}
+                            {asmFullDetail && <th className="px-5 py-2.5 text-right">Заработок</th>}
                             <th className="px-5 py-2.5 text-right cursor-pointer hover:text-slate-700" onClick={sortBtn('qty')}>Количество{arw('qty')}</th>
                           </tr>
                         );
@@ -752,7 +769,10 @@ export function AdminPanel(props: AdminPanelProps) {
                         <tr key={`asmd-${i}`} className="hover:bg-slate-50">
                           <td className="px-5 py-2.5 font-medium text-slate-800">{r.who}</td>
                           <td className="px-5 py-2.5"><span className={`text-xs px-2 py-0.5 rounded-full ${r.kind === 'Временный' ? 'bg-amber-100 text-amber-700' : 'bg-indigo-100 text-indigo-700'}`}>{r.kind}</span></td>
-                          <td className="px-5 py-2.5 text-slate-600">{r.type}</td>
+                          {asmFullDetail && <td className="px-5 py-2.5 text-slate-600">{r.supplier}</td>}
+                          <td className="px-5 py-2.5 text-slate-600">{asmFullDetail ? `${r.type} ${r.qty}` : r.type}</td>
+                          {asmFullDetail && <td className="px-5 py-2.5 text-right text-slate-600">{r.hours ? `${r.hours} ч.` : '—'}</td>}
+                          {asmFullDetail && <td className="px-5 py-2.5 text-right font-semibold text-green-600">{r.earnings ? `${r.earnings.toLocaleString('ru-RU')} ₽` : '—'}</td>}
                           <td className="px-5 py-2.5 text-right font-bold text-slate-900">{r.qty.toLocaleString('ru-RU')}</td>
                         </tr>
                       ))}

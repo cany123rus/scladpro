@@ -2727,22 +2727,26 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     let tempData: any[] = []; let staffData: any[] = [];
     try {
       const [tr, sr] = await Promise.all([
-        supabase.from('temporary_workers_logs').select('date, quantity, work_comment').is('deleted_at', null).gte('date', start).lte('date', end),
-        supabase.from('work_logs').select('date, quantity, work_rates(name)').is('deleted_at', null).gte('date', start).lte('date', end),
+        supabase.from('temporary_workers_logs').select('date, quantity, work_comment, supplier_id').is('deleted_at', null).gte('date', start).lte('date', end),
+        supabase.from('work_logs').select('date, quantity, supplier_id, work_rates(name)').is('deleted_at', null).gte('date', start).lte('date', end),
       ]);
       tempData = tr.data || []; staffData = sr.data || [];
     } catch { /* ignore */ }
     const days = new Map<string, { temp: number; staff: number }>();
+    const sup = new Map<string, { temp: number; staff: number }>();
     const sD = new Date(start + 'T00:00:00'); const eD = new Date(end + 'T00:00:00');
     for (let d = new Date(sD); d <= eD; d.setDate(d.getDate() + 1)) days.set(d.toISOString().slice(0, 10), { temp: 0, staff: 0 });
-    tempData.forEach((r: any) => { const dk = String(r.date || '').slice(0, 10); if (days.has(dk) && isAssemblyTempType(r.work_comment)) days.get(dk)!.temp += Number(r.quantity || 0); });
-    staffData.forEach((r: any) => { const dk = String(r.date || '').slice(0, 10); if (!days.has(dk) || isAssemblyExcludedStaffRate(r.work_rates?.name)) return; days.get(dk)!.staff += Number(r.quantity || 0); });
+    tempData.forEach((r: any) => { const dk = String(r.date || '').slice(0, 10); if (days.has(dk) && isAssemblyTempType(r.work_comment)) { const q = Number(r.quantity || 0); days.get(dk)!.temp += q; const sk = String(r.supplier_id || ''); const e = sup.get(sk) || { temp: 0, staff: 0 }; e.temp += q; sup.set(sk, e); } });
+    staffData.forEach((r: any) => { const dk = String(r.date || '').slice(0, 10); if (!days.has(dk) || isAssemblyExcludedStaffRate(r.work_rates?.name)) return; const q = Number(r.quantity || 0); days.get(dk)!.staff += q; const sk = String(r.supplier_id || ''); const e = sup.get(sk) || { temp: 0, staff: 0 }; e.staff += q; sup.set(sk, e); });
     const aList = Array.from(days.entries());
-    return { aList, aMax: Math.max(1, ...aList.map(([, v]) => v.temp + v.staff)), aTotalTemp: aList.reduce((s, [, v]) => s + v.temp, 0), aTotalStaff: aList.reduce((s, [, v]) => s + v.staff, 0) };
+    const bySupplier = Array.from(sup.entries())
+      .map(([sid, v]) => ({ name: suppliers.find((s: any) => String(s.id) === sid)?.name || 'Без поставщика', temp: v.temp, staff: v.staff, total: v.temp + v.staff }))
+      .sort((a, b) => b.total - a.total);
+    return { aList, aMax: Math.max(1, ...aList.map(([, v]) => v.temp + v.staff)), aTotalTemp: aList.reduce((s, [, v]) => s + v.temp, 0), aTotalStaff: aList.reduce((s, [, v]) => s + v.staff, 0), bySupplier };
   };
 
   // Draw a modern assembly bar chart in a jsPDF doc; returns the y below it.
-  const drawAssemblyChartPdf = (doc: any, yStart: number, data: { aList: [string, { temp: number; staff: number }][]; aMax: number; aTotalTemp: number; aTotalStaff: number }) => {
+  const drawAssemblyChartPdf = (doc: any, yStart: number, data: { aList: [string, { temp: number; staff: number }][]; aMax: number; aTotalTemp: number; aTotalStaff: number; bySupplier?: { name: string; temp: number; staff: number; total: number }[] }) => {
     const pageW = doc.internal.pageSize.getWidth();
     const sf = (rgb: number[]) => doc.setFillColor(rgb[0], rgb[1], rgb[2]);
     const st = (rgb: number[]) => doc.setTextColor(rgb[0], rgb[1], rgb[2]);
@@ -2779,7 +2783,45 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     // Legend
     sf([99, 102, 241]); doc.rect(pageW - 64, top - 0.5, 2.2, 2.2, 'F'); st([100, 116, 139]); doc.setFontSize(6); doc.text('сотрудники', pageW - 61, top + 1.4);
     sf([16, 185, 129]); doc.rect(pageW - 34, top - 0.5, 2.2, 2.2, 'F'); doc.text('временные', pageW - 31, top + 1.4);
-    return bottom + 12;
+    let y = bottom + 12;
+    // Per-supplier breakdown
+    const bySup = (data.bySupplier || []).filter((s) => s.total > 0);
+    if (bySup.length) {
+      sf([124, 58, 237]); doc.roundedRect(10, y, pageW - 20, 6, 1.5, 1.5, 'F');
+      st([255, 255, 255]); doc.setFontSize(8.5); doc.text('Собрано по поставщикам', 13, y + 4);
+      y += 9;
+      st([100, 116, 139]); doc.setFontSize(6.5);
+      doc.text('Поставщик', 13, y); doc.text('сотр.', pageW - 70, y, { align: 'right' }); doc.text('врем.', pageW - 45, y, { align: 'right' }); doc.text('всего', pageW - 13, y, { align: 'right' });
+      y += 2; doc.setDrawColor(226, 232, 240); doc.setLineWidth(0.1); doc.line(12, y, pageW - 12, y); y += 3.5;
+      bySup.forEach((s) => {
+        if (y > doc.internal.pageSize.getHeight() - 12) { doc.addPage(); y = 16; }
+        st([51, 65, 85]); doc.setFontSize(7);
+        doc.text(String(s.name).slice(0, 50), 13, y);
+        doc.text(s.staff.toLocaleString('ru-RU'), pageW - 70, y, { align: 'right' });
+        doc.text(s.temp.toLocaleString('ru-RU'), pageW - 45, y, { align: 'right' });
+        st([15, 23, 42]); doc.text(s.total.toLocaleString('ru-RU'), pageW - 13, y, { align: 'right' });
+        y += 5;
+      });
+      y += 6;
+    }
+    return y;
+  };
+
+  // Build "Сборка по поставщикам" Excel rows for a date range.
+  const buildAssemblySupplierExcelRows = async (startStr?: string, endStr?: string) => {
+    const end = String(endStr || new Date().toISOString().slice(0, 10));
+    const startDef = new Date(); startDef.setDate(startDef.getDate() - 29);
+    const start = String(startStr || startDef.toISOString().slice(0, 10));
+    try {
+      const [tr, sr] = await Promise.all([
+        supabase.from('temporary_workers_logs').select('quantity, work_comment, supplier_id').is('deleted_at', null).gte('date', start).lte('date', end),
+        supabase.from('work_logs').select('quantity, supplier_id, work_rates(name)').is('deleted_at', null).gte('date', start).lte('date', end),
+      ]);
+      const smap = new Map<string, { staff: number; temp: number }>();
+      (tr.data || []).forEach((r: any) => { if (!isAssemblyTempType(r.work_comment)) return; const q = Number(r.quantity || 0); const sk = String(r.supplier_id || ''); const e = smap.get(sk) || { staff: 0, temp: 0 }; e.temp += q; smap.set(sk, e); });
+      (sr.data || []).forEach((r: any) => { if (isAssemblyExcludedStaffRate(r.work_rates?.name)) return; const q = Number(r.quantity || 0); const sk = String(r.supplier_id || ''); const e = smap.get(sk) || { staff: 0, temp: 0 }; e.staff += q; smap.set(sk, e); });
+      return Array.from(smap.entries()).map(([sid, v]) => ({ 'Поставщик': suppliers.find((s: any) => String(s.id) === sid)?.name || 'Без поставщика', 'Сотрудники': v.staff, 'Временные': v.temp, 'Всего собрано': v.staff + v.temp })).sort((a, b) => b['Всего собрано'] - a['Всего собрано']);
+    } catch { return []; }
   };
 
   const handleDownloadGeneralReportExcel = async () => {
@@ -2789,24 +2831,28 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       const cw = generalReportCwRows.map((r: any) => ({ 'Дата': xlsxDate(r.date), 'Сотрудник': r.employee_name || '-', 'Поставщик': r.supplier_name || '-', 'Вид работы': r.work_name || '-', 'Кол-во': Number(r.quantity || 0), 'Цена': Number(r.price || 0), 'Сумма': Number(r.total || 0) }));
       // Сборка по дням (за период отчёта или 30 дней)
       let asmRows: any[] = [];
+      let asmSupRows: any[] = [];
       try {
         const end = String(generalReportForm.end_date || new Date().toISOString().slice(0, 10));
         const startDef = new Date(); startDef.setDate(startDef.getDate() - 29);
         const start = String(generalReportForm.start_date || startDef.toISOString().slice(0, 10));
         const [tr, sr] = await Promise.all([
-          supabase.from('temporary_workers_logs').select('date, quantity, work_comment, worker_name').is('deleted_at', null).gte('date', start).lte('date', end),
-          supabase.from('work_logs').select('date, quantity, employee_id, work_rates(name)').is('deleted_at', null).gte('date', start).lte('date', end),
+          supabase.from('temporary_workers_logs').select('date, quantity, work_comment, worker_name, supplier_id').is('deleted_at', null).gte('date', start).lte('date', end),
+          supabase.from('work_logs').select('date, quantity, employee_id, supplier_id, work_rates(name)').is('deleted_at', null).gte('date', start).lte('date', end),
         ]);
         const dmap = new Map<string, { staff: number; temp: number }>();
-        (tr.data || []).forEach((r: any) => { if (!isAssemblyTempType(r.work_comment)) return; const dk = String(r.date).slice(0, 10); const d = dmap.get(dk) || { staff: 0, temp: 0 }; d.temp += Number(r.quantity || 0); dmap.set(dk, d); });
-        (sr.data || []).forEach((r: any) => { if (isAssemblyExcludedStaffRate(r.work_rates?.name)) return; const dk = String(r.date).slice(0, 10); const d = dmap.get(dk) || { staff: 0, temp: 0 }; d.staff += Number(r.quantity || 0); dmap.set(dk, d); });
+        const smap = new Map<string, { staff: number; temp: number }>();
+        (tr.data || []).forEach((r: any) => { if (!isAssemblyTempType(r.work_comment)) return; const q = Number(r.quantity || 0); const dk = String(r.date).slice(0, 10); const d = dmap.get(dk) || { staff: 0, temp: 0 }; d.temp += q; dmap.set(dk, d); const sk = String(r.supplier_id || ''); const e = smap.get(sk) || { staff: 0, temp: 0 }; e.temp += q; smap.set(sk, e); });
+        (sr.data || []).forEach((r: any) => { if (isAssemblyExcludedStaffRate(r.work_rates?.name)) return; const q = Number(r.quantity || 0); const dk = String(r.date).slice(0, 10); const d = dmap.get(dk) || { staff: 0, temp: 0 }; d.staff += q; dmap.set(dk, d); const sk = String(r.supplier_id || ''); const e = smap.get(sk) || { staff: 0, temp: 0 }; e.staff += q; smap.set(sk, e); });
         asmRows = Array.from(dmap.entries()).sort((a, b) => a[0].localeCompare(b[0])).map(([dk, v]) => ({ 'Дата': xlsxDate(dk), 'Сотрудники': v.staff, 'Временные (ФБО/ФБС)': v.temp, 'Всего собрано': v.staff + v.temp }));
+        asmSupRows = Array.from(smap.entries()).map(([sid, v]) => ({ 'Поставщик': suppliers.find((s: any) => String(s.id) === sid)?.name || 'Без поставщика', 'Сотрудники': v.staff, 'Временные': v.temp, 'Всего собрано': v.staff + v.temp })).sort((a, b) => b['Всего собрано'] - a['Всего собрано']);
       } catch { /* ignore */ }
       const sheets = [
         { name: 'ЗП временные', rows: temp.length ? temp : [{ 'Нет данных': '' }] },
         { name: 'Доставки', rows: delivery.length ? delivery : [{ 'Нет данных': '' }] },
         { name: 'Постоянные', rows: cw.length ? cw : [{ 'Нет данных': '' }] },
         { name: 'Сборка по дням', rows: asmRows.length ? asmRows : [{ 'Нет данных': '' }] },
+        { name: 'Сборка по поставщикам', rows: asmSupRows.length ? asmSupRows : [{ 'Нет данных': '' }] },
       ];
       await downloadWorkbook(`obschiy_otchet_${generalReportForm.start_date || 'start'}_${generalReportForm.end_date || 'end'}.xlsx`, sheets);
     } catch (e: any) {
@@ -2829,7 +2875,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const handleDownloadCwReportExcel = async () => {
     try {
       const rows = (cwReportResult || []).map((r: any) => ({ 'Дата': xlsxDate(r.date), 'Сотрудник': r.employee_name || '-', 'Поставщик': r.supplier_name || '-', 'Вид работы': r.work_name || '-', 'Кол-во': Number(r.quantity || 0), 'Цена': Number(r.price || 0), 'Сумма': Number(r.total || 0) }));
-      await downloadWorkbook(`otchet_postoyannye_${cwReportForm.start_date || 'start'}_${cwReportForm.end_date || 'end'}.xlsx`, [{ name: 'Постоянные', rows: rows.length ? rows : [{ 'Нет данных': '' }] }]);
+      const asmSup = await buildAssemblySupplierExcelRows(cwReportForm.start_date, cwReportForm.end_date);
+      await downloadWorkbook(`otchet_postoyannye_${cwReportForm.start_date || 'start'}_${cwReportForm.end_date || 'end'}.xlsx`, [
+        { name: 'Постоянные', rows: rows.length ? rows : [{ 'Нет данных': '' }] },
+        { name: 'Сборка по поставщикам', rows: asmSup.length ? asmSup : [{ 'Нет данных': '' }] },
+      ]);
     } catch (e: any) {
       showToast('Ошибка Excel: ' + (e?.message || 'неизвестно'), 'error');
     }
@@ -2841,7 +2891,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       tempWorkerReportGrouped.groups.forEach((g: any) => g.rows.forEach((r: any) => rows.push({
         'Поставщик': g.supplierName, 'Дата': xlsxDate(r.date), 'Сотрудник': r.worker_name || r.worker || 'Без имени', 'Тип работы': r.work_comment || r.comment || '-', 'Кол-во (собрано)': Number(r.quantity || 0), 'Часы': Number(r.hours || 0), 'Заработано': Number(r.earnings || 0), 'Факт оплаты': Number(r.paidAmount || 0), 'Кто оплатил': String(r.paidByText || '-').replace(/₽/g, 'руб.'), 'Не оплачено': Number(r.remainingAmount || 0),
       })));
-      await downloadWorkbook(`otchet_vremennye_${tempWorkerReportForm.start_date || 'start'}_${tempWorkerReportForm.end_date || 'end'}.xlsx`, [{ name: 'Временные', rows: rows.length ? rows : [{ 'Нет данных': '' }] }]);
+      const asmSup = await buildAssemblySupplierExcelRows(tempWorkerReportForm.start_date, tempWorkerReportForm.end_date);
+      await downloadWorkbook(`otchet_vremennye_${tempWorkerReportForm.start_date || 'start'}_${tempWorkerReportForm.end_date || 'end'}.xlsx`, [
+        { name: 'Временные', rows: rows.length ? rows : [{ 'Нет данных': '' }] },
+        { name: 'Сборка по поставщикам', rows: asmSup.length ? asmSup : [{ 'Нет данных': '' }] },
+      ]);
     } catch (e: any) {
       showToast('Ошибка Excel: ' + (e?.message || 'неизвестно'), 'error');
     }
