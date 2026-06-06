@@ -18815,9 +18815,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                   <div className="bg-yellow-50 rounded-xl p-4 sm:p-6 mb-6 border border-yellow-100">
                     <div className="flex flex-col sm:flex-row gap-4 text-left">
-                      <div className="w-full sm:w-36 aspect-square rounded-xl border border-yellow-100 bg-white overflow-hidden flex items-center justify-center shrink-0 shadow-sm">
+                      <div className="w-full sm:w-44 aspect-[3/4] rounded-xl border border-yellow-100 bg-white overflow-hidden flex items-center justify-center shrink-0 shadow-sm">
                         {scannedItem.photo_url ? (
-                          <img src={scannedItem.photo_url} alt={scannedItem.name} className="h-full w-full object-cover" />
+                          <img src={scannedItem.photo_url} alt={scannedItem.name} className="h-full w-full object-contain" />
                         ) : (
                           <Package className="h-10 w-10 text-yellow-300" />
                         )}
