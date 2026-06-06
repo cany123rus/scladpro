@@ -243,7 +243,7 @@ export function AdminPanel(props: AdminPanelProps) {
       try {
         const [tempRes, staffRes] = await Promise.all([
           supabase.from('temporary_workers_logs').select('date, quantity, work_comment, worker_name, supplier_id, hours, earnings').is('deleted_at', null).gte('date', asmFrom).lte('date', asmTo),
-          supabase.from('work_logs').select('date, quantity, employee_id, supplier_id, hours, earnings, work_rates(name)').is('deleted_at', null).gte('date', asmFrom).lte('date', asmTo),
+          supabase.from('work_logs').select('date, quantity, employee_id, supplier_id, work_rates(name)').is('deleted_at', null).gte('date', asmFrom).lte('date', asmTo),
         ]);
         if (cancelled) return;
         setAsmTempRows(Array.isArray(tempRes.data) ? tempRes.data : []);
