@@ -1194,6 +1194,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     earnings: '',
     hours: ''
   });
+  // Multi-line "add shift" model: several positions (different workers / goods /
+  // prices) added in one go. Each line: worker, type, qty×price OR hours×price.
+  const makeTempLine = () => ({ worker_name: '', work_comment: '', isTime: false, quantity: '', price: '', hours: '' });
+  const [tempWorkerLines, setTempWorkerLines] = useState<any[]>([makeTempLine()]);
+  const tempLineEarnings = (l: any) => l.isTime ? (Number(l.hours || 0) * Number(l.price || 0)) : (Number(l.quantity || 0) * Number(l.price || 0));
   const [tempWorkerEditForm, setTempWorkerEditForm] = useState({
     id: '',
     supplier_id: '',
@@ -3205,64 +3210,43 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
   const handleAddTempWorkerLog = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!tempWorkerForm.supplier_id || !tempWorkerForm.worker_name.trim() || !tempWorkerForm.earnings || !tempWorkerForm.hours) {
-        showToast('Заполните все обязательные поля (поставщик, дата, имя рабочего, часы, заработок)', 'error');
-        return;
+    if (!tempWorkerForm.supplier_id) { showToast('Выберите поставщика', 'error'); return; }
+    const createdBy = user?.id || currentEmployee?.id;
+    if (!createdBy) { showToast('Ошибка: не удалось определить пользователя', 'error'); return; }
+
+    // Build a payload per valid line (worker + non-zero earnings).
+    const payloads = tempWorkerLines
+      .map((l) => {
+        const earnings = tempLineEarnings(l);
+        return {
+          supplier_id: tempWorkerForm.supplier_id,
+          date: tempWorkerForm.date,
+          worker_name: String(l.worker_name || '').trim(),
+          work_comment: String(l.work_comment || '').trim(),
+          quantity: l.isTime ? 0 : Number(l.quantity || 0),
+          hours: l.isTime ? Number(l.hours || 0) : 0,
+          earnings,
+          created_by: createdBy,
+        };
+      })
+      .filter((p) => p.worker_name && p.earnings > 0);
+
+    if (!payloads.length) {
+      showToast('Заполните хотя бы одну строку: сотрудник, количество/часы и цена', 'error');
+      return;
     }
 
     try {
-        const createdBy = user?.id || currentEmployee?.id;
-        if (!createdBy) {
-            showToast('Ошибка: не удалось определить пользователя', 'error');
-            return;
-        }
-
-        const payload = {
-            supplier_id: tempWorkerForm.supplier_id,
-            date: tempWorkerForm.date,
-            worker_name: tempWorkerForm.worker_name.trim(),
-            work_comment: tempWorkerForm.work_comment.trim(),
-            quantity: Number(tempWorkerForm.quantity || 0),
-            earnings: parseFloat(tempWorkerForm.earnings),
-            hours: parseFloat(tempWorkerForm.hours),
-            created_by: createdBy
-        };
-
-        let { error } = await supabase.from('temporary_workers_logs').insert([payload]);
-
-        // Fallback for old schema (without worker_name/work_comment columns)
-        if (error && /column .* does not exist|schema cache/i.test(String(error.message || ''))) {
-            const fallbackPayload = {
-              supplier_id: payload.supplier_id,
-              date: payload.date,
-              earnings: payload.earnings,
-              hours: payload.hours,
-              created_by: payload.created_by,
-            };
-            const fallbackResult = await supabase.from('temporary_workers_logs').insert([fallbackPayload]);
-            error = fallbackResult.error || null;
-            if (!error) {
-              showToast('Смена добавлена, но БД пока без полей «Имя рабочего/Комментарий». Добавьте колонки в таблицу temporary_workers_logs.', 'info');
-            }
-        }
-
-        if (error) throw error;
-
-        showToast('Запись добавлена', 'success');
-        setShowTempWorkerModal(false);
-        setTempWorkerForm({
-            supplier_id: '',
-            date: new Date().toISOString().split('T')[0],
-            worker_name: '',
-            work_comment: '',
-            quantity: '',
-            earnings: '',
-            hours: ''
-        });
-        if (showTempWorkerHistory) fetchTempWorkerLogs();
+      const { error } = await supabase.from('temporary_workers_logs').insert(payloads);
+      if (error) throw error;
+      showToast(`Добавлено смен: ${payloads.length}`, 'success');
+      setShowTempWorkerModal(false);
+      setTempWorkerForm({ supplier_id: '', date: new Date().toISOString().split('T')[0], worker_name: '', work_comment: '', quantity: '', earnings: '', hours: '' });
+      setTempWorkerLines([makeTempLine()]);
+      if (showTempWorkerHistory) fetchTempWorkerLogs();
     } catch (error: any) {
-        console.error('Error adding temp worker log:', error);
-        showToast('Ошибка: ' + error.message, 'error');
+      console.error('Error adding temp worker log:', error);
+      showToast('Ошибка: ' + error.message, 'error');
     }
   };
 
@@ -28444,7 +28428,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           <span className="text-center">Доставка</span>
                       </button>
                       <button
-                          onClick={() => setShowTempWorkerModal(true)}
+                          onClick={() => { setTempWorkerLines([makeTempLine()]); setShowTempWorkerModal(true); }}
                           disabled={!hasAssemblyButtonAccess('temp_shift_add')}
                           className={`min-h-[44px] w-full 2xl:w-auto rounded-2xl bg-indigo-600 px-3.5 py-2 text-sm font-semibold leading-tight text-white shadow-sm transition-all hover:bg-indigo-700 hover:shadow-md inline-flex items-center justify-center gap-2 ${!hasAssemblyButtonAccess('temp_shift_add') ? 'opacity-50 cursor-not-allowed' : ''}`}
                       >
@@ -30664,8 +30648,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
           {/* Add Temp Worker Log Modal */}
           {showTempWorkerModal && (
-            <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm backdrop-blur-sm flex items-center justify-center z-[60] transition-opacity" onClick={() => setShowTempWorkerModal(false)}>
-              <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md transform transition-all scale-100" onClick={e => e.stopPropagation()}>
+            <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm backdrop-blur-sm flex items-center justify-center z-[60] p-3 transition-opacity" onClick={() => setShowTempWorkerModal(false)}>
+              <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-3xl max-h-[92vh] overflow-y-auto transform transition-all scale-100" onClick={e => e.stopPropagation()}>
                 <div className="flex justify-between items-center mb-6">
                     <h2 className="text-xl font-bold text-slate-900">Добавить смену</h2>
                     <button onClick={() => setShowTempWorkerModal(false)} className="text-slate-400 hover:text-slate-600 transition-colors">
@@ -30700,72 +30684,63 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             required
                         />
                     </div>
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1.5">Имя рабочего</label>
-                        <select
-                            value={tempWorkerForm.worker_name}
-                            onChange={e => setTempWorkerForm({...tempWorkerForm, worker_name: e.target.value})}
-                            className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 appearance-none transition-all"
-                            required
-                        >
-                            <option value="">Выберите сотрудника...</option>
-                            {tempWorkersList.map((n) => <option key={`tw-n-${n}`} value={n}>{n}</option>)}
-                        </select>
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1.5">Тип работы</label>
-                        <select
-                            value={tempWorkerForm.work_comment}
-                            onChange={e => setTempWorkerForm({...tempWorkerForm, work_comment: e.target.value})}
-                            className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
-                        >
-                            <option value="">Выберите тип работы…</option>
-                            {tempWorkerCommentTemplates.map((t, i) => (
-                              <option key={`tw-tpl-opt-${i}`} value={t}>{t}</option>
-                            ))}
-                        </select>
-                        {!tempWorkerCommentTemplates.length && (
-                          <p className="mt-1 text-xs text-slate-400">Добавьте типы работ кнопкой «+ Тип работы» в истории смен.</p>
-                        )}
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1.5">Количество (собрано)</label>
-                        <input
-                            type="number"
-                            min="0"
-                            value={tempWorkerForm.quantity}
-                            onChange={e => setTempWorkerForm({...tempWorkerForm, quantity: e.target.value})}
-                            className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
-                            placeholder="0"
-                        />
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1.5">Часы</label>
-                            <input
-                                type="number"
-                                step="0.5"
-                                value={tempWorkerForm.hours}
-                                onChange={e => setTempWorkerForm({...tempWorkerForm, hours: e.target.value})}
-                                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
-                                required
-                                placeholder="0"
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1.5">Заработок (₽)</label>
-                            <input
-                                type="number"
-                                value={tempWorkerForm.earnings}
-                                onChange={e => setTempWorkerForm({...tempWorkerForm, earnings: e.target.value})}
-                                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
-                                required
-                                placeholder="0"
-                            />
-                        </div>
+                    <div className="space-y-3">
+                      {tempWorkerLines.map((line, idx) => {
+                        const upd = (patch: any) => setTempWorkerLines((prev) => prev.map((x, i) => i === idx ? { ...x, ...patch } : x));
+                        const earn = tempLineEarnings(line);
+                        return (
+                          <div key={`tw-line-${idx}`} className="rounded-2xl border border-slate-200 bg-slate-50/60 p-3">
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="text-xs font-semibold text-slate-500">Позиция {idx + 1}</span>
+                              <div className="flex items-center gap-3">
+                                <label className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-600 cursor-pointer">
+                                  <input type="checkbox" checked={line.isTime} onChange={e => upd({ isTime: e.target.checked })} className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
+                                  Время (почасовая)
+                                </label>
+                                {tempWorkerLines.length > 1 && (
+                                  <button type="button" onClick={() => setTempWorkerLines((prev) => prev.filter((_, i) => i !== idx))} className="text-rose-500 hover:bg-rose-50 rounded-lg p-1"><Trash2 className="h-4 w-4" /></button>
+                                )}
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              <select value={line.worker_name} onChange={e => upd({ worker_name: e.target.value })} className="p-2.5 bg-white border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-500">
+                                <option value="">Сотрудник…</option>
+                                {tempWorkersList.map((n) => <option key={`twl-n-${idx}-${n}`} value={n}>{n}</option>)}
+                              </select>
+                              <select value={line.work_comment} onChange={e => upd({ work_comment: e.target.value })} className="p-2.5 bg-white border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-500">
+                                <option value="">Тип работы…</option>
+                                {tempWorkerCommentTemplates.map((t, i) => <option key={`twl-tpl-${idx}-${i}`} value={t}>{t}</option>)}
+                              </select>
+                            </div>
+                            <div className="grid grid-cols-3 gap-2 mt-2 items-end">
+                              {line.isTime ? (
+                                <>
+                                  <div><label className="block text-[11px] text-slate-500 mb-1">Часы</label><input type="number" step="0.5" min="0" value={line.hours} onChange={e => upd({ hours: e.target.value })} className="w-full p-2.5 bg-white border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-500" placeholder="0" /></div>
+                                  <div><label className="block text-[11px] text-slate-500 mb-1">Цена за час ₽</label><input type="number" min="0" value={line.price} onChange={e => upd({ price: e.target.value })} className="w-full p-2.5 bg-white border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-500" placeholder="0" /></div>
+                                </>
+                              ) : (
+                                <>
+                                  <div><label className="block text-[11px] text-slate-500 mb-1">Количество</label><input type="number" min="0" value={line.quantity} onChange={e => upd({ quantity: e.target.value })} className="w-full p-2.5 bg-white border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-500" placeholder="0" /></div>
+                                  <div><label className="block text-[11px] text-slate-500 mb-1">Цена сборки ₽</label><input type="number" min="0" value={line.price} onChange={e => upd({ price: e.target.value })} className="w-full p-2.5 bg-white border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-500" placeholder="0" /></div>
+                                </>
+                              )}
+                              <div><label className="block text-[11px] text-slate-500 mb-1">Заработок</label><div className="p-2.5 rounded-lg bg-emerald-50 text-emerald-700 font-bold text-sm text-center">{earn.toLocaleString('ru-RU')} ₽</div></div>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
 
-                    <div className="flex justify-end gap-3 mt-8">
+                    <button type="button" onClick={() => setTempWorkerLines((prev) => [...prev, makeTempLine()])} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-indigo-200 text-indigo-700 hover:bg-indigo-50 text-sm font-medium">
+                      <Plus className="h-4 w-4" /> Добавить
+                    </button>
+
+                    <div className="flex items-center justify-between rounded-xl bg-slate-900 px-4 py-3 text-white">
+                      <span className="text-sm text-slate-300">Итого заработок ({tempWorkerLines.length} поз.)</span>
+                      <span className="text-lg font-extrabold">{tempWorkerLines.reduce((s, l) => s + tempLineEarnings(l), 0).toLocaleString('ru-RU')} ₽</span>
+                    </div>
+
+                    <div className="flex justify-end gap-3 mt-4">
                         <button type="button" onClick={() => setShowTempWorkerModal(false)} className="px-5 py-2.5 text-slate-600 hover:bg-slate-100 rounded-xl font-medium transition-colors">Отмена</button>
                         <button type="submit" disabled={!hasAssemblyButtonAccess('temp_shift_add')} className={`px-5 py-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 font-medium shadow-lg shadow-indigo-200 transition-all ${!hasAssemblyButtonAccess('temp_shift_add') ? 'opacity-50 cursor-not-allowed' : ''}`}>Добавить</button>
                     </div>
