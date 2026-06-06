@@ -2490,14 +2490,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     ].filter(Boolean))).sort((a, b) => String(a).localeCompare(String(b), 'ru'))
   ), [tempWorkerReportWorkerOptions, deliveryCourierOptions, employees]);
 
-  const loadAssemblyDaily = async () => {
+  const loadAssemblyDaily = async (startStr?: string, endStr?: string) => {
     try {
       const since = new Date(); since.setDate(since.getDate() - 29);
-      const sinceStr = since.toISOString().slice(0, 10);
-      const [tempRes, staffRes] = await Promise.all([
-        supabase.from('temporary_workers_logs').select('date, quantity, work_comment, worker_name, supplier_id').is('deleted_at', null).gte('date', sinceStr),
-        supabase.from('work_logs').select('date, quantity, employee_id, supplier_id, work_rates(name)').is('deleted_at', null).gte('date', sinceStr),
-      ]);
+      const sinceStr = startStr || since.toISOString().slice(0, 10);
+      let tq = supabase.from('temporary_workers_logs').select('date, quantity, work_comment, worker_name, supplier_id').is('deleted_at', null).gte('date', sinceStr);
+      let sq = supabase.from('work_logs').select('date, quantity, employee_id, supplier_id, work_rates(name)').is('deleted_at', null).gte('date', sinceStr);
+      if (endStr) { tq = tq.lte('date', endStr); sq = sq.lte('date', endStr); }
+      const [tempRes, staffRes] = await Promise.all([tq, sq]);
       setAssemblyTempRows(Array.isArray(tempRes.data) ? tempRes.data : []);
       setAssemblyStaffRows(Array.isArray(staffRes.data) ? staffRes.data : []);
     } catch (e) {
@@ -2549,7 +2549,55 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     return { list, maxDay, totalTemp: list.reduce((s, [, v]) => s + v.temp, 0), totalStaff: list.reduce((s, [, v]) => s + v.staff, 0) };
   }, [assemblyTempRows, assemblyStaffRows, empNameById]);
 
-  useEffect(() => { if (showGeneralReportModal) loadAssemblyDaily(); }, [showGeneralReportModal]);
+  useEffect(() => { if (showGeneralReportModal) loadAssemblyDaily(generalReportForm.start_date, generalReportForm.end_date); }, [showGeneralReportModal, generalReportForm.start_date, generalReportForm.end_date]);
+
+  // Does an assembly row pass the general-report filters (supplier + person)?
+  const matchGeneralAsm = (kind: 'temp' | 'staff', r: any) => {
+    const sup = String(generalReportForm.supplier_id || 'all');
+    if (sup !== 'all' && String(r.supplier_id || '') !== sup) return false;
+    const person = String(generalReportForm.person_name || 'all');
+    if (person !== 'all') {
+      const name = kind === 'temp' ? String(r.worker_name || '') : (empNameById.get(String(r.employee_id)) || '');
+      if (name !== person) return false;
+    }
+    return true;
+  };
+
+  // Assembly daily/by-supplier filtered by the general-report form (date + supplier + person).
+  const generalAssembly = useMemo(() => {
+    const start = String(generalReportForm.start_date || '');
+    const end = String(generalReportForm.end_date || '');
+    const inRange = (dk: string) => (!start || dk >= start) && (!end || dk <= end);
+    const days = new Map<string, { temp: number; staff: number; people: Record<string, number> }>();
+    if (start && end) {
+      const sD = new Date(start + 'T00:00:00'); const eD = new Date(end + 'T00:00:00');
+      for (let d = new Date(sD); d <= eD; d.setDate(d.getDate() + 1)) days.set(d.toISOString().slice(0, 10), { temp: 0, staff: 0, people: {} });
+    }
+    const ensure = (dk: string) => { if (!days.has(dk)) days.set(dk, { temp: 0, staff: 0, people: {} }); return days.get(dk)!; };
+    const sup = new Map<string, { temp: number; staff: number }>();
+    (assemblyTempRows || []).forEach((r: any) => {
+      const dk = String(r.date || '').slice(0, 10);
+      if (!inRange(dk) || !isAssemblyTempType(r.work_comment) || !matchGeneralAsm('temp', r)) return;
+      const qty = Number(r.quantity || 0); if (qty <= 0) return;
+      const day = ensure(dk); day.temp += qty;
+      const nm = `${r.worker_name || 'Без имени'} (врем)`; day.people[nm] = (day.people[nm] || 0) + qty;
+      const sk = String(r.supplier_id || ''); const e = sup.get(sk) || { temp: 0, staff: 0 }; e.temp += qty; sup.set(sk, e);
+    });
+    (assemblyStaffRows || []).forEach((r: any) => {
+      const dk = String(r.date || '').slice(0, 10);
+      if (!inRange(dk) || isAssemblyExcludedStaffRate(r.work_rates?.name) || !matchGeneralAsm('staff', r)) return;
+      const qty = Number(r.quantity || 0); if (qty <= 0) return;
+      const day = ensure(dk); day.staff += qty;
+      const nm = empNameById.get(String(r.employee_id)) || 'Сотрудник'; day.people[nm] = (day.people[nm] || 0) + qty;
+      const sk = String(r.supplier_id || ''); const e = sup.get(sk) || { temp: 0, staff: 0 }; e.staff += qty; sup.set(sk, e);
+    });
+    const list = Array.from(days.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+    const maxDay = Math.max(1, ...list.map(([, v]) => v.temp + v.staff));
+    const bySupplier = Array.from(sup.entries())
+      .map(([sid, v]) => ({ supplierId: sid, name: suppliers.find((s: any) => String(s.id) === sid)?.name || 'Без поставщика', temp: v.temp, staff: v.staff, total: v.temp + v.staff }))
+      .sort((a, b) => b.total - a.total);
+    return { list, maxDay, totalTemp: list.reduce((s, [, v]) => s + v.temp, 0), totalStaff: list.reduce((s, [, v]) => s + v.staff, 0), bySupplier };
+  }, [assemblyTempRows, assemblyStaffRows, empNameById, suppliers, generalReportForm.start_date, generalReportForm.end_date, generalReportForm.supplier_id, generalReportForm.person_name]);
 
   // Assembled quantity per supplier (for the general report breakdown).
   const assemblyBySupplier = useMemo(() => {
@@ -2720,24 +2768,29 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const xlsxDate = (v: string) => v ? new Date(`${v}T12:00:00`).toLocaleDateString('ru-RU') : '-';
 
   // Fetch + aggregate assembled quantities per day (temp ФБО/ФБС + staff non-time/Пик).
-  const buildAssemblyDailyForPdf = async (startStr?: string, endStr?: string) => {
+  const buildAssemblyDailyForPdf = async (startStr?: string, endStr?: string, opts?: { supplierId?: string; personName?: string }) => {
     const end = String(endStr || new Date().toISOString().slice(0, 10));
     const startDef = new Date(); startDef.setDate(startDef.getDate() - 29);
     const start = String(startStr || startDef.toISOString().slice(0, 10));
+    const fSup = String(opts?.supplierId || 'all');
+    const fPerson = String(opts?.personName || 'all');
     let tempData: any[] = []; let staffData: any[] = [];
     try {
       const [tr, sr] = await Promise.all([
-        supabase.from('temporary_workers_logs').select('date, quantity, work_comment, supplier_id').is('deleted_at', null).gte('date', start).lte('date', end),
-        supabase.from('work_logs').select('date, quantity, supplier_id, work_rates(name)').is('deleted_at', null).gte('date', start).lte('date', end),
+        supabase.from('temporary_workers_logs').select('date, quantity, work_comment, supplier_id, worker_name').is('deleted_at', null).gte('date', start).lte('date', end),
+        supabase.from('work_logs').select('date, quantity, supplier_id, employee_id, work_rates(name)').is('deleted_at', null).gte('date', start).lte('date', end),
       ]);
       tempData = tr.data || []; staffData = sr.data || [];
     } catch { /* ignore */ }
+    const passSup = (r: any) => fSup === 'all' || String(r.supplier_id || '') === fSup;
+    const passTempPerson = (r: any) => fPerson === 'all' || String(r.worker_name || '') === fPerson;
+    const passStaffPerson = (r: any) => fPerson === 'all' || (empNameById.get(String(r.employee_id)) || '') === fPerson;
     const days = new Map<string, { temp: number; staff: number }>();
     const sup = new Map<string, { temp: number; staff: number }>();
     const sD = new Date(start + 'T00:00:00'); const eD = new Date(end + 'T00:00:00');
     for (let d = new Date(sD); d <= eD; d.setDate(d.getDate() + 1)) days.set(d.toISOString().slice(0, 10), { temp: 0, staff: 0 });
-    tempData.forEach((r: any) => { const dk = String(r.date || '').slice(0, 10); if (days.has(dk) && isAssemblyTempType(r.work_comment)) { const q = Number(r.quantity || 0); days.get(dk)!.temp += q; const sk = String(r.supplier_id || ''); const e = sup.get(sk) || { temp: 0, staff: 0 }; e.temp += q; sup.set(sk, e); } });
-    staffData.forEach((r: any) => { const dk = String(r.date || '').slice(0, 10); if (!days.has(dk) || isAssemblyExcludedStaffRate(r.work_rates?.name)) return; const q = Number(r.quantity || 0); days.get(dk)!.staff += q; const sk = String(r.supplier_id || ''); const e = sup.get(sk) || { temp: 0, staff: 0 }; e.staff += q; sup.set(sk, e); });
+    tempData.forEach((r: any) => { const dk = String(r.date || '').slice(0, 10); if (days.has(dk) && isAssemblyTempType(r.work_comment) && passSup(r) && passTempPerson(r)) { const q = Number(r.quantity || 0); days.get(dk)!.temp += q; const sk = String(r.supplier_id || ''); const e = sup.get(sk) || { temp: 0, staff: 0 }; e.temp += q; sup.set(sk, e); } });
+    staffData.forEach((r: any) => { const dk = String(r.date || '').slice(0, 10); if (!days.has(dk) || isAssemblyExcludedStaffRate(r.work_rates?.name) || !passSup(r) || !passStaffPerson(r)) return; const q = Number(r.quantity || 0); days.get(dk)!.staff += q; const sk = String(r.supplier_id || ''); const e = sup.get(sk) || { temp: 0, staff: 0 }; e.staff += q; sup.set(sk, e); });
     const aList = Array.from(days.entries());
     const bySupplier = Array.from(sup.entries())
       .map(([sid, v]) => ({ name: suppliers.find((s: any) => String(s.id) === sid)?.name || 'Без поставщика', temp: v.temp, staff: v.staff, total: v.temp + v.staff }))
@@ -2850,10 +2903,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           supabase.from('temporary_workers_logs').select('date, quantity, work_comment, worker_name, supplier_id').is('deleted_at', null).gte('date', start).lte('date', end),
           supabase.from('work_logs').select('date, quantity, employee_id, supplier_id, work_rates(name)').is('deleted_at', null).gte('date', start).lte('date', end),
         ]);
+        const fSup = String(generalReportForm.supplier_id || 'all');
+        const fPerson = String(generalReportForm.person_name || 'all');
+        const passSup = (r: any) => fSup === 'all' || String(r.supplier_id || '') === fSup;
         const dmap = new Map<string, { staff: number; temp: number }>();
         const smap = new Map<string, { staff: number; temp: number }>();
-        (tr.data || []).forEach((r: any) => { if (!isAssemblyTempType(r.work_comment)) return; const q = Number(r.quantity || 0); const dk = String(r.date).slice(0, 10); const d = dmap.get(dk) || { staff: 0, temp: 0 }; d.temp += q; dmap.set(dk, d); const sk = String(r.supplier_id || ''); const e = smap.get(sk) || { staff: 0, temp: 0 }; e.temp += q; smap.set(sk, e); });
-        (sr.data || []).forEach((r: any) => { if (isAssemblyExcludedStaffRate(r.work_rates?.name)) return; const q = Number(r.quantity || 0); const dk = String(r.date).slice(0, 10); const d = dmap.get(dk) || { staff: 0, temp: 0 }; d.staff += q; dmap.set(dk, d); const sk = String(r.supplier_id || ''); const e = smap.get(sk) || { staff: 0, temp: 0 }; e.staff += q; smap.set(sk, e); });
+        (tr.data || []).forEach((r: any) => { if (!isAssemblyTempType(r.work_comment) || !passSup(r) || (fPerson !== 'all' && String(r.worker_name || '') !== fPerson)) return; const q = Number(r.quantity || 0); const dk = String(r.date).slice(0, 10); const d = dmap.get(dk) || { staff: 0, temp: 0 }; d.temp += q; dmap.set(dk, d); const sk = String(r.supplier_id || ''); const e = smap.get(sk) || { staff: 0, temp: 0 }; e.temp += q; smap.set(sk, e); });
+        (sr.data || []).forEach((r: any) => { if (isAssemblyExcludedStaffRate(r.work_rates?.name) || !passSup(r) || (fPerson !== 'all' && (empNameById.get(String(r.employee_id)) || '') !== fPerson)) return; const q = Number(r.quantity || 0); const dk = String(r.date).slice(0, 10); const d = dmap.get(dk) || { staff: 0, temp: 0 }; d.staff += q; dmap.set(dk, d); const sk = String(r.supplier_id || ''); const e = smap.get(sk) || { staff: 0, temp: 0 }; e.staff += q; smap.set(sk, e); });
         asmRows = Array.from(dmap.entries()).sort((a, b) => a[0].localeCompare(b[0])).map(([dk, v]) => ({ 'Дата': xlsxDate(dk), 'Сотрудники': v.staff, 'Временные (ФБО/ФБС)': v.temp, 'Всего собрано': v.staff + v.temp }));
         asmSupRows = Array.from(smap.entries()).map(([sid, v]) => ({ 'Поставщик': suppliers.find((s: any) => String(s.id) === sid)?.name || 'Без поставщика', 'Сотрудники': v.staff, 'Временные': v.temp, 'Всего собрано': v.staff + v.temp })).sort((a, b) => b['Всего собрано'] - a['Всего собрано']);
       } catch { /* ignore */ }
@@ -3034,7 +3090,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       };
 
       // Assembly daily chart (report period or last 30 days)
-      const asmData = await buildAssemblyDailyForPdf(generalReportForm.start_date, generalReportForm.end_date);
+      const asmData = await buildAssemblyDailyForPdf(generalReportForm.start_date, generalReportForm.end_date, { supplierId: generalReportForm.supplier_id, personName: generalReportForm.person_name });
 
       // ── Assembly KPI box (собрано: временные / сотрудники / вместе в одном окне) ──
       const acY = 68; const acH = 16; const acX = 12; const acW = pageW - 24;
@@ -30348,30 +30404,30 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   <div className="grid grid-cols-3 gap-2">
                     <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 shadow-sm">
                       <div className="text-[11px] text-amber-700">Собрано — временные</div>
-                      <div className="text-lg font-bold text-amber-800">{assemblyDaily.totalTemp.toLocaleString('ru-RU')}</div>
+                      <div className="text-lg font-bold text-amber-800">{generalAssembly.totalTemp.toLocaleString('ru-RU')}</div>
                     </div>
                     <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-3 shadow-sm">
                       <div className="text-[11px] text-indigo-700">Собрано — сотрудники</div>
-                      <div className="text-lg font-bold text-indigo-800">{assemblyDaily.totalStaff.toLocaleString('ru-RU')}</div>
+                      <div className="text-lg font-bold text-indigo-800">{generalAssembly.totalStaff.toLocaleString('ru-RU')}</div>
                     </div>
                     <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 shadow-sm">
                       <div className="text-[11px] text-emerald-700">Собрано — вместе</div>
-                      <div className="text-lg font-bold text-emerald-800">{(assemblyDaily.totalTemp + assemblyDaily.totalStaff).toLocaleString('ru-RU')}</div>
+                      <div className="text-lg font-bold text-emerald-800">{(generalAssembly.totalTemp + generalAssembly.totalStaff).toLocaleString('ru-RU')}</div>
                     </div>
                   </div>
 
                   <div className="rounded-2xl border border-slate-200 bg-white p-4">
                     <div className="flex items-center justify-between mb-3">
-                      <h4 className="font-bold text-slate-900 text-sm">Собрано по дням (30 дней)</h4>
+                      <h4 className="font-bold text-slate-900 text-sm">Собрано по дням</h4>
                       <div className="flex items-center gap-3 text-xs">
                         <span className="inline-flex items-center gap-1.5 text-slate-500"><span className="h-2.5 w-2.5 rounded-sm bg-indigo-500" /> Сотрудники</span>
                         <span className="inline-flex items-center gap-1.5 text-slate-500"><span className="h-2.5 w-2.5 rounded-sm bg-emerald-500" /> Временные</span>
                       </div>
                     </div>
                     <div className="flex items-end gap-[3px] h-40 overflow-x-auto">
-                      {assemblyDaily.list.map(([dk, v]) => {
+                      {generalAssembly.list.map(([dk, v]) => {
                         const total = v.temp + v.staff;
-                        const h = Math.round((total / assemblyDaily.maxDay) * 130);
+                        const h = Math.round((total / generalAssembly.maxDay) * 130);
                         const staffH = total > 0 ? Math.round((v.staff / total) * h) : 0;
                         const tempH = h - staffH;
                         const people = Object.entries(v.people).sort((a, b) => b[1] - a[1]);
@@ -30391,11 +30447,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       })}
                     </div>
                     {/* Supplier breakdown under chart */}
-                    {assemblyBySupplier.length > 0 && (
+                    {generalAssembly.bySupplier.length > 0 && (
                       <div className="mt-4 border-t border-slate-100 pt-3">
                         <div className="text-xs font-semibold text-slate-500 mb-2">Собрано по поставщикам</div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                          {assemblyBySupplier.map((s) => (
+                          {generalAssembly.bySupplier.map((s) => (
                             <div key={`asm-sup-${s.supplierId}`} className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-1.5 text-sm">
                               <span className="text-slate-700 truncate">{s.name}</span>
                               <span className="font-semibold text-slate-900 shrink-0 ml-2">{s.total.toLocaleString('ru-RU')} <span className="text-[11px] text-slate-400">(с {s.staff} · в {s.temp})</span></span>
