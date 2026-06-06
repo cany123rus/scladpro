@@ -8451,6 +8451,16 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     await offlineFboIndexesWarmupRef.current[supplierId];
   }, []);
 
+  // Прогреваем индексы SKU/товаров заранее (при открытии поставки), чтобы первый
+  // скан не ждал ~4с построения индекса из wb_products_cache.
+  useEffect(() => {
+    const sid = currentSupply?.supplier_id;
+    if (!sid) return;
+    preloadOfflineFboIndexes(sid);
+    ensureWbModelNumbers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentSupply?.supplier_id]);
+
   const handleItemScan = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentSupply) return;
@@ -18816,11 +18826,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   <div className="bg-yellow-50 rounded-xl p-4 sm:p-6 mb-6 border border-yellow-100">
                     <div className="flex flex-col sm:flex-row gap-4 text-left">
                       {scannedItem.photo_url ? (
-                        <div className="w-full sm:w-72 rounded-xl border border-yellow-100 overflow-hidden shrink-0 shadow-sm">
+                        <div className="w-full sm:w-80 rounded-xl border border-yellow-100 overflow-hidden shrink-0 shadow-sm">
                           <img src={scannedItem.photo_url} alt={scannedItem.name} className="block h-auto w-full object-contain" />
                         </div>
                       ) : (
-                        <div className="w-full sm:w-72 aspect-[3/4] rounded-xl border border-yellow-100 bg-white overflow-hidden flex items-center justify-center shrink-0 shadow-sm">
+                        <div className="w-full sm:w-80 aspect-[3/4] rounded-xl border border-yellow-100 bg-white overflow-hidden flex items-center justify-center shrink-0 shadow-sm">
                           <Package className="h-10 w-10 text-yellow-300" />
                         </div>
                       )}
