@@ -27,6 +27,7 @@ import { mergeWarehouseUpdates, removeWarehouseShelfItem, upsertWarehouseShelfIt
 import { ensurePdfLibs, ensureExcel, ensureBwip, lazyLibs } from './dashboardLazyLibs';
 import { ExcelUploader, SuppliesFBOSection, WBProductsSection, ReportsSection, EmployeesSection, TelegramSettingsSection, DatamatrixCode } from './dashboardComponents';
 import { DashboardDatabaseTab } from './DashboardDatabaseTab';
+import { drawReportHeader, drawMetaLines, drawKpiChips, reportFooter, reportTableStyles } from './pdfReportKit';
 
 import { DASHBOARD_TAB_IDS, isDashboardTabId } from '../constants/dashboardTabs';
 import { getDefaultWarehouseOfflineUrl, getWarehouseOfflineUrl, isWarehouseOfflineEnabled, setWarehouseOfflineEnabled, setWarehouseOfflineUrl, warehouseOfflineClient, WarehouseOfflineSnapshot, WarehouseOfflineStatus } from '../lib/warehouseOffline';
@@ -1830,14 +1831,17 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
     const p = report?.payload || {};
     const lines = Array.isArray(p.lines) ? p.lines : [];
-    doc.setFontSize(14);
-    doc.text('Отчет о выплате ЗП', 14, 14);
-    doc.setFontSize(9);
-    doc.text(`Сотрудник: ${p.employee_name || '-'}`, 14, 21);
-    doc.text(`Период: ${report.period_start || '-'} — ${report.period_end || '-'}`, 14, 27);
-    doc.text(`Дата выплаты: ${report.created_at ? new Date(report.created_at).toLocaleString('ru-RU') : '-'}`, 14, 33);
-    doc.text(`Кто оплатил: ${p.paid_by || '-'}`, 14, 39);
-    doc.text(`Итого выплачено: ${money(report.amount)}`, 14, 45);
+    const hY = drawReportHeader(doc, {
+      title: 'Отчёт о выплате ЗП',
+      subtitle: 'СкладПро · выплата зарплаты',
+      rightLines: [
+        `Период: ${report.period_start || '-'} — ${report.period_end || '-'}`,
+        `Выплата: ${report.created_at ? new Date(report.created_at).toLocaleString('ru-RU') : '-'}`,
+      ],
+      accent: [16, 185, 129],
+    });
+    let mY = drawMetaLines(doc, hY + 4, [`Сотрудник: ${p.employee_name || '-'}`, `Кто оплатил: ${p.paid_by || '-'}`]);
+    mY = drawKpiChips(doc, mY, [{ label: 'Итого выплачено', value: money(report.amount), rgb: [16, 185, 129] }]);
 
     const body = lines.map((l: any) => [
       l?.date ? new Date(`${l.date}T12:00:00`).toLocaleDateString('ru-RU') : '-',
@@ -1847,14 +1851,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     ]);
 
     (lazyLibs.autoTable as any)(doc, {
-      startY: 51,
+      startY: mY,
       head: [['Дата', 'Работа', 'Кол-во / Часы', 'Сумма']],
       body,
-      styles: { font: 'Roboto', fontSize: 9, cellPadding: 2, overflow: 'linebreak' },
-      headStyles: { font: 'Roboto', fillColor: [15, 23, 42], textColor: 255, fontStyle: 'normal' },
-      bodyStyles: { font: 'Roboto', fontStyle: 'normal' },
-      alternateRowStyles: { fillColor: [250, 250, 250] },
-      margin: { left: 10, right: 10 },
+      ...reportTableStyles([16, 185, 129]),
+      didDrawPage: reportFooter(doc, 'СкладПро · отчёт о выплате ЗП'),
       columnStyles: { 0: { cellWidth: 30 }, 2: { cellWidth: 40, halign: 'right' }, 3: { cellWidth: 40, halign: 'right' } },
     });
 
@@ -2186,15 +2187,23 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           ? 'Не оплачено'
           : 'Все статусы оплаты';
 
-      doc.setFontSize(14);
-      doc.text('Отчет по доставкам', 14, 14);
-      doc.setFontSize(9);
-      doc.text('Период: ' + (deliveryReportForm.start_date || '-') + ' — ' + (deliveryReportForm.end_date || '-'), 14, 21);
-      doc.text('Поставщик: ' + supplierLabel, 14, 27);
-      doc.text('Доставщик: ' + courierLabel, 14, 33);
-      doc.text('Кто оплатил: ' + paidByLabel, 14, 39);
-      doc.text('Статус оплаты: ' + paidStatusLabel, 14, 45);
-      doc.text('Доставок: ' + deliveryReportGrouped.totalDeliveries + ' • Коробок: ' + deliveryReportGrouped.totalBoxes.toFixed(0) + ' • Паллет: ' + deliveryReportGrouped.totalPallets.toFixed(0) + ' • Сумма: ' + money(deliveryReportGrouped.totalAmount) + ' • Не оплачено: ' + money(deliveryReportGrouped.totalUnpaid), 14, 51);
+      const hY = drawReportHeader(doc, {
+        title: 'Отчёт по доставкам',
+        subtitle: 'СкладПро · логистика',
+        rightLines: [`Период: ${deliveryReportForm.start_date || '-'} — ${deliveryReportForm.end_date || '-'}`],
+        accent: [37, 99, 235],
+      });
+      let mY = drawMetaLines(doc, hY + 4, [
+        'Поставщик: ' + supplierLabel + '    •    Доставщик: ' + courierLabel,
+        'Кто оплатил: ' + paidByLabel + '    •    Статус: ' + paidStatusLabel,
+      ]);
+      mY = drawKpiChips(doc, mY, [
+        { label: 'Доставок', value: String(deliveryReportGrouped.totalDeliveries), rgb: [37, 99, 235] },
+        { label: 'Коробок', value: deliveryReportGrouped.totalBoxes.toFixed(0), rgb: [13, 148, 136] },
+        { label: 'Паллет', value: deliveryReportGrouped.totalPallets.toFixed(0), rgb: [124, 58, 237] },
+        { label: 'Сумма', value: money(deliveryReportGrouped.totalAmount), rgb: [15, 23, 42] },
+        { label: 'Не оплачено', value: money(deliveryReportGrouped.totalUnpaid), rgb: [225, 29, 72] },
+      ]);
 
       const body: any[] = [];
       deliveryReportGrouped.groups.forEach((group) => {
@@ -2215,14 +2224,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       });
 
       (lazyLibs.autoTable as any)(doc, {
-        startY: 57,
+        startY: mY,
         head: [['Дата', 'Доставщик', 'Коробки', 'Паллеты', 'Сумма поставщика', 'Сумма доставки', 'Статус', 'Кто оплатил']],
         body,
-        styles: { font: 'Roboto', fontSize: 8, cellPadding: 1.8, overflow: 'linebreak' },
-        headStyles: { font: 'Roboto', fillColor: [15, 23, 42], textColor: 255, fontStyle: 'normal' },
-        bodyStyles: { font: 'Roboto', fontStyle: 'normal' },
-        alternateRowStyles: { fillColor: [250, 250, 250] },
-        margin: { left: 10, right: 10 },
+        ...reportTableStyles([37, 99, 235]),
+        didDrawPage: reportFooter(doc, 'СкладПро · отчёт по доставкам'),
         columnStyles: {
           0: { cellWidth: 22 },
           1: { cellWidth: 38 },
@@ -2668,13 +2674,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
       // ── KPI chips ──────────────────────────────────────────────────
       const chips = [
-        { label: 'Временные', value: money(generalReportTotals.tempEarned), rgb: [79, 70, 229] },
-        { label: 'Доставки', value: money(generalReportTotals.deliveryAmount), rgb: [13, 148, 136] },
-        { label: 'Выполненная работа', value: money(generalReportTotals.cwAmount), rgb: [124, 58, 237] },
-        { label: 'ОБЩИЙ ИТОГ', value: money(generalReportTotals.totalAmount), rgb: [15, 23, 42] },
+        { label: 'ЗП временные', value: money(generalReportTotals.tempEarned), rgb: [16, 185, 129] },
+        { label: 'Доставки', value: money(generalReportTotals.deliveryAmount), rgb: [37, 99, 235] },
+        { label: 'Постоянные сотрудники', value: money(generalReportTotals.cwAmount), rgb: [79, 70, 229] },
+        { label: 'Не оплачено', value: money((generalReportTotals.tempRemaining || 0) + (generalReportTotals.deliveryUnpaid || 0)), rgb: [225, 29, 72] },
+        { label: 'Общий итог', value: money(generalReportTotals.totalAmount), rgb: [15, 23, 42] },
       ];
       const chipGap = 4;
-      const chipW = (pageW - 24 - chipGap * 3) / 4;
+      const chipW = (pageW - 24 - chipGap * (chips.length - 1)) / chips.length;
       let cx = 12;
       const chipY = 49;
       chips.forEach((c) => {
@@ -2721,7 +2728,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       };
 
       let y = 70;
-      y = drawBand(y, 'Отчёт по временным сотрудникам', [79, 70, 229]);
+      y = drawBand(y, 'ЗП временные', [16, 185, 129]);
       baseTable({
         startY: y,
         head: [['Дата', 'Сотрудник', 'Поставщик', 'Работа', 'Часы', 'Заработано', 'Кто оплатил', 'Не оплачено']],
@@ -2735,10 +2742,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           String(row.paidByText || '-').replace(/₽/g, 'руб.'),
           money(row.remainingAmount),
         ]),
-      }, y, [79, 70, 229]);
+      }, y, [16, 185, 129]);
       y = ((doc as any).lastAutoTable?.finalY || y) + 9;
 
-      y = drawBand(y, 'Отчёт по доставке', [13, 148, 136]);
+      y = drawBand(y, 'Доставки', [37, 99, 235]);
       baseTable({
         startY: y,
         head: [['Дата', 'Доставщик', 'Поставщик', 'Коробки', 'Сумма', 'Статус', 'Кто оплатил']],
@@ -2751,10 +2758,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           row.is_paid ? 'Оплачено' : 'Не оплачено',
           row.paidByText || '-',
         ]),
-      }, y, [13, 148, 136]);
+      }, y, [37, 99, 235]);
       y = ((doc as any).lastAutoTable?.finalY || y) + 9;
 
-      y = drawBand(y, 'Отчёт по выполненной работе', [124, 58, 237]);
+      y = drawBand(y, 'Постоянные сотрудники', [79, 70, 229]);
       baseTable({
         startY: y,
         head: [['Дата', 'Сотрудник', 'Поставщик', 'Вид работы', 'Кол-во', 'Цена', 'Сумма']],
@@ -2767,7 +2774,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           money(row.price),
           money(row.total),
         ]),
-      }, y, [124, 58, 237]);
+      }, y, [79, 70, 229]);
 
       const safeName = `obschiy_otchet_${generalReportForm.start_date || 'start'}_${generalReportForm.end_date || 'end'}`.replace(/[^a-zA-Z0-9_\-.]+/g, '_');
       doc.save(`${safeName}.pdf`);
@@ -2823,14 +2830,21 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         ? cwReportExcludedDates.map(dateRu).join(', ')
         : 'нет';
 
-      doc.setFontSize(14);
-      doc.text('Отчет по выполненной работе', 14, 14);
-      doc.setFontSize(9);
-      doc.text(`Период: ${dateRu(cwReportForm.start_date)} — ${dateRu(cwReportForm.end_date)}`, 14, 21);
-      doc.text(`Сотрудник: ${employeeLabel}`, 14, 27);
-      doc.text(`Поставщик: ${supplierLabel}`, 14, 33);
-      doc.text(`Исключенные даты: ${excludedLabel}`, 14, 39);
-      doc.text(`Записей: ${cwReportResult.length} • Кол-во: ${totalQuantity.toLocaleString('ru-RU')} • Итого: ${money(totalAmount)}`, 14, 45);
+      const hY = drawReportHeader(doc, {
+        title: 'Постоянные сотрудники',
+        subtitle: 'СкладПро · выполненная работа',
+        rightLines: [`Период: ${dateRu(cwReportForm.start_date)} — ${dateRu(cwReportForm.end_date)}`],
+        accent: [79, 70, 229],
+      });
+      let mY = drawMetaLines(doc, hY + 4, [
+        `Сотрудник: ${employeeLabel}    •    Поставщик: ${supplierLabel}`,
+        `Исключённые даты: ${excludedLabel}`,
+      ]);
+      mY = drawKpiChips(doc, mY, [
+        { label: 'Записей', value: String(cwReportResult.length), rgb: [37, 99, 235] },
+        { label: 'Кол-во', value: totalQuantity.toLocaleString('ru-RU'), rgb: [13, 148, 136] },
+        { label: 'Итого', value: money(totalAmount), rgb: [15, 23, 42] },
+      ]);
 
       const head = [
         'Дата',
@@ -2852,7 +2866,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       ]);
 
       (lazyLibs.autoTable as any)(doc, {
-        startY: 51,
+        startY: mY,
         head: [head],
         body,
         foot: [[
@@ -2862,12 +2876,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           '',
           money(totalAmount),
         ]],
-        styles: { font: 'Roboto', fontSize: 8, cellPadding: 1.8, overflow: 'linebreak' },
-        headStyles: { font: 'Roboto', fillColor: [79, 70, 229], textColor: 255, fontStyle: 'normal' },
-        footStyles: { font: 'Roboto', fillColor: [241, 245, 249], textColor: [15, 23, 42], fontStyle: 'normal' },
-        bodyStyles: { font: 'Roboto', fontStyle: 'normal' },
-        alternateRowStyles: { fillColor: [250, 250, 250] },
-        margin: { left: 10, right: 10 },
+        ...reportTableStyles([79, 70, 229]),
+        didDrawPage: reportFooter(doc, 'СкладПро · постоянные сотрудники'),
       });
 
       const safeName = `otchet_vypolnennaya_rabota_${cwReportForm.start_date || 'start'}_${cwReportForm.end_date || 'end'}`.replace(/[^a-zA-Z0-9_\-.]+/g, '_');
@@ -2919,15 +2929,22 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           ? 'Не оплачено'
           : 'Все статусы оплаты';
 
-      doc.setFontSize(14);
-      doc.text('Отчет о временном сотруднике', 14, 14);
-      doc.setFontSize(9);
-      doc.text(`Период: ${tempWorkerReportForm.start_date || '-'} — ${tempWorkerReportForm.end_date || '-'}`, 14, 21);
-      doc.text(`Поставщик работ: ${supplierLabel}`, 14, 27);
-      doc.text(`Временный сотрудник: ${workerLabel}`, 14, 33);
-      doc.text(`Кто оплатил: ${paidByLabel}`, 14, 39);
-      doc.text(`Статус оплаты: ${paidStatusLabel}`, 14, 45);
-      doc.text(`Работ: ${tempWorkerReportGrouped.totalRows} • Часы: ${tempWorkerReportGrouped.totalHours.toFixed(2)} • Заработано: ${money(tempWorkerReportGrouped.totalEarnings)} • Не оплачено: ${money(tempWorkerReportGrouped.totalRemaining)}`, 14, 51);
+      const hY = drawReportHeader(doc, {
+        title: 'ЗП временные',
+        subtitle: 'СкладПро · временные сотрудники',
+        rightLines: [`Период: ${tempWorkerReportForm.start_date || '-'} — ${tempWorkerReportForm.end_date || '-'}`],
+        accent: [16, 185, 129],
+      });
+      let mY = drawMetaLines(doc, hY + 4, [
+        `Поставщик работ: ${supplierLabel}    •    Сотрудник: ${workerLabel}`,
+        `Кто оплатил: ${paidByLabel}    •    Статус: ${paidStatusLabel}`,
+      ]);
+      mY = drawKpiChips(doc, mY, [
+        { label: 'Работ', value: String(tempWorkerReportGrouped.totalRows), rgb: [37, 99, 235] },
+        { label: 'Часы', value: tempWorkerReportGrouped.totalHours.toFixed(2), rgb: [13, 148, 136] },
+        { label: 'Заработано', value: money(tempWorkerReportGrouped.totalEarnings), rgb: [16, 185, 129] },
+        { label: 'Не оплачено', value: money(tempWorkerReportGrouped.totalRemaining), rgb: [225, 29, 72] },
+      ]);
 
       const body: any[] = [];
       tempWorkerReportGrouped.groups.forEach((group) => {
@@ -2947,14 +2964,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       });
 
       (lazyLibs.autoTable as any)(doc, {
-        startY: 57,
+        startY: mY,
         head: [['Дата', 'Сотрудник', 'Работа', 'Часы', 'Заработано', 'Факт оплаты', 'Кто оплатил', 'Не оплачено']],
         body,
-        styles: { font: 'Roboto', fontSize: 8, cellPadding: 1.8, overflow: 'linebreak' },
-        headStyles: { font: 'Roboto', fillColor: [15, 23, 42], textColor: 255, fontStyle: 'normal' },
-        bodyStyles: { font: 'Roboto', fontStyle: 'normal' },
-        alternateRowStyles: { fillColor: [250, 250, 250] },
-        margin: { left: 10, right: 10 },
+        ...reportTableStyles([16, 185, 129]),
+        didDrawPage: reportFooter(doc, 'СкладПро · ЗП временные'),
         columnStyles: {
           0: { cellWidth: 20 },
           1: { cellWidth: 32 },
