@@ -2626,6 +2626,57 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       + generalReportCwRows.reduce((sum: number, row: any) => sum + Number(row.total || 0), 0),
   }), [generalTempWorkerRows, generalDeliveryRows, generalReportCwRows]);
 
+  const xlsxDate = (v: string) => v ? new Date(`${v}T12:00:00`).toLocaleDateString('ru-RU') : '-';
+
+  const handleDownloadGeneralReportExcel = async () => {
+    try {
+      const temp = generalTempWorkerRows.map((r: any) => ({ 'Дата': xlsxDate(r.date), 'Сотрудник': r.worker_name || r.worker || 'Без имени', 'Поставщик': r.supplierName || '-', 'Работа': r.work_comment || r.comment || '-', 'Часы': Number(r.hours || 0), 'Заработано': Number(r.earnings || 0), 'Кто оплатил': String(r.paidByText || '-').replace(/₽/g, 'руб.'), 'Не оплачено': Number(r.remainingAmount || 0) }));
+      const delivery = generalDeliveryRows.map((r: any) => ({ 'Дата': xlsxDate(r.date), 'Доставщик': r.courier || '-', 'Поставщик': r.supplierName || '-', 'Коробки': Number(r.boxes || 0), 'Сумма': Number(r.amount || 0), 'Статус': r.is_paid ? 'Оплачено' : 'Не оплачено', 'Кто оплатил': r.paidByText || '-' }));
+      const cw = generalReportCwRows.map((r: any) => ({ 'Дата': xlsxDate(r.date), 'Сотрудник': r.employee_name || '-', 'Поставщик': r.supplier_name || '-', 'Вид работы': r.work_name || '-', 'Кол-во': Number(r.quantity || 0), 'Цена': Number(r.price || 0), 'Сумма': Number(r.total || 0) }));
+      const sheets = [
+        { name: 'ЗП временные', rows: temp.length ? temp : [{ 'Нет данных': '' }] },
+        { name: 'Доставки', rows: delivery.length ? delivery : [{ 'Нет данных': '' }] },
+        { name: 'Постоянные', rows: cw.length ? cw : [{ 'Нет данных': '' }] },
+      ];
+      await downloadWorkbook(`obschiy_otchet_${generalReportForm.start_date || 'start'}_${generalReportForm.end_date || 'end'}.xlsx`, sheets);
+    } catch (e: any) {
+      showToast('Ошибка Excel: ' + (e?.message || 'неизвестно'), 'error');
+    }
+  };
+
+  const handleDownloadDeliveryReportExcel = async () => {
+    try {
+      const rows: any[] = [];
+      deliveryReportGrouped.groups.forEach((g: any) => g.rows.forEach((r: any) => rows.push({
+        'Поставщик': g.supplierName, 'Дата': xlsxDate(r.date), 'Доставщик': r.courier || '-', 'Коробки': Number(r.boxes || 0), 'Паллеты': Number(r.pallets || 0), 'Сумма поставщика': Number(r.amount || 0), 'Сумма доставки': Number(r.totalDeliveryAmount || 0), 'Статус': r.is_paid ? 'Оплачено' : 'Не оплачено', 'Кто оплатил': String(r.paidByText || '-').replace(/₽/g, 'руб.'),
+      })));
+      await downloadWorkbook(`otchet_dostavki_${deliveryReportForm.start_date || 'start'}_${deliveryReportForm.end_date || 'end'}.xlsx`, [{ name: 'Доставки', rows: rows.length ? rows : [{ 'Нет данных': '' }] }]);
+    } catch (e: any) {
+      showToast('Ошибка Excel: ' + (e?.message || 'неизвестно'), 'error');
+    }
+  };
+
+  const handleDownloadCwReportExcel = async () => {
+    try {
+      const rows = (cwReportResult || []).map((r: any) => ({ 'Дата': xlsxDate(r.date), 'Сотрудник': r.employee_name || '-', 'Поставщик': r.supplier_name || '-', 'Вид работы': r.work_name || '-', 'Кол-во': Number(r.quantity || 0), 'Цена': Number(r.price || 0), 'Сумма': Number(r.total || 0) }));
+      await downloadWorkbook(`otchet_postoyannye_${cwReportForm.start_date || 'start'}_${cwReportForm.end_date || 'end'}.xlsx`, [{ name: 'Постоянные', rows: rows.length ? rows : [{ 'Нет данных': '' }] }]);
+    } catch (e: any) {
+      showToast('Ошибка Excel: ' + (e?.message || 'неизвестно'), 'error');
+    }
+  };
+
+  const handleDownloadTempWorkerReportExcel = async () => {
+    try {
+      const rows: any[] = [];
+      tempWorkerReportGrouped.groups.forEach((g: any) => g.rows.forEach((r: any) => rows.push({
+        'Поставщик': g.supplierName, 'Дата': xlsxDate(r.date), 'Сотрудник': r.worker_name || r.worker || 'Без имени', 'Работа': r.work_comment || r.comment || '-', 'Часы': Number(r.hours || 0), 'Заработано': Number(r.earnings || 0), 'Факт оплаты': Number(r.paidAmount || 0), 'Кто оплатил': String(r.paidByText || '-').replace(/₽/g, 'руб.'), 'Не оплачено': Number(r.remainingAmount || 0),
+      })));
+      await downloadWorkbook(`otchet_vremennye_${tempWorkerReportForm.start_date || 'start'}_${tempWorkerReportForm.end_date || 'end'}.xlsx`, [{ name: 'Временные', rows: rows.length ? rows : [{ 'Нет данных': '' }] }]);
+    } catch (e: any) {
+      showToast('Ошибка Excel: ' + (e?.message || 'неизвестно'), 'error');
+    }
+  };
+
   const handleDownloadGeneralReportPdf = async () => {
     await ensurePdfLibs();
     try {
@@ -27201,12 +27252,20 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       </button>
 
                       {cwReportResult && cwReportResult.length > 0 && (
+                        <>
                         <button
                           onClick={handleDownloadCwReportPdf}
-                          className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 flex items-center gap-2"
+                          className="px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 flex items-center gap-2"
                         >
                           <Download className="h-4 w-4" /> PDF
                         </button>
+                        <button
+                          onClick={handleDownloadCwReportExcel}
+                          className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 flex items-center gap-2"
+                        >
+                          <FileSpreadsheet className="h-4 w-4" /> Excel
+                        </button>
+                        </>
                       )}
 
                       {cwReportResult && cwReportResult.length > 0 && (
@@ -29550,14 +29609,22 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           className="oc-input h-11 rounded-xl bg-white text-sm"
                         />
                       </label>
-                      <div className="flex items-end">
+                      <div className="flex items-end gap-2">
                         <button
                           type="button"
                           onClick={handleDownloadDeliveryReportPdf}
-                          className="h-11 w-full px-4 rounded-xl bg-slate-900 text-white hover:bg-slate-800 inline-flex items-center justify-center gap-2 whitespace-nowrap shadow-sm"
+                          className="h-11 flex-1 px-4 rounded-xl bg-slate-900 text-white hover:bg-slate-800 inline-flex items-center justify-center gap-2 whitespace-nowrap shadow-sm"
                         >
                           <Download className="h-4 w-4" />
                           PDF
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleDownloadDeliveryReportExcel}
+                          className="h-11 flex-1 px-4 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 inline-flex items-center justify-center gap-2 whitespace-nowrap shadow-sm"
+                        >
+                          <FileSpreadsheet className="h-4 w-4" />
+                          Excel
                         </button>
                       </div>
                     </div>
@@ -29844,9 +29911,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Дата по</span>
                         <input type="date" value={generalReportForm.end_date} onChange={(e) => setGeneralReportForm(prev => ({ ...prev, end_date: e.target.value }))} className="oc-input h-11 rounded-xl bg-white text-sm" />
                       </label>
-                      <div className="flex items-end">
-                        <button type="button" onClick={handleDownloadGeneralReportPdf} className="h-11 w-full px-4 rounded-xl bg-slate-900 text-white hover:bg-slate-800 inline-flex items-center justify-center gap-2 whitespace-nowrap shadow-sm">
+                      <div className="flex items-end gap-2">
+                        <button type="button" onClick={handleDownloadGeneralReportPdf} className="h-11 flex-1 px-4 rounded-xl bg-slate-900 text-white hover:bg-slate-800 inline-flex items-center justify-center gap-2 whitespace-nowrap shadow-sm">
                           <Download className="h-4 w-4" /> PDF
+                        </button>
+                        <button type="button" onClick={handleDownloadGeneralReportExcel} className="h-11 flex-1 px-4 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 inline-flex items-center justify-center gap-2 whitespace-nowrap shadow-sm">
+                          <FileSpreadsheet className="h-4 w-4" /> Excel
                         </button>
                       </div>
                     </div>
@@ -30070,14 +30140,22 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           className="oc-input h-11 rounded-xl bg-white text-sm"
                         />
                       </label>
-                      <div className="flex items-end">
+                      <div className="flex items-end gap-2">
                         <button
                           type="button"
                           onClick={handleDownloadTempWorkerReportPdf}
-                          className="h-11 w-full px-4 rounded-xl bg-slate-900 text-white hover:bg-slate-800 inline-flex items-center justify-center gap-2 whitespace-nowrap shadow-sm"
+                          className="h-11 flex-1 px-4 rounded-xl bg-slate-900 text-white hover:bg-slate-800 inline-flex items-center justify-center gap-2 whitespace-nowrap shadow-sm"
                         >
                           <Download className="h-4 w-4" />
                           PDF
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleDownloadTempWorkerReportExcel}
+                          className="h-11 flex-1 px-4 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 inline-flex items-center justify-center gap-2 whitespace-nowrap shadow-sm"
+                        >
+                          <FileSpreadsheet className="h-4 w-4" />
+                          Excel
                         </button>
                       </div>
                     </div>
