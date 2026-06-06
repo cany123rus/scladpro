@@ -224,29 +224,35 @@ export function AdminPanel(props: AdminPanelProps) {
   }, [financeRows]);
 
   // ── Assembly (сборка) daily quantities: temp (ФБО/ФБС) + staff ────
-  const [asmLoaded, setAsmLoaded] = useState(false);
+  const isoDay = (d: Date) => d.toISOString().slice(0, 10);
+  const [asmFrom, setAsmFrom] = useState(() => { const d = new Date(); d.setDate(d.getDate() - 29); return isoDay(d); });
+  const [asmTo, setAsmTo] = useState(() => isoDay(new Date()));
+  const [asmLoading, setAsmLoading] = useState(false);
   const [asmTempRows, setAsmTempRows] = useState<any[]>([]);
   const [asmStaffRows, setAsmStaffRows] = useState<any[]>([]);
+  const [asmSelectedDay, setAsmSelectedDay] = useState<string>('');
 
   useEffect(() => {
-    if (section !== 'assembly' || asmLoaded) return;
+    if (section !== 'assembly') return;
+    let cancelled = false;
     (async () => {
+      setAsmLoading(true);
       try {
-        const since = new Date(); since.setDate(since.getDate() - 29);
-        const sinceStr = since.toISOString().slice(0, 10);
         const [tempRes, staffRes] = await Promise.all([
-          supabase.from('temporary_workers_logs').select('date, quantity, work_comment, worker_name').is('deleted_at', null).gte('date', sinceStr),
-          supabase.from('work_logs').select('date, quantity, employee_id, work_rates(name)').is('deleted_at', null).gte('date', sinceStr),
+          supabase.from('temporary_workers_logs').select('date, quantity, work_comment, worker_name').is('deleted_at', null).gte('date', asmFrom).lte('date', asmTo),
+          supabase.from('work_logs').select('date, quantity, employee_id, work_rates(name)').is('deleted_at', null).gte('date', asmFrom).lte('date', asmTo),
         ]);
+        if (cancelled) return;
         setAsmTempRows(Array.isArray(tempRes.data) ? tempRes.data : []);
         setAsmStaffRows(Array.isArray(staffRes.data) ? staffRes.data : []);
       } catch (e: any) {
-        notify('Ошибка загрузки сборки: ' + (e?.message || 'неизвестно'), 'error');
+        if (!cancelled) notify('Ошибка загрузки сборки: ' + (e?.message || 'неизвестно'), 'error');
       } finally {
-        setAsmLoaded(true);
+        if (!cancelled) setAsmLoading(false);
       }
     })();
-  }, [section, asmLoaded]);
+    return () => { cancelled = true; };
+  }, [section, asmFrom, asmTo]);
 
   const empNameById = useMemo(() => {
     const m = new Map<string, string>();
@@ -256,9 +262,10 @@ export function AdminPanel(props: AdminPanelProps) {
 
   const assembly = useMemo(() => {
     const days = new Map<string, { temp: number; staff: number; people: Record<string, number> }>();
-    for (let i = 29; i >= 0; i--) {
-      const d = new Date(); d.setDate(d.getDate() - i);
-      days.set(d.toISOString().slice(0, 10), { temp: 0, staff: 0, people: {} });
+    const startD = new Date(asmFrom + 'T00:00:00');
+    const endD = new Date(asmTo + 'T00:00:00');
+    for (let d = new Date(startD); d <= endD; d.setDate(d.getDate() + 1)) {
+      days.set(isoDay(d), { temp: 0, staff: 0, people: {} });
     }
     asmTempRows.forEach((r) => {
       const dk = String(r.date || '').slice(0, 10);
@@ -281,7 +288,24 @@ export function AdminPanel(props: AdminPanelProps) {
     const totalTemp = list.reduce((s, [, v]) => s + v.temp, 0);
     const totalStaff = list.reduce((s, [, v]) => s + v.staff, 0);
     return { list, maxDay, totalTemp, totalStaff };
-  }, [asmTempRows, asmStaffRows, empNameById]);
+  }, [asmTempRows, asmStaffRows, empNameById, asmFrom, asmTo]);
+
+  const asmDayDetail = useMemo(() => {
+    if (!asmSelectedDay) return null;
+    const rows: Array<{ who: string; kind: string; type: string; qty: number }> = [];
+    asmTempRows.forEach((r) => {
+      if (String(r.date || '').slice(0, 10) !== asmSelectedDay || !isAssemblyTempType(r.work_comment)) return;
+      const qty = Number(r.quantity || 0); if (qty <= 0) return;
+      rows.push({ who: r.worker_name || 'Без имени', kind: 'Временный', type: String(r.work_comment || ''), qty });
+    });
+    asmStaffRows.forEach((r) => {
+      if (String(r.date || '').slice(0, 10) !== asmSelectedDay || isAssemblyExcludedStaffRate(r.work_rates?.name)) return;
+      const qty = Number(r.quantity || 0); if (qty <= 0) return;
+      rows.push({ who: empNameById.get(String(r.employee_id)) || 'Сотрудник', kind: 'Сотрудник', type: String(r.work_rates?.name || ''), qty });
+    });
+    rows.sort((a, b) => b.qty - a.qty);
+    return { rows, total: rows.reduce((s, r) => s + r.qty, 0) };
+  }, [asmSelectedDay, asmTempRows, asmStaffRows, empNameById]);
 
   const staffEmployees = useMemo(() => (employees || []).filter((e) => !isAdminEmp(e)), [employees]);
   const allSections = useMemo(() => sectionGroups.flatMap((g) => g.items), [sectionGroups]);
@@ -620,28 +644,43 @@ export function AdminPanel(props: AdminPanelProps) {
 
       {/* ASSEMBLY */}
       {section === 'assembly' && (
-        !asmLoaded ? (
-          <div className="oc-card p-6 text-center text-slate-400">Загрузка…</div>
-        ) : (
           <div className="space-y-5">
+            {/* Range picker */}
+            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm flex flex-wrap items-end gap-3">
+              <div>
+                <label className="block text-xs font-medium text-slate-500 mb-1">Период с</label>
+                <input type="date" value={asmFrom} onChange={(e) => { setAsmFrom(e.target.value); setAsmSelectedDay(''); }} className="oc-input h-10" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-500 mb-1">по</label>
+                <input type="date" value={asmTo} onChange={(e) => { setAsmTo(e.target.value); setAsmSelectedDay(''); }} className="oc-input h-10" />
+              </div>
+              <div className="flex gap-2">
+                {[7, 30, 90].map((n) => (
+                  <button key={n} onClick={() => { const d = new Date(); d.setDate(d.getDate() - (n - 1)); setAsmFrom(isoDay(d)); setAsmTo(isoDay(new Date())); setAsmSelectedDay(''); }} className="px-3 py-2 rounded-lg border border-slate-200 text-xs text-slate-600 hover:bg-slate-50">{n} дн.</button>
+                ))}
+              </div>
+              {asmLoading && <span className="text-xs text-slate-400">Загрузка…</span>}
+            </div>
+
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                <div className="text-xs font-medium text-slate-500 flex items-center gap-1"><Box className="h-3.5 w-3.5 text-amber-500" /> Временные (ФБО/ФБС), 30 дн.</div>
+                <div className="text-xs font-medium text-slate-500 flex items-center gap-1"><Box className="h-3.5 w-3.5 text-amber-500" /> Временные (ФБО/ФБС)</div>
                 <div className="text-2xl font-extrabold text-amber-600 mt-1">{assembly.totalTemp.toLocaleString('ru-RU')}</div>
               </div>
               <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                <div className="text-xs font-medium text-slate-500 flex items-center gap-1"><Box className="h-3.5 w-3.5 text-indigo-500" /> Сотрудники, 30 дн.</div>
+                <div className="text-xs font-medium text-slate-500 flex items-center gap-1"><Box className="h-3.5 w-3.5 text-indigo-500" /> Сотрудники</div>
                 <div className="text-2xl font-extrabold text-indigo-600 mt-1">{assembly.totalStaff.toLocaleString('ru-RU')}</div>
               </div>
               <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                <div className="text-xs font-medium text-slate-500">Всего собрано, 30 дн.</div>
+                <div className="text-xs font-medium text-slate-500">Всего собрано за период</div>
                 <div className="text-2xl font-extrabold text-slate-900 mt-1">{(assembly.totalTemp + assembly.totalStaff).toLocaleString('ru-RU')}</div>
               </div>
             </div>
 
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="font-bold text-slate-900">Собрано по дням (последние 30 дней)</h3>
+                <h3 className="font-bold text-slate-900">Собрано по дням <span className="text-xs font-normal text-slate-400">(нажмите на день для детализации)</span></h3>
                 <div className="flex items-center gap-3 text-xs">
                   <span className="inline-flex items-center gap-1.5 text-slate-500"><span className="h-2.5 w-2.5 rounded-sm bg-indigo-500" /> Сотрудники</span>
                   <span className="inline-flex items-center gap-1.5 text-slate-500"><span className="h-2.5 w-2.5 rounded-sm bg-amber-400" /> Временные</span>
@@ -657,8 +696,9 @@ export function AdminPanel(props: AdminPanelProps) {
                   const people = Object.entries(v.people).sort((a, b) => b[1] - a[1]);
                   const dLabel = new Date(dk + 'T12:00:00').toLocaleDateString('ru-RU');
                   const title = `${dLabel}\nВсего: ${total} (сотрудники ${v.staff}, временные ${v.temp})` + (people.length ? '\n\nКто собрал:\n' + people.map(([n, q]) => `• ${n}: ${q}`).join('\n') : '\nНет сборки');
+                  const selected = asmSelectedDay === dk;
                   return (
-                    <div key={dk} className="flex-1 min-w-[14px] flex flex-col items-center gap-1 rounded-md px-0.5 hover:bg-indigo-50/70 transition-colors cursor-default" title={title}>
+                    <button type="button" key={dk} onClick={() => setAsmSelectedDay(selected ? '' : dk)} className={`flex-1 min-w-[14px] flex flex-col items-center gap-1 rounded-md px-0.5 transition-colors cursor-pointer ${selected ? 'bg-indigo-100 ring-1 ring-indigo-300' : 'hover:bg-indigo-50/70'}`} title={title}>
                       <div className="w-full flex flex-col justify-end h-[190px]">
                         {total > 0 && (
                           <>
@@ -667,15 +707,43 @@ export function AdminPanel(props: AdminPanelProps) {
                           </>
                         )}
                       </div>
-                      <span className="text-[9px] text-slate-400">{dd}</span>
-                    </div>
+                      <span className={`text-[9px] ${selected ? 'text-indigo-700 font-bold' : 'text-slate-400'}`}>{dd}</span>
+                    </button>
                   );
                 })}
               </div>
-              <p className="mt-3 text-[11px] text-slate-400">Временные: типы работ с «ФБО»/«ФБС». Сотрудники: все типы работ кроме повременных. Количество берётся из поля «Количество» смен и из работ сотрудников.</p>
+              <p className="mt-3 text-[11px] text-slate-400">Временные: типы работ с «ФБО»/«ФБС». Сотрудники: все типы работ кроме повременных, ПИК и возвратов. Данные привязаны к дате смены/работы.</p>
             </div>
+
+            {/* Day detail */}
+            {asmSelectedDay && asmDayDetail && (
+              <div className="rounded-2xl border border-indigo-200 bg-white shadow-sm overflow-hidden">
+                <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+                  <h3 className="font-bold text-slate-900">Детализация за {new Date(asmSelectedDay + 'T12:00:00').toLocaleDateString('ru-RU')}</h3>
+                  <span className="text-sm text-slate-500">Всего собрано: <b className="text-slate-900">{asmDayDetail.total.toLocaleString('ru-RU')}</b></span>
+                </div>
+                {asmDayDetail.rows.length === 0 ? (
+                  <div className="px-5 py-8 text-center text-slate-400 text-sm">В этот день сборки не было</div>
+                ) : (
+                  <table className="w-full text-left text-sm">
+                    <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
+                      <tr><th className="px-5 py-2.5">Кто</th><th className="px-5 py-2.5">Категория</th><th className="px-5 py-2.5">Тип работы</th><th className="px-5 py-2.5 text-right">Количество</th></tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {asmDayDetail.rows.map((r, i) => (
+                        <tr key={`asmd-${i}`} className="hover:bg-slate-50">
+                          <td className="px-5 py-2.5 font-medium text-slate-800">{r.who}</td>
+                          <td className="px-5 py-2.5"><span className={`text-xs px-2 py-0.5 rounded-full ${r.kind === 'Временный' ? 'bg-amber-100 text-amber-700' : 'bg-indigo-100 text-indigo-700'}`}>{r.kind}</span></td>
+                          <td className="px-5 py-2.5 text-slate-600">{r.type}</td>
+                          <td className="px-5 py-2.5 text-right font-bold text-slate-900">{r.qty.toLocaleString('ru-RU')}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            )}
           </div>
-        )
       )}
 
       {/* BOTS */}

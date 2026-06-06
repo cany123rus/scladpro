@@ -2692,10 +2692,26 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       const temp = generalTempWorkerRows.map((r: any) => ({ 'Дата': xlsxDate(r.date), 'Сотрудник': r.worker_name || r.worker || 'Без имени', 'Поставщик': r.supplierName || '-', 'Тип работы': r.work_comment || r.comment || '-', 'Кол-во': Number(r.quantity || 0), 'Часы': Number(r.hours || 0), 'Заработано': Number(r.earnings || 0), 'Кто оплатил': String(r.paidByText || '-').replace(/₽/g, 'руб.'), 'Не оплачено': Number(r.remainingAmount || 0) }));
       const delivery = generalDeliveryRows.map((r: any) => ({ 'Дата': xlsxDate(r.date), 'Доставщик': r.courier || '-', 'Поставщик': r.supplierName || '-', 'Коробки': Number(r.boxes || 0), 'Сумма': Number(r.amount || 0), 'Статус': r.is_paid ? 'Оплачено' : 'Не оплачено', 'Кто оплатил': r.paidByText || '-' }));
       const cw = generalReportCwRows.map((r: any) => ({ 'Дата': xlsxDate(r.date), 'Сотрудник': r.employee_name || '-', 'Поставщик': r.supplier_name || '-', 'Вид работы': r.work_name || '-', 'Кол-во': Number(r.quantity || 0), 'Цена': Number(r.price || 0), 'Сумма': Number(r.total || 0) }));
+      // Сборка по дням (за период отчёта или 30 дней)
+      let asmRows: any[] = [];
+      try {
+        const end = String(generalReportForm.end_date || new Date().toISOString().slice(0, 10));
+        const startDef = new Date(); startDef.setDate(startDef.getDate() - 29);
+        const start = String(generalReportForm.start_date || startDef.toISOString().slice(0, 10));
+        const [tr, sr] = await Promise.all([
+          supabase.from('temporary_workers_logs').select('date, quantity, work_comment, worker_name').is('deleted_at', null).gte('date', start).lte('date', end),
+          supabase.from('work_logs').select('date, quantity, employee_id, work_rates(name)').is('deleted_at', null).gte('date', start).lte('date', end),
+        ]);
+        const dmap = new Map<string, { staff: number; temp: number }>();
+        (tr.data || []).forEach((r: any) => { if (!isAssemblyTempType(r.work_comment)) return; const dk = String(r.date).slice(0, 10); const d = dmap.get(dk) || { staff: 0, temp: 0 }; d.temp += Number(r.quantity || 0); dmap.set(dk, d); });
+        (sr.data || []).forEach((r: any) => { if (isAssemblyExcludedStaffRate(r.work_rates?.name)) return; const dk = String(r.date).slice(0, 10); const d = dmap.get(dk) || { staff: 0, temp: 0 }; d.staff += Number(r.quantity || 0); dmap.set(dk, d); });
+        asmRows = Array.from(dmap.entries()).sort((a, b) => a[0].localeCompare(b[0])).map(([dk, v]) => ({ 'Дата': xlsxDate(dk), 'Сотрудники': v.staff, 'Временные (ФБО/ФБС)': v.temp, 'Всего собрано': v.staff + v.temp }));
+      } catch { /* ignore */ }
       const sheets = [
         { name: 'ЗП временные', rows: temp.length ? temp : [{ 'Нет данных': '' }] },
         { name: 'Доставки', rows: delivery.length ? delivery : [{ 'Нет данных': '' }] },
         { name: 'Постоянные', rows: cw.length ? cw : [{ 'Нет данных': '' }] },
+        { name: 'Сборка по дням', rows: asmRows.length ? asmRows : [{ 'Нет данных': '' }] },
       ];
       await downloadWorkbook(`obschiy_otchet_${generalReportForm.start_date || 'start'}_${generalReportForm.end_date || 'end'}.xlsx`, sheets);
     } catch (e: any) {
