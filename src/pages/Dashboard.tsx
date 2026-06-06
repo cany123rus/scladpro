@@ -24603,14 +24603,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 <div className="flex flex-col gap-4 sm:flex-row sm:justify-between sm:items-center">
                 <div className="flex items-center gap-3">
                   <h1 className="text-xl sm:text-2xl font-extrabold text-white tracking-tight">Выполненная работа</h1>
-                  {(!currentEmployee || normalizeRoleKey(currentEmployee.role || currentEmployee.login) === 'admin') && (
-                    <button
-                      onClick={() => setShowAssemblyAccessModal(true)}
-                      className="px-3 py-1.5 text-xs rounded-lg border border-white/20 text-indigo-100 bg-white/10 hover:bg-white/20 transition-colors"
-                    >
-                      Права кнопок
-                    </button>
-                  )}
                 </div>
                 <div className="grid w-full grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:w-auto 2xl:grid-cols-8 gap-2 bg-white/10 p-1.5 rounded-xl border border-white/15 backdrop-blur-sm">
                   {hasAssemblyButtonAccess('cw_tab_calendar') && (
