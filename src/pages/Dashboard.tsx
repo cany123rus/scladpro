@@ -1223,6 +1223,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [paymentReportsSearch, setPaymentReportsSearch] = useState('');
   const [paymentReportsFrom, setPaymentReportsFrom] = useState('');
   const [paymentReportsTo, setPaymentReportsTo] = useState('');
+  const [assemblyTempRows, setAssemblyTempRows] = useState<any[]>([]);
+  const [assemblyStaffRows, setAssemblyStaffRows] = useState<any[]>([]);
   const [paymentReportToDelete, setPaymentReportToDelete] = useState<any | null>(null);
   const [paymentReportDeleting, setPaymentReportDeleting] = useState(false);
   const [deliverySupplierFilter, setDeliverySupplierFilter] = useState('all');
@@ -2481,6 +2483,44 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     ].filter(Boolean))).sort((a, b) => String(a).localeCompare(String(b), 'ru'))
   ), [tempWorkerReportWorkerOptions, deliveryCourierOptions, employees]);
 
+  const loadAssemblyDaily = async () => {
+    try {
+      const since = new Date(); since.setDate(since.getDate() - 29);
+      const sinceStr = since.toISOString().slice(0, 10);
+      const [tempRes, staffRes] = await Promise.all([
+        supabase.from('temporary_workers_logs').select('date, quantity, work_comment').is('deleted_at', null).gte('date', sinceStr),
+        supabase.from('work_logs').select('date, quantity, work_rates(name)').is('deleted_at', null).gte('date', sinceStr),
+      ]);
+      setAssemblyTempRows(Array.isArray(tempRes.data) ? tempRes.data : []);
+      setAssemblyStaffRows(Array.isArray(staffRes.data) ? staffRes.data : []);
+    } catch (e) {
+      console.warn('loadAssemblyDaily failed', e);
+    }
+  };
+
+  const assemblyDaily = useMemo(() => {
+    const days = new Map<string, { temp: number; staff: number }>();
+    for (let i = 29; i >= 0; i--) {
+      const d = new Date(); d.setDate(d.getDate() - i);
+      days.set(d.toISOString().slice(0, 10), { temp: 0, staff: 0 });
+    }
+    (assemblyTempRows || []).forEach((r: any) => {
+      const dk = String(r.date || '').slice(0, 10);
+      const wc = String(r.work_comment || '').toLowerCase();
+      if (days.has(dk) && (wc.includes('фбо') || wc.includes('фбс'))) days.get(dk)!.temp += Number(r.quantity || 0);
+    });
+    (assemblyStaffRows || []).forEach((r: any) => {
+      const dk = String(r.date || '').slice(0, 10);
+      const rate = String(r.work_rates?.name || '').toLowerCase();
+      if (!days.has(dk)) return;
+      if (rate.includes('врем') || rate.includes('час') || rate.includes('time')) return;
+      days.get(dk)!.staff += Number(r.quantity || 0);
+    });
+    const list = Array.from(days.entries());
+    const maxDay = Math.max(1, ...list.map(([, v]) => v.temp + v.staff));
+    return { list, maxDay, totalTemp: list.reduce((s, [, v]) => s + v.temp, 0), totalStaff: list.reduce((s, [, v]) => s + v.staff, 0) };
+  }, [assemblyTempRows, assemblyStaffRows]);
+
   const generalTempWorkerRows = useMemo(() => {
     const start = String(generalReportForm.start_date || '');
     const end = String(generalReportForm.end_date || '');
@@ -2804,7 +2844,48 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         return y + 9;
       };
 
+      // Assembly daily chart (last 30 days): staff + temp (ФБО/ФБС)
+      let asmTemp: any[] = []; let asmStaff: any[] = [];
+      try {
+        const since = new Date(); since.setDate(since.getDate() - 29);
+        const s = since.toISOString().slice(0, 10);
+        const [tr, sr] = await Promise.all([
+          supabase.from('temporary_workers_logs').select('date, quantity, work_comment').is('deleted_at', null).gte('date', s),
+          supabase.from('work_logs').select('date, quantity, work_rates(name)').is('deleted_at', null).gte('date', s),
+        ]);
+        asmTemp = tr.data || []; asmStaff = sr.data || [];
+      } catch { /* ignore */ }
+      const aDays = new Map<string, { temp: number; staff: number }>();
+      for (let i = 29; i >= 0; i--) { const d = new Date(); d.setDate(d.getDate() - i); aDays.set(d.toISOString().slice(0, 10), { temp: 0, staff: 0 }); }
+      asmTemp.forEach((r: any) => { const dk = String(r.date || '').slice(0, 10); const wc = String(r.work_comment || '').toLowerCase(); if (aDays.has(dk) && (wc.includes('фбо') || wc.includes('фбс'))) aDays.get(dk)!.temp += Number(r.quantity || 0); });
+      asmStaff.forEach((r: any) => { const dk = String(r.date || '').slice(0, 10); const rate = String(r.work_rates?.name || '').toLowerCase(); if (!aDays.has(dk)) return; if (rate.includes('врем') || rate.includes('час') || rate.includes('time')) return; aDays.get(dk)!.staff += Number(r.quantity || 0); });
+      const aList = Array.from(aDays.entries());
+      const aMax = Math.max(1, ...aList.map(([, v]) => v.temp + v.staff));
+      const aTotalTemp = aList.reduce((s, [, v]) => s + v.temp, 0);
+      const aTotalStaff = aList.reduce((s, [, v]) => s + v.staff, 0);
+
       let y = 70;
+      y = drawBand(y, `Сборка по дням (30 дней) — сотрудники: ${aTotalStaff.toLocaleString('ru-RU')}, временные: ${aTotalTemp.toLocaleString('ru-RU')}`, [124, 58, 237]);
+      const chartTop = y + 1;
+      const chartH = 28;
+      const chartBottom = chartTop + chartH;
+      const innerW = pageW - 24;
+      const bw = innerW / aList.length;
+      aList.forEach(([dk, v], i) => {
+        const total = v.temp + v.staff;
+        const barH = (total / aMax) * chartH;
+        const staffH = total > 0 ? (v.staff / total) * barH : 0;
+        const tempH = barH - staffH;
+        const bx = 12 + i * bw;
+        const iw = Math.max(1.2, bw - 1);
+        setFill([79, 70, 229]); doc.rect(bx, chartBottom - staffH, iw, staffH, 'F');
+        setFill([245, 158, 11]); doc.rect(bx, chartBottom - staffH - tempH, iw, tempH, 'F');
+        if (i % 5 === 0) { setText([148, 163, 184]); doc.setFontSize(5); doc.text(dk.slice(8, 10) + '.' + dk.slice(5, 7), bx, chartBottom + 3); }
+      });
+      setText([79, 70, 229]); doc.setFontSize(6); doc.text('■ сотрудники', pageW - 60, chartTop + 2);
+      setText([245, 158, 11]); doc.text('■ временные', pageW - 35, chartTop + 2);
+      y = chartBottom + 8;
+
       y = drawBand(y, 'ЗП временные', [16, 185, 129]);
       baseTable({
         startY: y,
@@ -15781,7 +15862,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
   useEffect(() => {
     // Lazy-load data by active tab to reduce startup memory/load spikes.
-    if (activeTab === 'reports') fetchReportsData();
+    if (activeTab === 'reports') { fetchReportsData(); loadAssemblyDaily(); }
     if (activeTab === 'employees' || activeTab === 'warehouse' || activeTab === 'admin') fetchEmployees();
     if (activeTab === 'employees') loadPaymentReports();
     if (activeTab === 'reception') fetchReceptions();
@@ -23301,6 +23382,39 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         {reportTotals.avgPriceInStock.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽
                       </div>
                       <p className="text-xs text-slate-400 mt-1">За все время · все поставщики</p>
+                    </div>
+                  </div>
+
+                  {/* Assembly daily chart */}
+                  <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-2">
+                        <div className="p-2 bg-amber-50 rounded-xl"><Box className="h-5 w-5 text-amber-600" /></div>
+                        <h3 className="text-lg font-bold text-slate-900">Собрано по дням (30 дней)</h3>
+                      </div>
+                      <div className="flex items-center gap-3 text-xs">
+                        <span className="inline-flex items-center gap-1.5 text-slate-500"><span className="h-2.5 w-2.5 rounded-sm bg-indigo-500" /> Сотрудники: <b className="text-slate-700">{assemblyDaily.totalStaff.toLocaleString('ru-RU')}</b></span>
+                        <span className="inline-flex items-center gap-1.5 text-slate-500"><span className="h-2.5 w-2.5 rounded-sm bg-amber-400" /> Временные: <b className="text-slate-700">{assemblyDaily.totalTemp.toLocaleString('ru-RU')}</b></span>
+                      </div>
+                    </div>
+                    <div className="flex items-end gap-[3px] h-56 pt-4 overflow-x-auto">
+                      {assemblyDaily.list.map(([dk, v]) => {
+                        const total = v.temp + v.staff;
+                        const h = Math.round((total / assemblyDaily.maxDay) * 190);
+                        const staffH = total > 0 ? Math.round((v.staff / total) * h) : 0;
+                        const tempH = h - staffH;
+                        return (
+                          <div key={`asm-${dk}`} className="flex-1 min-w-[14px] flex flex-col items-center gap-1" title={`${dk}\nСотрудники: ${v.staff}\nВременные: ${v.temp}\nВсего: ${total}`}>
+                            <div className="w-full flex flex-col justify-end h-[190px]">
+                              {total > 0 && (<>
+                                <div className="w-full bg-amber-400 rounded-t-sm" style={{ height: `${tempH}px` }} />
+                                <div className="w-full bg-indigo-500" style={{ height: `${staffH}px` }} />
+                              </>)}
+                            </div>
+                            <span className="text-[9px] text-slate-400">{dk.slice(8, 10)}</span>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
 
