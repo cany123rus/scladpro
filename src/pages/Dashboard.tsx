@@ -15723,6 +15723,24 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   });
 
   const [wbDragState, setWbDragState] = useState<any>(null);
+  const PREVIEW_BASE_W = 737;
+  const PREVIEW_BASE_H = 510;
+  const [wbPreviewScale, setWbPreviewScale] = useState(1);
+  const wbPreviewScaleRef = useRef(1);
+  const wbPreviewWrapRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { wbPreviewScaleRef.current = wbPreviewScale; }, [wbPreviewScale]);
+  useEffect(() => {
+    const el = wbPreviewWrapRef.current;
+    if (!el) return;
+    const update = () => {
+      const w = el.clientWidth || PREVIEW_BASE_W;
+      setWbPreviewScale(Math.min(1, w / PREVIEW_BASE_W));
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [activeTab]);
   const PREVIEW_SCALE_X = 737 / 58;
   const PREVIEW_SCALE_Y = 510 / 40;
   const PT_TO_MM = 0.3528;
@@ -15818,8 +15836,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     if (!wbDragState) return;
 
     const onMove = (e: MouseEvent) => {
-      const dx = e.clientX - wbDragState.startX;
-      const dy = e.clientY - wbDragState.startY;
+      const s = wbPreviewScaleRef.current || 1;
+      const dx = (e.clientX - wbDragState.startX) / s;
+      const dy = (e.clientY - wbDragState.startY) / s;
 
       setWbLayoutEditor((prev: any) => {
         const group = prev[wbDragState.layout];
@@ -19261,6 +19280,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   <h3 className="font-bold text-slate-900 mb-1">Предпросмотр 58×40 (XPrinter 420B)</h3>
                   <p className="text-xs text-slate-500 mb-3">В реальном времени: двигаешь ползунки слева, и сразу меняются размеры блоков во всех макетах.</p>
 
+                  <div ref={wbPreviewWrapRef} className="w-full overflow-hidden" style={{ height: PREVIEW_BASE_H * wbPreviewScale }}>
+                  <div className="origin-top-left" style={{ width: PREVIEW_BASE_W, height: PREVIEW_BASE_H, transform: `scale(${wbPreviewScale})` }}>
                   <div className="space-y-4">
                     <div className={wbLayoutTemplate === 'withChz' ? '' : 'hidden'}>
                       <div className="wb-preview-frame mx-auto rounded-2xl p-3 w-[737px] h-[510px] max-w-full bg-white relative overflow-hidden ring-1 ring-slate-200 shadow-[0_14px_40px_-16px_rgba(15,23,42,0.35)]">
@@ -19371,6 +19392,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         </div>
                       </div>
                     </div>
+                  </div>
+                  </div>
                   </div>
                 </div>
               </div>
