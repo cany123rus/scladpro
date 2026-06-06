@@ -23,43 +23,9 @@ import { telegramService } from '../services/telegram.service';
 import { useWarehousePersistence } from '../hooks/useWarehousePersistence';
 import { downloadJsonRowsAsExcel, ensureExcelFileSize, ensureExcelRowLimit, ensureRequiredColumns, readFirstSheetAsJson } from '../utils/safeExcel';
 import { mergeWarehouseUpdates, removeWarehouseShelfItem, upsertWarehouseShelfItem } from '../utils/warehouseActions';
+import { ensurePdfLibs, ensureExcel, ensureBwip, lazyLibs } from './dashboardLazyLibs';
+import { ExcelUploader, SuppliesFBOSection, WBProductsSection, ReportsSection, EmployeesSection, TelegramSettingsSection, DatamatrixCode } from './dashboardComponents';
 
-// Lazy-loaded heavy libraries — pulled in only when a PDF/Excel action runs,
-// keeping them out of the initial dashboard chunk.
-let jsPDF: any = null;
-let autoTable: any = null;
-let ExcelJS: any = null;
-let _pdfLibsPromise: Promise<void> | null = null;
-let _excelPromise: Promise<void> | null = null;
-const ensurePdfLibs = () => {
-  if (!_pdfLibsPromise) {
-    _pdfLibsPromise = Promise.all([import('jspdf'), import('jspdf-autotable')]).then(([p, a]) => {
-      jsPDF = (p as any).jsPDF;
-      autoTable = (a as any).default;
-    });
-  }
-  return _pdfLibsPromise;
-};
-const ensureExcel = () => {
-  if (!_excelPromise) {
-    _excelPromise = import('exceljs/dist/exceljs.min.js').then((m) => {
-      ExcelJS = (m as any).default;
-    });
-  }
-  return _excelPromise;
-};
-// bwip-js (DataMatrix/barcode renderer) is heavy; load it on demand instead of
-// bundling it into the initial dashboard chunk.
-let bwipjs: any = null;
-let _bwipPromise: Promise<void> | null = null;
-const ensureBwip = () => {
-  if (!_bwipPromise) {
-    _bwipPromise = import('bwip-js').then((m) => {
-      bwipjs = (m as any).default || m;
-    });
-  }
-  return _bwipPromise;
-};
 import { DASHBOARD_TAB_IDS, isDashboardTabId } from '../constants/dashboardTabs';
 import { getDefaultWarehouseOfflineUrl, getWarehouseOfflineUrl, isWarehouseOfflineEnabled, setWarehouseOfflineEnabled, setWarehouseOfflineUrl, warehouseOfflineClient, WarehouseOfflineSnapshot, WarehouseOfflineStatus } from '../lib/warehouseOffline';
 import type {
@@ -87,112 +53,6 @@ import type {
 
 
 
-const ExcelUploader = ({ onUpload, disabled = false, maxFileBytes }: { onUpload: (data: any[], fileName?: string, sourceFile?: File) => void | Promise<void>; disabled?: boolean; maxFileBytes?: number }) => {
-  return (
-    <div className="oc-card p-6">
-      <h2 className="text-lg font-bold text-slate-900 mb-4">Загрузка отчета</h2>
-      <div className={`border-2 border-dashed rounded-xl p-4 md:p-8 text-center transition-colors ${disabled ? 'border-slate-200 bg-slate-50' : 'border-slate-200 hover:border-indigo-500'}`}>
-        <input
-          type="file"
-          accept=".xlsx, .xls"
-          multiple
-          disabled={disabled}
-          onChange={async (e) => {
-            const files = Array.from(e.target.files || []);
-            if (!files.length) return;
-
-            const errors: string[] = [];
-
-            try {
-              for (let fi = 0; fi < files.length; fi += 1) {
-                const file = files[fi];
-                if (fi > 0) {
-                  await new Promise((r) => setTimeout(r, 350));
-                }
-                try {
-                  const fileSizeError = ensureExcelFileSize(file, maxFileBytes);
-                  if (fileSizeError) {
-                    errors.push(`${file.name}: ${fileSizeError}`);
-                    continue;
-                  }
-
-                  const buff = await file.arrayBuffer();
-                  const data = await readFirstSheetAsJson(buff);
-                  if (Array.isArray(data)) {
-                    const rowLimitError = ensureExcelRowLimit(data.length);
-                    if (rowLimitError) {
-                      errors.push(`${file.name}: ${rowLimitError}`);
-                      continue;
-                    }
-                  }
-
-                  await onUpload(data, file.name, file);
-                } catch (error: any) {
-                  errors.push(`${file.name}: ${error?.message || 'неизвестно'}`);
-                }
-              }
-
-              if (errors.length) {
-                alert(`Часть файлов не обработана:\n\n${errors.slice(0, 8).join('\n')}`);
-              }
-            } finally {
-              if (e.target) e.target.value = '';
-            }
-          }}
-          className="hidden"
-          id="excel-upload"
-        />
-        <label htmlFor="excel-upload" className={`flex flex-col items-center ${disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}>
-          <div className="p-4 bg-indigo-50 rounded-full mb-4">
-            <Upload className="h-8 w-8 text-indigo-600" />
-          </div>
-          <span className="text-slate-900 font-medium">{disabled ? 'Сначала выберите поставщика' : 'Нажмите для загрузки'}</span>
-          <span className="text-sm text-slate-500 mt-1">{disabled ? 'Загрузка недоступна без выбранного поставщика' : 'можно выбрать один или несколько файлов Excel'}</span>
-        </label>
-      </div>
-    </div>
-  );
-};
-
-const SectionWrapper = ({ children }: { children: React.ReactNode }) => <>{children}</>;
-const SuppliesFBOSection = ({ children }: { children: React.ReactNode }) => <SectionWrapper>{children}</SectionWrapper>;
-const WBProductsSection = ({ children }: { children: React.ReactNode }) => <SectionWrapper>{children}</SectionWrapper>;
-const ReportsSection = ({ children }: { children: React.ReactNode }) => <SectionWrapper>{children}</SectionWrapper>;
-const EmployeesSection = ({ children }: { children: React.ReactNode }) => <SectionWrapper>{children}</SectionWrapper>;
-const TelegramSettingsSection = ({ children }: { children: React.ReactNode }) => <SectionWrapper>{children}</SectionWrapper>;
-
-const DatamatrixCode = ({ code }: { code: string }) => {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    ensureBwip().then(() => {
-      if (cancelled || !canvasRef.current) return;
-      try {
-        bwipjs.toCanvas(canvasRef.current, {
-            bcid: 'datamatrix',
-            text: code,
-            scale: 3,
-            height: 10,
-            includetext: false,
-            textxalign: 'center',
-        });
-      } catch (e) {
-        console.error(e);
-      }
-    });
-    return () => { cancelled = true; };
-  }, [code]);
-
-  return (
-    <div className="sticker w-[58mm] h-[40mm] flex flex-col items-center justify-center p-2 bg-white break-inside-avoid">
-        <canvas ref={canvasRef} className="max-w-full max-h-[30mm]" />
-        <div className="text-[8px] mt-1 text-center break-all leading-tight max-w-full overflow-hidden h-[8px]">
-            {code}
-        </div>
-    </div>
-  );
-};
 
 type DashboardProps = {
   forcedTab?: string;
@@ -818,7 +678,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
         showToast('Генерация PDF...', 'success');
 
-        const doc = new jsPDF({
+        const doc = new lazyLibs.jsPDF({
             orientation: 'landscape',
             unit: 'mm',
             format: [58, 40]
@@ -830,7 +690,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
             const canvas = document.createElement('canvas');
             try {
-                bwipjs.toCanvas(canvas, {
+                lazyLibs.bwipjs.toCanvas(canvas, {
                     bcid: 'datamatrix',
                     text: code,
                     scale: 2,
@@ -1936,7 +1796,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
   const generateSalaryReportPdf = async (report: any) => {
     await ensurePdfLibs();
-    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    const doc = new lazyLibs.jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
     const money = (v: any) => `${Number(v || 0).toFixed(2)} руб.`;
     try {
       if (!tempWorkerReportPdfFontRef.current) {
@@ -1978,7 +1838,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       money(l?.amount),
     ]);
 
-    (autoTable as any)(doc, {
+    (lazyLibs.autoTable as any)(doc, {
       startY: 51,
       head: [['Дата', 'Работа', 'Кол-во / Часы', 'Сумма']],
       body,
@@ -2281,7 +2141,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     await ensurePdfLibs();
     try {
       showToast('Создаю PDF отчёт по доставкам...', 'success');
-      const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+      const doc = new lazyLibs.jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
       const money = (value: any) => Number(value || 0).toFixed(2) + ' руб.';
 
       try {
@@ -2346,7 +2206,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         });
       });
 
-      (autoTable as any)(doc, {
+      (lazyLibs.autoTable as any)(doc, {
         startY: 57,
         head: [['Дата', 'Доставщик', 'Коробки', 'Паллеты', 'Сумма поставщика', 'Сумма доставки', 'Статус', 'Кто оплатил']],
         body,
@@ -2735,7 +2595,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     await ensurePdfLibs();
     try {
       showToast('Создаю общий PDF отчёт...', 'success');
-      const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+      const doc = new lazyLibs.jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
       const money = (value: any) => `${Number(value || 0).toLocaleString('ru-RU', { maximumFractionDigits: 2 })} руб.`;
       const dateRu = (value: string) => value ? new Date(`${value}T12:00:00`).toLocaleDateString('ru-RU') : '-';
 
@@ -2779,7 +2639,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       doc.text(`Общий итог всех отчетов: ${money(generalReportTotals.totalAmount)}`, 14, 45);
 
       let y = 53;
-      (autoTable as any)(doc, {
+      (lazyLibs.autoTable as any)(doc, {
         startY: y,
         head: [['Отчет по временным сотрудникам', 'Дата', 'Сотрудник', 'Поставщик', 'Работа', 'Часы', 'Заработано', 'Кто оплатил', 'Не оплачено']],
         body: generalTempWorkerRows.map((row: any) => [
@@ -2799,7 +2659,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       });
       y = ((doc as any).lastAutoTable?.finalY || y) + 8;
 
-      (autoTable as any)(doc, {
+      (lazyLibs.autoTable as any)(doc, {
         startY: y,
         head: [['Отчет по доставке', 'Дата', 'Доставщик', 'Поставщик', 'Коробки', 'Сумма', 'Статус', 'Кто оплатил']],
         body: generalDeliveryRows.map((row: any) => [
@@ -2818,7 +2678,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       });
       y = ((doc as any).lastAutoTable?.finalY || y) + 8;
 
-      (autoTable as any)(doc, {
+      (lazyLibs.autoTable as any)(doc, {
         startY: y,
         head: [['Отчет по выполненной работе', 'Дата', 'Сотрудник', 'Поставщик', 'Вид работы', 'Кол-во', 'Цена', 'Сумма']],
         body: generalReportCwRows.map((row: any) => [
@@ -2853,7 +2713,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
     try {
       showToast('Создаю PDF отчёт...', 'success');
-      const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+      const doc = new lazyLibs.jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
       const money = (value: any) => `${Number(value || 0).toLocaleString('ru-RU', { maximumFractionDigits: 2 })} руб.`;
       const dateRu = (value: string) => value ? new Date(`${value}T12:00:00`).toLocaleDateString('ru-RU') : '-';
 
@@ -2918,7 +2778,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         money(item.total),
       ]);
 
-      (autoTable as any)(doc, {
+      (lazyLibs.autoTable as any)(doc, {
         startY: 51,
         head: [head],
         body,
@@ -2949,7 +2809,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     await ensurePdfLibs();
     try {
       showToast('Создаю PDF отчёт...', 'success');
-      const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+      const doc = new lazyLibs.jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
       const money = (value: any) => `${Number(value || 0).toFixed(2)} руб.`;
 
       try {
@@ -3013,7 +2873,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         });
       });
 
-      (autoTable as any)(doc, {
+      (lazyLibs.autoTable as any)(doc, {
         startY: 57,
         head: [['Дата', 'Сотрудник', 'Работа', 'Часы', 'Заработано', 'Факт оплаты', 'Кто оплатил', 'Не оплачено']],
         body,
@@ -6127,7 +5987,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       const supplierName = suppliers.find(s => String(s.id) === String(fboBoxesSupplierId))?.name || 'Поставщик';
       const total = codes.length;
 
-      const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: [58, 40] });
+      const doc = new lazyLibs.jsPDF({ orientation: 'landscape', unit: 'mm', format: [58, 40] });
       const canvas = document.createElement('canvas');
       const layout = getWbLayoutPayloadFromEditor();
 
@@ -6159,7 +6019,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         const code = codes[i];
         const isEan13 = /^\d{13}$/.test(code);
 
-        bwipjs.toCanvas(canvas, {
+        lazyLibs.bwipjs.toCanvas(canvas, {
           bcid: isEan13 ? 'ean13' : 'code128',
           text: code,
           scale: 3,
@@ -6375,13 +6235,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       return;
     }
 
-    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: [58, 40] });
+    const doc = new lazyLibs.jsPDF({ orientation: 'landscape', unit: 'mm', format: [58, 40] });
     const canvas = document.createElement('canvas');
 
     boxes.forEach((b: any, i: number) => {
       if (i > 0) doc.addPage([58, 40], 'landscape');
       const txt = String(b.name || 'BOX');
-      bwipjs.toCanvas(canvas, {
+      lazyLibs.bwipjs.toCanvas(canvas, {
         bcid: 'code128',
         text: txt,
         scale: 3,
@@ -12333,7 +12193,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
       const qrData = `AUTH:${authToken}`;
 
-      const doc = new jsPDF();
+      const doc = new lazyLibs.jsPDF();
       const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(qrData)}`;
       const qrImage = await fetch(qrImageUrl).then(res => res.blob());
 
@@ -15369,7 +15229,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       }
 
       const buf = await file.arrayBuffer();
-      const wb = new ExcelJS.Workbook();
+      const wb = new lazyLibs.ExcelJS.Workbook();
       await wb.xlsx.load(buf);
 
       const sheets = wb.worksheets.slice(0, 4).map((ws: any) => {
@@ -16125,7 +15985,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       await ensurePdfLibs();
       await ensureBwip();
       const layout = getWbLayoutPayloadFromEditor();
-      const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: [58, 40] });
+      const doc = new lazyLibs.jsPDF({ orientation: 'landscape', unit: 'mm', format: [58, 40] });
       const canvas = document.createElement('canvas');
 
       await ensureRobotoPdfFont(doc);
@@ -16136,7 +15996,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           ? `${dmTextRaw.slice(0, 16)}21${dmTextRaw.slice(16)}`
           : dmTextRaw;
         try {
-          bwipjs.toCanvas(canvas, { bcid: 'datamatrix', text: dmText, binarytext: true, parsefnc: false, scale: 4, padding: 1, includetext: false });
+          lazyLibs.bwipjs.toCanvas(canvas, { bcid: 'datamatrix', text: dmText, binarytext: true, parsefnc: false, scale: 4, padding: 1, includetext: false });
           doc.addImage(canvas.toDataURL('image/png'), 'PNG', layout.withChz.dmX, layout.withChz.dmY, layout.withChz.dmSize, layout.withChz.dmSize);
           doc.setFontSize(3.6);
           doc.text(doc.splitTextToSize(dmText, Math.max(16, layout.withChz.dmSize - 0.4)), layout.withChz.dmTextX, layout.withChz.dmTextY);
@@ -16156,14 +16016,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         doc.text('Цвет: графит', layout.withChz.textX, y); y += dataGap;
         doc.text('Поставщик: ИП Власенко_И_А', layout.withChz.textX, y);
 
-        bwipjs.toCanvas(canvas, { bcid: 'ean13', text: '2042797303856', scale: 4, height: 8, includetext: false, paddingwidth: 0, paddingheight: 0 });
+        lazyLibs.bwipjs.toCanvas(canvas, { bcid: 'ean13', text: '2042797303856', scale: 4, height: 8, includetext: false, paddingwidth: 0, paddingheight: 0 });
         doc.addImage(canvas.toDataURL('image/png'), 'PNG', layout.withChz.barcodeX, layout.withChz.barcodeY, layout.withChz.barcodeW, layout.withChz.barcodeH);
         doc.setFont('Roboto', 'bold');
         doc.setFontSize(10.4);
         const withChzDigitsY = Math.max(layout.withChz.barcodeY + layout.withChz.barcodeH + 1.2, layout.withChz.barcodeTextY);
         doc.text('2042797303856', layout.withChz.barcodeX + layout.withChz.barcodeW / 2, withChzDigitsY, { align: 'center' });
       } else if (template === 'withoutChz') {
-        bwipjs.toCanvas(canvas, { bcid: 'ean13', text: '2045891906831', scale: 4, height: 11, includetext: false, paddingwidth: 0, paddingheight: 0 });
+        lazyLibs.bwipjs.toCanvas(canvas, { bcid: 'ean13', text: '2045891906831', scale: 4, height: 11, includetext: false, paddingwidth: 0, paddingheight: 0 });
         doc.addImage(canvas.toDataURL('image/png'), 'PNG', layout.withoutChz.barcodeX, layout.withoutChz.barcodeY, layout.withoutChz.barcodeW, layout.withoutChz.barcodeH);
         doc.setFont('Roboto', 'bold');
         doc.setFontSize(10.6);
@@ -16186,7 +16046,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         doc.text('Поставщик: ИП БЕКИРОВА_Л_Р', x, y);
       } else if (template === 'fboBoxes') {
         const code = 'WBBOX001234567';
-        bwipjs.toCanvas(canvas, { bcid: 'code128', text: code, scale: 3, height: 9, includetext: false, paddingwidth: 0, paddingheight: 0 });
+        lazyLibs.bwipjs.toCanvas(canvas, { bcid: 'code128', text: code, scale: 3, height: 9, includetext: false, paddingwidth: 0, paddingheight: 0 });
 
         doc.setFont('Roboto', 'bold');
         doc.setFontSize(layout.fboBoxes.numberFont);
@@ -16276,7 +16136,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
       setNameSequencePrintLoading(true);
 
-      const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: [58, 40] });
+      const doc = new lazyLibs.jsPDF({ orientation: 'landscape', unit: 'mm', format: [58, 40] });
       const layout = getWbLayoutPayloadFromEditor();
       const hasUnicodeFont = await ensureRobotoPdfFont(doc);
       if (!hasUnicodeFont && /[^\x00-\x7F]/.test(rawName)) {
@@ -16320,7 +16180,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     await ensureBwip();
     try {
       const qty = Math.min(200, Math.max(1, parseInt(labelBuilder.quantity || '1')));
-      const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: [58, 40] }); // XPrinter 420B: 58x40
+      const doc = new lazyLibs.jsPDF({ orientation: 'landscape', unit: 'mm', format: [58, 40] }); // XPrinter 420B: 58x40
 
       for (let i = 0; i < qty; i++) {
         if (i > 0) doc.addPage([58, 40], 'landscape');
@@ -16329,7 +16189,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         if (labelBuilder.qr) {
           const dmCanvas = document.createElement('canvas');
           try {
-            bwipjs.toCanvas(dmCanvas, {
+            lazyLibs.bwipjs.toCanvas(dmCanvas, {
               bcid: 'datamatrix',
               text: labelBuilder.qr,
               binarytext: true,
@@ -16363,7 +16223,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           const bcCanvas = document.createElement('canvas');
           const isEan13 = /^\d{13}$/.test(labelBuilder.barcode.trim());
           try {
-            bwipjs.toCanvas(bcCanvas, {
+            lazyLibs.bwipjs.toCanvas(bcCanvas, {
               bcid: isEan13 ? 'ean13' : 'code128',
               text: labelBuilder.barcode.trim(),
               scale: 2,
@@ -21474,9 +21334,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                         className="max-w-full max-h-[30mm]"
                                         ref={(canvas) => {
                                             if (canvas) {
-                                                ensureBwip().then(() => { if (!bwipjs) return;
+                                                ensureBwip().then(() => { if (!lazyLibs.bwipjs) return;
                                                 try {
-                                                    bwipjs.toCanvas(canvas, {
+                                                    lazyLibs.bwipjs.toCanvas(canvas, {
                                                         bcid: 'datamatrix',
                                                         text: code,
                                                         scale: 2,
