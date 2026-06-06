@@ -1456,6 +1456,16 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
   const desktopListHeight = typeof window !== 'undefined'
     ? Math.max(520, Math.min(1200, window.innerHeight - 220))
     : 700;
+
+  // Tablet cards were rendered all at once (filteredVariants.map) — every quantity
+  // change re-rendered hundreds of cards and froze the UI. Window them like the
+  // desktop table: 1 column on md, 2 columns on lg, only visible rows render.
+  const isLargeTablet = useMediaQuery('(min-width: 1024px)');
+  const tabletColumns = isLargeTablet ? 2 : 1;
+  const tabletRowHeight = 304;
+  const tabletListHeight = typeof window !== 'undefined'
+    ? Math.max(480, Math.min(1200, window.innerHeight - 240))
+    : 700;
   const ProductTabletCard = useCallback(({ variant }: { variant: ProductVariant }) => {
     const qty = quantities[variant.id] || 0;
     return (
@@ -1529,6 +1539,23 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
     </div>
     );
   }, [commitModelNumber, commitQuantity, commitQuantityDeferred, getModelNumber, getWbProductUrl, handleQuantityInput, localLabelEdits, openEditModal, quantities, updateQuantity]);
+
+  const TabletRow = useCallback(({ index, style }: ListChildComponentProps) => {
+    const start = index * tabletColumns;
+    const items = filteredVariants.slice(start, start + tabletColumns);
+    if (!items.length) return null;
+    return (
+      <div style={style} className="px-3">
+        <div className={`grid gap-3 ${tabletColumns === 2 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+          {items.map((variant) => (
+            <div key={variant.id} className="h-[292px]">
+              <ProductTabletCard variant={variant} />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }, [filteredVariants, tabletColumns, ProductTabletCard]);
 
   const VirtualizedRow = useCallback(({ index, style }: ListChildComponentProps) => {
     const variant = filteredVariants[index];
@@ -1845,16 +1872,21 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
       </div>
       )}
 
-      {/* Tablet Cards */}
+      {/* Tablet Cards (virtualized) */}
       {isTabletView && (
-      <div className="no-print hidden md:grid md:grid-cols-1 lg:grid-cols-2 2xl:hidden gap-3 p-3">
+      <div className="no-print py-3">
         {loading && <div className="p-12 text-center text-slate-500"><Loader2 className="h-8 w-8 mx-auto animate-spin text-indigo-600" /><p className="mt-2">Загрузка товаров...</p></div>}
         {!loading && filteredVariants.length === 0 && <div className="p-12 text-center text-slate-500"><Package className="h-12 w-12 mx-auto mb-4 text-slate-300" /><p className="text-lg font-medium">Товары не найдены</p></div>}
-        {!loading && filteredVariants.map((variant) => (
-          <div key={variant.id} className="h-[292px]">
-            <ProductTabletCard variant={variant} />
-          </div>
-        ))}
+        {!loading && filteredVariants.length > 0 && (
+          <List
+            height={tabletListHeight}
+            itemCount={Math.ceil(filteredVariants.length / tabletColumns)}
+            itemSize={tabletRowHeight}
+            width="100%"
+          >
+            {TabletRow}
+          </List>
+        )}
       </div>
       )}
 

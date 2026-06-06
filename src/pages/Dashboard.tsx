@@ -18005,11 +18005,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     </div>
                   </div>
 
-                  {/* Standalone «Собрать паллеты» action banner */}
+                  {/* Standalone action banners: «Собрать паллеты» + «Маркировка Мешков/Коробок» */}
+                  <div className="mb-6 grid gap-3 lg:grid-cols-2">
                   <button
                     type="button"
                     onClick={openFboPalletCollector}
-                    className="group mb-6 flex w-full items-center gap-4 overflow-hidden rounded-2xl bg-gradient-to-r from-violet-600 to-indigo-600 p-5 text-left text-white shadow-lg shadow-violet-600/25 transition-all hover:shadow-xl hover:shadow-violet-600/30 active:scale-[0.99]"
+                    className="group flex w-full items-center gap-4 overflow-hidden rounded-2xl bg-gradient-to-r from-violet-600 to-indigo-600 p-5 text-left text-white shadow-lg shadow-violet-600/25 transition-all hover:shadow-xl hover:shadow-violet-600/30 active:scale-[0.99]"
                   >
                     <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-white/20 transition-transform group-hover:scale-105">
                       <Box className="h-7 w-7" />
@@ -18020,6 +18021,25 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     </div>
                     <ChevronRight className="h-6 w-6 shrink-0 text-white/80 transition-transform group-hover:translate-x-1" />
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const supplierName = suppliers.find(s => String(s.id) === String(currentSupply?.supplier_id || ''))?.name || '';
+                      setNameSequencePrintForm(prev => ({ name: supplierName || prev.name || '', quantity: prev.quantity || '1' }));
+                      setShowNameSequencePrintModal(true);
+                    }}
+                    className="group flex w-full items-center gap-4 overflow-hidden rounded-2xl bg-gradient-to-r from-fuchsia-600 to-pink-600 p-5 text-left text-white shadow-lg shadow-fuchsia-600/25 transition-all hover:shadow-xl hover:shadow-fuchsia-600/30 active:scale-[0.99]"
+                  >
+                    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-white/20 transition-transform group-hover:scale-105">
+                      <Printer className="h-7 w-7" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-lg font-bold leading-tight">Маркировка Мешков/Коробок</div>
+                      <div className="text-sm text-white/80">Печать имени и порядкового номера</div>
+                    </div>
+                    <ChevronRight className="h-6 w-6 shrink-0 text-white/80 transition-transform group-hover:translate-x-1" />
+                  </button>
+                  </div>
 
                   <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(340px,420px)]">
                   <div className="oc-card overflow-hidden p-0">
@@ -18272,19 +18292,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           <div className="flex flex-wrap gap-2">
                             <button onClick={() => setShowGenerateBoxQR(true)} className="inline-flex items-center justify-center rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-slate-800">
                               <QrCode className="h-4 w-4 mr-2" /> <span className="whitespace-nowrap">QR генерация коробки</span>
-                            </button>
-	                            <button
-                              onClick={() => {
-                                const supplierName = suppliers.find(s => String(s.id) === String(currentSupply?.supplier_id || ''))?.name || '';
-                                setNameSequencePrintForm(prev => ({
-                                  name: supplierName || '',
-                                  quantity: prev.quantity || '1',
-                                }));
-                                setShowNameSequencePrintModal(true);
-                              }}
-                              className="inline-flex items-center justify-center rounded-xl bg-fuchsia-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-fuchsia-700"
-                            >
-                              <Printer className="h-4 w-4 mr-2" /> <span className="whitespace-nowrap">Имя и номер</span>
                             </button>
                             <button onClick={() => setFboOfflineMode((prev) => !prev)} className={`relative inline-flex items-center justify-center rounded-xl px-4 py-2.5 text-sm font-medium shadow-sm ${fboOfflineMode ? 'bg-amber-600 text-white hover:bg-amber-700' : 'bg-amber-50 text-amber-800 hover:bg-amber-100'}`}>
                               <Database className="h-4 w-4 mr-2" /> {fboOfflineMode ? 'Оффлайн включен' : 'Оффлайн режим'}
