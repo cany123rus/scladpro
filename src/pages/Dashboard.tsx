@@ -19910,14 +19910,32 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 </div>
               </div>
 
+              {/* Вкладки шаблонов: показываем один зараз — удобнее */}
+              <div className="mb-5 flex flex-wrap gap-2">
+                {([
+                  { key: 'withChz', label: 'С ЧЗ' },
+                  { key: 'withoutChz', label: 'Без ЧЗ' },
+                  { key: 'fboBoxes', label: 'Короба FBO' },
+                  { key: 'nameSequence', label: 'Номер + имя' },
+                ] as const).map(({ key, label }) => (
+                  <button
+                    key={`maptab-${key}`}
+                    onClick={() => setWbLayoutTemplate(key)}
+                    className={`rounded-xl px-4 py-2 text-sm font-semibold transition-all active:scale-[0.97] ${wbLayoutTemplate === key ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-600/20' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div className="rounded-3xl border border-slate-200 bg-white shadow-sm p-5 md:p-6 space-y-4">
                   <div className="rounded-2xl border border-indigo-100 bg-indigo-50/60 p-4 space-y-3">
-                    <div className="font-bold text-slate-900">Макеты печати WB (4 шаблона)</div>
-                    <div className="text-xs text-slate-500">Двигай ползунки и блоки в превью. Эти настройки напрямую влияют на печать в разделе «Товары WB».</div>
+                    <div className="font-bold text-slate-900">Настройки макета</div>
+                    <div className="text-xs text-slate-500">Двигай ползунки и блоки в превью. Настройки сразу влияют на печать в «Товары WB».</div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div className="p-3 bg-white rounded-xl border border-slate-200 shadow-sm">
+                    <div className="grid grid-cols-1 gap-3">
+                      <div className={`p-3 bg-white rounded-xl border border-slate-200 shadow-sm ${wbLayoutTemplate === 'withChz' ? '' : 'hidden'}`}>
                         <div className="text-xs font-bold mb-2 text-slate-700">С ЧЗ (QR + штрихкод)</div>
                         <label className="mt-2 block text-[11px] font-medium text-slate-500">Размер QR/DataMatrix: {wbLayoutEditor.withChz.dmSize.toFixed(1)} мм</label>
                         <input type="range" min={18} max={25} step={0.1} value={wbLayoutEditor.withChz.dmSize} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, withChz: { ...prev.withChz, dmSize: Number(e.target.value) } }))} className="w-full accent-indigo-600 cursor-pointer" />
@@ -19937,7 +19955,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <input type="range" min={35} max={39.5} step={0.05} value={wbLayoutEditor.withChz.barcodeTextY} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, withChz: { ...prev.withChz, barcodeTextY: Number(e.target.value), barcodeTextYpx: mmToPreviewY(Number(e.target.value)) } }))} className="w-full accent-indigo-600 cursor-pointer" />
                       </div>
 
-                      <div className="p-3 bg-white rounded-xl border border-slate-200 shadow-sm">
+                      <div className={`p-3 bg-white rounded-xl border border-slate-200 shadow-sm ${wbLayoutTemplate === 'withoutChz' ? '' : 'hidden'}`}>
                         <div className="text-xs font-bold mb-2 text-slate-700">Без ЧЗ (только штрихкод)</div>
                         <label className="mt-2 block text-[11px] font-medium text-slate-500">Штрихкод ширина: {wbLayoutEditor.withoutChz.barcodeW.toFixed(1)} мм</label>
                         <input type="range" min={46} max={56} step={0.1} value={wbLayoutEditor.withoutChz.barcodeW} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, withoutChz: { ...prev.withoutChz, barcodeW: Number(e.target.value) } }))} className="w-full accent-indigo-600 cursor-pointer" />
@@ -19955,7 +19973,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <input type="range" min={7} max={9.5} step={0.1} value={wbLayoutEditor.withoutChz.textFont} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, withoutChz: { ...prev.withoutChz, textFont: Number(e.target.value) } }))} className="w-full accent-indigo-600 cursor-pointer" />
                       </div>
 
-                      <div className="p-3 bg-white rounded-xl border border-slate-200 shadow-sm">
+                      <div className={`p-3 bg-white rounded-xl border border-slate-200 shadow-sm ${wbLayoutTemplate === 'fboBoxes' ? '' : 'hidden'}`}>
                         <div className="text-xs font-bold mb-2 text-slate-700">Короба FBO</div>
                         <label className="mt-2 block text-[11px] font-medium text-slate-500">Штрихкод ширина: {wbLayoutEditor.fboBoxes.barcodeW.toFixed(1)} мм</label>
                         <input type="range" min={40} max={54} step={0.1} value={wbLayoutEditor.fboBoxes.barcodeW} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, fboBoxes: { ...prev.fboBoxes, barcodeW: Number(e.target.value) } }))} className="w-full accent-indigo-600 cursor-pointer" />
@@ -19967,7 +19985,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <input type="range" min={7} max={12} step={0.1} value={wbLayoutEditor.fboBoxes.codeFont} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, fboBoxes: { ...prev.fboBoxes, codeFont: Number(e.target.value) } }))} className="w-full accent-indigo-600 cursor-pointer" />
                       </div>
 
-                      <div className="p-3 bg-white rounded-xl border border-slate-200 shadow-sm">
+                      <div className={`p-3 bg-white rounded-xl border border-slate-200 shadow-sm ${wbLayoutTemplate === 'nameSequence' ? '' : 'hidden'}`}>
                         <div className="text-xs font-bold mb-2 text-slate-700">Номер + имя</div>
                         <label className="mt-2 block text-[11px] font-medium text-slate-500">Размер номера: {wbLayoutEditor.nameSequence.numberFont.toFixed(1)}</label>
                         <input type="range" min={18} max={34} step={0.1} value={wbLayoutEditor.nameSequence.numberFont} onChange={(e) => setWbLayoutEditor(prev => ({ ...prev, nameSequence: { ...prev.nameSequence, numberFont: Number(e.target.value) } }))} className="w-full accent-indigo-600 cursor-pointer" />
@@ -19994,8 +20012,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   <p className="text-xs text-slate-500 mb-3">В реальном времени: двигаешь ползунки слева, и сразу меняются размеры блоков во всех макетах.</p>
 
                   <div className="space-y-4">
-                    <div>
-                      <div className="text-xs font-semibold text-slate-700 mb-2">Макет 1: с ЧЗ (QR + штрихкод)</div>
+                    <div className={wbLayoutTemplate === 'withChz' ? '' : 'hidden'}>
                       <div className="mx-auto rounded-2xl p-2 w-[390px] h-[270px] bg-white relative overflow-hidden ring-1 ring-slate-200 shadow-md">
                         <div
                           className="absolute border-2 border-indigo-300 rounded bg-slate-50 flex items-center justify-center text-[10px] text-slate-600 cursor-move"
@@ -20041,8 +20058,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       </div>
                     </div>
 
-                    <div>
-                      <div className="text-xs font-semibold text-slate-700 mb-2">Макет 2: без ЧЗ (только штрихкод)</div>
+                    <div className={wbLayoutTemplate === 'withoutChz' ? '' : 'hidden'}>
                       <div className="mx-auto rounded-2xl p-2 w-[390px] h-[270px] bg-white relative overflow-hidden ring-1 ring-slate-200 shadow-md">
                         <div
                           className="absolute border-2 border-dashed border-fuchsia-400 rounded flex items-center justify-center text-[12px] text-slate-600 cursor-move"
@@ -20073,8 +20089,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       </div>
                     </div>
 
-                    <div>
-                      <div className="text-xs font-semibold text-slate-700 mb-2">Макет 3: Короба FBO</div>
+                    <div className={wbLayoutTemplate === 'fboBoxes' ? '' : 'hidden'}>
                       <div className="mx-auto rounded-2xl p-2 w-[390px] h-[270px] bg-white relative overflow-hidden ring-1 ring-slate-200 shadow-md">
                         <div className="absolute text-black font-bold border border-cyan-300 rounded px-1 bg-white/70 cursor-move" onMouseDown={(e) => startWbBlockDrag(e, 'fboBoxes', 'numberXpx', 'numberYpx', wbLayoutEditor.fboBoxes.numberXpx, wbLayoutEditor.fboBoxes.numberYpx)} style={{ left: `${wbLayoutEditor.fboBoxes.numberXpx - mmToPreviewX(6)}px`, top: `${wbLayoutEditor.fboBoxes.numberYpx}px`, width: `${mmToPreviewX(12)}px`, textAlign: 'center', fontSize: `${ptToPreviewPx(wbLayoutEditor.fboBoxes.numberFont)}px` }}>
                           1/120
@@ -20094,8 +20109,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       </div>
                     </div>
 
-                    <div>
-                      <div className="text-xs font-semibold text-slate-700 mb-2">Макет 4: Номер + имя</div>
+                    <div className={wbLayoutTemplate === 'nameSequence' ? '' : 'hidden'}>
                       <div className="mx-auto rounded-2xl p-2 w-[390px] h-[270px] bg-white relative overflow-hidden ring-1 ring-slate-200 shadow-md">
                         <div className="absolute text-black font-bold border border-cyan-300 rounded px-1 bg-white/70 cursor-move" onMouseDown={(e) => startWbBlockDrag(e, 'nameSequence', 'numberXpx', 'numberYpx', wbLayoutEditor.nameSequence.numberXpx, wbLayoutEditor.nameSequence.numberYpx)} style={{ left: `${wbLayoutEditor.nameSequence.numberXpx - mmToPreviewX(8)}px`, top: `${wbLayoutEditor.nameSequence.numberYpx}px`, width: `${mmToPreviewX(16)}px`, textAlign: 'center', fontSize: `${ptToPreviewPx(wbLayoutEditor.nameSequence.numberFont)}px` }}>
                           1
@@ -20115,16 +20129,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   <h3 className="font-bold text-slate-900">Точный PDF-предпросмотр (1-в-1 с печатью)</h3>
                 </div>
                 <p className="text-xs text-slate-500 mt-1">Это реальный результат печати из того же движка. Обновляется автоматически при изменении ползунков и блоков слева.</p>
-                <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="mt-4">
                   {([
                     { key: 'withChz', label: 'С ЧЗ (QR + штрихкод)' },
                     { key: 'withoutChz', label: 'Без ЧЗ (только штрихкод)' },
                     { key: 'fboBoxes', label: 'Короба FBO' },
                     { key: 'nameSequence', label: 'Номер + имя' },
-                  ] as const).map(({ key, label }) => (
+                  ] as const).filter(({ key }) => key === wbLayoutTemplate).map(({ key }) => (
                     <div key={`pdfprev-${key}`}>
-                      <div className="text-xs font-semibold text-slate-700 mb-2">{label}</div>
-                      <div className="mx-auto w-[348px] h-[240px] rounded-2xl ring-1 ring-slate-200 shadow-md bg-white overflow-hidden">
+                      <div className="mx-auto w-[464px] max-w-full aspect-[58/40] rounded-2xl ring-1 ring-slate-200 shadow-md bg-white overflow-hidden">
                         {wbLayoutPdfPreviews[key] ? (
                           <iframe
                             title={`pdf-${key}`}
