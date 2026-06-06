@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Settings, Layers, ShieldCheck, UserCog, Search, Check, Save, Pencil, History, Smartphone, Send, Bot } from 'lucide-react';
-import { getEmpAvatarColor, getEmpInitials, normalizeRoleKey } from './dashboardHelpers';
+import { Settings, Layers, ShieldCheck, UserCog, Search, Check, Save, Pencil, History, Smartphone, Send, Bot, Wallet, TrendingDown, TrendingUp } from 'lucide-react';
+import { getEmpAvatarColor, getEmpInitials, normalizeRoleKey, getWarehouseMoneyOwner, getWarehouseMoneyDisplayComment, WAREHOUSE_MONEY_OWNERS } from './dashboardHelpers';
 import { supabase } from '../lib/supabase';
 import { telegramService } from '../services/telegram.service';
 
@@ -18,7 +18,22 @@ type SectionItem = { id: string; label: string };
 type SectionGroup = { title: string; items: SectionItem[] };
 type AssemblyGroup = { title: string; items: ReadonlyArray<{ id: string; label: string }> };
 
-type AdminSection = 'sections-emp' | 'sections-role' | 'buttons' | 'employees' | 'bots';
+type AdminSection = 'sections-emp' | 'sections-role' | 'buttons' | 'employees' | 'bots' | 'finance';
+
+const money = (v: number) => Math.round(Number(v || 0)).toLocaleString('ru-RU') + ' ₽';
+const spendCategory = (comment: string): string => {
+  const c = String(comment || '').toLowerCase();
+  if (c.startsWith('оплата зп') || c.includes('зп:')) return 'Зарплата';
+  if (c.includes('доставк')) return 'Доставки';
+  if (c.includes('временным') || c.includes('временны')) return 'Временные';
+  return 'Прочее / ручное';
+};
+const CAT_COLORS: Record<string, string> = {
+  'Зарплата': 'bg-indigo-500',
+  'Доставки': 'bg-blue-500',
+  'Временные': 'bg-emerald-500',
+  'Прочее / ручное': 'bg-slate-400',
+};
 
 type AdminPanelProps = {
   section: AdminSection;
@@ -157,6 +172,57 @@ export function AdminPanel(props: AdminPanelProps) {
     }
   };
 
+  // ── Finance dashboard ───────────────────────────────────────────
+  const [financeRows, setFinanceRows] = useState<any[]>([]);
+  const [financeLoaded, setFinanceLoaded] = useState(false);
+
+  useEffect(() => {
+    if (section !== 'finance' || financeLoaded) return;
+    (async () => {
+      try {
+        const { data } = await supabase
+          .from('warehouse_money_log')
+          .select('id, amount, comment, type, employee_name, created_at, deleted_at')
+          .is('deleted_at', null)
+          .order('created_at', { ascending: false })
+          .limit(5000);
+        setFinanceRows(Array.isArray(data) ? data : []);
+      } catch (e: any) {
+        notify('Ошибка загрузки финансов: ' + (e?.message || 'неизвестно'), 'error');
+      } finally {
+        setFinanceLoaded(true);
+      }
+    })();
+  }, [section, financeLoaded]);
+
+  const finance = useMemo(() => {
+    const ownerBalance: Record<string, number> = {};
+    WAREHOUSE_MONEY_OWNERS.forEach((o) => { ownerBalance[o.id] = 0; });
+    let income = 0;
+    let spend = 0;
+    const months = new Map<string, { income: number; spend: number }>();
+    const categories = new Map<string, number>();
+    financeRows.forEach((r) => {
+      const amt = Number(r.amount || 0);
+      const owner = getWarehouseMoneyOwner(r);
+      ownerBalance[owner] = (ownerBalance[owner] || 0) + amt;
+      const mk = String(r.created_at || '').slice(0, 7);
+      const m = months.get(mk) || { income: 0, spend: 0 };
+      if (amt >= 0) { income += amt; m.income += amt; }
+      else {
+        spend += -amt; m.spend += -amt;
+        const cat = spendCategory(getWarehouseMoneyDisplayComment(r.comment));
+        categories.set(cat, (categories.get(cat) || 0) + -amt);
+      }
+      months.set(mk, m);
+    });
+    const monthList = Array.from(months.entries()).sort((a, b) => a[0].localeCompare(b[0])).slice(-6);
+    const catList = Array.from(categories.entries()).sort((a, b) => b[1] - a[1]);
+    const totalBalance = Object.values(ownerBalance).reduce((s, v) => s + v, 0);
+    const maxMonth = Math.max(1, ...monthList.map(([, v]) => Math.max(v.income, v.spend)));
+    return { ownerBalance, income, spend, totalBalance, monthList, catList, maxMonth };
+  }, [financeRows]);
+
   const staffEmployees = useMemo(() => (employees || []).filter((e) => !isAdminEmp(e)), [employees]);
   const allSections = useMemo(() => sectionGroups.flatMap((g) => g.items), [sectionGroups]);
 
@@ -193,6 +259,7 @@ export function AdminPanel(props: AdminPanelProps) {
         <SubTab active={section === 'sections-role'} onClick={() => setSection('sections-role')} icon={ShieldCheck} label="Разделы — по ролям" />
         <SubTab active={section === 'buttons'} onClick={() => setSection('buttons')} icon={Check} label="Права кнопок" />
         <SubTab active={section === 'employees'} onClick={() => setSection('employees')} icon={UserCog} label="Сотрудники" />
+        <SubTab active={section === 'finance'} onClick={() => setSection('finance')} icon={Wallet} label="Финансы" />
         <SubTab active={section === 'bots'} onClick={() => setSection('bots')} icon={Bot} label="Боты" />
       </div>
 
@@ -382,6 +449,104 @@ export function AdminPanel(props: AdminPanelProps) {
             ))}
           </div>
         </div>
+      )}
+
+      {/* FINANCE DASHBOARD */}
+      {section === 'finance' && (
+        !financeLoaded ? (
+          <div className="oc-card p-6 text-center text-slate-400">Загрузка…</div>
+        ) : (
+          <div className="space-y-5">
+            {/* KPI */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              {WAREHOUSE_MONEY_OWNERS.map((o) => (
+                <div key={o.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="text-xs font-medium text-slate-500 truncate">{o.title}</div>
+                  <div className="text-2xl font-extrabold text-slate-900 mt-1">{money(finance.ownerBalance[o.id] || 0)}</div>
+                </div>
+              ))}
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="text-xs font-medium text-slate-500 flex items-center gap-1"><TrendingUp className="h-3.5 w-3.5 text-emerald-500" /> Поступило всего</div>
+                <div className="text-2xl font-extrabold text-emerald-600 mt-1">{money(finance.income)}</div>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="text-xs font-medium text-slate-500 flex items-center gap-1"><TrendingDown className="h-3.5 w-3.5 text-rose-500" /> Потрачено всего</div>
+                <div className="text-2xl font-extrabold text-rose-600 mt-1">{money(finance.spend)}</div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {/* Monthly chart */}
+              <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <h3 className="font-bold text-slate-900 mb-4">Динамика по месяцам</h3>
+                {finance.monthList.length === 0 ? (
+                  <div className="text-sm text-slate-400 text-center py-8">Нет данных</div>
+                ) : (
+                  <div className="space-y-3">
+                    {finance.monthList.map(([mk, v]) => (
+                      <div key={mk}>
+                        <div className="flex justify-between text-xs text-slate-500 mb-1">
+                          <span>{mk}</span>
+                          <span><span className="text-emerald-600">+{money(v.income)}</span> · <span className="text-rose-600">−{money(v.spend)}</span></span>
+                        </div>
+                        <div className="space-y-1">
+                          <div className="h-2 rounded-full bg-emerald-100 overflow-hidden"><div className="h-full bg-emerald-500" style={{ width: `${(v.income / finance.maxMonth) * 100}%` }} /></div>
+                          <div className="h-2 rounded-full bg-rose-100 overflow-hidden"><div className="h-full bg-rose-500" style={{ width: `${(v.spend / finance.maxMonth) * 100}%` }} /></div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Category breakdown */}
+              <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <h3 className="font-bold text-slate-900 mb-4">Куда уходят деньги</h3>
+                {finance.catList.length === 0 ? (
+                  <div className="text-sm text-slate-400 text-center py-8">Нет списаний</div>
+                ) : (
+                  <div className="space-y-3">
+                    {finance.catList.map(([cat, sum]) => (
+                      <div key={cat}>
+                        <div className="flex justify-between text-sm mb-1">
+                          <span className="text-slate-700">{cat}</span>
+                          <span className="font-semibold text-slate-900">{money(sum)} <span className="text-xs text-slate-400">· {((sum / (finance.spend || 1)) * 100).toFixed(0)}%</span></span>
+                        </div>
+                        <div className="h-2.5 rounded-full bg-slate-100 overflow-hidden">
+                          <div className={`h-full ${CAT_COLORS[cat] || 'bg-slate-400'}`} style={{ width: `${(sum / (finance.spend || 1)) * 100}%` }} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Recent operations */}
+            <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+              <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-2">
+                <History className="h-4 w-4 text-slate-500" />
+                <h3 className="font-bold text-slate-900">Последние операции</h3>
+              </div>
+              <div className="divide-y divide-slate-100 max-h-[420px] overflow-auto">
+                {financeRows.slice(0, 60).map((r) => {
+                  const amt = Number(r.amount || 0);
+                  const owner = WAREHOUSE_MONEY_OWNERS.find((o) => o.id === getWarehouseMoneyOwner(r));
+                  return (
+                    <div key={r.id} className="flex items-center justify-between gap-3 px-5 py-2.5">
+                      <div className="min-w-0">
+                        <div className="text-sm text-slate-800 truncate">{getWarehouseMoneyDisplayComment(r.comment) || '—'}</div>
+                        <div className="text-[11px] text-slate-400">{new Date(r.created_at).toLocaleString('ru-RU')} · {owner?.title || ''}{r.employee_name ? ` · ${r.employee_name}` : ''}</div>
+                      </div>
+                      <div className={`shrink-0 font-bold text-sm ${amt >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{amt >= 0 ? '+' : '−'}{money(Math.abs(amt))}</div>
+                    </div>
+                  );
+                })}
+                {!financeRows.length && <div className="px-5 py-10 text-center text-slate-400 text-sm">Операций нет</div>}
+              </div>
+            </div>
+          </div>
+        )
       )}
 
       {/* BOTS */}

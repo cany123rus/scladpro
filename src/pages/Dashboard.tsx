@@ -1256,7 +1256,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   // Personal employee.permissions[tabId] overrides the role default.
   const [sectionRoleAccess, setSectionRoleAccess] = useState<Record<string, Record<string, 'allow' | 'deny'>>>({});
   const [sectionRoleAccessLoaded, setSectionRoleAccessLoaded] = useState(false);
-  const [adminPanelSection, setAdminPanelSection] = useState<'sections-emp' | 'sections-role' | 'buttons' | 'employees' | 'bots'>('sections-emp');
+  const [adminPanelSection, setAdminPanelSection] = useState<'sections-emp' | 'sections-role' | 'buttons' | 'employees' | 'bots' | 'finance'>('sections-emp');
   const [selectedAccessEmployeeId, setSelectedAccessEmployeeId] = useState('');
 
   const fetchTempWorkerLogs = async () => {
