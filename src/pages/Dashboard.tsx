@@ -3040,21 +3040,27 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       const acY = 68; const acH = 16; const acX = 12; const acW = pageW - 24;
       setFill([30, 41, 59]);
       doc.roundedRect(acX, acY, acW, acH, 2, 2, 'F');
-      setText([148, 163, 184]); doc.setFontSize(7);
-      doc.text('СОБРАНО ТОВАРОВ', acX + 4, acY + 6);
+      // Title block on the left (vertically centered)
+      const titleW = 48;
+      setText([226, 232, 240]); doc.setFontSize(8.5);
+      doc.text('СОБРАНО', acX + 5, acY + 7.5);
+      setText([148, 163, 184]); doc.setFontSize(8.5);
+      doc.text('ТОВАРОВ', acX + 5, acY + 12.5);
+      setFill([51, 65, 85]); doc.rect(acX + titleW, acY + 3, 0.4, acH - 6, 'F');
       const asmStats = [
         { label: 'временные', value: asmData.aTotalTemp, rgb: [16, 185, 129] },
         { label: 'сотрудники', value: asmData.aTotalStaff, rgb: [129, 140, 248] },
         { label: 'вместе', value: asmData.aTotalTemp + asmData.aTotalStaff, rgb: [196, 181, 253] },
       ];
-      const segW = (acW - 8) / asmStats.length;
+      const segArea = acW - titleW - 6;
+      const segW = segArea / asmStats.length;
       asmStats.forEach((s, i) => {
-        const sx = acX + 4 + segW * i;
-        setFill(s.rgb); doc.roundedRect(sx, acY + 8.5, 2.4, 2.4, 0.6, 0.6, 'F');
+        const sx = acX + titleW + 4 + segW * i;
+        setFill(s.rgb); doc.roundedRect(sx, acY + 5.4, 2.4, 2.4, 0.6, 0.6, 'F');
         setText([203, 213, 225]); doc.setFontSize(6.5);
         doc.text(s.label.toUpperCase(), sx + 4, acY + 7.5);
         setText([255, 255, 255]); doc.setFontSize(11);
-        doc.text(`${Number(s.value || 0).toLocaleString('ru-RU')} шт.`, sx + 4, acY + 13.5);
+        doc.text(`${Number(s.value || 0).toLocaleString('ru-RU')} шт.`, sx + 4, acY + 13);
       });
 
       let y = drawAssemblyChartPdf(doc, acY + acH + 4, asmData);
