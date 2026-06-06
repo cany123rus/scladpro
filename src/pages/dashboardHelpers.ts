@@ -413,6 +413,19 @@ export const FINANCIAL_DEFAULT_DENY_BUTTONS = new Set<string>([
   'cw_calendar_salary_pay',
 ]);
 
+// Assembly analytics: which records count toward "собрано".
+// Staff: all work rates EXCEPT time-based, Пик, возвраты. Temp: only ФБО/ФБС
+// (and never смена/время/возвраты/пик).
+export const isAssemblyExcludedStaffRate = (name?: string | null) => {
+  const r = String(name || '').toLowerCase();
+  return r.includes('врем') || r.includes('час') || r.includes('time') || r.includes('пик') || r.includes('возврат') || r.includes('смена');
+};
+export const isAssemblyTempType = (workComment?: string | null) => {
+  const c = String(workComment || '').toLowerCase();
+  if (c.includes('возврат') || c.includes('пик') || c.includes('смена') || c.includes('врем')) return false;
+  return c.includes('фбо') || c.includes('фбс');
+};
+
 export const normalizeRoleKey = (role?: string | null) => String(role || '').trim().toLowerCase();
 
 export const ruToEn: Record<string, string> = {

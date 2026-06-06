@@ -48,7 +48,7 @@ import {
   buildFboScanProductCard, WAREHOUSE_MONEY_LEHA_PREFIX, WAREHOUSE_MONEY_OWNERS, getEmptyWarehouseMoneyForms,
   getDefaultWarehouseMoneyFilters, getWarehouseMoneyOwner, getWarehouseMoneyDisplayComment,
   buildWarehouseMoneyStoredComment, DELIVERY_PAYER_OWNER_RULES, getDeliveryPayerOwner, isDeliveryPayerSupplier,
-  ASSEMBLY_BUTTONS, FINANCIAL_DEFAULT_DENY_BUTTONS, normalizeRoleKey, ruToEn, fixLayout,
+  ASSEMBLY_BUTTONS, FINANCIAL_DEFAULT_DENY_BUTTONS, isAssemblyExcludedStaffRate, isAssemblyTempType, normalizeRoleKey, ruToEn, fixLayout,
 } from './dashboardHelpers';
 import type {
   WarehouseMoneyOwner, WarehouseMoneyFilter, WarehouseMoneyFormState, WarehouseMoneyFilterState, WarehouseMoneyLog,
@@ -2488,8 +2488,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       const since = new Date(); since.setDate(since.getDate() - 29);
       const sinceStr = since.toISOString().slice(0, 10);
       const [tempRes, staffRes] = await Promise.all([
-        supabase.from('temporary_workers_logs').select('date, quantity, work_comment').is('deleted_at', null).gte('date', sinceStr),
-        supabase.from('work_logs').select('date, quantity, work_rates(name)').is('deleted_at', null).gte('date', sinceStr),
+        supabase.from('temporary_workers_logs').select('date, quantity, work_comment, worker_name').is('deleted_at', null).gte('date', sinceStr),
+        supabase.from('work_logs').select('date, quantity, employee_id, work_rates(name)').is('deleted_at', null).gte('date', sinceStr),
       ]);
       setAssemblyTempRows(Array.isArray(tempRes.data) ? tempRes.data : []);
       setAssemblyStaffRows(Array.isArray(staffRes.data) ? staffRes.data : []);
@@ -2498,28 +2498,42 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     }
   };
 
+  const empNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    (employees || []).forEach((e: any) => m.set(String(e.id), e.full_name || e.login || 'Сотрудник'));
+    return m;
+  }, [employees]);
+
   const assemblyDaily = useMemo(() => {
-    const days = new Map<string, { temp: number; staff: number }>();
+    const days = new Map<string, { temp: number; staff: number; people: Record<string, number> }>();
     for (let i = 29; i >= 0; i--) {
       const d = new Date(); d.setDate(d.getDate() - i);
-      days.set(d.toISOString().slice(0, 10), { temp: 0, staff: 0 });
+      days.set(d.toISOString().slice(0, 10), { temp: 0, staff: 0, people: {} });
     }
     (assemblyTempRows || []).forEach((r: any) => {
       const dk = String(r.date || '').slice(0, 10);
-      const wc = String(r.work_comment || '').toLowerCase();
-      if (days.has(dk) && (wc.includes('фбо') || wc.includes('фбс'))) days.get(dk)!.temp += Number(r.quantity || 0);
+      if (!days.has(dk) || !isAssemblyTempType(r.work_comment)) return;
+      const qty = Number(r.quantity || 0);
+      if (qty <= 0) return;
+      const day = days.get(dk)!;
+      day.temp += qty;
+      const name = `${r.worker_name || 'Без имени'} (врем)`;
+      day.people[name] = (day.people[name] || 0) + qty;
     });
     (assemblyStaffRows || []).forEach((r: any) => {
       const dk = String(r.date || '').slice(0, 10);
-      const rate = String(r.work_rates?.name || '').toLowerCase();
-      if (!days.has(dk)) return;
-      if (rate.includes('врем') || rate.includes('час') || rate.includes('time')) return;
-      days.get(dk)!.staff += Number(r.quantity || 0);
+      if (!days.has(dk) || isAssemblyExcludedStaffRate(r.work_rates?.name)) return;
+      const qty = Number(r.quantity || 0);
+      if (qty <= 0) return;
+      const day = days.get(dk)!;
+      day.staff += qty;
+      const name = empNameById.get(String(r.employee_id)) || 'Сотрудник';
+      day.people[name] = (day.people[name] || 0) + qty;
     });
     const list = Array.from(days.entries());
     const maxDay = Math.max(1, ...list.map(([, v]) => v.temp + v.staff));
     return { list, maxDay, totalTemp: list.reduce((s, [, v]) => s + v.temp, 0), totalStaff: list.reduce((s, [, v]) => s + v.staff, 0) };
-  }, [assemblyTempRows, assemblyStaffRows]);
+  }, [assemblyTempRows, assemblyStaffRows, empNameById]);
 
   const generalTempWorkerRows = useMemo(() => {
     const start = String(generalReportForm.start_date || '');
@@ -2857,8 +2871,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       } catch { /* ignore */ }
       const aDays = new Map<string, { temp: number; staff: number }>();
       for (let i = 29; i >= 0; i--) { const d = new Date(); d.setDate(d.getDate() - i); aDays.set(d.toISOString().slice(0, 10), { temp: 0, staff: 0 }); }
-      asmTemp.forEach((r: any) => { const dk = String(r.date || '').slice(0, 10); const wc = String(r.work_comment || '').toLowerCase(); if (aDays.has(dk) && (wc.includes('фбо') || wc.includes('фбс'))) aDays.get(dk)!.temp += Number(r.quantity || 0); });
-      asmStaff.forEach((r: any) => { const dk = String(r.date || '').slice(0, 10); const rate = String(r.work_rates?.name || '').toLowerCase(); if (!aDays.has(dk)) return; if (rate.includes('врем') || rate.includes('час') || rate.includes('time')) return; aDays.get(dk)!.staff += Number(r.quantity || 0); });
+      asmTemp.forEach((r: any) => { const dk = String(r.date || '').slice(0, 10); if (aDays.has(dk) && isAssemblyTempType(r.work_comment)) aDays.get(dk)!.temp += Number(r.quantity || 0); });
+      asmStaff.forEach((r: any) => { const dk = String(r.date || '').slice(0, 10); if (!aDays.has(dk) || isAssemblyExcludedStaffRate(r.work_rates?.name)) return; aDays.get(dk)!.staff += Number(r.quantity || 0); });
       const aList = Array.from(aDays.entries());
       const aMax = Math.max(1, ...aList.map(([, v]) => v.temp + v.staff));
       const aTotalTemp = aList.reduce((s, [, v]) => s + v.temp, 0);
@@ -23403,12 +23417,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         const h = Math.round((total / assemblyDaily.maxDay) * 190);
                         const staffH = total > 0 ? Math.round((v.staff / total) * h) : 0;
                         const tempH = h - staffH;
+                        const people = Object.entries(v.people).sort((a, b) => b[1] - a[1]);
+                        const dLabel = new Date(dk + 'T12:00:00').toLocaleDateString('ru-RU');
+                        const title = `${dLabel}\nВсего: ${total} (сотрудники ${v.staff}, временные ${v.temp})` + (people.length ? '\n\nКто собрал:\n' + people.map(([n, q]) => `• ${n}: ${q}`).join('\n') : '\nНет сборки');
                         return (
-                          <div key={`asm-${dk}`} className="flex-1 min-w-[14px] flex flex-col items-center gap-1" title={`${dk}\nСотрудники: ${v.staff}\nВременные: ${v.temp}\nВсего: ${total}`}>
+                          <div key={`asm-${dk}`} className="flex-1 min-w-[14px] flex flex-col items-center gap-1 rounded-md px-0.5 hover:bg-indigo-50/70 transition-colors cursor-default" title={title}>
                             <div className="w-full flex flex-col justify-end h-[190px]">
                               {total > 0 && (<>
-                                <div className="w-full bg-amber-400 rounded-t-sm" style={{ height: `${tempH}px` }} />
-                                <div className="w-full bg-indigo-500" style={{ height: `${staffH}px` }} />
+                                <div className="w-full bg-amber-400 rounded-t-sm transition-all hover:brightness-95" style={{ height: `${tempH}px` }} />
+                                <div className="w-full bg-indigo-500 transition-all hover:brightness-110" style={{ height: `${staffH}px` }} />
                               </>)}
                             </div>
                             <span className="text-[9px] text-slate-400">{dk.slice(8, 10)}</span>

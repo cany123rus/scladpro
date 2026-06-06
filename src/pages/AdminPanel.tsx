@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Settings, Layers, ShieldCheck, UserCog, Search, Check, Save, Pencil, History, Smartphone, Send, Bot, Wallet, TrendingDown, TrendingUp, Box } from 'lucide-react';
-import { getEmpAvatarColor, getEmpInitials, normalizeRoleKey, getWarehouseMoneyOwner, getWarehouseMoneyDisplayComment, WAREHOUSE_MONEY_OWNERS } from './dashboardHelpers';
+import { getEmpAvatarColor, getEmpInitials, normalizeRoleKey, getWarehouseMoneyOwner, getWarehouseMoneyDisplayComment, WAREHOUSE_MONEY_OWNERS, isAssemblyExcludedStaffRate, isAssemblyTempType } from './dashboardHelpers';
 import { supabase } from '../lib/supabase';
 import { telegramService } from '../services/telegram.service';
 
@@ -235,8 +235,8 @@ export function AdminPanel(props: AdminPanelProps) {
         const since = new Date(); since.setDate(since.getDate() - 29);
         const sinceStr = since.toISOString().slice(0, 10);
         const [tempRes, staffRes] = await Promise.all([
-          supabase.from('temporary_workers_logs').select('date, quantity, work_comment').is('deleted_at', null).gte('date', sinceStr),
-          supabase.from('work_logs').select('date, quantity, work_rates(name)').is('deleted_at', null).gte('date', sinceStr),
+          supabase.from('temporary_workers_logs').select('date, quantity, work_comment, worker_name').is('deleted_at', null).gte('date', sinceStr),
+          supabase.from('work_logs').select('date, quantity, employee_id, work_rates(name)').is('deleted_at', null).gte('date', sinceStr),
         ]);
         setAsmTempRows(Array.isArray(tempRes.data) ? tempRes.data : []);
         setAsmStaffRows(Array.isArray(staffRes.data) ? staffRes.data : []);
@@ -248,31 +248,40 @@ export function AdminPanel(props: AdminPanelProps) {
     })();
   }, [section, asmLoaded]);
 
+  const empNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    (employees || []).forEach((e: any) => m.set(String(e.id), e.full_name || e.login || 'Сотрудник'));
+    return m;
+  }, [employees]);
+
   const assembly = useMemo(() => {
-    const days = new Map<string, { temp: number; staff: number }>();
+    const days = new Map<string, { temp: number; staff: number; people: Record<string, number> }>();
     for (let i = 29; i >= 0; i--) {
       const d = new Date(); d.setDate(d.getDate() - i);
-      days.set(d.toISOString().slice(0, 10), { temp: 0, staff: 0 });
+      days.set(d.toISOString().slice(0, 10), { temp: 0, staff: 0, people: {} });
     }
     asmTempRows.forEach((r) => {
       const dk = String(r.date || '').slice(0, 10);
-      const wc = String(r.work_comment || '').toLowerCase();
-      if (!days.has(dk)) return;
-      if (wc.includes('фбо') || wc.includes('фбс')) days.get(dk)!.temp += Number(r.quantity || 0);
+      if (!days.has(dk) || !isAssemblyTempType(r.work_comment)) return;
+      const qty = Number(r.quantity || 0); if (qty <= 0) return;
+      const day = days.get(dk)!; day.temp += qty;
+      const name = `${r.worker_name || 'Без имени'} (врем)`;
+      day.people[name] = (day.people[name] || 0) + qty;
     });
     asmStaffRows.forEach((r) => {
       const dk = String(r.date || '').slice(0, 10);
-      const rate = String(r.work_rates?.name || '').toLowerCase();
-      if (!days.has(dk)) return;
-      if (rate.includes('врем') || rate.includes('час') || rate.includes('time')) return; // exclude time-based
-      days.get(dk)!.staff += Number(r.quantity || 0);
+      if (!days.has(dk) || isAssemblyExcludedStaffRate(r.work_rates?.name)) return;
+      const qty = Number(r.quantity || 0); if (qty <= 0) return;
+      const day = days.get(dk)!; day.staff += qty;
+      const name = empNameById.get(String(r.employee_id)) || 'Сотрудник';
+      day.people[name] = (day.people[name] || 0) + qty;
     });
     const list = Array.from(days.entries());
     const maxDay = Math.max(1, ...list.map(([, v]) => v.temp + v.staff));
     const totalTemp = list.reduce((s, [, v]) => s + v.temp, 0);
     const totalStaff = list.reduce((s, [, v]) => s + v.staff, 0);
     return { list, maxDay, totalTemp, totalStaff };
-  }, [asmTempRows, asmStaffRows]);
+  }, [asmTempRows, asmStaffRows, empNameById]);
 
   const staffEmployees = useMemo(() => (employees || []).filter((e) => !isAdminEmp(e)), [employees]);
   const allSections = useMemo(() => sectionGroups.flatMap((g) => g.items), [sectionGroups]);
@@ -645,13 +654,16 @@ export function AdminPanel(props: AdminPanelProps) {
                   const staffH = total > 0 ? Math.round((v.staff / total) * h) : 0;
                   const tempH = h - staffH;
                   const dd = dk.slice(8, 10);
+                  const people = Object.entries(v.people).sort((a, b) => b[1] - a[1]);
+                  const dLabel = new Date(dk + 'T12:00:00').toLocaleDateString('ru-RU');
+                  const title = `${dLabel}\nВсего: ${total} (сотрудники ${v.staff}, временные ${v.temp})` + (people.length ? '\n\nКто собрал:\n' + people.map(([n, q]) => `• ${n}: ${q}`).join('\n') : '\nНет сборки');
                   return (
-                    <div key={dk} className="flex-1 min-w-[14px] flex flex-col items-center gap-1 group" title={`${dk}\nСотрудники: ${v.staff}\nВременные: ${v.temp}\nВсего: ${total}`}>
+                    <div key={dk} className="flex-1 min-w-[14px] flex flex-col items-center gap-1 rounded-md px-0.5 hover:bg-indigo-50/70 transition-colors cursor-default" title={title}>
                       <div className="w-full flex flex-col justify-end h-[190px]">
                         {total > 0 && (
                           <>
-                            <div className="w-full bg-amber-400 rounded-t-sm" style={{ height: `${tempH}px` }} />
-                            <div className="w-full bg-indigo-500" style={{ height: `${staffH}px` }} />
+                            <div className="w-full bg-amber-400 rounded-t-sm transition-all hover:brightness-95" style={{ height: `${tempH}px` }} />
+                            <div className="w-full bg-indigo-500 transition-all hover:brightness-110" style={{ height: `${staffH}px` }} />
                           </>
                         )}
                       </div>
