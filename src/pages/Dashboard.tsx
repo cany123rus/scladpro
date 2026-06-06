@@ -23043,60 +23043,80 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           {activeTab === 'reports' && (
             <ReportsSection>
             <div className="max-w-7xl mx-auto">
-              <div className="mb-8 flex justify-between items-center">
+              <div className="mb-6 rounded-3xl bg-gradient-to-r from-slate-900 via-indigo-900 to-slate-900 p-6 shadow-xl border border-white/10 flex items-center gap-4">
+                <div className="bg-white/10 ring-1 ring-white/20 p-3 rounded-2xl backdrop-blur">
+                  <FileText className="h-7 w-7 text-indigo-200" />
+                </div>
                 <div>
-                  <h1 className="text-2xl font-bold text-slate-900">Отчеты</h1>
-                  <p className="text-slate-500 mt-1">Статистика и аналитика</p>
+                  <h1 className="text-2xl font-extrabold text-white tracking-tight">Отчеты</h1>
+                  <p className="text-indigo-200/80 mt-0.5 text-sm">Статистика, выплаты и сводка по поставщикам</p>
                 </div>
               </div>
 
               {loadingReports ? (
-                <div className="text-center py-12 text-slate-400">Загрузка данных...</div>
+                <div className="space-y-6">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    {[0,1,2].map((i) => (
+                      <div key={i} className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm animate-pulse">
+                        <div className="h-10 w-10 rounded-2xl bg-slate-100 mb-4" />
+                        <div className="h-8 w-32 bg-slate-100 rounded mb-2" />
+                        <div className="h-3 w-40 bg-slate-100 rounded" />
+                      </div>
+                    ))}
+                  </div>
+                  <div className="h-40 rounded-3xl border border-slate-200 bg-white shadow-sm animate-pulse" />
+                </div>
               ) : (
-                <div className="space-y-8">
+                <div className="space-y-6">
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     {/* Total Items */}
-                    <div className="oc-card p-6">
+                    <div className="group relative overflow-hidden rounded-3xl border border-slate-200 bg-white p-6 shadow-sm transition-all hover:shadow-lg hover:-translate-y-0.5">
+                      <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-indigo-500 to-violet-500" />
                       <div className="flex items-center justify-between mb-4">
-                        <h3 className="text-lg font-bold text-slate-900">Собрано товаров</h3>
-                        <div className="p-2 bg-indigo-50 rounded-lg">
-                          <Package className="h-6 w-6 text-indigo-600" />
+                        <span className="text-sm font-medium text-slate-500">Собрано товаров</span>
+                        <div className="p-2.5 bg-gradient-to-br from-indigo-500 to-violet-500 rounded-2xl shadow-sm">
+                          <Package className="h-5 w-5 text-white" />
                         </div>
                       </div>
-                      <div className="text-3xl font-bold text-slate-900">{reportTotals.items}</div>
-                      <p className="text-sm text-slate-500 mt-1">За все время (все поставщики)</p>
+                      <div className="text-3xl font-extrabold text-slate-900">{Number(reportTotals.items).toLocaleString('ru-RU')}</div>
+                      <p className="text-xs text-slate-400 mt-1">За все время · все поставщики</p>
                     </div>
 
                     {/* Total Supplies */}
-                    <div className="oc-card p-6">
+                    <div className="group relative overflow-hidden rounded-3xl border border-slate-200 bg-white p-6 shadow-sm transition-all hover:shadow-lg hover:-translate-y-0.5">
+                      <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-emerald-500 to-teal-500" />
                       <div className="flex items-center justify-between mb-4">
-                        <h3 className="text-lg font-bold text-slate-900">Всего поставок</h3>
-                        <div className="p-2 bg-green-50 rounded-lg">
-                          <Truck className="h-6 w-6 text-green-600" />
+                        <span className="text-sm font-medium text-slate-500">Всего поставок</span>
+                        <div className="p-2.5 bg-gradient-to-br from-emerald-500 to-teal-500 rounded-2xl shadow-sm">
+                          <Truck className="h-5 w-5 text-white" />
                         </div>
                       </div>
-                      <div className="text-3xl font-bold text-slate-900">{reportTotals.supplies}</div>
-                      <p className="text-sm text-slate-500 mt-1">За все время (все поставщики)</p>
+                      <div className="text-3xl font-extrabold text-slate-900">{Number(reportTotals.supplies).toLocaleString('ru-RU')}</div>
+                      <p className="text-xs text-slate-400 mt-1">За все время · все поставщики</p>
                     </div>
 
                     {/* Avg Price in Stock */}
-                    <div className="oc-card p-6">
+                    <div className="group relative overflow-hidden rounded-3xl border border-slate-200 bg-white p-6 shadow-sm transition-all hover:shadow-lg hover:-translate-y-0.5">
+                      <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-fuchsia-500 to-purple-500" />
                       <div className="flex items-center justify-between mb-4">
-                        <h3 className="text-lg font-bold text-slate-900">Ср. цена на складе</h3>
-                        <div className="p-2 bg-purple-50 rounded-lg">
-                          <FileSpreadsheet className="h-6 w-6 text-purple-600" />
+                        <span className="text-sm font-medium text-slate-500">Ср. цена на складе</span>
+                        <div className="p-2.5 bg-gradient-to-br from-fuchsia-500 to-purple-500 rounded-2xl shadow-sm">
+                          <FileSpreadsheet className="h-5 w-5 text-white" />
                         </div>
                       </div>
-                      <div className="text-3xl font-bold text-slate-900">
+                      <div className="text-3xl font-extrabold text-slate-900">
                         {reportTotals.avgPriceInStock.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽
                       </div>
-                      <p className="text-sm text-slate-500 mt-1">За все время (все поставщики)</p>
+                      <p className="text-xs text-slate-400 mt-1">За все время · все поставщики</p>
                     </div>
                   </div>
 
                   {/* Report by Supplier Section */}
-                  <div className="oc-card p-6">
-                    <h3 className="text-lg font-bold text-slate-900 mb-6">Отчет по поставщику</h3>
+                  <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                    <div className="flex items-center gap-2 mb-6">
+                      <div className="p-2 bg-indigo-50 rounded-xl"><FileText className="h-5 w-5 text-indigo-600" /></div>
+                      <h3 className="text-lg font-bold text-slate-900">Отчет по поставщику</h3>
+                    </div>
                     <div className={`grid gap-6 ${reportsReportResult ? 'grid-cols-1 lg:grid-cols-3' : 'grid-cols-1'}`}>
                         <div className="space-y-4">
                             <div>
@@ -23104,7 +23124,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                 <select
                                     value={reportsReportForm.supplier_id}
                                     onChange={e => setReportsReportForm({...reportsReportForm, supplier_id: e.target.value})}
-                                    className="w-full p-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                                    className="oc-select"
                                 >
                                     <option value="">Выберите поставщика</option>
                                     {suppliers.map(s => (
@@ -23120,7 +23140,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                         type="date"
                                         value={reportsReportForm.start}
                                         onChange={e => setReportsReportForm({...reportsReportForm, start: e.target.value})}
-                                        className="w-full p-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                                        className="oc-input"
                                     />
                                 </div>
                                 <div>
@@ -23129,14 +23149,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                         type="date"
                                         value={reportsReportForm.end}
                                         onChange={e => setReportsReportForm({...reportsReportForm, end: e.target.value})}
-                                        className="w-full p-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                                        className="oc-input"
                                     />
                                 </div>
                             </div>
 
                             <button
                                 onClick={generateReportsReport}
-                                className="w-full py-2.5 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2"
+                                className="w-full py-2.5 bg-gradient-to-r from-indigo-600 to-violet-600 text-white rounded-xl font-medium hover:from-indigo-700 hover:to-violet-700 transition-all shadow-sm flex items-center justify-center gap-2"
                             >
                                 <FileText className="w-4 h-4" />
                                 Сформировать отчет
@@ -23144,36 +23164,36 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         </div>
 
                         {reportsReportResult && (
-                            <div className="lg:col-span-2 bg-slate-50 rounded-xl p-6 border border-slate-100">
+                            <div className="lg:col-span-2 bg-slate-50/70 rounded-2xl p-5 border border-slate-200">
                                 <h3 className="font-semibold text-slate-800 mb-4">Результаты за период</h3>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                    <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-100">
-                                        <div className="text-sm text-slate-500 mb-1">Остатки товаров</div>
-                                        <div className="text-xl font-bold text-indigo-600">
-                                            {((reportsReportResult.received || 0) - (reportsReportResult.shipped || 0)).toLocaleString('ru-RU')} шт
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <div className="bg-white p-4 rounded-2xl shadow-sm border-l-4 border-indigo-500 ring-1 ring-slate-100">
+                                        <div className="text-xs font-medium text-slate-500 mb-1">Остатки товаров</div>
+                                        <div className="text-2xl font-bold text-indigo-600">
+                                            {((reportsReportResult.received || 0) - (reportsReportResult.shipped || 0)).toLocaleString('ru-RU')} <span className="text-base font-semibold text-slate-400">шт</span>
                                         </div>
                                     </div>
-                                    <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-100">
-                                        <div className="text-sm text-slate-500 mb-1">Выплаты</div>
-                                        <div className="text-xl font-bold text-green-600">
+                                    <div className="bg-white p-4 rounded-2xl shadow-sm border-l-4 border-emerald-500 ring-1 ring-slate-100">
+                                        <div className="text-xs font-medium text-slate-500 mb-1">Выплаты</div>
+                                        <div className="text-2xl font-bold text-emerald-600">
                                             {(reportsReportResult.total_payment || 0).toLocaleString('ru-RU')} ₽
                                         </div>
                                     </div>
-                                    <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-100">
-                                        <div className="text-sm text-slate-500 mb-1">Короба</div>
-                                        <div className="text-xl font-bold text-blue-600">
+                                    <div className="bg-white p-4 rounded-2xl shadow-sm border-l-4 border-sky-500 ring-1 ring-slate-100">
+                                        <div className="text-xs font-medium text-slate-500 mb-1">Короба</div>
+                                        <div className="text-2xl font-bold text-sky-600">
                                             {((reportsReportResult.boxes || 0) * (reportsReportResult.avgBoxPrice || 0)).toLocaleString('ru-RU')} ₽
                                         </div>
                                     </div>
-                                    <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-100">
-                                        <div className="text-sm text-slate-500 mb-1">Упаковка</div>
-                                        <div className="text-xl font-bold text-orange-600">
+                                    <div className="bg-white p-4 rounded-2xl shadow-sm border-l-4 border-orange-500 ring-1 ring-slate-100">
+                                        <div className="text-xs font-medium text-slate-500 mb-1">Упаковка</div>
+                                        <div className="text-2xl font-bold text-orange-600">
                                             {(reportsReportResult.packaging_cost || 0).toLocaleString('ru-RU')} ₽
                                         </div>
                                     </div>
-                                    <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-100 col-span-1 sm:col-span-2">
-                                        <div className="text-sm text-slate-500 mb-1">Средняя стоимость единицы за все время</div>
-                                        <div className="text-xl font-bold text-purple-600">
+                                    <div className="bg-white p-4 rounded-2xl shadow-sm border-l-4 border-purple-500 ring-1 ring-slate-100 col-span-1 sm:col-span-2">
+                                        <div className="text-xs font-medium text-slate-500 mb-1">Средняя стоимость единицы за все время</div>
+                                        <div className="text-2xl font-bold text-purple-600">
                                             {(() => {
                                                 const stats = reportsReportResult.allTime || {};
                                                 const totalCost = (stats.total_payment || 0) +
@@ -23194,8 +23214,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   </div>
 
                   {/* Warehouse History Section */}
-                  <div className="oc-card p-6 mt-6">
-                    <h3 className="text-lg font-bold text-slate-900 mb-6">История склада и цена</h3>
+                  <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                    <div className="flex items-center gap-2 mb-6">
+                      <div className="p-2 bg-emerald-50 rounded-xl"><History className="h-5 w-5 text-emerald-600" /></div>
+                      <h3 className="text-lg font-bold text-slate-900">История склада и цена</h3>
+                    </div>
                     <div className="space-y-4">
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                             <div>
@@ -23203,7 +23226,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                 <select
                                     value={reportsReportForm.supplier_id}
                                     onChange={e => setReportsReportForm({...reportsReportForm, supplier_id: e.target.value})}
-                                    className="w-full p-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                                    className="oc-select"
                                 >
                                     <option value="">Выберите поставщика</option>
                                     {suppliers.map(s => (
@@ -23217,7 +23240,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                     type="month"
                                     value={warehouseCostForm.month}
                                     onChange={e => setWarehouseCostForm({...warehouseCostForm, month: e.target.value})}
-                                    className="w-full p-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                                    className="oc-input"
                                 />
                             </div>
                             <div>
@@ -23228,12 +23251,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                         placeholder="₽"
                                         value={warehouseCostForm.cost}
                                         onChange={e => setWarehouseCostForm({...warehouseCostForm, cost: e.target.value})}
-                                        className="w-full p-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                                        className="oc-input"
                                     />
                                     <button
                                         onClick={handleSaveWarehouseCost}
                                         disabled={!reportsReportForm.supplier_id}
-                                        className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors disabled:opacity-50 whitespace-nowrap"
+                                        className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-medium hover:bg-indigo-700 transition-colors disabled:opacity-50 whitespace-nowrap shadow-sm"
                                     >
                                         Сохранить
                                     </button>
@@ -23285,22 +23308,25 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   </div>
 
                   {/* Unified Supplier Stats Table */}
-                  <div className="oc-card overflow-hidden">
-                    <div className="p-6 border-b border-slate-100">
-                      <h3 className="text-lg font-bold text-slate-900">Сводная статистика по поставщикам</h3>
-                      <p className="text-sm text-slate-500 mt-1">Данные за все время</p>
+                  <div className="rounded-3xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+                    <div className="p-6 border-b border-slate-100 flex items-center gap-2">
+                      <div className="p-2 bg-purple-50 rounded-xl"><BarChart2 className="h-5 w-5 text-purple-600" /></div>
+                      <div>
+                        <h3 className="text-lg font-bold text-slate-900">Сводная статистика по поставщикам</h3>
+                        <p className="text-sm text-slate-500 mt-0.5">Данные за все время</p>
+                      </div>
                     </div>
                     <div className="overflow-x-auto">
                       <table className="w-full text-left text-sm">
-                        <thead className="bg-slate-50 text-slate-600 font-medium border-b border-slate-100">
+                        <thead className="bg-slate-50/80 backdrop-blur text-slate-500 text-xs font-semibold uppercase tracking-wide border-b border-slate-200 sticky top-0">
                           <tr>
-                            <th className="px-6 py-4">Поставщик</th>
-                            <th className="px-6 py-4 text-right">Товары на складе</th>
-                            <th className="px-6 py-4 text-right">Выплаты</th>
-                            <th className="px-6 py-4 text-right">Коробки</th>
-                            <th className="px-6 py-4 text-right">Упаковка</th>
-                            <th className="px-6 py-4 text-right">Средняя цена склада</th>
-                            <th className="px-6 py-4 text-right">Ср. стоимость ед.</th>
+                            <th className="px-6 py-3.5">Поставщик</th>
+                            <th className="px-6 py-3.5 text-right">Товары на складе</th>
+                            <th className="px-6 py-3.5 text-right">Выплаты</th>
+                            <th className="px-6 py-3.5 text-right">Коробки</th>
+                            <th className="px-6 py-3.5 text-right">Упаковка</th>
+                            <th className="px-6 py-3.5 text-right">Средняя цена склада</th>
+                            <th className="px-6 py-3.5 text-right">Ср. стоимость ед.</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
