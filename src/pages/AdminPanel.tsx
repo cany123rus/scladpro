@@ -183,7 +183,7 @@ export function AdminPanel(props: AdminPanelProps) {
           <Settings className="h-6 w-6 text-white" />
         </div>
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Администрирование</h1>
+          <h1 className="text-2xl font-bold text-slate-900">АдминПанель</h1>
           <p className="text-slate-500 text-sm">Доступ к разделам и кнопкам, управление сотрудниками</p>
         </div>
       </div>

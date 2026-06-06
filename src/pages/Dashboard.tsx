@@ -15705,7 +15705,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   useEffect(() => {
     // Lazy-load data by active tab to reduce startup memory/load spikes.
     if (activeTab === 'reports') fetchReportsData();
-    if (activeTab === 'employees' || activeTab === 'warehouse') fetchEmployees();
+    if (activeTab === 'employees' || activeTab === 'warehouse' || activeTab === 'admin') fetchEmployees();
     if (activeTab === 'employees') loadPaymentReports();
     if (activeTab === 'reception') fetchReceptions();
     if (activeTab === 'completed') {
@@ -16577,7 +16577,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     { id: 'telegram', icon: Send, label: 'Telegram' },
     { id: 'employees', icon: UserCog, label: 'Сотрудники' },
     { id: 'database', icon: Database, label: 'База данных' },
-    { id: 'admin', icon: Settings, label: 'Администрирование' },
+    { id: 'admin', icon: Settings, label: 'АдминПанель' },
   ], []);
 
   const warehouseRows = useMemo(() => {
