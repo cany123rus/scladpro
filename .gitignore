@@ -103,6 +103,3 @@ tmp_*
 dist /
 firebase deploy/
 awesome-design-md/
-
-# Claude Code local settings
-.claude/settings.local.json

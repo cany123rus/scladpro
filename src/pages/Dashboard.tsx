@@ -16420,15 +16420,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       barcodeW: 29,
       barcodeH: 7,
       barcodeTextY: 38.35,
-      dmXpx: 10,
-      dmYpx: 8,
-      dmTextXpx: 10,
-      dmTextYpx: 160,
-      textXpx: 170,
-      textYpx: 10,
-      barcodeXpx: 170,
-      barcodeYpx: 165,
-      barcodeTextYpx: 226,
+      dmXpx: 14,
+      dmYpx: 11,
+      dmTextXpx: 14,
+      dmTextYpx: 224,
+      textXpx: 238,
+      textYpx: 14,
+      barcodeXpx: 238,
+      barcodeYpx: 231,
+      barcodeTextYpx: 316,
     },
     withoutChz: {
       barcodeW: 53,
@@ -16438,11 +16438,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       titleGap: 0,
       textFont: 8.4,
       dataGap: 2.65,
-      barcodeXpx: 12,
-      barcodeYpx: 8,
-      barcodeTextYpx: 80,
-      textXpx: 14,
-      textYpx: 95,
+      barcodeXpx: 17,
+      barcodeYpx: 11,
+      barcodeTextYpx: 112,
+      textXpx: 20,
+      textYpx: 133,
     },
     fboBoxes: {
       barcodeW: 52,
@@ -16451,30 +16451,30 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       supplierFont: 8,
       codeFont: 9,
       footerFont: 7,
-      numberXpx: 195,
-      numberYpx: 40,
-      supplierXpx: 195,
-      supplierYpx: 74,
-      barcodeXpx: 20,
-      barcodeYpx: 88,
-      codeXpx: 195,
-      codeYpx: 196,
-      footerXpx: 195,
-      footerYpx: 230,
+      numberXpx: 273,
+      numberYpx: 56,
+      supplierXpx: 273,
+      supplierYpx: 104,
+      barcodeXpx: 28,
+      barcodeYpx: 123,
+      codeXpx: 273,
+      codeYpx: 274,
+      footerXpx: 273,
+      footerYpx: 322,
     },
     nameSequence: {
       numberFont: 28,
       nameFont: 11,
-      numberXpx: 195,
-      numberYpx: 120,
-      nameXpx: 195,
-      nameYpx: 226,
+      numberXpx: 273,
+      numberYpx: 168,
+      nameXpx: 273,
+      nameYpx: 316,
     }
   });
 
   const [wbDragState, setWbDragState] = useState<any>(null);
-  const PREVIEW_SCALE_X = 390 / 58;
-  const PREVIEW_SCALE_Y = 270 / 40;
+  const PREVIEW_SCALE_X = 546 / 58;
+  const PREVIEW_SCALE_Y = 378 / 40;
   const PT_TO_MM = 0.3528;
   const mmToPreviewX = (mm: number) => mm * PREVIEW_SCALE_X;
   const mmToPreviewY = (mm: number) => mm * PREVIEW_SCALE_Y;
@@ -20013,7 +20013,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                   <div className="space-y-4">
                     <div className={wbLayoutTemplate === 'withChz' ? '' : 'hidden'}>
-                      <div className="mx-auto rounded-2xl p-2 w-[390px] h-[270px] bg-white relative overflow-hidden ring-1 ring-slate-200 shadow-md">
+                      <div className="mx-auto rounded-2xl p-2 w-[546px] h-[378px] bg-white relative overflow-hidden ring-1 ring-slate-200 shadow-md">
                         <div
                           className="absolute border-2 border-indigo-300 rounded bg-slate-50 flex items-center justify-center text-[10px] text-slate-600 cursor-move"
                           onMouseDown={(e) => startWbBlockDrag(e, 'withChz', 'dmXpx', 'dmYpx', wbLayoutEditor.withChz.dmXpx, wbLayoutEditor.withChz.dmYpx)}
@@ -20059,7 +20059,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     </div>
 
                     <div className={wbLayoutTemplate === 'withoutChz' ? '' : 'hidden'}>
-                      <div className="mx-auto rounded-2xl p-2 w-[390px] h-[270px] bg-white relative overflow-hidden ring-1 ring-slate-200 shadow-md">
+                      <div className="mx-auto rounded-2xl p-2 w-[546px] h-[378px] bg-white relative overflow-hidden ring-1 ring-slate-200 shadow-md">
                         <div
                           className="absolute border-2 border-dashed border-fuchsia-400 rounded flex items-center justify-center text-[12px] text-slate-600 cursor-move"
                           onMouseDown={(e) => startWbBlockDrag(e, 'withoutChz', 'barcodeXpx', 'barcodeYpx', wbLayoutEditor.withoutChz.barcodeXpx, wbLayoutEditor.withoutChz.barcodeYpx)}
@@ -20090,7 +20090,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     </div>
 
                     <div className={wbLayoutTemplate === 'fboBoxes' ? '' : 'hidden'}>
-                      <div className="mx-auto rounded-2xl p-2 w-[390px] h-[270px] bg-white relative overflow-hidden ring-1 ring-slate-200 shadow-md">
+                      <div className="mx-auto rounded-2xl p-2 w-[546px] h-[378px] bg-white relative overflow-hidden ring-1 ring-slate-200 shadow-md">
                         <div className="absolute text-black font-bold border border-cyan-300 rounded px-1 bg-white/70 cursor-move" onMouseDown={(e) => startWbBlockDrag(e, 'fboBoxes', 'numberXpx', 'numberYpx', wbLayoutEditor.fboBoxes.numberXpx, wbLayoutEditor.fboBoxes.numberYpx)} style={{ left: `${wbLayoutEditor.fboBoxes.numberXpx - mmToPreviewX(6)}px`, top: `${wbLayoutEditor.fboBoxes.numberYpx}px`, width: `${mmToPreviewX(12)}px`, textAlign: 'center', fontSize: `${ptToPreviewPx(wbLayoutEditor.fboBoxes.numberFont)}px` }}>
                           1/120
                         </div>
@@ -20110,7 +20110,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     </div>
 
                     <div className={wbLayoutTemplate === 'nameSequence' ? '' : 'hidden'}>
-                      <div className="mx-auto rounded-2xl p-2 w-[390px] h-[270px] bg-white relative overflow-hidden ring-1 ring-slate-200 shadow-md">
+                      <div className="mx-auto rounded-2xl p-2 w-[546px] h-[378px] bg-white relative overflow-hidden ring-1 ring-slate-200 shadow-md">
                         <div className="absolute text-black font-bold border border-cyan-300 rounded px-1 bg-white/70 cursor-move" onMouseDown={(e) => startWbBlockDrag(e, 'nameSequence', 'numberXpx', 'numberYpx', wbLayoutEditor.nameSequence.numberXpx, wbLayoutEditor.nameSequence.numberYpx)} style={{ left: `${wbLayoutEditor.nameSequence.numberXpx - mmToPreviewX(8)}px`, top: `${wbLayoutEditor.nameSequence.numberYpx}px`, width: `${mmToPreviewX(16)}px`, textAlign: 'center', fontSize: `${ptToPreviewPx(wbLayoutEditor.nameSequence.numberFont)}px` }}>
                           1
                         </div>
