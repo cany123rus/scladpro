@@ -4074,13 +4074,19 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
     return (
       <div key={'warehouse-money-' + owner} className={'rounded-2xl border bg-white p-3 shadow-sm ring-1 sm:p-4 ' + ownerConfig.borderClass}>
-        <div className="mb-3 flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className={'font-semibold ' + ownerConfig.titleClass}>{ownerConfig.title}</div>
-            <div className="mt-1 text-xs text-slate-500">Отдельный баланс и история операций</div>
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <span className={'flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ' + ownerConfig.balanceClass + ' bg-slate-50 ring-1 ring-slate-100'}><Wallet className="h-5 w-5" /></span>
+            <div className="min-w-0">
+              <div className={'truncate font-semibold ' + ownerConfig.titleClass}>{ownerConfig.title}</div>
+              <div className="text-xs text-slate-500">Баланс и история операций</div>
+            </div>
           </div>
-          <div className={'shrink-0 text-lg font-extrabold ' + ownerConfig.balanceClass}>
-            {Math.floor(balance).toLocaleString('ru-RU')} ₽
+          <div className="shrink-0 text-right">
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Баланс</div>
+            <div className={'text-lg font-extrabold leading-tight ' + ownerConfig.balanceClass}>
+              {Math.floor(balance).toLocaleString('ru-RU')} ₽
+            </div>
           </div>
         </div>
 
@@ -25126,6 +25132,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     <Calendar className="h-4 w-4 shrink-0" /> Календарь
                   </button>
                   )}
+                  {hasAssemblyButtonAccess('cw_general_report_open') && (
                   <button
                     onClick={() => {
                       fetchTempWorkerLogs();
@@ -25137,6 +25144,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   >
                     <FileSpreadsheet className="h-4 w-4 shrink-0" /> Общий отчет
                   </button>
+                  )}
                   {hasAssemblyButtonAccess('cw_tab_rates') && (
                   <button
                     onClick={() => setCompletedWorkStep('RATES')}
@@ -28646,39 +28654,42 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   </div>
                 )}
 
-                <div className="mx-3 mb-4 grid grid-cols-1 gap-3 rounded-3xl border border-slate-200 bg-white p-3 shadow-sm md:mx-6 md:grid-cols-3">
-                  <select
-                    value={tempWorkerSupplierFilter}
-                    onChange={(e) => setTempWorkerSupplierFilter(e.target.value)}
-                    className="oc-input"
-                  >
-                    <option value="all">Все поставщики</option>
-                    {suppliers.map((s) => (
-                      <option key={`temp-filter-s-${s.id}`} value={String(s.id)}>{s.name}</option>
-                    ))}
-                  </select>
-                  <select
-                    value={tempWorkerPaidFilter}
-                    onChange={(e) => setTempWorkerPaidFilter(e.target.value as 'all' | 'paid' | 'unpaid')}
-                    className="oc-input"
-                  >
-                    <option value="all">Все статусы оплаты</option>
-                    <option value="paid">Оплачено</option>
-                    <option value="unpaid">Не оплачено</option>
-                  </select>
-                  <select
-                    value={tempWorkerDateSort}
-                    onChange={(e) => setTempWorkerDateSort(e.target.value as 'desc' | 'asc')}
-                    className="oc-input"
-                  >
-                    <option value="desc">Сначала новые</option>
-                    <option value="asc">Сначала старые</option>
-                  </select>
-                </div>
-
                 <div className="px-3 md:px-6 pb-6 2xl:flex-1 2xl:overflow-y-auto custom-scrollbar">
-                <div className="mb-4 grid grid-cols-1 gap-4 2xl:grid-cols-2">
-                    {WAREHOUSE_MONEY_OWNERS.map(renderWarehouseMoneyCard)}
+                  {/* Деньги на складе */}
+                  <div className="mb-5">
+                    <div className="mb-2 flex items-center gap-2">
+                      <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600 ring-1 ring-emerald-100"><Wallet className="h-4 w-4" /></span>
+                      <h3 className="text-sm font-bold uppercase tracking-wide text-slate-700">Деньги на складе</h3>
+                    </div>
+                    <div className="grid grid-cols-1 gap-4 2xl:grid-cols-2">
+                      {WAREHOUSE_MONEY_OWNERS.map(renderWarehouseMoneyCard)}
+                    </div>
+                  </div>
+
+                  {/* Записи смен + фильтры */}
+                  <div className="mb-3 flex flex-col gap-3 rounded-3xl border border-slate-200 bg-white p-3 shadow-sm xl:flex-row xl:items-center xl:justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 ring-1 ring-indigo-100"><History className="h-4 w-4" /></span>
+                      <h3 className="text-sm font-bold uppercase tracking-wide text-slate-700">Записи смен</h3>
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-500">{filteredTempWorkerLogs.length}</span>
+                    </div>
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 xl:w-auto xl:max-w-2xl xl:flex-1">
+                      <select value={tempWorkerSupplierFilter} onChange={(e) => setTempWorkerSupplierFilter(e.target.value)} className="oc-input">
+                        <option value="all">Все поставщики</option>
+                        {suppliers.map((s) => (
+                          <option key={`temp-filter-s-${s.id}`} value={String(s.id)}>{s.name}</option>
+                        ))}
+                      </select>
+                      <select value={tempWorkerPaidFilter} onChange={(e) => setTempWorkerPaidFilter(e.target.value as 'all' | 'paid' | 'unpaid')} className="oc-input">
+                        <option value="all">Все статусы оплаты</option>
+                        <option value="paid">Оплачено</option>
+                        <option value="unpaid">Не оплачено</option>
+                      </select>
+                      <select value={tempWorkerDateSort} onChange={(e) => setTempWorkerDateSort(e.target.value as 'desc' | 'asc')} className="oc-input">
+                        <option value="desc">Сначала новые</option>
+                        <option value="asc">Сначала старые</option>
+                      </select>
+                    </div>
                   </div>
                     <div className="md:hidden space-y-2">
                       {filteredTempWorkerLogs.map((log) => {

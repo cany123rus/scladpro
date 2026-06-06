@@ -379,6 +379,7 @@ export const ASSEMBLY_BUTTONS = [
   { id: 'cw_tab_purchase', label: 'Сборка: вкладка Закуп' },
   { id: 'cw_send_report', label: 'Сборка: кнопка Отправить отчёт' },
   { id: 'cw_report_open', label: 'Сборка: кнопка Отчёт' },
+  { id: 'cw_general_report_open', label: 'Сборка: кнопка Общий отчёт' },
   { id: 'cw_rates_save', label: 'Сборка: Расценки - Добавить/Сохранить' },
   { id: 'cw_rates_delete', label: 'Сборка: Расценки - Удалить' },
   { id: 'cw_packaging_save', label: 'Сборка: Упаковка - Добавить/Сохранить' },
