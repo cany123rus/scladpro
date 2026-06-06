@@ -1218,6 +1218,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [paymentReports, setPaymentReports] = useState<any[]>([]);
   const [paymentReportsTab, setPaymentReportsTab] = useState<'delivery' | 'salary'>('delivery');
   const [paymentReportsLoading, setPaymentReportsLoading] = useState(false);
+  const [paymentReportsSearch, setPaymentReportsSearch] = useState('');
+  const [paymentReportsFrom, setPaymentReportsFrom] = useState('');
+  const [paymentReportsTo, setPaymentReportsTo] = useState('');
   const [paymentReportToDelete, setPaymentReportToDelete] = useState<any | null>(null);
   const [paymentReportDeleting, setPaymentReportDeleting] = useState(false);
   const [deliverySupplierFilter, setDeliverySupplierFilter] = useState('all');
@@ -24014,12 +24017,41 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   </div>
                 </div>
                 <div className="p-4 space-y-2">
+                  <div className="mb-3 grid grid-cols-1 sm:grid-cols-[1fr_auto_auto] gap-2">
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                      <input value={paymentReportsSearch} onChange={(e) => setPaymentReportsSearch(e.target.value)} placeholder="Поиск: сотрудник, кто оплатил, название" className="oc-input pl-9 h-10" />
+                    </div>
+                    <input type="date" value={paymentReportsFrom} onChange={(e) => setPaymentReportsFrom(e.target.value)} className="oc-input h-10" title="С даты" />
+                    <input type="date" value={paymentReportsTo} onChange={(e) => setPaymentReportsTo(e.target.value)} className="oc-input h-10" title="По дату" />
+                  </div>
                   {paymentReportsLoading ? (
                     <div className="py-8 text-center text-sm text-slate-400">Загрузка отчётов…</div>
                   ) : (() => {
-                    const list = (paymentReports || []).filter((r: any) => r?.kind === paymentReportsTab);
-                    if (!list.length) return <div className="rounded-2xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-400">Отчётов пока нет</div>;
-                    return list.map((r: any) => {
+                    const q = paymentReportsSearch.trim().toLowerCase();
+                    const fromTs = paymentReportsFrom ? new Date(paymentReportsFrom + 'T00:00:00').getTime() : null;
+                    const toTs = paymentReportsTo ? new Date(paymentReportsTo + 'T23:59:59').getTime() : null;
+                    const list = (paymentReports || []).filter((r: any) => {
+                      if (r?.kind !== paymentReportsTab) return false;
+                      if (q) {
+                        const hay = `${r.title || ''} ${r?.payload?.paid_by || ''} ${r?.payload?.employee_name || ''}`.toLowerCase();
+                        if (!hay.includes(q)) return false;
+                      }
+                      if (fromTs || toTs) {
+                        const ts = r?.created_at ? new Date(r.created_at).getTime() : 0;
+                        if (fromTs && ts < fromTs) return false;
+                        if (toTs && ts > toTs) return false;
+                      }
+                      return true;
+                    });
+                    const filteredTotal = list.reduce((s: number, r: any) => s + Number(r.amount || 0), 0);
+                    if (!list.length) return <div className="rounded-2xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-400">{(q || fromTs || toTs) ? 'Ничего не найдено по фильтрам' : 'Отчётов пока нет'}</div>;
+                    return [
+                      <div key="pr-total" className="mb-2 flex items-center justify-between rounded-xl bg-slate-50 px-4 py-2 text-sm">
+                        <span className="text-slate-500">Найдено: <b className="text-slate-800">{list.length}</b></span>
+                        <span className="text-slate-500">Сумма: <b className="text-emerald-700">{filteredTotal.toLocaleString('ru-RU')} ₽</b></span>
+                      </div>,
+                      ...list.map((r: any) => {
                       const items = Array.isArray(r?.payload?.items) ? r.payload.items : [];
                       return (
                         <div key={'pay-report-' + r.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -24074,7 +24106,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           )}
                         </div>
                       );
-                    });
+                    })];
                   })()}
                 </div>
               </div>
