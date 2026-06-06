@@ -16732,10 +16732,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     }
   };
 
-  const handleTestPrintWbLayout = async (template: 'withChz' | 'withoutChz' | 'fboBoxes' | 'nameSequence') => {
-    await ensurePdfLibs();
-    await ensureBwip();
-    try {
+  const buildWbLayoutLabelDoc = async (template: 'withChz' | 'withoutChz' | 'fboBoxes' | 'nameSequence') => {
+      await ensurePdfLibs();
+      await ensureBwip();
       const layout = getWbLayoutPayloadFromEditor();
       const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: [58, 40] });
       const canvas = document.createElement('canvas');
@@ -16827,6 +16826,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         doc.text('Имя', layout.nameSequence.nameX, layout.nameSequence.nameY, { align: 'center' });
       }
 
+      return doc;
+  };
+
+  const handleTestPrintWbLayout = async (template: 'withChz' | 'withoutChz' | 'fboBoxes' | 'nameSequence') => {
+    try {
+      const doc = await buildWbLayoutLabelDoc(template);
       const blobUrl = doc.output('bloburl');
       const preview = window.open('', 'WBLayoutTestPrint', 'width=980,height=780');
       if (preview) {
@@ -16838,6 +16843,36 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       showToast(`Ошибка пробной печати: ${e?.message || 'неизвестно'}`, 'error');
     }
   };
+
+  // Живой PDF-предпросмотр (1-в-1 с печатью) для конструктора этикеток.
+  const [wbLayoutPdfPreviews, setWbLayoutPdfPreviews] = useState<Record<string, string>>({});
+  const wbLayoutPdfPreviewUrlsRef = useRef<string[]>([]);
+  useEffect(() => {
+    if (activeTab !== 'map') return;
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const templates: Array<'withChz' | 'withoutChz' | 'fboBoxes' | 'nameSequence'> = ['withChz', 'withoutChz', 'fboBoxes', 'nameSequence'];
+        const next: Record<string, string> = {};
+        for (const t of templates) {
+          const doc = await buildWbLayoutLabelDoc(t);
+          next[t] = doc.output('bloburl') as unknown as string;
+        }
+        if (cancelled) {
+          Object.values(next).forEach((u) => { try { URL.revokeObjectURL(u); } catch {} });
+          return;
+        }
+        // revoke previous urls
+        wbLayoutPdfPreviewUrlsRef.current.forEach((u) => { try { URL.revokeObjectURL(u); } catch {} });
+        wbLayoutPdfPreviewUrlsRef.current = Object.values(next);
+        setWbLayoutPdfPreviews(next);
+      } catch (e) {
+        console.warn('label pdf preview build failed', e);
+      }
+    }, 450);
+    return () => { cancelled = true; clearTimeout(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, wbLayoutEditor]);
 
   const handlePrintNameSequenceLabels = async () => {
     await ensurePdfLibs();
@@ -20068,6 +20103,37 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       </div>
                     </div>
                   </div>
+                </div>
+              </div>
+
+              <div className="mt-6 rounded-3xl border border-slate-200 bg-white shadow-sm p-5 md:p-6">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="h-5 w-5 text-emerald-600" />
+                  <h3 className="font-bold text-slate-900">Точный PDF-предпросмотр (1-в-1 с печатью)</h3>
+                </div>
+                <p className="text-xs text-slate-500 mt-1">Это реальный результат печати из того же движка. Обновляется автоматически при изменении ползунков и блоков слева.</p>
+                <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {([
+                    { key: 'withChz', label: 'С ЧЗ (QR + штрихкод)' },
+                    { key: 'withoutChz', label: 'Без ЧЗ (только штрихкод)' },
+                    { key: 'fboBoxes', label: 'Короба FBO' },
+                    { key: 'nameSequence', label: 'Номер + имя' },
+                  ] as const).map(({ key, label }) => (
+                    <div key={`pdfprev-${key}`}>
+                      <div className="text-xs font-semibold text-slate-700 mb-2">{label}</div>
+                      <div className="mx-auto w-[348px] h-[240px] rounded-2xl ring-1 ring-slate-200 shadow-md bg-white overflow-hidden">
+                        {wbLayoutPdfPreviews[key] ? (
+                          <iframe
+                            title={`pdf-${key}`}
+                            src={`${wbLayoutPdfPreviews[key]}#toolbar=0&navpanes=0&scrollbar=0&view=Fit`}
+                            className="w-full h-full border-0"
+                          />
+                        ) : (
+                          <div className="flex h-full items-center justify-center text-xs text-slate-400">Готовлю PDF…</div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>
