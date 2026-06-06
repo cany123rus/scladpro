@@ -312,14 +312,27 @@ export function AdminPanel(props: AdminPanelProps) {
       rows.push({ who: empNameById.get(String(r.employee_id)) || 'Сотрудник', kind: 'Сотрудник', type: String(r.work_rates?.name || ''), qty, supplier: asmSuppliers.get(String(r.supplier_id)) || '—', hours: Number(r.hours || 0), earnings: Number(r.earnings || 0) });
     });
     void typeQty;
+    // Grouped view (без полной детализации): merge records of same employee+kind
+    // into one row — total qty + types joined with " / ".
+    const gmap = new Map<string, { who: string; kind: string; types: string[]; qty: number; supplier: string; hours: number; earnings: number }>();
+    rows.forEach((r) => {
+      const key = `${r.kind}|${r.who}`;
+      const g = gmap.get(key) || { who: r.who, kind: r.kind, types: [], qty: 0, supplier: r.supplier, hours: 0, earnings: 0 };
+      if (r.type && !g.types.includes(r.type)) g.types.push(r.type);
+      g.qty += r.qty; g.hours += r.hours; g.earnings += r.earnings;
+      gmap.set(key, g);
+    });
+    const grouped = Array.from(gmap.values()).map((g) => ({ who: g.who, kind: g.kind, type: g.types.join(' / '), qty: g.qty, supplier: g.supplier, hours: g.hours, earnings: g.earnings }));
+
     const { field, dir } = asmDetailSort;
     const mul = dir === 'asc' ? 1 : -1;
-    rows.sort((a, b) => {
+    const sortFn = (a: any, b: any) => {
       if (field === 'qty') return (a.qty - b.qty) * mul;
       if (field === 'who') return a.who.localeCompare(b.who, 'ru') * mul;
       return a.type.localeCompare(b.type, 'ru') * mul;
-    });
-    return { rows, total: rows.reduce((s, r) => s + r.qty, 0) };
+    };
+    rows.sort(sortFn); grouped.sort(sortFn);
+    return { rows, grouped, total: rows.reduce((s, r) => s + r.qty, 0) };
   }, [asmSelectedDay, asmTempRows, asmStaffRows, empNameById, asmDetailSort, asmSuppliers]);
 
   const staffEmployees = useMemo(() => (employees || []).filter((e) => !isAdminEmp(e)), [employees]);
@@ -743,7 +756,8 @@ export function AdminPanel(props: AdminPanelProps) {
                     <span className="text-sm text-slate-500">Всего собрано: <b className="text-slate-900">{asmDayDetail.total.toLocaleString('ru-RU')}</b></span>
                   </div>
                 </div>
-                {asmDayDetail.rows.length === 0 ? (
+                {(() => { const detailRows = asmFullDetail ? asmDayDetail.rows : asmDayDetail.grouped; return (
+                detailRows.length === 0 ? (
                   <div className="px-5 py-8 text-center text-slate-400 text-sm">В этот день сборки не было</div>
                 ) : (
                   <table className="w-full text-left text-sm">
@@ -765,7 +779,7 @@ export function AdminPanel(props: AdminPanelProps) {
                       })()}
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {asmDayDetail.rows.map((r, i) => (
+                      {detailRows.map((r, i) => (
                         <tr key={`asmd-${i}`} className="hover:bg-slate-50">
                           <td className="px-5 py-2.5 font-medium text-slate-800">{r.who}</td>
                           <td className="px-5 py-2.5"><span className={`text-xs px-2 py-0.5 rounded-full ${r.kind === 'Временный' ? 'bg-amber-100 text-amber-700' : 'bg-indigo-100 text-indigo-700'}`}>{r.kind}</span></td>
@@ -778,7 +792,7 @@ export function AdminPanel(props: AdminPanelProps) {
                       ))}
                     </tbody>
                   </table>
-                )}
+                )); })()}
               </div>
             )}
           </div>
