@@ -2802,7 +2802,17 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         st([15, 23, 42]); doc.text(s.total.toLocaleString('ru-RU'), pageW - 13, y, { align: 'right' });
         y += 5;
       });
-      y += 6;
+      // Итого line
+      const tStaff = bySup.reduce((a, s) => a + s.staff, 0);
+      const tTemp = bySup.reduce((a, s) => a + s.temp, 0);
+      const tAll = tStaff + tTemp;
+      y += 0.5; doc.setDrawColor(148, 163, 184); doc.setLineWidth(0.3); doc.line(12, y, pageW - 12, y); y += 4;
+      st([15, 23, 42]); doc.setFontSize(7.5);
+      doc.text('Итого', 13, y);
+      doc.text(tStaff.toLocaleString('ru-RU'), pageW - 70, y, { align: 'right' });
+      doc.text(tTemp.toLocaleString('ru-RU'), pageW - 45, y, { align: 'right' });
+      doc.text(tAll.toLocaleString('ru-RU'), pageW - 13, y, { align: 'right' });
+      y += 8;
     }
     return y;
   };
@@ -3025,7 +3035,27 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
       // Assembly daily chart (report period or last 30 days)
       const asmData = await buildAssemblyDailyForPdf(generalReportForm.start_date, generalReportForm.end_date);
-      let y = drawAssemblyChartPdf(doc, 70, asmData);
+
+      // ── Assembly KPI boxes (собрано: временные / сотрудники / вместе) ──
+      const asmCards = [
+        { label: 'Собрано — временные', value: asmData.aTotalTemp, rgb: [16, 185, 129] },
+        { label: 'Собрано — сотрудники', value: asmData.aTotalStaff, rgb: [99, 102, 241] },
+        { label: 'Собрано — вместе', value: asmData.aTotalTemp + asmData.aTotalStaff, rgb: [124, 58, 237] },
+      ];
+      const acGap = 4;
+      const acW = (pageW - 24 - acGap * (asmCards.length - 1)) / asmCards.length;
+      let acx = 12; const acY = 68;
+      asmCards.forEach((c) => {
+        setFill(c.rgb);
+        doc.roundedRect(acx, acY, acW, 15, 2, 2, 'F');
+        setText([226, 232, 240]); doc.setFontSize(7);
+        doc.text(c.label.toUpperCase(), acx + 4, acY + 6);
+        setText([255, 255, 255]); doc.setFontSize(13);
+        doc.text(`${Number(c.value || 0).toLocaleString('ru-RU')} шт.`, acx + 4, acY + 12.5);
+        acx += acW + acGap;
+      });
+
+      let y = drawAssemblyChartPdf(doc, acY + 19, asmData);
 
       y = drawBand(y, 'ЗП временные', [16, 185, 129]);
       baseTable({
