@@ -18815,13 +18815,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                   <div className="bg-yellow-50 rounded-xl p-4 sm:p-6 mb-6 border border-yellow-100">
                     <div className="flex flex-col sm:flex-row gap-4 text-left">
-                      <div className="w-full sm:w-64 aspect-[3/4] rounded-xl border border-yellow-100 bg-white overflow-hidden flex items-center justify-center shrink-0 shadow-sm">
-                        {scannedItem.photo_url ? (
-                          <img src={scannedItem.photo_url} alt={scannedItem.name} className="h-full w-full object-contain" />
-                        ) : (
+                      {scannedItem.photo_url ? (
+                        <div className="w-full sm:w-72 rounded-xl border border-yellow-100 overflow-hidden shrink-0 shadow-sm">
+                          <img src={scannedItem.photo_url} alt={scannedItem.name} className="block h-auto w-full object-contain" />
+                        </div>
+                      ) : (
+                        <div className="w-full sm:w-72 aspect-[3/4] rounded-xl border border-yellow-100 bg-white overflow-hidden flex items-center justify-center shrink-0 shadow-sm">
                           <Package className="h-10 w-10 text-yellow-300" />
-                        )}
-                      </div>
+                        </div>
+                      )}
                       <div className="min-w-0 flex-1">
                         <div className="inline-flex items-center rounded-full bg-white px-3 py-1 text-xs font-semibold text-yellow-700 border border-yellow-100">
                           <ShieldCheck className="mr-1.5 h-3.5 w-3.5" /> Сканируйте Честный Знак
