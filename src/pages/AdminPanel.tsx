@@ -690,7 +690,7 @@ export function AdminPanel(props: AdminPanelProps) {
                 <h3 className="font-bold text-slate-900">Собрано по дням <span className="text-xs font-normal text-slate-400">(нажмите на день для детализации)</span></h3>
                 <div className="flex items-center gap-3 text-xs">
                   <span className="inline-flex items-center gap-1.5 text-slate-500"><span className="h-2.5 w-2.5 rounded-sm bg-indigo-500" /> Сотрудники</span>
-                  <span className="inline-flex items-center gap-1.5 text-slate-500"><span className="h-2.5 w-2.5 rounded-sm bg-amber-400" /> Временные</span>
+                  <span className="inline-flex items-center gap-1.5 text-slate-500"><span className="h-2.5 w-2.5 rounded-sm bg-emerald-500" /> Временные</span>
                 </div>
               </div>
               <div className="flex items-end gap-[3px] h-56 pt-4 overflow-x-auto">
@@ -709,7 +709,7 @@ export function AdminPanel(props: AdminPanelProps) {
                       <div className="w-full flex flex-col justify-end h-[190px]">
                         {total > 0 && (
                           <>
-                            <div className="w-full bg-amber-400 rounded-t-sm transition-all hover:brightness-95" style={{ height: `${tempH}px` }} />
+                            <div className="w-full bg-emerald-500 rounded-t-sm transition-all hover:brightness-95" style={{ height: `${tempH}px` }} />
                             <div className="w-full bg-indigo-500 transition-all hover:brightness-110" style={{ height: `${staffH}px` }} />
                           </>
                         )}

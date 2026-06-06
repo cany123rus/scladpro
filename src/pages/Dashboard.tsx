@@ -2495,8 +2495,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       const since = new Date(); since.setDate(since.getDate() - 29);
       const sinceStr = since.toISOString().slice(0, 10);
       const [tempRes, staffRes] = await Promise.all([
-        supabase.from('temporary_workers_logs').select('date, quantity, work_comment, worker_name').is('deleted_at', null).gte('date', sinceStr),
-        supabase.from('work_logs').select('date, quantity, employee_id, work_rates(name)').is('deleted_at', null).gte('date', sinceStr),
+        supabase.from('temporary_workers_logs').select('date, quantity, work_comment, worker_name, supplier_id').is('deleted_at', null).gte('date', sinceStr),
+        supabase.from('work_logs').select('date, quantity, employee_id, supplier_id, work_rates(name)').is('deleted_at', null).gte('date', sinceStr),
       ]);
       setAssemblyTempRows(Array.isArray(tempRes.data) ? tempRes.data : []);
       setAssemblyStaffRows(Array.isArray(staffRes.data) ? staffRes.data : []);
@@ -2548,6 +2548,24 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     const maxDay = Math.max(1, ...list.map(([, v]) => v.temp + v.staff));
     return { list, maxDay, totalTemp: list.reduce((s, [, v]) => s + v.temp, 0), totalStaff: list.reduce((s, [, v]) => s + v.staff, 0) };
   }, [assemblyTempRows, assemblyStaffRows, empNameById]);
+
+  useEffect(() => { if (showGeneralReportModal) loadAssemblyDaily(); }, [showGeneralReportModal]);
+
+  // Assembled quantity per supplier (for the general report breakdown).
+  const assemblyBySupplier = useMemo(() => {
+    const m = new Map<string, { temp: number; staff: number }>();
+    (assemblyTempRows || []).forEach((r: any) => {
+      if (!isAssemblyTempType(r.work_comment)) return; const q = Number(r.quantity || 0); if (q <= 0) return;
+      const k = String(r.supplier_id || ''); const e = m.get(k) || { temp: 0, staff: 0 }; e.temp += q; m.set(k, e);
+    });
+    (assemblyStaffRows || []).forEach((r: any) => {
+      if (isAssemblyExcludedStaffRate(r.work_rates?.name)) return; const q = Number(r.quantity || 0); if (q <= 0) return;
+      const k = String(r.supplier_id || ''); const e = m.get(k) || { temp: 0, staff: 0 }; e.staff += q; m.set(k, e);
+    });
+    return Array.from(m.entries())
+      .map(([sid, v]) => ({ supplierId: sid, name: suppliers.find((s: any) => String(s.id) === sid)?.name || 'Без поставщика', temp: v.temp, staff: v.staff, total: v.temp + v.staff }))
+      .sort((a, b) => b.total - a.total);
+  }, [assemblyTempRows, assemblyStaffRows, suppliers]);
 
   const generalTempWorkerRows = useMemo(() => {
     const start = String(generalReportForm.start_date || '');
@@ -2751,16 +2769,16 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       const barH = (t / data.aMax) * chartH;
       const staffH = t > 0 ? (v.staff / t) * barH : 0; const tempH = barH - staffH;
       const cx = left + i * slot + slot / 2; const bx = cx - iw / 2;
-      if (staffH > 0) { sf([79, 70, 229]); doc.rect(bx, bottom - staffH, iw, staffH, 'F'); }
-      if (tempH > 0) { sf([245, 158, 11]); doc.rect(bx, bottom - staffH - tempH, iw, tempH, 'F'); }
+      if (staffH > 0) { sf([99, 102, 241]); doc.rect(bx, bottom - staffH, iw, staffH, 'F'); }
+      if (tempH > 0) { sf([16, 185, 129]); doc.rect(bx, bottom - staffH - tempH, iw, tempH, 'F'); }
       // qty above bar
       if (t > 0) { st([71, 85, 105]); doc.setFontSize(4.6); doc.text(String(t), cx, bottom - barH - 1.2, { align: 'center' }); }
       // day label under each bar
       st([100, 116, 139]); doc.setFontSize(4.6); doc.text(dk.slice(8, 10), cx, bottom + 4, { align: 'center' });
     });
     // Legend
-    sf([79, 70, 229]); doc.rect(pageW - 64, top - 0.5, 2.2, 2.2, 'F'); st([100, 116, 139]); doc.setFontSize(6); doc.text('сотрудники', pageW - 61, top + 1.4);
-    sf([245, 158, 11]); doc.rect(pageW - 34, top - 0.5, 2.2, 2.2, 'F'); doc.text('временные', pageW - 31, top + 1.4);
+    sf([99, 102, 241]); doc.rect(pageW - 64, top - 0.5, 2.2, 2.2, 'F'); st([100, 116, 139]); doc.setFontSize(6); doc.text('сотрудники', pageW - 61, top + 1.4);
+    sf([16, 185, 129]); doc.rect(pageW - 34, top - 0.5, 2.2, 2.2, 'F'); doc.text('временные', pageW - 31, top + 1.4);
     return bottom + 12;
   };
 
@@ -23469,7 +23487,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       </div>
                       <div className="flex items-center gap-3 text-xs">
                         <span className="inline-flex items-center gap-1.5 text-slate-500"><span className="h-2.5 w-2.5 rounded-sm bg-indigo-500" /> Сотрудники: <b className="text-slate-700">{assemblyDaily.totalStaff.toLocaleString('ru-RU')}</b></span>
-                        <span className="inline-flex items-center gap-1.5 text-slate-500"><span className="h-2.5 w-2.5 rounded-sm bg-amber-400" /> Временные: <b className="text-slate-700">{assemblyDaily.totalTemp.toLocaleString('ru-RU')}</b></span>
+                        <span className="inline-flex items-center gap-1.5 text-slate-500"><span className="h-2.5 w-2.5 rounded-sm bg-emerald-500" /> Временные: <b className="text-slate-700">{assemblyDaily.totalTemp.toLocaleString('ru-RU')}</b></span>
                       </div>
                     </div>
                     <div className="flex items-end gap-[3px] h-56 pt-4 overflow-x-auto">
@@ -23485,7 +23503,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           <div key={`asm-${dk}`} className="flex-1 min-w-[14px] flex flex-col items-center gap-1 rounded-md px-0.5 hover:bg-indigo-50/70 transition-colors cursor-default" title={title}>
                             <div className="w-full flex flex-col justify-end h-[190px]">
                               {total > 0 && (<>
-                                <div className="w-full bg-amber-400 rounded-t-sm transition-all hover:brightness-95" style={{ height: `${tempH}px` }} />
+                                <div className="w-full bg-emerald-500 rounded-t-sm transition-all hover:brightness-95" style={{ height: `${tempH}px` }} />
                                 <div className="w-full bg-indigo-500 transition-all hover:brightness-110" style={{ height: `${staffH}px` }} />
                               </>)}
                             </div>
@@ -30223,6 +30241,68 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 </div>
 
                 <div className="p-4 md:p-6 space-y-4 2xl:flex-1 2xl:overflow-y-auto custom-scrollbar">
+                  {/* Assembly infographic */}
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 shadow-sm">
+                      <div className="text-[11px] text-amber-700">Собрано — временные</div>
+                      <div className="text-lg font-bold text-amber-800">{assemblyDaily.totalTemp.toLocaleString('ru-RU')}</div>
+                    </div>
+                    <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-3 shadow-sm">
+                      <div className="text-[11px] text-indigo-700">Собрано — сотрудники</div>
+                      <div className="text-lg font-bold text-indigo-800">{assemblyDaily.totalStaff.toLocaleString('ru-RU')}</div>
+                    </div>
+                    <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 shadow-sm">
+                      <div className="text-[11px] text-emerald-700">Собрано — вместе</div>
+                      <div className="text-lg font-bold text-emerald-800">{(assemblyDaily.totalTemp + assemblyDaily.totalStaff).toLocaleString('ru-RU')}</div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <h4 className="font-bold text-slate-900 text-sm">Собрано по дням (30 дней)</h4>
+                      <div className="flex items-center gap-3 text-xs">
+                        <span className="inline-flex items-center gap-1.5 text-slate-500"><span className="h-2.5 w-2.5 rounded-sm bg-indigo-500" /> Сотрудники</span>
+                        <span className="inline-flex items-center gap-1.5 text-slate-500"><span className="h-2.5 w-2.5 rounded-sm bg-emerald-500" /> Временные</span>
+                      </div>
+                    </div>
+                    <div className="flex items-end gap-[3px] h-40 overflow-x-auto">
+                      {assemblyDaily.list.map(([dk, v]) => {
+                        const total = v.temp + v.staff;
+                        const h = Math.round((total / assemblyDaily.maxDay) * 130);
+                        const staffH = total > 0 ? Math.round((v.staff / total) * h) : 0;
+                        const tempH = h - staffH;
+                        const people = Object.entries(v.people).sort((a, b) => b[1] - a[1]);
+                        const dLabel = new Date(dk + 'T12:00:00').toLocaleDateString('ru-RU');
+                        const title = `${dLabel}\nВсего: ${total} (сотрудники ${v.staff}, временные ${v.temp})` + (people.length ? '\n\n' + people.map(([n, q]) => `• ${n}: ${q}`).join('\n') : '');
+                        return (
+                          <div key={`gr-asm-${dk}`} className="flex-1 min-w-[12px] flex flex-col items-center gap-1 rounded hover:bg-indigo-50/70 cursor-default" title={title}>
+                            <div className="w-full flex flex-col justify-end h-[130px]">
+                              {total > 0 && (<>
+                                <div className="w-full bg-emerald-500 rounded-t-sm" style={{ height: `${tempH}px` }} />
+                                <div className="w-full bg-indigo-500" style={{ height: `${staffH}px` }} />
+                              </>)}
+                            </div>
+                            <span className="text-[8px] text-slate-400">{dk.slice(8, 10)}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    {/* Supplier breakdown under chart */}
+                    {assemblyBySupplier.length > 0 && (
+                      <div className="mt-4 border-t border-slate-100 pt-3">
+                        <div className="text-xs font-semibold text-slate-500 mb-2">Собрано по поставщикам</div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                          {assemblyBySupplier.map((s) => (
+                            <div key={`asm-sup-${s.supplierId}`} className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-1.5 text-sm">
+                              <span className="text-slate-700 truncate">{s.name}</span>
+                              <span className="font-semibold text-slate-900 shrink-0 ml-2">{s.total.toLocaleString('ru-RU')} <span className="text-[11px] text-slate-400">(с {s.staff} · в {s.temp})</span></span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
                   <div className="rounded-2xl border border-slate-200 overflow-hidden bg-white">
                     <div className="bg-slate-50 px-4 py-3 font-bold text-slate-900">Отчет по временным сотрудникам</div>
                     {generalTempWorkerRows.length === 0 ? (
