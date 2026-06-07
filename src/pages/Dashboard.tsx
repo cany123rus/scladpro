@@ -4124,7 +4124,49 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
   // Edit State
   const [editingRateId, setEditingRateId] = useState<string | null>(null);
+  const [inlineRateEdit, setInlineRateEdit] = useState<{ id: string; name: string; price: string } | null>(null);
   const [editingPackagingId, setEditingPackagingId] = useState<string | null>(null);
+
+  // Save/create a work rate (shared by the top form and inline card editing).
+  const submitWorkRate = async (overrideName?: string, overridePrice?: string, rateId?: string | null) => {
+    if (!hasAssemblyButtonAccess('cw_rates_save')) return;
+    const name = String(overrideName ?? cwRateForm.name).trim();
+    const price = String(overridePrice ?? cwRateForm.price);
+    const targetId = rateId !== undefined ? rateId : editingRateId;
+    if (!name || !price) return;
+    if (targetId) {
+      const before = cwWorkRates.find((r: any) => String(r.id) === String(targetId));
+      const newPrice = parseFloat(price);
+      await supabase.from('work_rates').update({ name, price: newPrice }).eq('id', targetId);
+      const nextRateHistory = { ...(cwWorkRateHistory || {}) } as Record<string, Array<{ changed_at: string; price: number; old_price?: number | null; new_price?: number | null; name?: string }>>;
+      const rateKey = String(targetId);
+      const currentHistory = Array.isArray(nextRateHistory[rateKey]) ? nextRateHistory[rateKey] : [];
+      const oldPrice = Number(before?.price ?? 0);
+      nextRateHistory[rateKey] = [...currentHistory, { changed_at: new Date().toISOString(), price: newPrice, old_price: oldPrice, new_price: newPrice, name }];
+      setCwWorkRateHistory(nextRateHistory);
+      await supabase.from('app_settings').upsert([{ key: 'cw_work_rate_history_v1', value: JSON.stringify(nextRateHistory) }], { onConflict: 'key' });
+      await logAssemblyChange('work_rates', 'update', before || null, { ...(before || {}), name, price: newPrice });
+      setEditingRateId(null);
+    } else {
+      let createdRate: any = null;
+      const primaryInsert = await supabase.from('work_rates').insert([{ name, price: parseFloat(price), use_shared_price: true }]).select('*').maybeSingle();
+      if (primaryInsert.error) {
+        const fallbackInsert = await supabase.from('work_rates').insert([{ name, price: parseFloat(price) }]).select('*').maybeSingle();
+        createdRate = fallbackInsert.data || null;
+      } else { createdRate = primaryInsert.data || null; }
+      await logAssemblyChange('work_rates', 'create', null, createdRate || { name, price: parseFloat(price) });
+    }
+    setCwRateForm({ name: '', price: '' });
+    const { data } = await supabase.from('work_rates').select('*').is('deleted_at', null);
+    setCwWorkRates(data || []);
+    await loadCwWorkRateEmployeePrices(data || []);
+    if (cwSelectedEmployee?.id) {
+      const startOfMonth = new Date(cwSelectedPeriod.getFullYear(), cwSelectedPeriod.getMonth(), 1).toISOString().split('T')[0];
+      const endOfMonth = new Date(cwSelectedPeriod.getFullYear(), cwSelectedPeriod.getMonth() + 1, 0).toISOString().split('T')[0];
+      const { data: refreshedLogs } = await supabase.from('work_logs').select('*').eq('employee_id', cwSelectedEmployee.id).gte('date', startOfMonth).lte('date', endOfMonth).is('deleted_at', null);
+      setCwWorkLogs(refreshedLogs || []);
+    }
+  };
 
   // Report Dates State
   const [reportDates, setReportDates] = useState<{
@@ -25728,61 +25770,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     </div>
                     <div className="flex items-end">
                     <button
-                      onClick={async () => {
-                        if (!hasAssemblyButtonAccess('cw_rates_save')) return;
-                        if (!cwRateForm.name || !cwRateForm.price) return;
-
-                        if (editingRateId) {
-                            const before = cwWorkRates.find((r: any) => String(r.id) === String(editingRateId));
-                            const newPrice = parseFloat(cwRateForm.price);
-                            await supabase.from('work_rates').update({ name: cwRateForm.name, price: newPrice }).eq('id', editingRateId);
-                            const nextRateHistory = { ...(cwWorkRateHistory || {}) } as Record<string, Array<{ changed_at: string; price: number; old_price?: number | null; new_price?: number | null; name?: string }>>;
-                            const rateKey = String(editingRateId);
-                            const currentHistory = Array.isArray(nextRateHistory[rateKey]) ? nextRateHistory[rateKey] : [];
-                            const oldPrice = Number(before?.price ?? 0);
-                            nextRateHistory[rateKey] = [...currentHistory, { changed_at: new Date().toISOString(), price: newPrice, old_price: oldPrice, new_price: newPrice, name: cwRateForm.name }];
-                            setCwWorkRateHistory(nextRateHistory);
-                            await supabase.from('app_settings').upsert([{ key: 'cw_work_rate_history_v1', value: JSON.stringify(nextRateHistory) }], { onConflict: 'key' });
-                            await logAssemblyChange('work_rates', 'update', before || null, { ...(before || {}), name: cwRateForm.name, price: newPrice });
-                            setEditingRateId(null);
-                        } else {
-                            let createdRate: any = null;
-                            const primaryInsert = await supabase.from('work_rates').insert([{ name: cwRateForm.name, price: parseFloat(cwRateForm.price), use_shared_price: true }]).select('*').maybeSingle();
-                            if (primaryInsert.error) {
-                              const fallbackInsert = await supabase.from('work_rates').insert([{ name: cwRateForm.name, price: parseFloat(cwRateForm.price) }]).select('*').maybeSingle();
-                              createdRate = fallbackInsert.data || null;
-                            } else {
-                              createdRate = primaryInsert.data || null;
-                            }
-                            await logAssemblyChange('work_rates', 'create', null, createdRate || { name: cwRateForm.name, price: parseFloat(cwRateForm.price) });
-                        }
-
-                        setCwRateForm({ name: '', price: '' });
-                        // Refresh rates
-                        const { data } = await supabase.from('work_rates').select('*').is('deleted_at', null);
-                        setCwWorkRates(data || []);
-                        await loadCwWorkRateEmployeePrices(data || []);
-                        if (cwSelectedEmployee?.id) {
-                          const startOfMonth = new Date(cwSelectedPeriod.getFullYear(), cwSelectedPeriod.getMonth(), 1).toISOString().split('T')[0];
-                          const endOfMonth = new Date(cwSelectedPeriod.getFullYear(), cwSelectedPeriod.getMonth() + 1, 0).toISOString().split('T')[0];
-                          const { data: refreshedLogs } = await supabase
-                            .from('work_logs')
-                            .select('*')
-                            .eq('employee_id', cwSelectedEmployee.id)
-                            .gte('date', startOfMonth)
-                            .lte('date', endOfMonth)
-                            .is('deleted_at', null);
-                          setCwWorkLogs(refreshedLogs || []);
-                        }
-                      }}
+                      onClick={() => submitWorkRate(undefined, undefined, null)}
                       disabled={!hasAssemblyButtonAccess('cw_rates_save')}
-                      className={`h-11 px-5 rounded-xl font-semibold text-white shadow-sm inline-flex items-center gap-2 ${editingRateId ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-indigo-600 hover:bg-indigo-700'} ${!hasAssemblyButtonAccess('cw_rates_save') ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      className={`h-11 px-5 rounded-xl font-semibold text-white shadow-sm inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 ${!hasAssemblyButtonAccess('cw_rates_save') ? 'opacity-50 cursor-not-allowed' : ''}`}
                     >
-                      {editingRateId ? <><Save className="h-4 w-4" /> Сохранить</> : <><Plus className="h-4 w-4" /> Добавить</>}
+                      <Plus className="h-4 w-4" /> Добавить
                     </button>
-                    {editingRateId && (
-                      <button type="button" onClick={() => { setEditingRateId(null); setCwRateForm({ name: '', price: '' }); }} className="h-11 px-3 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 ml-2">Отмена</button>
-                    )}
                     </div>
                   </div>
                   <div className="space-y-2">
@@ -25814,11 +25807,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                 <RefreshCw className="h-3.5 w-3.5" /> Обновить
                               </button>
                               <button
-                                onClick={() => {
-                                    setEditingRateId(rate.id);
-                                    setCwRateForm({ name: rate.name, price: rate.price.toString() });
-                                }}
-                                className="inline-flex items-center justify-center h-8 w-8 rounded-lg text-blue-600 hover:bg-blue-50"
+                                onClick={() => setInlineRateEdit(inlineRateEdit?.id === String(rate.id) ? null : { id: String(rate.id), name: String(rate.name || ''), price: String(rate.price ?? '') })}
+                                className={`inline-flex items-center justify-center h-8 w-8 rounded-lg ${inlineRateEdit?.id === String(rate.id) ? 'bg-blue-100 text-blue-700' : 'text-blue-600 hover:bg-blue-50'}`}
                                 title="Редактировать"
                               >
                                 <Pencil className="h-4 w-4" />
@@ -25838,6 +25828,23 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               }} disabled={!hasAssemblyButtonAccess('cw_rates_delete')} className={`text-red-500 hover:text-red-700 ${!hasAssemblyButtonAccess('cw_rates_delete') ? 'opacity-40 cursor-not-allowed' : ''}`}><Trash2 className="h-4 w-4" /></button>
                             </div>
                           </div>
+
+                          {inlineRateEdit?.id === String(rate.id) && (
+                            <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-3">
+                              <div className="grid grid-cols-1 sm:grid-cols-[1fr_140px_auto_auto] gap-2 items-end">
+                                <div>
+                                  <label className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1">Название</label>
+                                  <input type="text" value={inlineRateEdit.name} onChange={(e) => setInlineRateEdit((p) => p ? { ...p, name: e.target.value } : p)} className="oc-input w-full" />
+                                </div>
+                                <div>
+                                  <label className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1">Цена за шт. (₽)</label>
+                                  <input type="number" step="0.01" value={inlineRateEdit.price} onChange={(e) => setInlineRateEdit((p) => p ? { ...p, price: e.target.value } : p)} className="oc-input w-full" />
+                                </div>
+                                <button type="button" disabled={!hasAssemblyButtonAccess('cw_rates_save')} onClick={async () => { await submitWorkRate(inlineRateEdit.name, inlineRateEdit.price, inlineRateEdit.id); setInlineRateEdit(null); showToast('Расценка обновлена', 'success'); }} className={`h-11 px-4 rounded-xl bg-emerald-600 text-white font-semibold hover:bg-emerald-700 inline-flex items-center gap-2 ${!hasAssemblyButtonAccess('cw_rates_save') ? 'opacity-50 cursor-not-allowed' : ''}`}><Save className="h-4 w-4" /> Сохранить</button>
+                                <button type="button" onClick={() => setInlineRateEdit(null)} className="h-11 px-3 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50">Отмена</button>
+                              </div>
+                            </div>
+                          )}
 
                           <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
                             <input
