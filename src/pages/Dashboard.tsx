@@ -3244,17 +3244,24 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       ];
       if (y > pageH - 40) { doc.addPage(); y = 16; }
       const costTotal = Number(generalReportTotals.tempEarned || 0) + Number(generalReportTotals.cwAmount || 0) + Number(generalReportTotals.deliveryAmount || 0) + pkg.total;
-      setFill([30, 41, 59]); doc.roundedRect(10, y, pageW - 20, 16, 2, 2, 'F');
-      setText([226, 232, 240]); doc.setFontSize(8.5); doc.text('ОБЩИЕ', 15, y + 7.5); setText([148, 163, 184]); doc.text('ЗАТРАТЫ', 15, y + 12.5);
-      setText([255, 255, 255]); doc.setFontSize(10); doc.text(money(costTotal), 15 + 26, y + 10);
-      const csArea = pageW - 20 - 60; const csW = csArea / costStats.length;
-      costStats.forEach((s, i) => {
-        const sx = 60 + csW * i;
-        setFill(s.rgb); doc.roundedRect(sx, y + 5.4, 2.4, 2.4, 0.6, 0.6, 'F');
-        setText([203, 213, 225]); doc.setFontSize(6.2); doc.text(s.label.toUpperCase(), sx + 4, y + 7.5);
-        setText([255, 255, 255]); doc.setFontSize(9.5); doc.text(s.text, sx + 4, y + 13);
-      });
-      y += 20;
+      {
+        const cbY = y; const cbH = 18; const cbX = 12; const cbW = pageW - 24; const cbTitleW = 56;
+        setFill([30, 41, 59]); doc.roundedRect(cbX, cbY, cbW, cbH, 2, 2, 'F');
+        // Title column (left) — two lines, vertically centered
+        setText([226, 232, 240]); doc.setFontSize(8.5); doc.text('ОБЩИЕ', cbX + 5, cbY + 7);
+        setText([148, 163, 184]); doc.text('ЗАТРАТЫ', cbX + 5, cbY + 11.5);
+        setText([255, 255, 255]); doc.setFontSize(9.5); doc.text(money(costTotal), cbX + 5, cbY + 16);
+        // Vertical divider after title (like СОБРАНО ТОВАРОВ)
+        setFill([51, 65, 85]); doc.rect(cbX + cbTitleW, cbY + 3, 0.4, cbH - 6, 'F');
+        const csArea = cbW - cbTitleW - 6; const csW = csArea / costStats.length;
+        costStats.forEach((s, i) => {
+          const sx = cbX + cbTitleW + 5 + csW * i;
+          setFill(s.rgb); doc.roundedRect(sx, cbY + 6, 2.4, 2.4, 0.6, 0.6, 'F');
+          setText([203, 213, 225]); doc.setFontSize(6.2); doc.text(s.label.toUpperCase(), sx + 4, cbY + 8);
+          setText([255, 255, 255]); doc.setFontSize(9.5); doc.text(s.text, sx + 4, cbY + 13.5);
+        });
+        y += cbH + 4;
+      }
       // Packaging by supplier table
       if (pkg.bySupplier.length) {
         y = drawBand(y, 'Закуп упаковки и прочее', [245, 158, 11]);
@@ -3263,6 +3270,30 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           head: [['Поставщик', 'Упаковка', 'Прочее', 'Итого']],
           body: pkg.bySupplier.map((s: any) => [s.name, money(s.pack), money(s.other), money(s.total)]),
           foot: [['Итого', money(pkg.totalPack), money(pkg.totalOther), money(pkg.total)]],
+        }, y, [245, 158, 11]);
+        y = ((doc as any).lastAutoTable?.finalY || y) + 9;
+      }
+      // Full packaging detail table
+      if (pkg.detail.length) {
+        if (y > pageH - 30) { doc.addPage(); y = 16; }
+        y = drawBand(y, 'Закуп — детализация', [245, 158, 11]);
+        baseTable({
+          startY: y,
+          head: [['Дата', 'Поставщик', 'Вид', 'Тип / Товар', 'Кол-во', 'Цена/шт', 'Доставка', 'Итого']],
+          body: pkg.detail
+            .slice()
+            .sort((a: any, b: any) => String(b.created_at).localeCompare(String(a.created_at)))
+            .map((r: any) => [
+              dateRu(String(r.created_at).slice(0, 10)),
+              suppliers.find((s: any) => String(s.id) === String(r.supplier_id))?.name || '-',
+              r.kind === 'other' ? 'Прочее' : 'Упаковка',
+              r.kind === 'other' ? (r.item_name || '-') : (r.size || '-'),
+              r.kind === 'other' ? '-' : Number(r.quantity || 0).toLocaleString('ru-RU'),
+              r.kind === 'other' ? '-' : money(r.price),
+              r.kind === 'other' ? '-' : money(r.delivery),
+              money(pkg.cost(r)),
+            ]),
+          foot: [['', '', '', '', '', '', 'Итого', money(pkg.total)]],
         }, y, [245, 158, 11]);
         y = ((doc as any).lastAutoTable?.finalY || y) + 9;
       }
@@ -27028,13 +27059,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   if (!sids.length) { showToast('Выберите хотя бы одного поставщика', 'error'); return; }
                   const N = sids.length;
                   const createdAt = new Date(`${cwPurchaseForm.purchase_date}T12:00:00`).toISOString();
-                  // Split each purchase cost equally between the selected suppliers.
+                  // Full price kept per supplier (no division) — a record per selected supplier.
                   const packPayload = cwPurchaseRows
                     .filter(x => x.size && x.quantity && x.price)
-                    .flatMap(x => sids.map(sid => ({ kind: 'packaging', supplier_id: sid, quantity: parseInt(x.quantity), size: x.size, price: parseFloat(x.price) / N, delivery: parseFloat(x.delivery || '0') / N, created_at: createdAt })));
+                    .flatMap(x => sids.map(sid => ({ kind: 'packaging', supplier_id: sid, quantity: parseInt(x.quantity), size: x.size, price: parseFloat(x.price), delivery: parseFloat(x.delivery || '0'), created_at: createdAt })));
                   const otherPayload = cwPurchaseOtherRows
                     .filter(x => x.item_name.trim() && x.price)
-                    .flatMap(x => sids.map(sid => ({ kind: 'other', supplier_id: sid, item_name: x.item_name.trim(), price: parseFloat(x.price) / N, created_at: createdAt })));
+                    .flatMap(x => sids.map(sid => ({ kind: 'other', supplier_id: sid, item_name: x.item_name.trim(), price: parseFloat(x.price), created_at: createdAt })));
                   const payload = [...packPayload, ...otherPayload];
                   if (!payload.length) { showToast('Заполните хотя бы одну запись', 'error'); return; }
                   const { error } = await supabase.from('packaging_purchase_log').insert(payload as any);
@@ -27043,7 +27074,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   setCwPurchaseOtherRows([{ id: getSafeId(), item_name: '', price: '' }]);
                   setCwPurchaseForm({ purchase_date: new Date().toISOString().slice(0, 10), supplier_ids: [] });
                   await fetchCwPurchaseHistory();
-                  showToast(`Добавлено записей: ${payload.length}${N > 1 ? ` (разделено между ${N} поставщиками)` : ''}`, 'success');
+                  showToast(`Добавлено записей: ${payload.length}${N > 1 ? ` (по ${N} поставщикам)` : ''}`, 'success');
                 };
                 return (
                 <div className="space-y-5">
@@ -27063,8 +27094,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       </div>
                       <div>
                         <div className="flex items-center justify-between mb-1.5">
-                          <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500">Поставщики (затраты делятся поровну)</label>
-                          {cwPurchaseForm.supplier_ids.length > 0 && <span className="text-[11px] text-indigo-600 font-medium">Выбрано: {cwPurchaseForm.supplier_ids.length} · делим на {cwPurchaseForm.supplier_ids.length}</span>}
+                          <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500">Поставщики (для разделения трат)</label>
+                          {cwPurchaseForm.supplier_ids.length > 0 && <span className="text-[11px] text-indigo-600 font-medium">Выбрано: {cwPurchaseForm.supplier_ids.length}</span>}
                         </div>
                         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-44 overflow-y-auto rounded-2xl border border-slate-200 bg-slate-50/60 p-2">
                           {suppliers.map((s) => {
