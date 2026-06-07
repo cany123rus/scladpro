@@ -924,7 +924,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       return {};
     }
   });
-  const [analyticsSubTab, setAnalyticsSubTab] = useState<'reports' | 'ads'>('reports');
+  const [analyticsSubTab, setAnalyticsSubTab] = useState<'reports' | 'ads' | 'ads_api'>('reports');
+  // ── Реклама API (WB Продвижение) ──
+  const [adsApiSupplierId, setAdsApiSupplierId] = useState('');
+  const [adsApiFrom, setAdsApiFrom] = useState('');
+  const [adsApiTo, setAdsApiTo] = useState('');
+  const [adsApiLoading, setAdsApiLoading] = useState(false);
+  const [adsApiError, setAdsApiError] = useState<string | null>(null);
+  const [adsApiData, setAdsApiData] = useState<any>(null);
+  const [adsApiCampSort, setAdsApiCampSort] = useState<{ field: string; dir: 'asc' | 'desc' }>({ field: 'sum', dir: 'desc' });
   const [adsAnalyticsSheets, setAdsAnalyticsSheets] = useState<Array<{ name: string; columns: string[]; rows: any[] }>>([]);
   const [adsNmSort, setAdsNmSort] = useState<{ field: string; dir: 'asc' | 'desc' }>({ field: 'revenue', dir: 'desc' });
   const [adsKwSearch, setAdsKwSearch] = useState('');
@@ -16198,6 +16206,72 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     }
   };
 
+  // Pull internal-advertising data via WB "Продвижение" API for the selected supplier.
+  const loadAdsApiData = async () => {
+    const supplier = (suppliers || []).find((s: any) => String(s?.id) === String(adsApiSupplierId));
+    if (!supplier?.wb_api_token) { setAdsApiError('У выбранного поставщика не указан WB API токен'); return; }
+    if (!adsApiFrom || !adsApiTo) { setAdsApiError('Укажите период'); return; }
+    const token = String(supplier.wb_api_token).trim();
+    const ADV = 'https://advert-api.wildberries.ru';
+    setAdsApiLoading(true); setAdsApiError(null); setAdsApiData(null);
+    try {
+      // 1) Список ID кампаний
+      const cntRes = await fetch(`${ADV}/adv/v1/promotion/count`, { headers: { Authorization: token } });
+      if (!cntRes.ok) throw new Error(`WB API ${cntRes.status}: ${(await cntRes.text()).slice(0, 160)}`);
+      const cnt = await cntRes.json();
+      const ids: number[] = [];
+      (cnt?.adverts || []).forEach((g: any) => (g?.advert_list || []).forEach((a: any) => { const id = Number(a?.advertId); if (id) ids.push(id); }));
+      if (!ids.length) { setAdsApiError('У поставщика не найдено рекламных кампаний'); return; }
+
+      // 2) Имена кампаний (необязательно)
+      const nameMap = new Map<number, string>();
+      for (let i = 0; i < ids.length; i += 50) {
+        try {
+          const r = await fetch(`${ADV}/adv/v1/promotion/adverts`, { method: 'POST', headers: { Authorization: token, 'Content-Type': 'application/json' }, body: JSON.stringify(ids.slice(i, i + 50)) });
+          if (r.ok) { const arr = await r.json(); (arr || []).forEach((c: any) => nameMap.set(Number(c?.advertId), c?.name || `#${c?.advertId}`)); }
+        } catch {}
+      }
+
+      // 3) Полная статистика (rate limit ~1 запрос/мин, до 100 кампаний за запрос)
+      const stats: any[] = [];
+      const batches = Math.ceil(ids.length / 100);
+      for (let i = 0; i < ids.length; i += 100) {
+        if (i > 0) await new Promise((r) => setTimeout(r, 61000));
+        const body = ids.slice(i, i + 100).map((id) => ({ id, interval: { begin: adsApiFrom, end: adsApiTo } }));
+        const r = await fetch(`${ADV}/adv/v2/fullstats`, { method: 'POST', headers: { Authorization: token, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        if (!r.ok) throw new Error(`fullstats ${r.status}: ${(await r.text()).slice(0, 160)}`);
+        const arr = await r.json();
+        if (Array.isArray(arr)) stats.push(...arr);
+      }
+      void batches;
+
+      // 4) Агрегация
+      const t = { views: 0, clicks: 0, sum: 0, atbs: 0, orders: 0, shks: 0, revenue: 0 };
+      const dayMap = new Map<string, { spend: number; clicks: number; orders: number; revenue: number; views: number }>();
+      const campaigns: any[] = [];
+      stats.forEach((s: any) => {
+        const sp = Number(s?.sum || 0), rev = Number(s?.sum_price || 0);
+        t.views += Number(s?.views || 0); t.clicks += Number(s?.clicks || 0); t.sum += sp;
+        t.atbs += Number(s?.atbs || 0); t.orders += Number(s?.orders || 0); t.shks += Number(s?.shks || 0); t.revenue += rev;
+        campaigns.push({ id: s?.advertId, name: nameMap.get(Number(s?.advertId)) || `#${s?.advertId}`, views: Number(s?.views || 0), clicks: Number(s?.clicks || 0), sum: sp, atbs: Number(s?.atbs || 0), orders: Number(s?.orders || 0), revenue: rev });
+        (s?.days || []).forEach((d: any) => {
+          const date = String(d?.date || '').slice(0, 10);
+          const e = dayMap.get(date) || { spend: 0, clicks: 0, orders: 0, revenue: 0, views: 0 };
+          e.spend += Number(d?.sum || 0); e.clicks += Number(d?.clicks || 0); e.orders += Number(d?.orders || 0); e.revenue += Number(d?.sum_price || 0); e.views += Number(d?.views || 0);
+          dayMap.set(date, e);
+        });
+      });
+      const daily = Array.from(dayMap.entries()).filter(([d]) => /^\d{4}/.test(d)).sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([date, v]) => ({ date, ...v }));
+      setAdsApiData({ totals: t, daily, campaigns, count: campaigns.length });
+      showToast(`Загружено кампаний: ${campaigns.length}`, 'success');
+    } catch (e: any) {
+      console.error('loadAdsApiData error', e);
+      setAdsApiError(e?.message || 'Ошибка WB API. Проверьте, что токен имеет категорию «Продвижение».');
+    } finally {
+      setAdsApiLoading(false);
+    }
+  };
+
   const deleteWbApiHistoryItem = async (id: string, fileName?: string) => {
     if (!id) return;
     const ok = await confirmDialog(`Удалить из хранилища WB API: ${String(fileName || 'файл')}?`);
@@ -22857,6 +22931,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     >
                       Аналитика рекламы
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => setAnalyticsSubTab('ads_api')}
+                      className={`px-4 sm:px-5 py-2 text-sm font-semibold rounded-xl transition-all ${analyticsSubTab === 'ads_api' ? 'bg-white text-indigo-700 shadow-sm' : 'text-white/90 hover:bg-white/10'}`}
+                    >
+                      Реклама API
+                    </button>
                   </div>
                 </div>
               </div>
@@ -23203,6 +23284,170 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     )}
 
                   </div>
+                </div>
+              )}
+
+              {analyticsSubTab === 'ads_api' && (
+                <div className="w-full mb-4 space-y-4">
+                  <div className="bg-white rounded-xl border border-slate-100 p-4">
+                    <h2 className="text-lg font-semibold text-slate-900">Реклама через WB API</h2>
+                    <p className="text-sm text-slate-500 mt-1">Данные тянутся напрямую из кабинета по API «Продвижение» выбранного поставщика — с заказами, выручкой и ДРР по дням.</p>
+                    <div className="mt-4 flex flex-wrap items-end gap-3">
+                      <div className="min-w-[240px]">
+                        <label className="block text-xs text-slate-500 mb-1">Поставщик (с WB API токеном)</label>
+                        <select value={adsApiSupplierId} onChange={(e) => setAdsApiSupplierId(e.target.value)} className="w-full md:w-[360px] px-3 py-2 text-sm border border-slate-300 rounded-lg bg-white">
+                          <option value="">- Выберите поставщика -</option>
+                          {(suppliers || []).filter((s: any) => s.wb_api_token).map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs text-slate-500 mb-1">Период с</label>
+                        <input type="date" value={adsApiFrom} onChange={(e) => setAdsApiFrom(e.target.value)} className="px-2 py-2 text-xs border border-slate-300 rounded-lg" />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-slate-500 mb-1">по</label>
+                        <input type="date" value={adsApiTo} onChange={(e) => setAdsApiTo(e.target.value)} className="px-2 py-2 text-xs border border-slate-300 rounded-lg" />
+                      </div>
+                      <button onClick={loadAdsApiData} disabled={adsApiLoading || !adsApiSupplierId} className="px-4 py-2 text-sm font-semibold rounded-xl border border-indigo-300 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 shadow-sm disabled:opacity-50">
+                        {adsApiLoading ? 'Загрузка из WB…' : 'Загрузить данные'}
+                      </button>
+                    </div>
+                    {adsApiError && <div className="mt-3 text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg p-2">{adsApiError}</div>}
+                    {adsApiLoading && <div className="mt-2 text-[11px] text-slate-400">При большом числе кампаний WB ограничивает 1 запрос/мин — загрузка может занять время.</div>}
+                  </div>
+
+                  {adsApiData && (() => {
+                    const t = adsApiData.totals; const money = (v: number) => Math.round(v).toLocaleString('ru-RU') + ' ₽';
+                    const ctr = t.views ? t.clicks / t.views * 100 : 0;
+                    const cpc = t.clicks ? t.sum / t.clicks : 0;
+                    const cpo = t.orders ? t.sum / t.orders : 0;
+                    const cr = t.clicks ? t.orders / t.clicks * 100 : 0;
+                    const drr = t.revenue ? t.sum / t.revenue * 100 : 0;
+                    const romi = t.sum ? (t.revenue - t.sum) / t.sum * 100 : 0;
+                    const drrColor = drr === 0 ? 'text-slate-900' : drr <= 15 ? 'text-emerald-600' : drr <= 22.5 ? 'text-amber-600' : 'text-rose-600';
+                    const cards = [
+                      { label: 'Расход', value: money(t.sum), grad: 'from-rose-500 to-orange-500' },
+                      { label: 'Выручка с рекламы', value: money(t.revenue), grad: 'from-emerald-500 to-teal-500' },
+                      { label: 'ДРР', value: drr.toFixed(2) + '%', grad: 'from-violet-500 to-fuchsia-500', cls: drrColor },
+                      { label: 'ROMI', value: romi.toFixed(0) + '%', grad: 'from-indigo-500 to-blue-500' },
+                    ];
+                    const mini = [
+                      { label: 'Показы', value: t.views.toLocaleString('ru-RU') },
+                      { label: 'Клики', value: t.clicks.toLocaleString('ru-RU') },
+                      { label: 'CTR', value: ctr.toFixed(2) + '%' },
+                      { label: 'CPC', value: cpc.toFixed(2) + ' ₽' },
+                      { label: 'В корзину', value: t.atbs.toLocaleString('ru-RU') },
+                      { label: 'Заказы', value: t.orders.toLocaleString('ru-RU') },
+                      { label: 'CR (клик→заказ)', value: cr.toFixed(2) + '%' },
+                      { label: 'CPO', value: cpo.toFixed(0) + ' ₽' },
+                    ];
+                    return (
+                      <div className="bg-white rounded-xl border border-slate-100 p-4 space-y-4">
+                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                          {cards.map((c) => (
+                            <div key={c.label} className="relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                              <div className={`absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${c.grad}`} />
+                              <div className="text-xs font-medium text-slate-500">{c.label}</div>
+                              <div className={`mt-1.5 text-2xl font-extrabold ${c.cls || 'text-slate-900'}`}>{c.value}</div>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
+                          {mini.map((m) => (
+                            <div key={m.label} className="rounded-xl bg-slate-50 border border-slate-100 px-3 py-2">
+                              <div className="text-[10px] uppercase tracking-wide text-slate-400">{m.label}</div>
+                              <div className="text-sm font-bold text-slate-800 mt-0.5">{m.value}</div>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Расход + выручка по дням */}
+                        {adsApiData.daily.length > 0 && (() => {
+                          const maxSpend = Math.max(1, ...adsApiData.daily.map((d: any) => d.spend));
+                          const maxRev = Math.max(1, ...adsApiData.daily.map((d: any) => d.revenue));
+                          return (
+                            <div className="rounded-2xl border border-slate-200 p-4">
+                              <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+                                <h4 className="font-bold text-slate-800 text-sm">Расход и выручка по дням</h4>
+                                <div className="flex items-center gap-3 text-xs">
+                                  <span className="inline-flex items-center gap-1.5 text-slate-500"><span className="h-2.5 w-2.5 rounded-sm bg-rose-500" /> расход</span>
+                                  <span className="inline-flex items-center gap-1.5 text-slate-500"><span className="h-2.5 w-2.5 rounded-sm bg-emerald-500" /> выручка</span>
+                                </div>
+                              </div>
+                              <div className="flex items-end gap-[3px] h-48 overflow-x-auto">
+                                {adsApiData.daily.map((d: any) => {
+                                  const drrD = d.revenue ? d.spend / d.revenue * 100 : 0;
+                                  return (
+                                    <div key={d.date} className="flex-1 min-w-[16px] flex flex-col items-center gap-1" title={`${new Date(d.date + 'T12:00:00').toLocaleDateString('ru-RU')}\nРасход: ${Math.round(d.spend).toLocaleString('ru-RU')} ₽\nВыручка: ${Math.round(d.revenue).toLocaleString('ru-RU')} ₽\nЗаказы: ${d.orders}\nДРР: ${drrD.toFixed(1)}%`}>
+                                      <div className="w-full flex items-end justify-center gap-[2px] h-[150px]">
+                                        <div className="w-1/2 bg-rose-500 rounded-t-sm" style={{ height: `${Math.round(d.spend / maxSpend * 150)}px` }} />
+                                        <div className="w-1/2 bg-emerald-500 rounded-t-sm" style={{ height: `${Math.round(d.revenue / maxRev * 150)}px` }} />
+                                      </div>
+                                      <span className="text-[8px] text-slate-400">{d.date.slice(8, 10)}</span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        })()}
+
+                        {/* ДРР по дням */}
+                        {adsApiData.daily.length > 0 && (() => {
+                          const series = adsApiData.daily.map((d: any) => ({ date: d.date, drr: d.revenue ? d.spend / d.revenue * 100 : 0 }));
+                          const maxDrr = Math.max(1, ...series.map((s: any) => s.drr));
+                          return (
+                            <div className="rounded-2xl border border-slate-200 p-4">
+                              <h4 className="font-bold text-slate-800 text-sm mb-3">ДРР по дням <span className="text-[11px] font-normal text-slate-400">(ниже — лучше; цель ≤15%)</span></h4>
+                              <div className="flex items-end gap-[3px] h-32 overflow-x-auto">
+                                {series.map((s: any) => (
+                                  <div key={s.date} className="flex-1 min-w-[14px] flex flex-col items-center gap-1" title={`${new Date(s.date + 'T12:00:00').toLocaleDateString('ru-RU')}\nДРР: ${s.drr.toFixed(1)}%`}>
+                                    <div className="w-full flex flex-col justify-end h-[100px]">
+                                      <div className={`w-full rounded-t-sm ${s.drr <= 15 ? 'bg-emerald-500' : s.drr <= 22.5 ? 'bg-amber-500' : 'bg-rose-500'}`} style={{ height: `${Math.round(s.drr / maxDrr * 100)}px` }} />
+                                    </div>
+                                    <span className="text-[8px] text-slate-400">{s.date.slice(8, 10)}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })()}
+
+                        {/* Таблица по кампаниям */}
+                        <div>
+                          <h4 className="font-bold text-slate-800 text-sm mb-2">По кампаниям ({adsApiData.count})</h4>
+                          <div className="overflow-auto max-h-[50vh] border border-slate-100 rounded-lg">
+                            <table className="min-w-full text-xs">
+                              <thead className="bg-slate-50 sticky top-0 z-10">
+                                <tr className="select-none">
+                                  {[['name','Кампания'],['sum','Расход'],['revenue','Выручка'],['views','Показы'],['clicks','Клики'],['atbs','Корзины'],['orders','Заказы']].map(([f,l]) => (
+                                    <th key={f} className="px-2 py-2 text-left cursor-pointer hover:text-indigo-600" onClick={() => setAdsApiCampSort((p) => ({ field: f, dir: p.field === f && p.dir === 'desc' ? 'asc' : 'desc' }))}>{l}{adsApiCampSort.field === f ? (adsApiCampSort.dir === 'asc' ? ' ▲' : ' ▼') : ''}</th>
+                                  ))}
+                                  <th className="px-2 py-2 text-left">ДРР %</th>
+                                  <th className="px-2 py-2 text-left">CPC</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {[...adsApiData.campaigns].sort((a: any, b: any) => { const f = adsApiCampSort.field; const mul = adsApiCampSort.dir === 'asc' ? 1 : -1; return f === 'name' ? String(a.name).localeCompare(String(b.name), 'ru') * mul : ((a[f] || 0) - (b[f] || 0)) * mul; }).map((c: any) => (
+                                  <tr key={c.id} className="border-t border-slate-100 hover:bg-slate-50">
+                                    <td className="px-2 py-1.5 max-w-[260px] truncate" title={c.name}>{c.name}</td>
+                                    <td className="px-2 py-1.5">{Math.round(c.sum).toLocaleString('ru-RU')}</td>
+                                    <td className="px-2 py-1.5">{Math.round(c.revenue).toLocaleString('ru-RU')}</td>
+                                    <td className="px-2 py-1.5">{c.views.toLocaleString('ru-RU')}</td>
+                                    <td className="px-2 py-1.5">{c.clicks.toLocaleString('ru-RU')}</td>
+                                    <td className="px-2 py-1.5">{c.atbs.toLocaleString('ru-RU')}</td>
+                                    <td className="px-2 py-1.5">{c.orders.toLocaleString('ru-RU')}</td>
+                                    <td className="px-2 py-1.5">{(c.revenue ? c.sum / c.revenue * 100 : 0).toFixed(1)}</td>
+                                    <td className="px-2 py-1.5">{(c.clicks ? c.sum / c.clicks : 0).toFixed(2)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
 
