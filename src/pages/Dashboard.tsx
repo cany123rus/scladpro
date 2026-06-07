@@ -3292,6 +3292,19 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
       let y = drawAssemblyChartPdf(doc, acY + acH + 4, asmData);
 
+      // Full assembly cost per unit by supplier (right after Собрано по поставщикам)
+      if (generalFullAvg.bySupplier.filter((s: any) => s.qty > 0).length) {
+        if (y > pageH - 30) { doc.addPage(); y = 16; }
+        y = drawBand(y, 'Средняя цена сборки (полная: ЗП + доставка + закуп)', [225, 29, 72]);
+        baseTable({
+          startY: y,
+          head: [['Поставщик', 'Собрано, шт', 'Затраты', 'Цена/шт']],
+          body: generalFullAvg.bySupplier.filter((s: any) => s.qty > 0).map((s: any) => [s.name, s.qty.toLocaleString('ru-RU'), money(s.cost), `${s.avg.toFixed(2)} руб.`]),
+          foot: [['Итого', generalFullAvg.totalQty.toLocaleString('ru-RU'), money(generalFullAvg.totalCost), `${generalFullAvg.avg.toFixed(2)} руб.`]],
+        }, y, [225, 29, 72]);
+        y = ((doc as any).lastAutoTable?.finalY || y) + 9;
+      }
+
       // ── Затраты + закуп ──────────────────────────────────────────
       const pkg = await buildPackagingForReport(generalReportForm.start_date, generalReportForm.end_date, generalReportForm.supplier_id);
       const costStats = [
@@ -3319,17 +3332,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           setText([255, 255, 255]); doc.setFontSize(9.5); doc.text(s.text, sx + 4, cbY + 13.5);
         });
         y += cbH + 4;
-      }
-      // Packaging by supplier table
-      if (pkg.bySupplier.length) {
-        y = drawBand(y, 'Закуп упаковки и прочее', [245, 158, 11]);
-        baseTable({
-          startY: y,
-          head: [['Поставщик', 'Упаковка', 'Прочее', 'Итого']],
-          body: pkg.bySupplier.map((s: any) => [s.name, money(s.pack), money(s.other), money(s.total)]),
-          foot: [['Итого', money(pkg.totalPack), money(pkg.totalOther), money(pkg.total)]],
-        }, y, [245, 158, 11]);
-        y = ((doc as any).lastAutoTable?.finalY || y) + 9;
       }
       // Full packaging detail table
       if (pkg.detail.length) {
@@ -3369,19 +3371,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           }, y, [79, 70, 229]);
           y = ((doc as any).lastAutoTable?.finalY || y) + 9;
         }
-      }
-
-      // Full assembly cost per unit by supplier
-      if (generalFullAvg.bySupplier.filter((s: any) => s.qty > 0).length) {
-        if (y > pageH - 30) { doc.addPage(); y = 16; }
-        y = drawBand(y, 'Средняя цена сборки (полная: ЗП + доставка + закуп)', [225, 29, 72]);
-        baseTable({
-          startY: y,
-          head: [['Поставщик', 'Собрано, шт', 'Затраты', 'Цена/шт']],
-          body: generalFullAvg.bySupplier.filter((s: any) => s.qty > 0).map((s: any) => [s.name, s.qty.toLocaleString('ru-RU'), money(s.cost), `${s.avg.toFixed(2)} руб.`]),
-          foot: [['Итого', generalFullAvg.totalQty.toLocaleString('ru-RU'), money(generalFullAvg.totalCost), `${generalFullAvg.avg.toFixed(2)} руб.`]],
-        }, y, [225, 29, 72]);
-        y = ((doc as any).lastAutoTable?.finalY || y) + 9;
       }
 
       y = drawBand(y, 'ЗП временные', [16, 185, 129]);
@@ -3944,6 +3933,19 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [cwPurchaseHistory, setCwPurchaseHistory] = useState<any[]>([]);
   const [cwPurchaseHistorySupplierFilter, setCwPurchaseHistorySupplierFilter] = useState('all');
   const [cwPurchaseEdit, setCwPurchaseEdit] = useState<any | null>(null);
+  const [boxAdjustValue, setBoxAdjustValue] = useState('');
+  const adjustBoxStock = async () => {
+    const target = parseInt(boxAdjustValue);
+    if (isNaN(target)) { showToast('Введите фактический остаток коробок', 'error'); return; }
+    const delta = target - boxStock.remaining;
+    if (delta === 0) { showToast('Остаток уже равен этому значению', 'info'); return; }
+    const { error } = await supabase.from('packaging_purchase_log').insert([{ kind: 'packaging', size: 'Корректировка остатка коробок', quantity: delta, price: 0, delivery: 0, created_at: new Date().toISOString() }]);
+    if (error) { showToast('Ошибка корректировки: ' + (error.message || 'неизвестно'), 'error'); return; }
+    setBoxAdjustValue('');
+    await fetchCwPurchaseHistory();
+    await loadBoxStock();
+    showToast(`Остаток скорректирован на ${delta > 0 ? '+' : ''}${delta} коробок`, 'success');
+  };
   const saveCwPurchaseEdit = async () => {
     if (!cwPurchaseEdit) return;
     const e = cwPurchaseEdit;
@@ -27306,6 +27308,23 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       <button onClick={savePurchases} disabled={!hasAssemblyButtonAccess('cw_purchase_add')} className={`w-full py-3 rounded-2xl bg-indigo-600 text-white font-semibold shadow-sm hover:bg-indigo-700 transition-colors ${!hasAssemblyButtonAccess('cw_purchase_add') ? 'opacity-50 cursor-not-allowed' : ''}`}>
                         Сохранить закуп
                       </button>
+                    </div>
+                  </div>
+
+                  {/* Box stock adjustment */}
+                  <div className="rounded-3xl border border-indigo-200 bg-indigo-50/50 shadow-sm p-4">
+                    <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+                      <div>
+                        <h4 className="text-sm font-bold text-slate-900">Корректировка остатка коробок</h4>
+                        <p className="text-xs text-slate-500 mt-0.5">Текущий остаток на складе: <b className={boxStock.remaining < 0 ? 'text-rose-600' : 'text-indigo-700'}>{boxStock.remaining.toLocaleString('ru-RU')} шт.</b> Введите фактический остаток — разница запишется в закуп.</p>
+                      </div>
+                      <div className="flex items-end gap-2">
+                        <div>
+                          <label className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1">Фактический остаток</label>
+                          <input type="number" value={boxAdjustValue} onChange={(e) => setBoxAdjustValue(e.target.value)} className="oc-input w-36" placeholder="напр. 500" />
+                        </div>
+                        <button type="button" onClick={adjustBoxStock} className="h-11 px-4 rounded-xl bg-indigo-600 text-white font-semibold hover:bg-indigo-700 whitespace-nowrap">Скорректировать</button>
+                      </div>
                     </div>
                   </div>
 
