@@ -16260,17 +16260,31 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const syncAdsApiNow = async () => {
     if (!adsApiSupplierId) { setAdsApiError('Выберите поставщика'); return; }
     setAdsApiSyncing(true); setAdsApiError(null);
+    // Native fetch (NOT supabase client) so we bypass the client's 35s resilient
+    // timeout + false "connection issue" banner; sync can run up to ~2.5 min.
+    const base = (import.meta as any).env?.VITE_SUPABASE_URL || 'https://blygwkxjogmioebutiwn.supabase.co';
+    const key = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || 'sb_publishable_kSk_B3Y6eN5P9sCVk67-cg_uSGedHJX';
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 150000);
     try {
-      const { data, error } = await supabase.functions.invoke('wb-adv-sync', { body: { supplier_id: adsApiSupplierId, days: 90 } });
-      if (error) throw error;
+      const r = await fetch(`${base}/functions/v1/wb-adv-sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: key, Authorization: `Bearer ${key}` },
+        body: JSON.stringify({ supplier_id: adsApiSupplierId, days: 90 }),
+        signal: ctrl.signal,
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok || data?.error) throw new Error(data?.error || `HTTP ${r.status}`);
       const res = (data?.results || [])[0];
       if (res && !res.ok) throw new Error(res.message || 'Ошибка синхронизации');
       showToast(`Синхронизация завершена${res ? `: кампаний ${res.campaigns}` : ''}`, 'success');
       await loadAdsApiData();
     } catch (e: any) {
       console.error('syncAdsApiNow error', e);
-      setAdsApiError('Синхронизация: ' + (e?.message || 'ошибка. Проверьте токен «Продвижение». При лимите WB повторите через минуту.'));
+      const msg = e?.name === 'AbortError' ? 'Синхронизация идёт дольше обычного. Данные подтянутся в фоне — нажмите «Показать» через минуту.' : 'Синхронизация: ' + (e?.message || 'ошибка. Проверьте токен «Продвижение».');
+      setAdsApiError(msg);
     } finally {
+      clearTimeout(timer);
       setAdsApiSyncing(false);
     }
   };
