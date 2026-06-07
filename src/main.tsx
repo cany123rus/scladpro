@@ -4,8 +4,20 @@ import "./index.css";
 import App from "./App.tsx";
 import ErrorBoundary from "./components/ErrorBoundary";
 
+const isChunkError = (message: string) => {
+  const m = message.toLowerCase();
+  return (
+    m.includes("failed to fetch dynamically imported module") ||
+    m.includes("error loading dynamically imported module") ||
+    m.includes("importing a module script failed") || // iOS Safari
+    m.includes("'text/html' is not a valid javascript mime type") ||
+    m.includes("unable to preload css") ||
+    (m.includes("module script") && m.includes("failed"))
+  );
+};
+
 const handleChunkLoadError = (message: string) => {
-  if (!message.includes("Failed to fetch dynamically imported module")) return;
+  if (!isChunkError(message)) return;
 
   const url = new URL(window.location.href);
   if (url.searchParams.get("chunk-reload") === "1") {
@@ -28,6 +40,12 @@ window.addEventListener("unhandledrejection", (event) => {
   const reason: any = (event as PromiseRejectionEvent)?.reason;
   const message = String(reason?.message || reason || "");
   handleChunkLoadError(message);
+});
+
+// Vite fires this when a dynamic import / preload fails (stale chunk after deploy).
+window.addEventListener("vite:preloadError", (event: any) => {
+  try { event.preventDefault(); } catch {}
+  handleChunkLoadError("failed to fetch dynamically imported module");
 });
 
 // cleanup helper query params after successful bootstrap

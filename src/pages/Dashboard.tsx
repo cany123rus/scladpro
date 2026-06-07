@@ -22131,13 +22131,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         {barterPhotoLoading ? 'Обновляю фото...' : 'Обновить фото'}
                       </button>
                     </div>
-                    <div className="mb-3 grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="block text-xs font-medium text-slate-500 mb-1 uppercase tracking-wide">Сколько бартеров создать</label>
+                    <div className="mb-3 grid grid-cols-2 gap-2 items-end">
+                      <div className="flex flex-col">
+                        <label className="block text-[11px] font-medium text-slate-500 mb-1 uppercase tracking-wide leading-tight min-h-[28px] flex items-end">Бартеров создать</label>
                         <input type="number" min="0" value={barterCreateBarterCount} onChange={(e) => setBarterCreateBarterCount(e.target.value)} className="oc-input w-full" placeholder="0" />
                       </div>
-                      <div>
-                        <label className="block text-xs font-medium text-slate-500 mb-1 uppercase tracking-wide">Сколько реклам создать</label>
+                      <div className="flex flex-col">
+                        <label className="block text-[11px] font-medium text-slate-500 mb-1 uppercase tracking-wide leading-tight min-h-[28px] flex items-end">Реклам создать</label>
                         <input type="number" min="0" value={barterCreateAdCount} onChange={(e) => setBarterCreateAdCount(e.target.value)} className="oc-input w-full" placeholder="0" />
                       </div>
                     </div>
