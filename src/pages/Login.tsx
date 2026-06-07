@@ -99,6 +99,38 @@ export default function Login() {
     if (showPinScreen && pin.length === PIN_LEN && !pinVerifying) { void verifyPin(pin); }
   }, [pin, showPinScreen]);
 
+  // Physical keyboard support (desktop / hardware) for PIN entry & setup.
+  useEffect(() => {
+    if (!showPinScreen && !pinSetupEmployee) return;
+    const onKey = (e: KeyboardEvent) => {
+      const isDigit = /^[0-9]$/.test(e.key);
+      const isBack = e.key === 'Backspace';
+      if (!isDigit && !isBack) return;
+      e.preventDefault();
+      setPinError(null);
+      if (pinSetupEmployee) {
+        if (setupPin.length < PIN_LEN) {
+          if (isBack) setSetupPin((p) => p.slice(0, -1));
+          else setSetupPin((p) => (p.length < PIN_LEN ? p + e.key : p));
+        } else {
+          if (isBack) setSetupPin2((p) => p.slice(0, -1));
+          else setSetupPin2((p) => {
+            const next = p.length < PIN_LEN ? p + e.key : p;
+            if (next.length === PIN_LEN) setTimeout(() => saveSetupPinWith(next), 50);
+            return next;
+          });
+        }
+        return;
+      }
+      // verify screen
+      if (pinVerifying) return;
+      if (isBack) setPin((p) => p.slice(0, -1));
+      else setPin((p) => (p.length < PIN_LEN ? p + e.key : p));
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [showPinScreen, pinSetupEmployee, setupPin, pinVerifying]);
+
   const saveSetupPinWith = async (confirmCode: string) => {
     if (!/^[0-9]{6}$/.test(setupPin)) { setPinError('PIN должен быть из 6 цифр'); return; }
     if (setupPin !== confirmCode) { setPinError('PIN-коды не совпадают'); setSetupPin2(''); return; }
