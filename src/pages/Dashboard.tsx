@@ -3866,25 +3866,33 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
   // Purchase Packaging State
   const [cwPurchaseForm, setCwPurchaseForm] = useState<{ purchase_date: string; supplier_ids: string[] }>({ purchase_date: new Date().toISOString().slice(0, 10), supplier_ids: [] });
-  const [cwPurchaseRows, setCwPurchaseRows] = useState<Array<{ id: string; quantity: string; size: string; price: string; delivery: string }>>([{ id: getSafeId(), quantity: '', size: '', price: '', delivery: '' }]);
+  const [cwPurchaseRows, setCwPurchaseRows] = useState<Array<{ id: string; quantity: string; size: string; price: string; delivery: string; newPrice?: boolean }>>([{ id: getSafeId(), quantity: '', size: '', price: '', delivery: '', newPrice: false }]);
   const [cwPurchaseOtherRows, setCwPurchaseOtherRows] = useState<Array<{ id: string; item_name: string; price: string }>>([{ id: getSafeId(), item_name: '', price: '' }]);
   const [cwPurchaseHistory, setCwPurchaseHistory] = useState<any[]>([]);
   const [cwPurchaseHistorySupplierFilter, setCwPurchaseHistorySupplierFilter] = useState('all');
-  // Packaging-type templates (dropdown in Закуп → Тип упаковки)
-  const [packagingTypeTemplates, setPackagingTypeTemplates] = useState<string[]>([]);
+  // Packaging-type templates (dropdown in Закуп → Тип упаковки), each with a price.
+  const [packagingTypeTemplates, setPackagingTypeTemplates] = useState<Array<{ name: string; price: number }>>([]);
   const [showPackagingTemplateModal, setShowPackagingTemplateModal] = useState(false);
   const [packagingNewTemplate, setPackagingNewTemplate] = useState('');
+  const [packagingNewTemplatePrice, setPackagingNewTemplatePrice] = useState('');
 
   const loadPackagingTypeTemplates = async () => {
     try {
       const { data } = await supabase.from('app_settings').select('value').eq('key', 'packaging_type_templates_v1').maybeSingle();
       const raw = (data as any)?.value;
       const arr = Array.isArray(raw) ? raw : (typeof raw === 'string' ? JSON.parse(raw || '[]') : []);
-      setPackagingTypeTemplates(Array.from(new Set((arr || []).map((x: any) => String(x || '').trim()).filter(Boolean))));
+      const norm = (arr || [])
+        .map((x: any) => typeof x === 'string' ? { name: String(x || '').trim(), price: 0 } : { name: String(x?.name || '').trim(), price: Number(x?.price || 0) })
+        .filter((x: any) => x.name);
+      const seen = new Set<string>();
+      setPackagingTypeTemplates(norm.filter((x: any) => (seen.has(x.name) ? false : (seen.add(x.name), true))));
     } catch { /* ignore */ }
   };
-  const savePackagingTypeTemplates = async (items: string[]) => {
-    const clean = Array.from(new Set(items.map((x) => String(x || '').trim()).filter(Boolean)));
+  const savePackagingTypeTemplates = async (items: Array<{ name: string; price: number }>) => {
+    const seen = new Set<string>();
+    const clean = items
+      .map((x) => ({ name: String(x.name || '').trim(), price: Number(x.price || 0) }))
+      .filter((x) => x.name && (seen.has(x.name) ? false : (seen.add(x.name), true)));
     setPackagingTypeTemplates(clean);
     await supabase.from('app_settings').upsert([{ key: 'packaging_type_templates_v1', value: JSON.stringify(clean) }], { onConflict: 'key' });
   };
@@ -27089,6 +27097,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   if (!payload.length) { showToast('Заполните хотя бы одну запись', 'error'); return; }
                   const { error } = await supabase.from('packaging_purchase_log').insert(payload as any);
                   if (error) { showToast('Ошибка добавления: ' + (error.message || 'неизвестно'), 'error'); return; }
+                  // Update template prices for rows where "Новая цена" was used.
+                  const priceUpdates = cwPurchaseRows.filter(x => x.newPrice && x.size && x.price && packagingTypeTemplates.some(t => t.name === x.size));
+                  if (priceUpdates.length) {
+                    let tpls = packagingTypeTemplates.map(t => ({ ...t }));
+                    priceUpdates.forEach(u => { tpls = tpls.map(t => t.name === u.size ? { ...t, price: parseFloat(u.price) } : t); });
+                    await savePackagingTypeTemplates(tpls);
+                  }
                   setCwPurchaseRows([{ id: getSafeId(), quantity: '', size: '', price: '', delivery: '' }]);
                   setCwPurchaseOtherRows([{ id: getSafeId(), item_name: '', price: '' }]);
                   setCwPurchaseForm({ purchase_date: new Date().toISOString().slice(0, 10), supplier_ids: [] });
@@ -27146,19 +27161,30 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           <div className="hidden md:grid grid-cols-[1.4fr_1fr_1fr_1fr_auto] gap-2 px-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
                             <span>Тип упаковки</span><span>Количество</span><span>Цена за штуку</span><span>Доставка</span><span></span>
                           </div>
-                          {cwPurchaseRows.map((r) => (
-                            <div key={r.id} className="grid grid-cols-1 md:grid-cols-[1.4fr_1fr_1fr_1fr_auto] gap-2 rounded-2xl border border-slate-200 bg-slate-50/60 p-2">
-                              <select value={r.size} onChange={(e) => setCwPurchaseRows(prev => prev.map(x => x.id === r.id ? { ...x, size: e.target.value } : x))} className="oc-input">
+                          {cwPurchaseRows.map((r) => {
+                            const tpl = packagingTypeTemplates.find((t) => t.name === r.size);
+                            return (
+                            <div key={r.id} className="grid grid-cols-1 md:grid-cols-[1.4fr_1fr_1.3fr_1fr_auto] gap-2 rounded-2xl border border-slate-200 bg-slate-50/60 p-2">
+                              <select value={r.size} onChange={(e) => { const name = e.target.value; const t = packagingTypeTemplates.find((x) => x.name === name); setCwPurchaseRows(prev => prev.map(x => x.id === r.id ? { ...x, size: name, price: (t && !x.newPrice) ? String(t.price || '') : x.price } : x)); }} className="oc-input">
                                 <option value="">Тип упаковки…</option>
-                                {packagingTypeTemplates.map((t) => <option key={`pt-${r.id}-${t}`} value={t}>{t}</option>)}
-                                {r.size && !packagingTypeTemplates.includes(r.size) && <option value={r.size}>{r.size}</option>}
+                                {packagingTypeTemplates.map((t) => <option key={`pt-${r.id}-${t.name}`} value={t.name}>{t.name}{t.price ? ` — ${t.price} ₽` : ''}</option>)}
+                                {r.size && !packagingTypeTemplates.some((t) => t.name === r.size) && <option value={r.size}>{r.size}</option>}
                               </select>
                               <input type="number" placeholder="Кол-во" value={r.quantity} onChange={(e) => setCwPurchaseRows(prev => prev.map(x => x.id === r.id ? { ...x, quantity: e.target.value } : x))} className="oc-input" />
-                              <input type="number" step="0.01" placeholder="Цена за шт." value={r.price} onChange={(e) => setCwPurchaseRows(prev => prev.map(x => x.id === r.id ? { ...x, price: e.target.value } : x))} className="oc-input" />
+                              <div>
+                                <input type="number" step="0.01" placeholder="Цена за шт." value={r.price} disabled={Boolean(tpl) && !r.newPrice} onChange={(e) => setCwPurchaseRows(prev => prev.map(x => x.id === r.id ? { ...x, price: e.target.value } : x))} className={`oc-input ${tpl && !r.newPrice ? 'bg-slate-100 text-slate-500' : ''}`} />
+                                {tpl && (
+                                  <label className="mt-1 flex items-center gap-1.5 text-[11px] text-slate-500 cursor-pointer">
+                                    <input type="checkbox" checked={Boolean(r.newPrice)} onChange={(e) => { const on = e.target.checked; setCwPurchaseRows(prev => prev.map(x => x.id === r.id ? { ...x, newPrice: on, price: on ? x.price : String(tpl.price || '') } : x)); }} className="h-3.5 w-3.5 rounded border-slate-300 text-indigo-600" />
+                                    Новая цена
+                                  </label>
+                                )}
+                              </div>
                               <input type="number" step="0.01" placeholder="Доставка" value={r.delivery} onChange={(e) => setCwPurchaseRows(prev => prev.map(x => x.id === r.id ? { ...x, delivery: e.target.value } : x))} className="oc-input" />
                               <button type="button" onClick={() => setCwPurchaseRows(prev => prev.length > 1 ? prev.filter(x => x.id !== r.id) : prev)} className="inline-flex items-center justify-center rounded-xl border border-slate-200 px-3 text-slate-400 hover:text-rose-600 hover:border-rose-200" title="Удалить"><Trash2 className="h-4 w-4" /></button>
                             </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       </div>
 
@@ -31362,16 +31388,19 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
               <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
                 <h3 className="text-lg font-bold mb-3">Шаблоны упаковки</h3>
                 <div className="flex gap-2">
-                  <input value={packagingNewTemplate} onChange={(e) => setPackagingNewTemplate(e.target.value)} className="oc-input flex-1" placeholder="Напр. Пакет 30x40, Коробка S…" onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); const t = String(packagingNewTemplate || '').trim(); if (t) { savePackagingTypeTemplates([...(packagingTypeTemplates || []), t]); setPackagingNewTemplate(''); } } }} />
-                  <button type="button" onClick={() => { const t = String(packagingNewTemplate || '').trim(); if (!t) return; savePackagingTypeTemplates([...(packagingTypeTemplates || []), t]); setPackagingNewTemplate(''); showToast('Шаблон добавлен', 'success'); }} className="px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">Добавить</button>
+                  <input value={packagingNewTemplate} onChange={(e) => setPackagingNewTemplate(e.target.value)} className="oc-input flex-1" placeholder="Тип (напр. Пакет 30x40)" />
+                  <input type="number" step="0.01" value={packagingNewTemplatePrice} onChange={(e) => setPackagingNewTemplatePrice(e.target.value)} className="oc-input w-28" placeholder="Цена ₽" />
+                  <button type="button" onClick={() => { const t = String(packagingNewTemplate || '').trim(); if (!t) return; savePackagingTypeTemplates([...(packagingTypeTemplates || []), { name: t, price: parseFloat(packagingNewTemplatePrice) || 0 }]); setPackagingNewTemplate(''); setPackagingNewTemplatePrice(''); showToast('Шаблон добавлен', 'success'); }} className="px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">Добавить</button>
                 </div>
                 {packagingTypeTemplates.length > 0 && (
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    {packagingTypeTemplates.map((t) => (
-                      <span key={`ptpl-${t}`} className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1 text-sm text-slate-700">
-                        {t}
-                        <button type="button" onClick={() => savePackagingTypeTemplates(packagingTypeTemplates.filter((x) => x !== t))} className="text-slate-400 hover:text-rose-600"><X className="h-3.5 w-3.5" /></button>
-                      </span>
+                  <div className="mt-4 space-y-2">
+                    {packagingTypeTemplates.map((t, idx) => (
+                      <div key={`ptpl-${t.name}`} className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                        <span className="flex-1 text-sm font-medium text-slate-800 truncate">{t.name}</span>
+                        <input type="number" step="0.01" value={String(t.price ?? '')} onChange={(e) => { const v = parseFloat(e.target.value) || 0; savePackagingTypeTemplates(packagingTypeTemplates.map((x, i) => i === idx ? { ...x, price: v } : x)); }} className="oc-input w-24 text-sm" placeholder="Цена" />
+                        <span className="text-xs text-slate-400">₽</span>
+                        <button type="button" onClick={() => savePackagingTypeTemplates(packagingTypeTemplates.filter((_, i) => i !== idx))} className="text-slate-400 hover:text-rose-600"><X className="h-4 w-4" /></button>
+                      </div>
                     ))}
                   </div>
                 )}
