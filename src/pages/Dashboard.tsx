@@ -2648,6 +2648,24 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     return { totalPack, totalOther, total: totalPack + totalOther, bySupplier };
   }, [generalPackagingRows, suppliers, generalReportForm.supplier_id]);
 
+  // Full assembly cost per unit = (ЗП временные + ЗП сотрудники + доставка + закуп) / собранное.
+  const generalFullAvg = useMemo(() => {
+    const m = new Map<string, { qty: number; cost: number }>();
+    const add = (name: string, qty: number, cost: number) => { const k = name || 'Без поставщика'; const e = m.get(k) || { qty: 0, cost: 0 }; e.qty += qty; e.cost += cost; m.set(k, e); };
+    (generalAssembly.bySupplier || []).forEach((s: any) => add(s.name, s.total, 0));
+    (generalTempWorkerRows || []).forEach((r: any) => add(r.supplierName || 'Без поставщика', 0, Number(r.earnings || 0)));
+    (generalReportCwRows || []).forEach((r: any) => add(r.supplier_name || 'Без поставщика', 0, Number(r.total || 0)));
+    (generalDeliveryRows || []).forEach((r: any) => add(r.supplierName || 'Без поставщика', 0, Number(r.amount || 0)));
+    (generalPackaging.bySupplier || []).forEach((s: any) => add(s.name, 0, s.total));
+    const totalQty = generalAssembly.totalTemp + generalAssembly.totalStaff;
+    const totalCost = Number(generalReportTotals.tempEarned || 0) + Number(generalReportTotals.cwAmount || 0) + Number(generalReportTotals.deliveryAmount || 0) + generalPackaging.total;
+    const bySupplier = Array.from(m.entries())
+      .map(([name, v]) => ({ name, qty: v.qty, cost: v.cost, avg: v.qty > 0 ? v.cost / v.qty : 0 }))
+      .filter((s) => s.qty > 0 || s.cost > 0)
+      .sort((a, b) => b.cost - a.cost);
+    return { totalQty, totalCost, avg: totalQty > 0 ? totalCost / totalQty : 0, bySupplier };
+  }, [generalAssembly, generalPackaging, generalTempWorkerRows, generalReportCwRows, generalDeliveryRows, generalReportTotals]);
+
   // Assembled quantity per supplier (for the general report breakdown).
   const assemblyBySupplier = useMemo(() => {
     const m = new Map<string, { temp: number; staff: number }>();
@@ -3011,6 +3029,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         { name: 'Сборка по поставщикам', rows: asmSupRows.length ? asmSupRows : [{ 'Нет данных': '' }] },
         { name: 'Закуп', rows: pkgDetail.length ? pkgDetail : [{ 'Нет данных': '' }] },
         { name: 'Закуп по поставщикам', rows: pkgBySup.length ? pkgBySup : [{ 'Нет данных': '' }] },
+        { name: 'Полная цена сборки', rows: (() => { const r = generalFullAvg.bySupplier.filter((s: any) => s.qty > 0).map((s: any) => ({ 'Поставщик': s.name, 'Собрано (шт)': s.qty, 'Затраты (ЗП+доставка+закуп)': Math.round(s.cost * 100) / 100, 'Цена за шт.': Math.round(s.avg * 100) / 100 })); r.push({ 'Поставщик': 'ИТОГО', 'Собрано (шт)': generalFullAvg.totalQty, 'Затраты (ЗП+доставка+закуп)': Math.round(generalFullAvg.totalCost * 100) / 100, 'Цена за шт.': Math.round(generalFullAvg.avg * 100) / 100 } as any); return r.length ? r : [{ 'Нет данных': '' }]; })() },
       ];
       await downloadWorkbook(`obschiy_otchet_${generalReportForm.start_date || 'start'}_${generalReportForm.end_date || 'end'}.xlsx`, sheets);
     } catch (e: any) {
@@ -3165,6 +3184,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           theme: 'striped',
           styles: { font: 'Roboto', fontSize: 7.5, cellPadding: 2, overflow: 'linebreak', lineColor: [226, 232, 240], lineWidth: 0.1 },
           headStyles: { font: 'Roboto', fillColor: headRgb, textColor: 255, fontStyle: 'normal', fontSize: 8 },
+          footStyles: { font: 'Roboto', fillColor: [241, 245, 249], textColor: [15, 23, 42], fontStyle: 'normal', fontSize: 8 },
           alternateRowStyles: { fillColor: [248, 250, 252] },
           margin: { left: 10, right: 10 },
           didDrawPage: drawFooter,
@@ -3244,6 +3264,19 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           body: pkg.bySupplier.map((s: any) => [s.name, money(s.pack), money(s.other), money(s.total)]),
           foot: [['Итого', money(pkg.totalPack), money(pkg.totalOther), money(pkg.total)]],
         }, y, [245, 158, 11]);
+        y = ((doc as any).lastAutoTable?.finalY || y) + 9;
+      }
+
+      // Full assembly cost per unit by supplier
+      if (generalFullAvg.bySupplier.filter((s: any) => s.qty > 0).length) {
+        if (y > pageH - 30) { doc.addPage(); y = 16; }
+        y = drawBand(y, 'Средняя цена сборки (полная: ЗП + доставка + закуп)', [225, 29, 72]);
+        baseTable({
+          startY: y,
+          head: [['Поставщик', 'Собрано, шт', 'Затраты', 'Цена/шт']],
+          body: generalFullAvg.bySupplier.filter((s: any) => s.qty > 0).map((s: any) => [s.name, s.qty.toLocaleString('ru-RU'), money(s.cost), `${s.avg.toFixed(2)} руб.`]),
+          foot: [['Итого', generalFullAvg.totalQty.toLocaleString('ru-RU'), money(generalFullAvg.totalCost), `${generalFullAvg.avg.toFixed(2)} руб.`]],
+        }, y, [225, 29, 72]);
         y = ((doc as any).lastAutoTable?.finalY || y) + 9;
       }
 
@@ -3801,7 +3834,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   });
 
   // Purchase Packaging State
-  const [cwPurchaseForm, setCwPurchaseForm] = useState<{ purchase_date: string; supplier_id: string }>({ purchase_date: new Date().toISOString().slice(0, 10), supplier_id: '' });
+  const [cwPurchaseForm, setCwPurchaseForm] = useState<{ purchase_date: string; supplier_ids: string[] }>({ purchase_date: new Date().toISOString().slice(0, 10), supplier_ids: [] });
   const [cwPurchaseRows, setCwPurchaseRows] = useState<Array<{ id: string; quantity: string; size: string; price: string; delivery: string }>>([{ id: getSafeId(), quantity: '', size: '', price: '', delivery: '' }]);
   const [cwPurchaseOtherRows, setCwPurchaseOtherRows] = useState<Array<{ id: string; item_name: string; price: string }>>([{ id: getSafeId(), item_name: '', price: '' }]);
   const [cwPurchaseHistory, setCwPurchaseHistory] = useState<any[]>([]);
@@ -26991,23 +27024,26 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 const savePurchases = async () => {
                   if (!hasAssemblyButtonAccess('cw_purchase_add')) return;
                   if (!cwPurchaseForm.purchase_date) { showToast('Укажите дату покупки', 'error'); return; }
-                  if (!cwPurchaseForm.supplier_id) { showToast('Выберите поставщика', 'error'); return; }
+                  const sids = cwPurchaseForm.supplier_ids.filter(Boolean);
+                  if (!sids.length) { showToast('Выберите хотя бы одного поставщика', 'error'); return; }
+                  const N = sids.length;
                   const createdAt = new Date(`${cwPurchaseForm.purchase_date}T12:00:00`).toISOString();
+                  // Split each purchase cost equally between the selected suppliers.
                   const packPayload = cwPurchaseRows
                     .filter(x => x.size && x.quantity && x.price)
-                    .map(x => ({ kind: 'packaging', supplier_id: cwPurchaseForm.supplier_id, quantity: parseInt(x.quantity), size: x.size, price: parseFloat(x.price), delivery: parseFloat(x.delivery || '0'), created_at: createdAt }));
+                    .flatMap(x => sids.map(sid => ({ kind: 'packaging', supplier_id: sid, quantity: parseInt(x.quantity), size: x.size, price: parseFloat(x.price) / N, delivery: parseFloat(x.delivery || '0') / N, created_at: createdAt })));
                   const otherPayload = cwPurchaseOtherRows
                     .filter(x => x.item_name.trim() && x.price)
-                    .map(x => ({ kind: 'other', supplier_id: cwPurchaseForm.supplier_id, item_name: x.item_name.trim(), price: parseFloat(x.price), created_at: createdAt }));
+                    .flatMap(x => sids.map(sid => ({ kind: 'other', supplier_id: sid, item_name: x.item_name.trim(), price: parseFloat(x.price) / N, created_at: createdAt })));
                   const payload = [...packPayload, ...otherPayload];
                   if (!payload.length) { showToast('Заполните хотя бы одну запись', 'error'); return; }
                   const { error } = await supabase.from('packaging_purchase_log').insert(payload as any);
                   if (error) { showToast('Ошибка добавления: ' + (error.message || 'неизвестно'), 'error'); return; }
                   setCwPurchaseRows([{ id: getSafeId(), quantity: '', size: '', price: '', delivery: '' }]);
                   setCwPurchaseOtherRows([{ id: getSafeId(), item_name: '', price: '' }]);
-                  setCwPurchaseForm({ purchase_date: new Date().toISOString().slice(0, 10), supplier_id: '' });
+                  setCwPurchaseForm({ purchase_date: new Date().toISOString().slice(0, 10), supplier_ids: [] });
                   await fetchCwPurchaseHistory();
-                  showToast(`Добавлено записей: ${payload.length}`, 'success');
+                  showToast(`Добавлено записей: ${payload.length}${N > 1 ? ` (разделено между ${N} поставщиками)` : ''}`, 'success');
                 };
                 return (
                 <div className="space-y-5">
@@ -27021,17 +27057,25 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       </div>
                     </div>
                     <div className="p-5 space-y-5">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        <div>
-                          <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1.5">Дата покупки</label>
-                          <input type="date" value={cwPurchaseForm.purchase_date} onChange={e => setCwPurchaseForm({ ...cwPurchaseForm, purchase_date: e.target.value })} className="oc-input w-full" />
+                      <div>
+                        <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1.5">Дата покупки</label>
+                        <input type="date" value={cwPurchaseForm.purchase_date} onChange={e => setCwPurchaseForm({ ...cwPurchaseForm, purchase_date: e.target.value })} className="oc-input w-full md:max-w-xs" />
+                      </div>
+                      <div>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500">Поставщики (затраты делятся поровну)</label>
+                          {cwPurchaseForm.supplier_ids.length > 0 && <span className="text-[11px] text-indigo-600 font-medium">Выбрано: {cwPurchaseForm.supplier_ids.length} · делим на {cwPurchaseForm.supplier_ids.length}</span>}
                         </div>
-                        <div>
-                          <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1.5">Поставщик (для разделения трат)</label>
-                          <select value={cwPurchaseForm.supplier_id} onChange={e => setCwPurchaseForm({ ...cwPurchaseForm, supplier_id: e.target.value })} className="oc-input w-full">
-                            <option value="">Выберите поставщика</option>
-                            {suppliers.map((s) => <option key={`pp-sup-${s.id}`} value={String(s.id)}>{s.name}</option>)}
-                          </select>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-44 overflow-y-auto rounded-2xl border border-slate-200 bg-slate-50/60 p-2">
+                          {suppliers.map((s) => {
+                            const checked = cwPurchaseForm.supplier_ids.includes(String(s.id));
+                            return (
+                              <label key={`pp-sup-${s.id}`} className={`flex items-center gap-2 rounded-xl border px-2.5 py-2 text-sm cursor-pointer transition-colors ${checked ? 'border-indigo-300 bg-indigo-50 text-indigo-800' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}>
+                                <input type="checkbox" checked={checked} onChange={(e) => setCwPurchaseForm(prev => ({ ...prev, supplier_ids: e.target.checked ? [...prev.supplier_ids, String(s.id)] : prev.supplier_ids.filter(x => x !== String(s.id)) }))} className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
+                                <span className="truncate">{s.name}</span>
+                              </label>
+                            );
+                          })}
                         </div>
                       </div>
 
@@ -30698,6 +30742,28 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       </div>
                     );
                   })()}
+
+                  {/* Средняя цена сборки (полная, с учётом всех затрат) */}
+                  <div className="rounded-2xl border border-rose-200 bg-gradient-to-br from-rose-50 to-pink-50 p-4 shadow-sm">
+                    <div className="flex items-center justify-between mb-2">
+                      <h4 className="font-bold text-slate-900 text-sm">Средняя цена сборки (полная)</h4>
+                      <div className="text-right">
+                        <div className="text-[11px] text-rose-600">За период (все поставщики)</div>
+                        <div className="text-xl font-extrabold text-rose-800">{generalFullAvg.avg.toFixed(2)} ₽<span className="text-xs font-medium text-rose-500"> / шт.</span></div>
+                      </div>
+                    </div>
+                    <div className="text-[11px] text-slate-500 mb-3">(ЗП временные + ЗП сотрудники + доставка + закуп) ÷ собранное кол-во. Затраты: <b className="text-slate-700">{generalFullAvg.totalCost.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽</b> · кол-во: <b className="text-slate-700">{generalFullAvg.totalQty.toLocaleString('ru-RU')}</b></div>
+                    {generalFullAvg.bySupplier.filter((s) => s.qty > 0).length > 0 && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                        {generalFullAvg.bySupplier.filter((s) => s.qty > 0).map((s) => (
+                          <div key={`full-avg-${s.name}`} className="flex items-center justify-between rounded-lg bg-white/70 border border-rose-100 px-3 py-1.5 text-sm">
+                            <span className="text-slate-700 truncate" title={s.name}>{s.name}</span>
+                            <span className="shrink-0 ml-2 font-semibold text-rose-800">{s.avg.toFixed(2)} ₽<span className="text-[11px] font-normal text-slate-400"> ({s.qty.toLocaleString('ru-RU')} шт · {s.cost.toLocaleString('ru-RU', { maximumFractionDigits: 0 })} ₽)</span></span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
 
                   {/* Закуп упаковки инфографика */}
                   <div className="rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 to-orange-50 p-4 shadow-sm">
