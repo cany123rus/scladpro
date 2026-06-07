@@ -2648,24 +2648,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     return { totalPack, totalOther, total: totalPack + totalOther, bySupplier };
   }, [generalPackagingRows, suppliers, generalReportForm.supplier_id]);
 
-  // Full assembly cost per unit = (ЗП временные + ЗП сотрудники + доставка + закуп) / собранное.
-  const generalFullAvg = useMemo(() => {
-    const m = new Map<string, { qty: number; cost: number }>();
-    const add = (name: string, qty: number, cost: number) => { const k = name || 'Без поставщика'; const e = m.get(k) || { qty: 0, cost: 0 }; e.qty += qty; e.cost += cost; m.set(k, e); };
-    (generalAssembly.bySupplier || []).forEach((s: any) => add(s.name, s.total, 0));
-    (generalTempWorkerRows || []).forEach((r: any) => add(r.supplierName || 'Без поставщика', 0, Number(r.earnings || 0)));
-    (generalReportCwRows || []).forEach((r: any) => add(r.supplier_name || 'Без поставщика', 0, Number(r.total || 0)));
-    (generalDeliveryRows || []).forEach((r: any) => add(r.supplierName || 'Без поставщика', 0, Number(r.amount || 0)));
-    (generalPackaging.bySupplier || []).forEach((s: any) => add(s.name, 0, s.total));
-    const totalQty = generalAssembly.totalTemp + generalAssembly.totalStaff;
-    const totalCost = Number(generalReportTotals.tempEarned || 0) + Number(generalReportTotals.cwAmount || 0) + Number(generalReportTotals.deliveryAmount || 0) + generalPackaging.total;
-    const bySupplier = Array.from(m.entries())
-      .map(([name, v]) => ({ name, qty: v.qty, cost: v.cost, avg: v.qty > 0 ? v.cost / v.qty : 0 }))
-      .filter((s) => s.qty > 0 || s.cost > 0)
-      .sort((a, b) => b.cost - a.cost);
-    return { totalQty, totalCost, avg: totalQty > 0 ? totalCost / totalQty : 0, bySupplier };
-  }, [generalAssembly, generalPackaging, generalTempWorkerRows, generalReportCwRows, generalDeliveryRows, generalReportTotals]);
-
   // Assembled quantity per supplier (for the general report breakdown).
   const assemblyBySupplier = useMemo(() => {
     const m = new Map<string, { temp: number; staff: number }>();
@@ -2831,6 +2813,24 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       + generalDeliveryRows.reduce((sum: number, row: any) => sum + Number(row.amount || 0), 0)
       + generalReportCwRows.reduce((sum: number, row: any) => sum + Number(row.total || 0), 0),
   }), [generalTempWorkerRows, generalDeliveryRows, generalReportCwRows]);
+
+  // Full assembly cost per unit = (ЗП временные + ЗП сотрудники + доставка + закуп) / собранное.
+  const generalFullAvg = useMemo(() => {
+    const m = new Map<string, { qty: number; cost: number }>();
+    const add = (name: string, qty: number, cost: number) => { const k = name || 'Без поставщика'; const e = m.get(k) || { qty: 0, cost: 0 }; e.qty += qty; e.cost += cost; m.set(k, e); };
+    (generalAssembly.bySupplier || []).forEach((s: any) => add(s.name, s.total, 0));
+    (generalTempWorkerRows || []).forEach((r: any) => add(r.supplierName || 'Без поставщика', 0, Number(r.earnings || 0)));
+    (generalReportCwRows || []).forEach((r: any) => add(r.supplier_name || 'Без поставщика', 0, Number(r.total || 0)));
+    (generalDeliveryRows || []).forEach((r: any) => add(r.supplierName || 'Без поставщика', 0, Number(r.amount || 0)));
+    (generalPackaging.bySupplier || []).forEach((s: any) => add(s.name, 0, s.total));
+    const totalQty = generalAssembly.totalTemp + generalAssembly.totalStaff;
+    const totalCost = Number(generalReportTotals.tempEarned || 0) + Number(generalReportTotals.cwAmount || 0) + Number(generalReportTotals.deliveryAmount || 0) + generalPackaging.total;
+    const bySupplier = Array.from(m.entries())
+      .map(([name, v]) => ({ name, qty: v.qty, cost: v.cost, avg: v.qty > 0 ? v.cost / v.qty : 0 }))
+      .filter((s) => s.qty > 0 || s.cost > 0)
+      .sort((a, b) => b.cost - a.cost);
+    return { totalQty, totalCost, avg: totalQty > 0 ? totalCost / totalQty : 0, bySupplier };
+  }, [generalAssembly, generalPackaging, generalTempWorkerRows, generalReportCwRows, generalDeliveryRows, generalReportTotals]);
 
   const xlsxDate = (v: string) => v ? new Date(`${v}T12:00:00`).toLocaleDateString('ru-RU') : '-';
 
