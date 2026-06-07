@@ -16472,6 +16472,65 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       .sort((a: any, b: any) => b.revenue - a.revenue);
   }, [adsUnified]);
 
+  // Visualisation data for the Ads dashboard: daily dynamics, keyword breakdown,
+  // and the impressions→clicks→carts→orders funnel.
+  const adsViz = React.useMemo(() => {
+    const sheets = adsAnalyticsSheets || [];
+    const toISO = (raw: any): string | null => {
+      const s = String(raw ?? '').trim();
+      if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+      const m = s.match(/(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{4})/);
+      if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+      return null;
+    };
+    // Daily spend + clicks (from any sheet that has a date column).
+    const dayMap = new Map<string, { spend: number; clicks: number }>();
+    sheets.forEach((sh) => {
+      const cols = sh.columns || [];
+      const dateCol = findAdsCol(cols, ['дата', 'date']);
+      if (!dateCol) return;
+      const spendCol = findAdsCol(cols, ['затраты,rub', 'затраты', 'расход', 'spend', 'cost']);
+      const clicksCol = findAdsCol(cols, ['клики', 'clicks']);
+      (sh.rows || []).forEach((r: any) => {
+        const d = toISO(r?.[dateCol]); if (!d) return;
+        const e = dayMap.get(d) || { spend: 0, clicks: 0 };
+        e.spend += toAdsNum(r?.[spendCol]); e.clicks += toAdsNum(r?.[clicksCol]); dayMap.set(d, e);
+      });
+    });
+    const daily = Array.from(dayMap.entries()).filter(([d]) => /^\d{4}/.test(d)).sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([date, v]) => ({ date, ...v }));
+
+    // Keyword breakdown (sheet with a phrase column). Skip rows that are pure
+    // numeric ids (those are nmIDs, not search phrases).
+    const kwSheet = sheets.find((sh) => findAdsCol(sh.columns || [], ['ключеваяфраза', 'фраза', 'keyword', 'запрос']));
+    const kwMap = new Map<string, { spend: number; clicks: number }>();
+    if (kwSheet) {
+      const cols = kwSheet.columns || [];
+      const fCol = findAdsCol(cols, ['ключеваяфраза', 'фраза', 'keyword', 'запрос']);
+      const sCol = findAdsCol(cols, ['затраты,rub', 'затраты', 'расход']);
+      const cCol = findAdsCol(cols, ['клики', 'clicks']);
+      (kwSheet.rows || []).forEach((r: any) => {
+        const f = String(r?.[fCol] || '').trim();
+        if (!f || /^\d+$/.test(f)) return;
+        const e = kwMap.get(f) || { spend: 0, clicks: 0 };
+        e.spend += toAdsNum(r?.[sCol]); e.clicks += toAdsNum(r?.[cCol]); kwMap.set(f, e);
+      });
+    }
+    const keywords = Array.from(kwMap.entries())
+      .map(([phrase, v]) => ({ phrase, ...v, cpc: v.clicks ? v.spend / v.clicks : 0 }))
+      .sort((a, b) => b.spend - a.spend);
+    const kwSpendTotal = keywords.reduce((s, k) => s + k.spend, 0);
+
+    // Funnel
+    let carts = 0;
+    sheets.forEach((sh) => {
+      const cartCol = findAdsCol(sh.columns || [], ['добавленийвкорзину', 'корзина', 'вкорзину', 'addtocart']);
+      if (cartCol) carts += (sh.rows || []).reduce((s: number, r: any) => s + toAdsNum(r?.[cartCol]), 0);
+    });
+    const funnel = { shows: adsKpi.shows, clicks: adsKpi.clicks, carts, orders: adsKpi.orders };
+
+    return { daily, keywords, kwSpendTotal, funnel };
+  }, [adsAnalyticsSheets, adsKpi]);
+
   const handleAdsExcelUpload = async (file: File) => {
     await ensureExcel();
     try {
@@ -22859,17 +22918,139 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     </div>
 
                     <div>
-                      <div className="text-sm font-semibold text-slate-900 mb-2">KPI рекламы (по объединённой таблице)</div>
-                      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2 text-xs">
-                        <div className="border rounded p-2">Расход<br/><b>{adsKpi.spend.toLocaleString('ru-RU')}</b></div>
-                        <div className="border rounded p-2">Выручка<br/><b>{adsKpi.revenue.toLocaleString('ru-RU')}</b></div>
-                        <div className="border rounded p-2">Заказы<br/><b>{adsKpi.orders.toLocaleString('ru-RU')}</b></div>
-                        <div className="border rounded p-2">CTR<br/><b>{adsKpi.ctr.toLocaleString('ru-RU',{maximumFractionDigits:2})}%</b></div>
-                        <div className="border rounded p-2">CPC<br/><b>{adsKpi.cpc.toLocaleString('ru-RU',{maximumFractionDigits:2})}</b></div>
-                        <div className="border rounded p-2">CPO<br/><b>{adsKpi.cpo.toLocaleString('ru-RU',{maximumFractionDigits:2})}</b></div>
-                        <div className="border rounded p-2">CR<br/><b>{adsKpi.cr.toLocaleString('ru-RU',{maximumFractionDigits:2})}%</b></div>
-                        <div className="border rounded p-2">ДРР<br/><b>{adsKpi.drr.toLocaleString('ru-RU',{maximumFractionDigits:2})}%</b></div>
-                        <div className="border rounded p-2">ROMI<br/><b>{adsKpi.romi.toLocaleString('ru-RU',{maximumFractionDigits:2})}%</b></div>
+                      <div className="text-sm font-semibold text-slate-900 mb-3">Ключевые показатели</div>
+                      {(() => {
+                        const money = (v: number) => Math.round(v).toLocaleString('ru-RU') + ' ₽';
+                        const drrColor = adsKpi.drr === 0 ? 'text-slate-900' : adsKpi.drr <= (adsRules.targetDrr || 15) ? 'text-emerald-600' : adsKpi.drr <= (adsRules.targetDrr || 15) * 1.5 ? 'text-amber-600' : 'text-rose-600';
+                        const cards = [
+                          { label: 'Расход', value: money(adsKpi.spend), grad: 'from-rose-500 to-orange-500', hint: 'бюджет на рекламу' },
+                          { label: 'Выручка с рекламы', value: money(adsKpi.revenue), grad: 'from-emerald-500 to-teal-500', hint: 'заказов на сумму' },
+                          { label: 'ДРР', value: adsKpi.drr.toFixed(2) + '%', grad: 'from-violet-500 to-fuchsia-500', hint: 'доля рекламы в выручке', cls: drrColor },
+                          { label: 'ROMI', value: adsKpi.romi.toLocaleString('ru-RU', { maximumFractionDigits: 0 }) + '%', grad: 'from-indigo-500 to-blue-500', hint: 'возврат на вложения' },
+                        ];
+                        const mini = [
+                          { label: 'Показы', value: adsKpi.shows.toLocaleString('ru-RU') },
+                          { label: 'Клики', value: adsKpi.clicks.toLocaleString('ru-RU') },
+                          { label: 'CTR', value: adsKpi.ctr.toFixed(2) + '%' },
+                          { label: 'CPC', value: adsKpi.cpc.toFixed(2) + ' ₽' },
+                          { label: 'CPM', value: (adsKpi.shows > 0 ? adsKpi.spend / adsKpi.shows * 1000 : 0).toFixed(0) + ' ₽' },
+                          { label: 'Корзины', value: adsViz.funnel.carts.toLocaleString('ru-RU') },
+                          { label: 'CR (клик→корзина)', value: (adsKpi.clicks > 0 ? adsViz.funnel.carts / adsKpi.clicks * 100 : 0).toFixed(1) + '%' },
+                          { label: 'CPO', value: adsKpi.cpo.toFixed(0) + ' ₽' },
+                        ];
+                        return (
+                          <>
+                            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                              {cards.map((c) => (
+                                <div key={c.label} className="relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                                  <div className={`absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${c.grad}`} />
+                                  <div className="text-xs font-medium text-slate-500">{c.label}</div>
+                                  <div className={`mt-1.5 text-2xl font-extrabold ${c.cls || 'text-slate-900'}`}>{c.value}</div>
+                                  <div className="text-[11px] text-slate-400 mt-0.5">{c.hint}</div>
+                                </div>
+                              ))}
+                            </div>
+                            <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
+                              {mini.map((m) => (
+                                <div key={m.label} className="rounded-xl bg-slate-50 border border-slate-100 px-3 py-2">
+                                  <div className="text-[10px] uppercase tracking-wide text-slate-400">{m.label}</div>
+                                  <div className="text-sm font-bold text-slate-800 mt-0.5">{m.value}</div>
+                                </div>
+                              ))}
+                            </div>
+                          </>
+                        );
+                      })()}
+                    </div>
+
+                    {/* ── Диаграммы ───────────────────────────────────── */}
+                    {adsViz.daily.length > 0 && (() => {
+                      const maxSpend = Math.max(1, ...adsViz.daily.map((d) => d.spend));
+                      const maxClicks = Math.max(1, ...adsViz.daily.map((d) => d.clicks));
+                      return (
+                        <div className="rounded-2xl border border-slate-200 p-4">
+                          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+                            <h4 className="font-bold text-slate-800 text-sm">Динамика по дням</h4>
+                            <div className="flex items-center gap-3 text-xs">
+                              <span className="inline-flex items-center gap-1.5 text-slate-500"><span className="h-2.5 w-2.5 rounded-sm bg-indigo-500" /> расход</span>
+                              <span className="inline-flex items-center gap-1.5 text-slate-500"><span className="h-2.5 w-3 rounded-sm bg-emerald-400" /> клики</span>
+                            </div>
+                          </div>
+                          <div className="flex items-end gap-[3px] h-48 overflow-x-auto">
+                            {adsViz.daily.map((d) => {
+                              const sh = Math.round((d.spend / maxSpend) * 150);
+                              const ch = Math.round((d.clicks / maxClicks) * 150);
+                              const cpc = d.clicks ? d.spend / d.clicks : 0;
+                              return (
+                                <div key={d.date} className="flex-1 min-w-[16px] flex flex-col items-center gap-1" title={`${new Date(d.date + 'T12:00:00').toLocaleDateString('ru-RU')}\nРасход: ${Math.round(d.spend).toLocaleString('ru-RU')} ₽\nКлики: ${d.clicks}\nCPC: ${cpc.toFixed(2)} ₽`}>
+                                  <div className="w-full flex items-end justify-center gap-[2px] h-[150px]">
+                                    <div className="w-1/2 bg-indigo-500 rounded-t-sm" style={{ height: `${sh}px` }} />
+                                    <div className="w-1/2 bg-emerald-400 rounded-t-sm" style={{ height: `${ch}px` }} />
+                                  </div>
+                                  <span className="text-[8px] text-slate-400">{d.date.slice(8, 10)}</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                      {/* Воронка */}
+                      <div className="rounded-2xl border border-slate-200 p-4">
+                        <h4 className="font-bold text-slate-800 text-sm mb-3">Воронка</h4>
+                        {(() => {
+                          const f = adsViz.funnel;
+                          const steps = [
+                            { label: 'Показы', value: f.shows, color: 'bg-indigo-500' },
+                            { label: 'Клики', value: f.clicks, color: 'bg-blue-500', conv: f.shows ? f.clicks / f.shows * 100 : 0 },
+                            { label: 'В корзину', value: f.carts, color: 'bg-violet-500', conv: f.clicks ? f.carts / f.clicks * 100 : 0 },
+                            { label: 'Заказы', value: f.orders, color: 'bg-emerald-500', conv: f.carts ? f.orders / f.carts * 100 : 0 },
+                          ].filter((s) => s.value > 0 || s.label !== 'Заказы');
+                          const max = Math.max(1, f.shows);
+                          return (
+                            <div className="space-y-2">
+                              {steps.map((s) => (
+                                <div key={s.label}>
+                                  <div className="flex justify-between text-xs mb-1">
+                                    <span className="text-slate-600 font-medium">{s.label}</span>
+                                    <span className="text-slate-500">{s.value.toLocaleString('ru-RU')}{s.conv != null ? <span className="text-slate-400"> · {s.conv.toFixed(1)}%</span> : null}</span>
+                                  </div>
+                                  <div className="h-6 rounded-lg bg-slate-100 overflow-hidden">
+                                    <div className={`h-full ${s.color} rounded-lg`} style={{ width: `${Math.max(2, (s.value / max) * 100)}%` }} />
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          );
+                        })()}
+                      </div>
+
+                      {/* Топ ключевых фраз по затратам */}
+                      <div className="rounded-2xl border border-slate-200 p-4">
+                        <h4 className="font-bold text-slate-800 text-sm mb-3">Топ-10 ключевых фраз по расходу</h4>
+                        {adsViz.keywords.length === 0 ? (
+                          <div className="text-xs text-slate-400 py-6 text-center">Нет листа с ключевыми фразами</div>
+                        ) : (() => {
+                          const top = adsViz.keywords.slice(0, 10);
+                          const max = Math.max(1, ...top.map((k) => k.spend));
+                          return (
+                            <div className="space-y-2">
+                              {top.map((k) => (
+                                <div key={k.phrase} title={`${k.phrase}\nРасход: ${Math.round(k.spend).toLocaleString('ru-RU')} ₽ (${(k.spend / (adsViz.kwSpendTotal || 1) * 100).toFixed(1)}%)\nКлики: ${k.clicks} · CPC: ${k.cpc.toFixed(2)} ₽`}>
+                                  <div className="flex justify-between text-xs mb-0.5 gap-2">
+                                    <span className="text-slate-700 truncate">{k.phrase}</span>
+                                    <span className="text-slate-500 shrink-0">{Math.round(k.spend).toLocaleString('ru-RU')} ₽ · CPC {k.cpc.toFixed(1)}</span>
+                                  </div>
+                                  <div className="h-3 rounded-full bg-slate-100 overflow-hidden">
+                                    <div className="h-full bg-gradient-to-r from-indigo-500 to-violet-500 rounded-full" style={{ width: `${Math.max(3, (k.spend / max) * 100)}%` }} />
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          );
+                        })()}
                       </div>
                     </div>
 
