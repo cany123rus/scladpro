@@ -926,18 +926,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   });
   const [analyticsSubTab, setAnalyticsSubTab] = useState<'reports' | 'ads'>('reports');
   const [adsAnalyticsSheets, setAdsAnalyticsSheets] = useState<Array<{ name: string; columns: string[]; rows: any[] }>>([]);
+  const [adsNmSort, setAdsNmSort] = useState<{ field: string; dir: 'asc' | 'desc' }>({ field: 'revenue', dir: 'desc' });
   const [adsAnalyticsFileName, setAdsAnalyticsFileName] = useState<string>('');
   const [adsSheetFilters, setAdsSheetFilters] = useState<Record<string, string>>({});
   const [adsSheetSorts, setAdsSheetSorts] = useState<Record<string, { col: string; dir: 'asc' | 'desc' }>>({});
   const [adsUnifiedFilter, setAdsUnifiedFilter] = useState<string>('');
   const [adsUnifiedSort, setAdsUnifiedSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: '__sheet', dir: 'asc' });
-  const [adsRules, setAdsRules] = useState({
-    targetDrr: 20,
-    minClicksForDecision: 20,
-    minSpendForStop: 500,
-    minOrdersForScale: 2,
-    minRomiForScale: 30,
-  });
   useEffect(() => {
     try {
       localStorage.setItem('uploaded_share_hidden_keys_v1', JSON.stringify(uploadedShareHiddenKeys || {}));
@@ -16362,56 +16356,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     return { columns, rows, viewRows };
   }, [adsAnalyticsSheets, adsUnifiedFilter, adsUnifiedSort]);
 
-  const adsInsights = React.useMemo(() => {
-    const rows: any[] = [];
-    (adsAnalyticsSheets || []).forEach((sheet) => {
-      const cols = sheet.columns || [];
-      const keywordCol = findAdsCol(cols, ['ключ', 'ключевоеслово', 'поисковаяфраза', 'фраза', 'запрос', 'keyword', 'query', 'searchterm']);
-      const clicksCol = findAdsCol(cols, ['клики', 'клик', 'clicks', 'click']);
-      const showsCol = findAdsCol(cols, ['показы', 'показ', 'impressions', 'shows', 'views']);
-      const spendCol = findAdsCol(cols, ['расход', 'затраты', 'бюджет', 'sum', 'суммарасхода', 'spend', 'cost', 'expense']);
-      const ordersCol = findAdsCol(cols, ['заказы', 'заказ', 'orders', 'order', 'конверсии']);
-      const revenueCol = findAdsCol(cols, ['выручка', 'продажи', 'суммапродаж', 'sumsales', 'revenue', 'sales']);
-
-      if (!keywordCol || !clicksCol || !spendCol) return;
-
-      (sheet.rows || []).forEach((r: any) => {
-        const keyword = String(r?.[keywordCol] || '').trim();
-        if (!keyword) return;
-
-        const shows = toAdsNum(r?.[showsCol]);
-        const clicks = toAdsNum(r?.[clicksCol]);
-        const spend = toAdsNum(r?.[spendCol]);
-        const orders = toAdsNum(r?.[ordersCol]);
-        const revenue = toAdsNum(r?.[revenueCol]);
-
-        const ctr = shows > 0 ? clicks / shows : 0;
-        const cpc = clicks > 0 ? spend / clicks : 0;
-        const cpo = orders > 0 ? spend / orders : 0;
-        const drr = revenue > 0 ? spend / revenue : 0;
-        const profit = revenue - spend;
-        const romi = spend > 0 ? (profit / spend) * 100 : 0;
-
-        let action: 'scale' | 'optimize' | 'stop' = 'optimize';
-        let reason = 'Требует оптимизации ставки/креатива';
-
-        if (orders <= 0 && (clicks >= adsRules.minClicksForDecision || spend >= adsRules.minSpendForStop)) {
-          action = 'stop';
-          reason = 'Расход есть, заказов нет';
-        } else if (orders >= adsRules.minOrdersForScale && drr > 0 && drr <= adsRules.targetDrr / 100 && romi >= adsRules.minRomiForScale) {
-          action = 'scale';
-          reason = 'Хороший ROMI и низкий ДРР';
-        }
-
-        rows.push({ sheet: sheet.name, keyword, shows, clicks, spend, orders, revenue, ctr, cpc, cpo, drr, profit, romi, action, reason });
-      });
-    });
-
-    const scale = rows.filter((x) => x.action === 'scale').sort((a, b) => b.romi - a.romi).slice(0, 20);
-    const stop = rows.filter((x) => x.action === 'stop').sort((a, b) => b.spend - a.spend).slice(0, 20);
-    return { all: rows, scale, stop };
-  }, [adsAnalyticsSheets, adsRules]);
-
   const adsKpi = React.useMemo(() => {
     const cols = adsUnified.columns || [];
     const showsCol = findAdsCol(cols, ['показы', 'просмотры', 'impressions', 'shows', 'views']);
@@ -16471,6 +16415,16 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       })
       .sort((a: any, b: any) => b.revenue - a.revenue);
   }, [adsUnified]);
+
+  const adsByNmSorted = React.useMemo(() => {
+    const { field, dir } = adsNmSort; const mul = dir === 'asc' ? 1 : -1;
+    return [...adsByNm].sort((a: any, b: any) => {
+      if (field === 'nm') return String(a.nm).localeCompare(String(b.nm), 'ru') * mul;
+      return ((a[field] || 0) - (b[field] || 0)) * mul;
+    });
+  }, [adsByNm, adsNmSort]);
+  const adsNmSortBtn = (field: string) => () => setAdsNmSort((p) => ({ field, dir: p.field === field && p.dir === 'desc' ? 'asc' : 'desc' }));
+  const adsNmArw = (field: string) => adsNmSort.field === field ? (adsNmSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
 
   // Visualisation data for the Ads dashboard: daily dynamics, keyword breakdown,
   // and the impressions→clicks→carts→orders funnel.
@@ -22916,22 +22870,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   </div>
 
                   <div className="bg-white rounded-xl border border-slate-100 p-4 space-y-4">
-                    <div>
-                      <div className="text-sm font-semibold text-slate-900 mb-2">Пороговые настройки аналитики</div>
-                      <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
-                        <label className="flex flex-col gap-1">Целевой ДРР, %<input className="px-2 py-1 border rounded" type="number" value={adsRules.targetDrr} onChange={(e)=>setAdsRules((p)=>({...p,targetDrr:Number(e.target.value||0)}))} /></label>
-                        <label className="flex flex-col gap-1">Мин. кликов<input className="px-2 py-1 border rounded" type="number" value={adsRules.minClicksForDecision} onChange={(e)=>setAdsRules((p)=>({...p,minClicksForDecision:Number(e.target.value||0)}))} /></label>
-                        <label className="flex flex-col gap-1">Мин. расход<input className="px-2 py-1 border rounded" type="number" value={adsRules.minSpendForStop} onChange={(e)=>setAdsRules((p)=>({...p,minSpendForStop:Number(e.target.value||0)}))} /></label>
-                        <label className="flex flex-col gap-1">Мин. заказов<input className="px-2 py-1 border rounded" type="number" value={adsRules.minOrdersForScale} onChange={(e)=>setAdsRules((p)=>({...p,minOrdersForScale:Number(e.target.value||0)}))} /></label>
-                        <label className="flex flex-col gap-1">Мин. ROMI, %<input className="px-2 py-1 border rounded" type="number" value={adsRules.minRomiForScale} onChange={(e)=>setAdsRules((p)=>({...p,minRomiForScale:Number(e.target.value||0)}))} /></label>
-                      </div>
-                    </div>
 
                     <div>
                       <div className="text-sm font-semibold text-slate-900 mb-3">Ключевые показатели</div>
                       {(() => {
                         const money = (v: number) => Math.round(v).toLocaleString('ru-RU') + ' ₽';
-                        const drrColor = adsKpi.drr === 0 ? 'text-slate-900' : adsKpi.drr <= (adsRules.targetDrr || 15) ? 'text-emerald-600' : adsKpi.drr <= (adsRules.targetDrr || 15) * 1.5 ? 'text-amber-600' : 'text-rose-600';
+                        const TARGET_DRR = 15;
+                        const drrColor = adsKpi.drr === 0 ? 'text-slate-900' : adsKpi.drr <= TARGET_DRR ? 'text-emerald-600' : adsKpi.drr <= TARGET_DRR * 1.5 ? 'text-amber-600' : 'text-rose-600';
                         const cards = [
                           { label: 'Расход', value: money(adsKpi.spend), grad: 'from-rose-500 to-orange-500', hint: 'бюджет на рекламу' },
                           { label: 'Выручка с рекламы', value: money(adsKpi.revenue), grad: 'from-emerald-500 to-teal-500', hint: 'заказов на сумму' },
@@ -23155,13 +23100,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       );
                     })()}
 
-                    <div className="text-sm font-semibold text-slate-900 mb-2">Рекомендации по ключам</div>
-                    {adsInsights.all.length === 0 && (
-                      <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2 mb-3">
-                        Недостаточно данных для рекомендаций по ключам (нужны минимум: ключ, клики, расход).
-                      </div>
-                    )}
-
                     </div>
 
                   <div className="bg-white rounded-xl border border-slate-100 p-4">
@@ -23172,20 +23110,20 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     <div className="overflow-auto max-h-[42vh] border border-slate-100 rounded-lg mb-4">
                       <table className="min-w-full text-xs">
                         <thead className="bg-slate-50 sticky top-0 z-10">
-                          <tr>
-                            <th className="px-2 py-2 text-left">Номенклатура</th>
-                            <th className="px-2 py-2 text-left">Расход</th>
-                            <th className="px-2 py-2 text-left">Выручка</th>
-                            <th className="px-2 py-2 text-left">Клики</th>
-                            <th className="px-2 py-2 text-left">Показы</th>
-                            <th className="px-2 py-2 text-left">CTR %</th>
-                            <th className="px-2 py-2 text-left">CPC</th>
-                            <th className="px-2 py-2 text-left">ДРР %</th>
-                            <th className="px-2 py-2 text-left">ROMI %</th>
+                          <tr className="select-none">
+                            <th className="px-2 py-2 text-left cursor-pointer hover:text-indigo-600" onClick={adsNmSortBtn('nm')}>Номенклатура{adsNmArw('nm')}</th>
+                            <th className="px-2 py-2 text-left cursor-pointer hover:text-indigo-600" onClick={adsNmSortBtn('spend')}>Расход{adsNmArw('spend')}</th>
+                            <th className="px-2 py-2 text-left cursor-pointer hover:text-indigo-600" onClick={adsNmSortBtn('revenue')}>Выручка{adsNmArw('revenue')}</th>
+                            <th className="px-2 py-2 text-left cursor-pointer hover:text-indigo-600" onClick={adsNmSortBtn('clicks')}>Клики{adsNmArw('clicks')}</th>
+                            <th className="px-2 py-2 text-left cursor-pointer hover:text-indigo-600" onClick={adsNmSortBtn('shows')}>Показы{adsNmArw('shows')}</th>
+                            <th className="px-2 py-2 text-left cursor-pointer hover:text-indigo-600" onClick={adsNmSortBtn('ctr')}>CTR %{adsNmArw('ctr')}</th>
+                            <th className="px-2 py-2 text-left cursor-pointer hover:text-indigo-600" onClick={adsNmSortBtn('cpc')}>CPC{adsNmArw('cpc')}</th>
+                            <th className="px-2 py-2 text-left cursor-pointer hover:text-indigo-600" onClick={adsNmSortBtn('drr')}>ДРР %{adsNmArw('drr')}</th>
+                            <th className="px-2 py-2 text-left cursor-pointer hover:text-indigo-600" onClick={adsNmSortBtn('romi')}>ROMI %{adsNmArw('romi')}</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {adsByNm.map((x: any) => (
+                          {adsByNmSorted.map((x: any) => (
                             <tr key={x.nm} className="border-t border-slate-100">
                               <td className="px-2 py-1.5 font-semibold">{x.nm}</td>
                               <td className="px-2 py-1.5">{x.spend.toLocaleString('ru-RU')}</td>
