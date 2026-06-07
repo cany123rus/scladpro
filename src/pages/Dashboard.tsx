@@ -3870,6 +3870,24 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [cwPurchaseOtherRows, setCwPurchaseOtherRows] = useState<Array<{ id: string; item_name: string; price: string }>>([{ id: getSafeId(), item_name: '', price: '' }]);
   const [cwPurchaseHistory, setCwPurchaseHistory] = useState<any[]>([]);
   const [cwPurchaseHistorySupplierFilter, setCwPurchaseHistorySupplierFilter] = useState('all');
+  // Packaging-type templates (dropdown in Закуп → Тип упаковки)
+  const [packagingTypeTemplates, setPackagingTypeTemplates] = useState<string[]>([]);
+  const [showPackagingTemplateModal, setShowPackagingTemplateModal] = useState(false);
+  const [packagingNewTemplate, setPackagingNewTemplate] = useState('');
+
+  const loadPackagingTypeTemplates = async () => {
+    try {
+      const { data } = await supabase.from('app_settings').select('value').eq('key', 'packaging_type_templates_v1').maybeSingle();
+      const raw = (data as any)?.value;
+      const arr = Array.isArray(raw) ? raw : (typeof raw === 'string' ? JSON.parse(raw || '[]') : []);
+      setPackagingTypeTemplates(Array.from(new Set((arr || []).map((x: any) => String(x || '').trim()).filter(Boolean))));
+    } catch { /* ignore */ }
+  };
+  const savePackagingTypeTemplates = async (items: string[]) => {
+    const clean = Array.from(new Set(items.map((x) => String(x || '').trim()).filter(Boolean)));
+    setPackagingTypeTemplates(clean);
+    await supabase.from('app_settings').upsert([{ key: 'packaging_type_templates_v1', value: JSON.stringify(clean) }], { onConflict: 'key' });
+  };
 
   const fetchCwPurchaseHistory = async () => {
     const { data, error } = await supabase
@@ -4547,6 +4565,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     }
     if (activeTab === 'completed' && completedWorkStep === 'PURCHASE') {
       fetchCwPurchaseHistory();
+      loadPackagingTypeTemplates();
     }
     if (activeTab === 'completed' && completedWorkStep === 'RATES') {
       ensureCwTimeRateId().catch(() => {});
@@ -27114,9 +27133,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       <div>
                         <div className="flex items-center justify-between mb-2">
                           <h4 className="text-sm font-bold text-slate-800">Упаковка</h4>
-                          <button type="button" onClick={() => setCwPurchaseRows(prev => [...prev, { id: getSafeId(), quantity: '', size: '', price: '', delivery: '' }])} className="inline-flex items-center gap-1.5 text-sm font-semibold text-indigo-600 hover:text-indigo-700">
-                            <Plus className="h-4 w-4" /> Тип упаковки
-                          </button>
+                          <div className="flex items-center gap-3">
+                            <button type="button" onClick={() => { setPackagingNewTemplate(''); setShowPackagingTemplateModal(true); }} className="inline-flex items-center gap-1.5 text-sm font-semibold text-violet-600 hover:text-violet-700">
+                              <Plus className="h-4 w-4" /> Шаблон упаковки
+                            </button>
+                            <button type="button" onClick={() => setCwPurchaseRows(prev => [...prev, { id: getSafeId(), quantity: '', size: '', price: '', delivery: '' }])} className="inline-flex items-center gap-1.5 text-sm font-semibold text-indigo-600 hover:text-indigo-700">
+                              <Plus className="h-4 w-4" /> Тип упаковки
+                            </button>
+                          </div>
                         </div>
                         <div className="space-y-2">
                           <div className="hidden md:grid grid-cols-[1.4fr_1fr_1fr_1fr_auto] gap-2 px-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
@@ -27124,7 +27148,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           </div>
                           {cwPurchaseRows.map((r) => (
                             <div key={r.id} className="grid grid-cols-1 md:grid-cols-[1.4fr_1fr_1fr_1fr_auto] gap-2 rounded-2xl border border-slate-200 bg-slate-50/60 p-2">
-                              <input type="text" placeholder="Тип упаковки (напр. Пакет 30x40)" value={r.size} onChange={(e) => setCwPurchaseRows(prev => prev.map(x => x.id === r.id ? { ...x, size: e.target.value } : x))} className="oc-input" />
+                              <select value={r.size} onChange={(e) => setCwPurchaseRows(prev => prev.map(x => x.id === r.id ? { ...x, size: e.target.value } : x))} className="oc-input">
+                                <option value="">Тип упаковки…</option>
+                                {packagingTypeTemplates.map((t) => <option key={`pt-${r.id}-${t}`} value={t}>{t}</option>)}
+                                {r.size && !packagingTypeTemplates.includes(r.size) && <option value={r.size}>{r.size}</option>}
+                              </select>
                               <input type="number" placeholder="Кол-во" value={r.quantity} onChange={(e) => setCwPurchaseRows(prev => prev.map(x => x.id === r.id ? { ...x, quantity: e.target.value } : x))} className="oc-input" />
                               <input type="number" step="0.01" placeholder="Цена за шт." value={r.price} onChange={(e) => setCwPurchaseRows(prev => prev.map(x => x.id === r.id ? { ...x, price: e.target.value } : x))} className="oc-input" />
                               <input type="number" step="0.01" placeholder="Доставка" value={r.delivery} onChange={(e) => setCwPurchaseRows(prev => prev.map(x => x.id === r.id ? { ...x, delivery: e.target.value } : x))} className="oc-input" />
@@ -31324,6 +31352,31 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 <div className="mt-4 flex justify-end gap-2">
                   <button type="button" onClick={() => setShowTempWorkerAddTemplateModal(false)} className="px-4 py-2 rounded-lg border">Отмена</button>
                   <button type="button" onClick={async () => { const text = String(tempWorkerNewTemplate || '').trim(); if (!text) return; await saveTempWorkerCommentTemplates([...(tempWorkerCommentTemplates || []), text]); setTempWorkerNewTemplate(''); setShowTempWorkerAddTemplateModal(false); showToast('Шаблон сохранен', 'success'); }} className="px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">Сохранить</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {showPackagingTemplateModal && (
+            <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-[65]" onClick={() => setShowPackagingTemplateModal(false)}>
+              <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
+                <h3 className="text-lg font-bold mb-3">Шаблоны упаковки</h3>
+                <div className="flex gap-2">
+                  <input value={packagingNewTemplate} onChange={(e) => setPackagingNewTemplate(e.target.value)} className="oc-input flex-1" placeholder="Напр. Пакет 30x40, Коробка S…" onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); const t = String(packagingNewTemplate || '').trim(); if (t) { savePackagingTypeTemplates([...(packagingTypeTemplates || []), t]); setPackagingNewTemplate(''); } } }} />
+                  <button type="button" onClick={() => { const t = String(packagingNewTemplate || '').trim(); if (!t) return; savePackagingTypeTemplates([...(packagingTypeTemplates || []), t]); setPackagingNewTemplate(''); showToast('Шаблон добавлен', 'success'); }} className="px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">Добавить</button>
+                </div>
+                {packagingTypeTemplates.length > 0 && (
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {packagingTypeTemplates.map((t) => (
+                      <span key={`ptpl-${t}`} className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1 text-sm text-slate-700">
+                        {t}
+                        <button type="button" onClick={() => savePackagingTypeTemplates(packagingTypeTemplates.filter((x) => x !== t))} className="text-slate-400 hover:text-rose-600"><X className="h-3.5 w-3.5" /></button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <div className="mt-5 flex justify-end">
+                  <button type="button" onClick={() => setShowPackagingTemplateModal(false)} className="px-4 py-2 rounded-lg border">Готово</button>
                 </div>
               </div>
             </div>
