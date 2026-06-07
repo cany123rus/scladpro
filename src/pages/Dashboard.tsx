@@ -20804,7 +20804,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
               <div className="oc-card p-5 md:p-6 mb-4">
                 <h2 className="text-2xl font-bold text-slate-900">Бартеры / Внешняя реклама</h2>
                 <p className="text-slate-600 mt-1">Внутри раздела теперь есть отдельные подразделы с собственными кнопками перехода.</p>
-                <div className="mt-4 sticky top-2 z-20 rounded-2xl border border-slate-200 bg-slate-50/95 backdrop-blur p-1.5 inline-flex flex-col sm:flex-row gap-1.5 w-full sm:w-auto shadow-sm">
+                <div className="mt-4 sm:sticky sm:top-2 z-20 rounded-2xl border border-slate-200 bg-slate-50/95 backdrop-blur p-1.5 inline-flex flex-col sm:flex-row gap-1.5 w-full sm:w-auto shadow-sm">
                   <button
                     type="button"
                     onClick={() => setBarterSection('barters_main')}
