@@ -829,13 +829,17 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     setReportsDayDetail({ date: dateStr, rows: [], grouped: [], total: 0 });
     try {
       const supMap = new Map((suppliers || []).map((s: any) => [String(s.id), s.name]));
-      const [tr, sr] = await Promise.all([
+      const [tr, sr, empRes] = await Promise.all([
         supabase.from('temporary_workers_logs').select('quantity, work_comment, worker_name, supplier_id, hours, earnings').is('deleted_at', null).eq('date', dateStr),
-        supabase.from('work_logs').select('quantity, employee_id, supplier_id, work_rates(name)').is('deleted_at', null).eq('date', dateStr),
+        supabase.from('work_logs').select('quantity, employee_id, supplier_id, work_rates(name, price)').is('deleted_at', null).eq('date', dateStr),
+        // employees may not be loaded on the Reports tab — fetch names directly.
+        empNameById.size > 0 ? Promise.resolve(null) : supabase.from('employees').select('id, full_name, login').is('deleted_at', null),
       ]);
+      const empMap = new Map(empNameById);
+      (empRes?.data || []).forEach((e: any) => empMap.set(String(e.id), e.full_name || e.login || 'Сотрудник'));
       const rows: RdDetRow[] = [];
       (tr.data || []).forEach((r: any) => { if (!isAssemblyTempType(r.work_comment)) return; const q = Number(r.quantity || 0); if (q <= 0) return; rows.push({ who: r.worker_name || 'Без имени', kind: 'Временный', type: String(r.work_comment || ''), qty: q, supplier: supMap.get(String(r.supplier_id)) || '—', hours: Number(r.hours || 0), earnings: Number(r.earnings || 0) }); });
-      (sr.data || []).forEach((r: any) => { if (isAssemblyExcludedStaffRate(r.work_rates?.name)) return; const q = Number(r.quantity || 0); if (q <= 0) return; rows.push({ who: empNameById.get(String(r.employee_id)) || 'Сотрудник', kind: 'Сотрудник', type: String(r.work_rates?.name || ''), qty: q, supplier: supMap.get(String(r.supplier_id)) || '—', hours: 0, earnings: 0 }); });
+      (sr.data || []).forEach((r: any) => { if (isAssemblyExcludedStaffRate(r.work_rates?.name)) return; const q = Number(r.quantity || 0); if (q <= 0) return; const price = Number(r.work_rates?.price || 0); rows.push({ who: empMap.get(String(r.employee_id)) || 'Сотрудник', kind: 'Сотрудник', type: String(r.work_rates?.name || ''), qty: q, supplier: supMap.get(String(r.supplier_id)) || '—', hours: 0, earnings: Math.round(q * price) }); });
       const gmap = new Map<string, { who: string; kind: string; types: string[]; qty: number; supplier: string; hours: number; earnings: number }>();
       rows.forEach((r) => { const key = `${r.kind}|${r.who}`; const g = gmap.get(key) || { who: r.who, kind: r.kind, types: [], qty: 0, supplier: r.supplier, hours: 0, earnings: 0 }; if (r.type && !g.types.includes(r.type)) g.types.push(r.type); g.qty += r.qty; g.hours += r.hours; g.earnings += r.earnings; gmap.set(key, g); });
       const grouped: RdDetRow[] = Array.from(gmap.values()).map((g) => ({ who: g.who, kind: g.kind, type: g.types.join(' / '), qty: g.qty, supplier: g.supplier, hours: g.hours, earnings: g.earnings }));
