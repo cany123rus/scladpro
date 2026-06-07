@@ -22115,13 +22115,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
               )}
 
               {barterModalOpen && (
-                <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-3" onClick={() => closeBarterAddModal()}>
-                  <div className="w-full max-w-3xl max-h-[92dvh] flex flex-col bg-white rounded-2xl shadow-xl p-4" onClick={(e) => e.stopPropagation()}>
+                <div className="fixed inset-0 z-[80] flex items-stretch sm:items-center justify-center bg-slate-900/40 backdrop-blur-sm p-0 sm:p-3" onClick={() => closeBarterAddModal()}>
+                  <div className="w-full max-w-3xl h-[100dvh] sm:h-auto sm:max-h-[92dvh] flex flex-col bg-white rounded-none sm:rounded-2xl shadow-xl p-4" onClick={(e) => e.stopPropagation()}>
                     <div className="flex items-center justify-between mb-3 shrink-0">
                       <div className="text-base font-semibold text-slate-900">Добавить товар</div>
                       <button className="text-slate-500 hover:text-slate-700" onClick={() => closeBarterAddModal()}><X className="h-4 w-4" /></button>
                     </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3 shrink-0">
                       <select value={barterSupplierId} onChange={(e) => setBarterSupplierId(e.target.value)} className="oc-select">
                         <option value="">Выберите поставщика</option>
                         {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -22131,7 +22131,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         {barterPhotoLoading ? 'Обновляю фото...' : 'Обновить фото'}
                       </button>
                     </div>
-                    <div className="mb-3 grid grid-cols-2 gap-2 items-end">
+                    <div className="mb-3 grid grid-cols-2 gap-2 items-end shrink-0">
                       <div className="flex flex-col">
                         <label className="block text-[11px] font-medium text-slate-500 mb-1 uppercase tracking-wide leading-tight min-h-[28px] flex items-end">Бартеров создать</label>
                         <input type="number" min="0" value={barterCreateBarterCount} onChange={(e) => setBarterCreateBarterCount(e.target.value)} className="oc-input w-full" placeholder="0" />
@@ -22141,7 +22141,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <input type="number" min="0" value={barterCreateAdCount} onChange={(e) => setBarterCreateAdCount(e.target.value)} className="oc-input w-full" placeholder="0" />
                       </div>
                     </div>
-                    <label className="mb-3 flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700">
+                    <label className="mb-3 flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700 shrink-0">
                       <input
                         type="checkbox"
                         className="mt-1"
