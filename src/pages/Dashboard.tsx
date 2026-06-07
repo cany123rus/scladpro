@@ -819,27 +819,41 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     } catch (e) { console.warn('loadReportsSummary failed', e); } finally { setReportsSummaryLoading(false); }
   };
   // Click-to-detail for a day in the Reports "Собрано по дням" chart.
-  const [reportsDayDetail, setReportsDayDetail] = useState<{ date: string; rows: Array<{ who: string; kind: string; type: string; qty: number }>; total: number } | null>(null);
+  type RdDetRow = { who: string; kind: string; type: string; qty: number; supplier: string; hours: number; earnings: number };
+  const [reportsDayDetail, setReportsDayDetail] = useState<{ date: string; rows: RdDetRow[]; grouped: RdDetRow[]; total: number } | null>(null);
   const [reportsDayLoading, setReportsDayLoading] = useState(false);
+  const [reportsDayFull, setReportsDayFull] = useState(false);
+  const [reportsDaySort, setReportsDaySort] = useState<{ field: 'who' | 'type' | 'qty' | 'hours' | 'earnings'; dir: 'asc' | 'desc' }>({ field: 'qty', dir: 'desc' });
   const loadReportsDayDetail = async (dateStr: string) => {
     setReportsDayLoading(true);
-    setReportsDayDetail({ date: dateStr, rows: [], total: 0 });
+    setReportsDayDetail({ date: dateStr, rows: [], grouped: [], total: 0 });
     try {
+      const supMap = new Map((suppliers || []).map((s: any) => [String(s.id), s.name]));
       const [tr, sr] = await Promise.all([
-        supabase.from('temporary_workers_logs').select('quantity, work_comment, worker_name').is('deleted_at', null).eq('date', dateStr),
-        supabase.from('work_logs').select('quantity, employee_id, work_rates(name)').is('deleted_at', null).eq('date', dateStr),
+        supabase.from('temporary_workers_logs').select('quantity, work_comment, worker_name, supplier_id, hours, earnings').is('deleted_at', null).eq('date', dateStr),
+        supabase.from('work_logs').select('quantity, employee_id, supplier_id, work_rates(name)').is('deleted_at', null).eq('date', dateStr),
       ]);
-      const gmap = new Map<string, { who: string; kind: string; types: string[]; qty: number }>();
-      const add = (who: string, kind: string, type: string, qty: number) => {
-        const key = `${kind}|${who}`; const g = gmap.get(key) || { who, kind, types: [], qty: 0 };
-        if (type && !g.types.includes(type)) g.types.push(type); g.qty += qty; gmap.set(key, g);
-      };
-      (tr.data || []).forEach((r: any) => { if (!isAssemblyTempType(r.work_comment)) return; const q = Number(r.quantity || 0); if (q <= 0) return; add(r.worker_name || 'Без имени', 'Временный', String(r.work_comment || ''), q); });
-      (sr.data || []).forEach((r: any) => { if (isAssemblyExcludedStaffRate(r.work_rates?.name)) return; const q = Number(r.quantity || 0); if (q <= 0) return; add(empNameById.get(String(r.employee_id)) || 'Сотрудник', 'Сотрудник', String(r.work_rates?.name || ''), q); });
-      const rows = Array.from(gmap.values()).map((g) => ({ who: g.who, kind: g.kind, type: g.types.join(' / '), qty: g.qty })).sort((a, b) => b.qty - a.qty);
-      setReportsDayDetail({ date: dateStr, rows, total: rows.reduce((s, r) => s + r.qty, 0) });
+      const rows: RdDetRow[] = [];
+      (tr.data || []).forEach((r: any) => { if (!isAssemblyTempType(r.work_comment)) return; const q = Number(r.quantity || 0); if (q <= 0) return; rows.push({ who: r.worker_name || 'Без имени', kind: 'Временный', type: String(r.work_comment || ''), qty: q, supplier: supMap.get(String(r.supplier_id)) || '—', hours: Number(r.hours || 0), earnings: Number(r.earnings || 0) }); });
+      (sr.data || []).forEach((r: any) => { if (isAssemblyExcludedStaffRate(r.work_rates?.name)) return; const q = Number(r.quantity || 0); if (q <= 0) return; rows.push({ who: empNameById.get(String(r.employee_id)) || 'Сотрудник', kind: 'Сотрудник', type: String(r.work_rates?.name || ''), qty: q, supplier: supMap.get(String(r.supplier_id)) || '—', hours: 0, earnings: 0 }); });
+      const gmap = new Map<string, { who: string; kind: string; types: string[]; qty: number; supplier: string; hours: number; earnings: number }>();
+      rows.forEach((r) => { const key = `${r.kind}|${r.who}`; const g = gmap.get(key) || { who: r.who, kind: r.kind, types: [], qty: 0, supplier: r.supplier, hours: 0, earnings: 0 }; if (r.type && !g.types.includes(r.type)) g.types.push(r.type); g.qty += r.qty; g.hours += r.hours; g.earnings += r.earnings; gmap.set(key, g); });
+      const grouped: RdDetRow[] = Array.from(gmap.values()).map((g) => ({ who: g.who, kind: g.kind, type: g.types.join(' / '), qty: g.qty, supplier: g.supplier, hours: g.hours, earnings: g.earnings }));
+      setReportsDayDetail({ date: dateStr, rows, grouped, total: rows.reduce((s, r) => s + r.qty, 0) });
     } catch (e) { console.warn('loadReportsDayDetail failed', e); } finally { setReportsDayLoading(false); }
   };
+  const reportsDaySortBtn = (field: 'who' | 'type' | 'qty' | 'hours' | 'earnings') => () => setReportsDaySort((p) => ({ field, dir: p.field === field && p.dir === 'desc' ? 'asc' : 'desc' }));
+  const reportsDayArw = (field: string) => reportsDaySort.field === field ? (reportsDaySort.dir === 'asc' ? ' ▲' : ' ▼') : '';
+  const reportsDayRows = useMemo(() => {
+    if (!reportsDayDetail) return [] as RdDetRow[];
+    const base = reportsDayFull ? reportsDayDetail.rows : reportsDayDetail.grouped;
+    const { field, dir } = reportsDaySort; const mul = dir === 'asc' ? 1 : -1;
+    return [...base].sort((a, b) => {
+      if (field === 'who') return a.who.localeCompare(b.who, 'ru') * mul;
+      if (field === 'type') return a.type.localeCompare(b.type, 'ru') * mul;
+      return ((a as any)[field] - (b as any)[field]) * mul;
+    });
+  }, [reportsDayDetail, reportsDayFull, reportsDaySort]);
   const [uploadedReportAnalytics, setUploadedReportAnalytics] = useState<any[]>([]);
   const [uploadedReportSummary, setUploadedReportSummary] = useState<any | null>(null);
   const [uploadedCostByKey, setUploadedCostByKey] = useState<Record<string, string>>({});
@@ -24395,9 +24409,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     {/* Day detail (click on a bar above) */}
                     {reportsDayDetail && (
                       <div className="mt-5 rounded-2xl border border-indigo-200 bg-white overflow-hidden">
-                        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
+                        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-b border-slate-100">
                           <h4 className="font-bold text-slate-900 text-sm">Детализация за {new Date(reportsDayDetail.date + 'T12:00:00').toLocaleDateString('ru-RU')}</h4>
                           <div className="flex items-center gap-3">
+                            <label className="inline-flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
+                              <input type="checkbox" checked={reportsDayFull} onChange={(e) => setReportsDayFull(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
+                              Полная детализация
+                            </label>
                             <span className="text-sm text-slate-500">Всего: <b className="text-slate-900">{reportsDayDetail.total.toLocaleString('ru-RU')}</b></span>
                             <button onClick={() => setReportsDayDetail(null)} className="p-1.5 rounded-lg hover:bg-slate-100"><X className="h-4 w-4 text-slate-500" /></button>
                           </div>
@@ -24407,21 +24425,34 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         ) : reportsDayDetail.rows.length === 0 ? (
                           <div className="px-4 py-6 text-center text-slate-400 text-sm">В этот день сборки не было</div>
                         ) : (
+                          <div className="overflow-x-auto">
                           <table className="w-full text-left text-sm">
-                            <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
-                              <tr><th className="px-4 py-2">Сотрудник</th><th className="px-4 py-2">Категория</th><th className="px-4 py-2">Тип работы</th><th className="px-4 py-2 text-right">Количество</th></tr>
+                            <thead className="bg-slate-50 text-slate-500 text-xs uppercase select-none">
+                              <tr>
+                                <th className="px-4 py-2 cursor-pointer hover:text-slate-700" onClick={reportsDaySortBtn('who')}>Сотрудник{reportsDayArw('who')}</th>
+                                <th className="px-4 py-2">Категория</th>
+                                {reportsDayFull && <th className="px-4 py-2">Поставщик</th>}
+                                <th className="px-4 py-2 cursor-pointer hover:text-slate-700" onClick={reportsDaySortBtn('type')}>Тип работы{reportsDayArw('type')}</th>
+                                {reportsDayFull && <th className="px-4 py-2 text-right cursor-pointer hover:text-slate-700" onClick={reportsDaySortBtn('hours')}>Часы{reportsDayArw('hours')}</th>}
+                                {reportsDayFull && <th className="px-4 py-2 text-right cursor-pointer hover:text-slate-700" onClick={reportsDaySortBtn('earnings')}>Заработок{reportsDayArw('earnings')}</th>}
+                                <th className="px-4 py-2 text-right cursor-pointer hover:text-slate-700" onClick={reportsDaySortBtn('qty')}>Количество{reportsDayArw('qty')}</th>
+                              </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
-                              {reportsDayDetail.rows.map((r, i) => (
+                              {reportsDayRows.map((r, i) => (
                                 <tr key={`rdd2-${i}`} className="hover:bg-slate-50">
                                   <td className="px-4 py-2 font-medium text-slate-800">{r.who}</td>
                                   <td className="px-4 py-2"><span className={`text-xs px-2 py-0.5 rounded-full ${r.kind === 'Временный' ? 'bg-amber-100 text-amber-700' : 'bg-indigo-100 text-indigo-700'}`}>{r.kind}</span></td>
+                                  {reportsDayFull && <td className="px-4 py-2 text-slate-600">{r.supplier}</td>}
                                   <td className="px-4 py-2 text-slate-600">{r.type}</td>
+                                  {reportsDayFull && <td className="px-4 py-2 text-right text-slate-600">{r.hours ? `${r.hours} ч.` : '—'}</td>}
+                                  {reportsDayFull && <td className="px-4 py-2 text-right font-semibold text-green-600">{r.earnings ? `${r.earnings.toLocaleString('ru-RU')} ₽` : '—'}</td>}
                                   <td className="px-4 py-2 text-right font-bold text-slate-900">{r.qty.toLocaleString('ru-RU')}</td>
                                 </tr>
                               ))}
                             </tbody>
                           </table>
+                          </div>
                         )}
                       </div>
                     )}
