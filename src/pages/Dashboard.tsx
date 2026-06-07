@@ -24091,7 +24091,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       <div className="p-2 bg-violet-50 rounded-xl"><TrendingUp className="h-5 w-5 text-violet-600" /></div>
                       <h3 className="text-lg font-bold text-slate-900">Сводная статистика за период</h3>
                     </div>
-                    <div className="flex items-end gap-2">
+                    <div className="flex flex-wrap items-end gap-2">
+                      {([['7 дней', 7], ['30 дней', 30], ['90 дней', 90]] as [string, number][]).map(([lbl, days]) => {
+                        const end = new Date(); const st = new Date(); st.setDate(st.getDate() - (days - 1));
+                        const sStr = st.toISOString().slice(0, 10); const eStr = end.toISOString().slice(0, 10);
+                        const active = reportsSummaryRange.start === sStr && reportsSummaryRange.end === eStr;
+                        return (
+                          <button key={lbl} onClick={() => { setReportsSummaryRange({ start: sStr, end: eStr }); loadReportsSummary(sStr, eStr); }} className={`h-11 px-3 rounded-xl text-sm font-semibold border transition-colors ${active ? 'bg-violet-600 text-white border-violet-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>{lbl}</button>
+                        );
+                      })}
                       <div><label className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1">С</label><input type="date" value={reportsSummaryRange.start} onChange={(e) => setReportsSummaryRange((p) => ({ ...p, start: e.target.value }))} className="oc-input" /></div>
                       <div><label className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1">По</label><input type="date" value={reportsSummaryRange.end} onChange={(e) => setReportsSummaryRange((p) => ({ ...p, end: e.target.value }))} className="oc-input" /></div>
                       <button onClick={() => loadReportsSummary(reportsSummaryRange.start, reportsSummaryRange.end)} disabled={reportsSummaryLoading} className="h-11 px-4 rounded-xl bg-violet-600 text-white font-semibold hover:bg-violet-700 disabled:opacity-50">{reportsSummaryLoading ? '…' : 'Обновить'}</button>
@@ -24102,16 +24110,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     <div className="py-8 text-center text-slate-400">{reportsSummaryLoading ? 'Загрузка…' : 'Нет данных'}</div>
                   ) : (
                   <>
-                  {/* KPI cards */}
-                  <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 mb-5">
-                    <div className="rounded-2xl border border-amber-100 bg-amber-50 p-3"><div className="text-[11px] font-semibold uppercase text-amber-600">Собрано — врем.</div><div className="text-xl font-extrabold text-amber-800">{s.temp.toLocaleString('ru-RU')}</div></div>
-                    <div className="rounded-2xl border border-indigo-100 bg-indigo-50 p-3"><div className="text-[11px] font-semibold uppercase text-indigo-600">Собрано — сотр.</div><div className="text-xl font-extrabold text-indigo-800">{s.staff.toLocaleString('ru-RU')}</div></div>
-                    <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-3"><div className="text-[11px] font-semibold uppercase text-emerald-600">Собрано — вместе</div><div className="text-xl font-extrabold text-emerald-800">{togetherQty.toLocaleString('ru-RU')}</div></div>
-                    <div className="rounded-2xl border border-blue-100 bg-blue-50 p-3"><div className="text-[11px] font-semibold uppercase text-blue-600">Доставки</div><div className="text-xl font-extrabold text-blue-800">{money(s.delivery)}</div></div>
-                    <div className="rounded-2xl border border-violet-100 bg-violet-50 p-3"><div className="text-[11px] font-semibold uppercase text-violet-600">Закуп</div><div className="text-xl font-extrabold text-violet-800">{money(s.packaging)}</div></div>
-                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3"><div className="text-[11px] font-semibold uppercase text-slate-500">Коробки (остаток)</div><div className={`text-xl font-extrabold ${boxStock.remaining < 0 ? 'text-rose-600' : 'text-slate-800'}`}>{boxStock.remaining.toLocaleString('ru-RU')}</div></div>
-                  </div>
-
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
                     {/* Cost structure */}
                     <div className="rounded-2xl border border-slate-200 p-4">
@@ -24190,10 +24188,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
               ) : (
                 <div className="space-y-6">
                   {(() => {
-                    const t = reportsBySupplier.totals;
-                    const zp = t.zpTemp + t.zpStaff;
-                    const avgFull = t.qty > 0 ? t.cost / t.qty : 0;
+                    const s = reportsSummary;
+                    const qty = s ? s.temp + s.staff : 0;
+                    const zp = s ? s.zpTemp + s.zpStaff : 0;
+                    const cost = s ? zp + s.delivery + s.packaging : 0;
+                    const avgFull = qty > 0 ? cost / qty : 0;
                     const money = (v: number) => `${Math.round(Number(v || 0)).toLocaleString('ru-RU')} ₽`;
+                    const periodNote = `${reportsSummaryRange.start} — ${reportsSummaryRange.end}`;
                     return (
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     {/* Собрано всего */}
@@ -24203,8 +24204,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <span className="text-sm font-medium text-slate-500">Собрано товаров</span>
                         <div className="p-2.5 bg-gradient-to-br from-indigo-500 to-violet-500 rounded-2xl shadow-sm"><Package className="h-5 w-5 text-white" /></div>
                       </div>
-                      <div className="text-3xl font-extrabold text-slate-900">{Number(t.qty).toLocaleString('ru-RU')} <span className="text-base font-semibold text-slate-400">шт</span></div>
-                      <p className="text-xs text-slate-400 mt-1">За всё время · ФБО/ФБС + сотрудники</p>
+                      <div className="text-3xl font-extrabold text-slate-900">{Number(qty).toLocaleString('ru-RU')} <span className="text-base font-semibold text-slate-400">шт</span></div>
+                      <p className="text-xs text-slate-400 mt-1">{periodNote} · ФБО/ФБС + сотрудники</p>
                     </div>
 
                     {/* Затраты всего */}
@@ -24214,8 +24215,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <span className="text-sm font-medium text-slate-500">Затраты всего</span>
                         <div className="p-2.5 bg-gradient-to-br from-emerald-500 to-teal-500 rounded-2xl shadow-sm"><Wallet className="h-5 w-5 text-white" /></div>
                       </div>
-                      <div className="text-3xl font-extrabold text-slate-900">{money(t.cost)}</div>
-                      <p className="text-xs text-slate-400 mt-1">ЗП {money(zp)} · доставка {money(t.delivery)} · закуп {money(t.packaging)}</p>
+                      <div className="text-3xl font-extrabold text-slate-900">{money(cost)}</div>
+                      <p className="text-xs text-slate-400 mt-1">ЗП {money(zp)} · доставка {money(s?.delivery || 0)} · закуп {money(s?.packaging || 0)}</p>
                     </div>
 
                     {/* Средняя цена сборки (полная) */}
@@ -24226,31 +24227,31 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <div className="p-2.5 bg-gradient-to-br from-fuchsia-500 to-purple-500 rounded-2xl shadow-sm"><FileSpreadsheet className="h-5 w-5 text-white" /></div>
                       </div>
                       <div className="text-3xl font-extrabold text-slate-900">{avgFull.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽<span className="text-base font-semibold text-slate-400">/шт</span></div>
-                      <p className="text-xs text-slate-400 mt-1">(ЗП+доставка+закуп) ÷ собрано · за всё время</p>
+                      <p className="text-xs text-slate-400 mt-1">(ЗП+доставка+закуп) ÷ собрано · за период</p>
                     </div>
                   </div>
                     );
                   })()}
 
-                  {/* Assembly infographic cards */}
+                  {/* Assembly infographic cards (за период) */}
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
                     <div className="relative overflow-hidden rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
                       <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-amber-400 to-orange-500" />
                       <div className="flex items-center justify-between mb-2"><span className="text-sm font-medium text-slate-500">Собрано — временные</span><div className="p-2 bg-amber-50 rounded-xl"><Box className="h-5 w-5 text-amber-600" /></div></div>
-                      <div className="text-3xl font-extrabold text-amber-600">{assemblyDaily.totalTemp.toLocaleString('ru-RU')}</div>
-                      <p className="text-xs text-slate-400 mt-1">ФБО/ФБС · 30 дней</p>
+                      <div className="text-3xl font-extrabold text-amber-600">{(reportsSummary?.temp || 0).toLocaleString('ru-RU')}</div>
+                      <p className="text-xs text-slate-400 mt-1">ФБО/ФБС · за период</p>
                     </div>
                     <div className="relative overflow-hidden rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
                       <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-indigo-500 to-violet-500" />
                       <div className="flex items-center justify-between mb-2"><span className="text-sm font-medium text-slate-500">Собрано — сотрудники</span><div className="p-2 bg-indigo-50 rounded-xl"><Box className="h-5 w-5 text-indigo-600" /></div></div>
-                      <div className="text-3xl font-extrabold text-indigo-600">{assemblyDaily.totalStaff.toLocaleString('ru-RU')}</div>
-                      <p className="text-xs text-slate-400 mt-1">кроме повременных/ПИК · 30 дней</p>
+                      <div className="text-3xl font-extrabold text-indigo-600">{(reportsSummary?.staff || 0).toLocaleString('ru-RU')}</div>
+                      <p className="text-xs text-slate-400 mt-1">кроме повременных/ПИК · за период</p>
                     </div>
                     <div className="relative overflow-hidden rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
                       <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-emerald-500 to-teal-500" />
                       <div className="flex items-center justify-between mb-2"><span className="text-sm font-medium text-slate-500">Собрано — вместе</span><div className="p-2 bg-emerald-50 rounded-xl"><Box className="h-5 w-5 text-emerald-600" /></div></div>
-                      <div className="text-3xl font-extrabold text-emerald-600">{(assemblyDaily.totalTemp + assemblyDaily.totalStaff).toLocaleString('ru-RU')}</div>
-                      <p className="text-xs text-slate-400 mt-1">общее количество · 30 дней</p>
+                      <div className="text-3xl font-extrabold text-emerald-600">{((reportsSummary?.temp || 0) + (reportsSummary?.staff || 0)).toLocaleString('ru-RU')}</div>
+                      <p className="text-xs text-slate-400 mt-1">общее количество · за период</p>
                     </div>
                   </div>
 
@@ -24355,276 +24356,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     })()}
                   </div>
 
-                  {/* Report by Supplier Section */}
-                  <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-                    <div className="flex items-center gap-2 mb-6">
-                      <div className="p-2 bg-indigo-50 rounded-xl"><FileText className="h-5 w-5 text-indigo-600" /></div>
-                      <h3 className="text-lg font-bold text-slate-900">Отчет по поставщику</h3>
-                    </div>
-                    <div className={`grid gap-6 ${reportsReportResult ? 'grid-cols-1 lg:grid-cols-3' : 'grid-cols-1'}`}>
-                        <div className="space-y-4">
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">Поставщик</label>
-                                <select
-                                    value={reportsReportForm.supplier_id}
-                                    onChange={e => setReportsReportForm({...reportsReportForm, supplier_id: e.target.value})}
-                                    className="oc-select"
-                                >
-                                    <option value="">Выберите поставщика</option>
-                                    {suppliers.map(s => (
-                                        <option key={s.id} value={s.id}>{s.name}</option>
-                                    ))}
-                                </select>
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Начало периода</label>
-                                    <input
-                                        type="date"
-                                        value={reportsReportForm.start}
-                                        onChange={e => setReportsReportForm({...reportsReportForm, start: e.target.value})}
-                                        className="oc-input"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Конец периода</label>
-                                    <input
-                                        type="date"
-                                        value={reportsReportForm.end}
-                                        onChange={e => setReportsReportForm({...reportsReportForm, end: e.target.value})}
-                                        className="oc-input"
-                                    />
-                                </div>
-                            </div>
-
-                            <button
-                                onClick={generateReportsReport}
-                                className="w-full py-2.5 bg-gradient-to-r from-indigo-600 to-violet-600 text-white rounded-xl font-medium hover:from-indigo-700 hover:to-violet-700 transition-all shadow-sm flex items-center justify-center gap-2"
-                            >
-                                <FileText className="w-4 h-4" />
-                                Сформировать отчет
-                            </button>
-                        </div>
-
-                        {reportsReportResult && (
-                            <div className="lg:col-span-2 bg-slate-50/70 rounded-2xl p-5 border border-slate-200">
-                                <h3 className="font-semibold text-slate-800 mb-4">Результаты за период</h3>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                    <div className="bg-white p-4 rounded-2xl shadow-sm border-l-4 border-indigo-500 ring-1 ring-slate-100">
-                                        <div className="text-xs font-medium text-slate-500 mb-1">Остатки товаров</div>
-                                        <div className="text-2xl font-bold text-indigo-600">
-                                            {((reportsReportResult.received || 0) - (reportsReportResult.shipped || 0)).toLocaleString('ru-RU')} <span className="text-base font-semibold text-slate-400">шт</span>
-                                        </div>
-                                    </div>
-                                    <div className="bg-white p-4 rounded-2xl shadow-sm border-l-4 border-emerald-500 ring-1 ring-slate-100">
-                                        <div className="text-xs font-medium text-slate-500 mb-1">Выплаты</div>
-                                        <div className="text-2xl font-bold text-emerald-600">
-                                            {(reportsReportResult.total_payment || 0).toLocaleString('ru-RU')} ₽
-                                        </div>
-                                    </div>
-                                    <div className="bg-white p-4 rounded-2xl shadow-sm border-l-4 border-sky-500 ring-1 ring-slate-100">
-                                        <div className="text-xs font-medium text-slate-500 mb-1">Короба</div>
-                                        <div className="text-2xl font-bold text-sky-600">
-                                            {((reportsReportResult.boxes || 0) * (reportsReportResult.avgBoxPrice || 0)).toLocaleString('ru-RU')} ₽
-                                        </div>
-                                    </div>
-                                    <div className="bg-white p-4 rounded-2xl shadow-sm border-l-4 border-orange-500 ring-1 ring-slate-100">
-                                        <div className="text-xs font-medium text-slate-500 mb-1">Упаковка</div>
-                                        <div className="text-2xl font-bold text-orange-600">
-                                            {(reportsReportResult.packaging_cost || 0).toLocaleString('ru-RU')} ₽
-                                        </div>
-                                    </div>
-                                    <div className="bg-white p-4 rounded-2xl shadow-sm border-l-4 border-purple-500 ring-1 ring-slate-100 col-span-1 sm:col-span-2">
-                                        <div className="text-xs font-medium text-slate-500 mb-1">Средняя стоимость единицы за все время</div>
-                                        <div className="text-2xl font-bold text-purple-600">
-                                            {(() => {
-                                                const stats = reportsReportResult.allTime || {};
-                                                const totalCost = (stats.total_payment || 0) +
-                                                                (stats.packaging_cost || 0) +
-                                                                ((stats.boxes || 0) * (reportsReportResult.avgBoxPrice || 0));
-                                                const shipped = stats.shipped || 0;
-                                                return shipped > 0 ? (totalCost / shipped).toLocaleString('ru-RU', { maximumFractionDigits: 2 }) : '0';
-                                            })()} ₽
-                                        </div>
-                                        <div className="text-xs text-slate-400 mt-1">
-                                            (Выплаты + Упаковка + Коробки) / Отгружено
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                  </div>
-
-                  {/* Warehouse History Section */}
-                  <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-                    <div className="flex items-center gap-2 mb-6">
-                      <div className="p-2 bg-emerald-50 rounded-xl"><History className="h-5 w-5 text-emerald-600" /></div>
-                      <h3 className="text-lg font-bold text-slate-900">История склада и цена</h3>
-                    </div>
-                    <div className="space-y-4">
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">Поставщик</label>
-                                <select
-                                    value={reportsReportForm.supplier_id}
-                                    onChange={e => setReportsReportForm({...reportsReportForm, supplier_id: e.target.value})}
-                                    className="oc-select"
-                                >
-                                    <option value="">Выберите поставщика</option>
-                                    {suppliers.map(s => (
-                                        <option key={s.id} value={s.id}>{s.name}</option>
-                                    ))}
-                                </select>
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">Месяц</label>
-                                <input
-                                    type="month"
-                                    value={warehouseCostForm.month}
-                                    onChange={e => setWarehouseCostForm({...warehouseCostForm, month: e.target.value})}
-                                    className="oc-input"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">Стоимость</label>
-                                <div className="flex gap-2">
-                                    <input
-                                        type="number"
-                                        placeholder="₽"
-                                        value={warehouseCostForm.cost}
-                                        onChange={e => setWarehouseCostForm({...warehouseCostForm, cost: e.target.value})}
-                                        className="oc-input"
-                                    />
-                                    <button
-                                        onClick={handleSaveWarehouseCost}
-                                        disabled={!reportsReportForm.supplier_id}
-                                        className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-medium hover:bg-indigo-700 transition-colors disabled:opacity-50 whitespace-nowrap shadow-sm"
-                                    >
-                                        Сохранить
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-
-                        {(reportsReportForm.supplier_id || warehouseCostHistory.length > 0) && (
-                            <div className="mt-6 border-t border-slate-100 pt-4">
-                                <div className="flex justify-between items-center mb-4">
-                                    <h5 className="font-bold text-slate-900">История ({warehouseCostHistory.length})</h5>
-                                    <button onClick={fetchWarehouseCosts} className="text-indigo-600 hover:text-indigo-800 p-1 rounded hover:bg-indigo-50" title="Обновить">
-                                        <RefreshCw className="h-4 w-4" />
-                                    </button>
-                                </div>
-                                {warehouseCostHistory.length === 0 ? (
-                                    <div className="text-slate-400 text-center py-4">Нет записей</div>
-                                ) : (
-                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                        {warehouseCostHistory.map(item => (
-                                            <div key={item.id} className="flex justify-between items-center bg-slate-50 p-3 rounded-lg border border-slate-100">
-                                                <div>
-                                                    <div className="font-medium capitalize">{new Date(item.month_date).toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })}</div>
-                                                    <div className="text-slate-600">{item.cost.toLocaleString('ru-RU')} ₽</div>
-                                                </div>
-                                                <div className="flex gap-1">
-                                                    <button
-                                                        onClick={() => handleEditWarehouseCost(item)}
-                                                        className="p-1.5 text-blue-500 hover:bg-blue-50 rounded-lg transition-colors"
-                                                        title="Редактировать"
-                                                    >
-                                                        <Pencil className="h-4 w-4" />
-                                                    </button>
-                                                    <button
-                                                        onClick={() => handleDeleteWarehouseCost(item.id)}
-                                                        className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                                                        title="Удалить"
-                                                    >
-                                                        <Trash2 className="h-4 w-4" />
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
-                        )}
-                    </div>
-                  </div>
-
-                  {/* Unified Supplier Stats Table */}
-                  <div className="rounded-3xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-                    <div className="p-6 border-b border-slate-100 flex items-center gap-2">
-                      <div className="p-2 bg-purple-50 rounded-xl"><BarChart2 className="h-5 w-5 text-purple-600" /></div>
-                      <div>
-                        <h3 className="text-lg font-bold text-slate-900">Сводная статистика по поставщикам</h3>
-                        <p className="text-sm text-slate-500 mt-0.5">Данные за все время</p>
-                      </div>
-                    </div>
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left text-sm">
-                        <thead className="bg-slate-50/80 backdrop-blur text-slate-500 text-xs font-semibold uppercase tracking-wide border-b border-slate-200 sticky top-0">
-                          <tr>
-                            <th className="px-6 py-3.5">Поставщик</th>
-                            <th className="px-6 py-3.5 text-right">Товары на складе</th>
-                            <th className="px-6 py-3.5 text-right">Выплаты</th>
-                            <th className="px-6 py-3.5 text-right">Коробки</th>
-                            <th className="px-6 py-3.5 text-right">Упаковка</th>
-                            <th className="px-6 py-3.5 text-right">Средняя цена склада</th>
-                            <th className="px-6 py-3.5 text-right">Ср. стоимость ед.</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                          {suppliersAllTimeStats.map((item) => {
-                            const stats = item.stats || {};
-                            const stock = (stats.received || 0) - (stats.shipped || 0);
-                            const payments = stats.total_payment || 0;
-                            const boxes = stats.boxes || 0;
-                            const boxesCost = boxes * (item.avgBoxPrice || 0);
-                            const packaging = stats.packaging_cost || 0;
-                            const avgWarehousePrice = stats.avg_warehouse_price || 0;
-
-                            const totalCost = payments + packaging + boxesCost + avgWarehousePrice;
-                            const shipped = stats.shipped || 0;
-                            const avgCost = shipped > 0 ? totalCost / shipped : 0;
-
-                            return (
-                              <tr key={item.id} className="hover:bg-slate-50 transition-colors">
-                                <td className="px-6 py-4 font-medium text-slate-900">{item.name}</td>
-                                <td className="px-6 py-4 text-right">
-                                  <span className={stock < 0 ? 'text-red-600 font-medium' : 'text-slate-900'}>
-                                    {stock.toLocaleString('ru-RU')} шт.
-                                  </span>
-                                </td>
-                                <td className="px-6 py-4 text-right font-medium text-indigo-600">
-                                  {payments.toLocaleString('ru-RU')} ₽
-                                </td>
-                                <td className="px-6 py-4 text-right">
-                                  <div className="font-medium text-slate-900">{boxes} шт.</div>
-                                  <div className="text-xs text-slate-500">≈ {boxesCost.toLocaleString('ru-RU', { maximumFractionDigits: 0 })} ₽</div>
-                                </td>
-                                <td className="px-6 py-4 text-right font-medium text-orange-600">
-                                  {packaging.toLocaleString('ru-RU')} ₽
-                                </td>
-                                <td className="px-6 py-4 text-right font-medium text-slate-600">
-                                  {avgWarehousePrice.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽
-                                </td>
-                                <td className="px-6 py-4 text-right font-bold text-purple-600">
-                                  {avgCost.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽
-                                </td>
-                              </tr>
-                            );
-                          })}
-                          {suppliersAllTimeStats.length === 0 && (
-                            <tr>
-                              <td colSpan={7} className="px-6 py-12 text-center text-slate-400">
-                                Нет данных
-                              </td>
-                            </tr>
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
                 </div>
               )}
             </div>
