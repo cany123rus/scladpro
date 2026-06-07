@@ -6,7 +6,7 @@ import {
   LayoutDashboard, Map as MapIcon, Package, Truck, ClipboardCheck, Users,
   ShieldCheck, Printer, Box, CheckSquare, Terminal, MessageSquare,
   Send, UserCog, LogOut, Plus, Search, Bell, Settings, ChevronRight, ChevronLeft, ChevronDown, ChevronUp, Calendar,
-  Pencil, Trash2, History, Save, X, Upload, ArrowLeft, Undo2, AlertCircle, CheckCircle2, QrCode, FileSpreadsheet, Lock, LockOpen, Camera, Download, FileText, File, FileClock, Clock, Menu, Database, Power, Link, RefreshCw, ShoppingCart, BarChart2, ShoppingBag, RotateCcw, Wallet, Megaphone
+  Pencil, Trash2, History, Save, X, Upload, ArrowLeft, Undo2, AlertCircle, CheckCircle2, QrCode, FileSpreadsheet, Lock, LockOpen, Camera, Download, FileText, File, FileClock, Clock, Menu, Database, Power, Link, RefreshCw, ShoppingCart, BarChart2, ShoppingBag, RotateCcw, Wallet, Megaphone, TrendingUp
 } from 'lucide-react';
 const WBProducts = React.lazy(() => import('../components/WBProducts').then((m) => ({ default: m.WBProducts })));
 const WBSupplyManager = React.lazy(() => import('../components/WBSupplyManager').then((m) => ({ default: m.WBSupplyManager })));
@@ -774,6 +774,33 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [reportPackagingData, setReportPackagingData] = useState<any[]>([]);
   const [reportTotals, setReportTotals] = useState({ items: 0, supplies: 0, avgPriceInStock: 0 });
   const [loadingReports, setLoadingReports] = useState(false);
+  // Сводная статистика (раздел Отчёты) — за период
+  const reportsSummaryDefaultRange = () => { const e = new Date(); const s = new Date(); s.setDate(s.getDate() - 29); return { start: s.toISOString().slice(0, 10), end: e.toISOString().slice(0, 10) }; };
+  const [reportsSummaryRange, setReportsSummaryRange] = useState(reportsSummaryDefaultRange());
+  const [reportsSummary, setReportsSummary] = useState<{ temp: number; staff: number; zpTemp: number; zpStaff: number; delivery: number; packaging: number; daily: Array<[string, { temp: number; staff: number }]>; maxDay: number } | null>(null);
+  const [reportsSummaryLoading, setReportsSummaryLoading] = useState(false);
+  const loadReportsSummary = async (startStr: string, endStr: string) => {
+    setReportsSummaryLoading(true);
+    try {
+      const [tr, sr, dl, pp] = await Promise.all([
+        supabase.from('temporary_workers_logs').select('date, quantity, work_comment, earnings').is('deleted_at', null).gte('date', startStr).lte('date', endStr),
+        supabase.from('work_logs').select('date, quantity, work_rates(name, price)').is('deleted_at', null).gte('date', startStr).lte('date', endStr),
+        supabase.from('delivery_logs').select('amount, date').gte('date', startStr).lte('date', endStr),
+        supabase.from('packaging_purchase_log').select('quantity, price, delivery, kind, created_at').is('deleted_at', null).gte('created_at', `${startStr}T00:00:00`).lte('created_at', `${endStr}T23:59:59`),
+      ]);
+      const days = new Map<string, { temp: number; staff: number }>();
+      const sD = new Date(startStr + 'T00:00:00'); const eD = new Date(endStr + 'T00:00:00');
+      for (let d = new Date(sD); d <= eD; d.setDate(d.getDate() + 1)) days.set(d.toISOString().slice(0, 10), { temp: 0, staff: 0 });
+      let temp = 0, staff = 0, zpTemp = 0, zpStaff = 0;
+      (tr.data || []).forEach((r: any) => { if (!isAssemblyTempType(r.work_comment)) return; const q = Number(r.quantity || 0); const dk = String(r.date).slice(0, 10); temp += q; zpTemp += Number(r.earnings || 0); if (days.has(dk)) days.get(dk)!.temp += q; });
+      (sr.data || []).forEach((r: any) => { if (isAssemblyExcludedStaffRate(r.work_rates?.name)) return; const q = Number(r.quantity || 0); const dk = String(r.date).slice(0, 10); staff += q; zpStaff += q * Number(r.work_rates?.price || 0); if (days.has(dk)) days.get(dk)!.staff += q; });
+      const delivery = (dl.data || []).reduce((s: number, r: any) => s + Number(r.amount || 0), 0);
+      const packaging = (pp.data || []).reduce((s: number, r: any) => s + (r.kind === 'other' ? Number(r.price || 0) : Number(r.quantity || 0) * Number(r.price || 0) + Number(r.delivery || 0)), 0);
+      const daily = Array.from(days.entries());
+      const maxDay = Math.max(1, ...daily.map(([, v]) => v.temp + v.staff));
+      setReportsSummary({ temp, staff, zpTemp, zpStaff, delivery, packaging, daily, maxDay });
+    } catch (e) { console.warn('loadReportsSummary failed', e); } finally { setReportsSummaryLoading(false); }
+  };
   const [uploadedReportAnalytics, setUploadedReportAnalytics] = useState<any[]>([]);
   const [uploadedReportSummary, setUploadedReportSummary] = useState<any | null>(null);
   const [uploadedCostByKey, setUploadedCostByKey] = useState<Record<string, string>>({});
@@ -16491,7 +16518,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
   useEffect(() => {
     // Lazy-load data by active tab to reduce startup memory/load spikes.
-    if (activeTab === 'reports') { fetchReportsData(); loadAssemblyDaily(); }
+    if (activeTab === 'reports') { fetchReportsData(); loadAssemblyDaily(); loadBoxStock(); loadReportsSummary(reportsSummaryRange.start, reportsSummaryRange.end); }
     if (activeTab === 'employees' || activeTab === 'warehouse' || activeTab === 'admin') fetchEmployees();
     if (activeTab === 'employees') loadPaymentReports();
     if (activeTab === 'reception') fetchReceptions();
@@ -23997,6 +24024,110 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   <p className="text-indigo-200/80 mt-0.5 text-sm">Статистика, выплаты и сводка по поставщикам</p>
                 </div>
               </div>
+
+              {/* ===== Сводная статистика за период ===== */}
+              {(() => {
+                const s = reportsSummary;
+                const money = (v: number) => `${Math.round(Number(v || 0)).toLocaleString('ru-RU')} ₽`;
+                const togetherQty = s ? s.temp + s.staff : 0;
+                const costs = s ? [
+                  { label: 'ЗП временные', value: s.zpTemp, color: 'bg-emerald-500', text: 'text-emerald-700' },
+                  { label: 'ЗП сотрудники', value: s.zpStaff, color: 'bg-indigo-500', text: 'text-indigo-700' },
+                  { label: 'Доставки', value: s.delivery, color: 'bg-blue-500', text: 'text-blue-700' },
+                  { label: 'Закуп упаковки/прочее', value: s.packaging, color: 'bg-amber-500', text: 'text-amber-700' },
+                ] : [];
+                const costTotal = costs.reduce((a, c) => a + c.value, 0);
+                const avgAssembly = togetherQty > 0 ? (s!.zpTemp + s!.zpStaff) / togetherQty : 0;
+                const avgFull = togetherQty > 0 ? costTotal / togetherQty : 0;
+                return (
+                <div className="mb-6 rounded-3xl border border-slate-200 bg-white p-5 md:p-6 shadow-sm">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-5">
+                    <div className="flex items-center gap-2">
+                      <div className="p-2 bg-violet-50 rounded-xl"><TrendingUp className="h-5 w-5 text-violet-600" /></div>
+                      <h3 className="text-lg font-bold text-slate-900">Сводная статистика за период</h3>
+                    </div>
+                    <div className="flex items-end gap-2">
+                      <div><label className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1">С</label><input type="date" value={reportsSummaryRange.start} onChange={(e) => setReportsSummaryRange((p) => ({ ...p, start: e.target.value }))} className="oc-input" /></div>
+                      <div><label className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1">По</label><input type="date" value={reportsSummaryRange.end} onChange={(e) => setReportsSummaryRange((p) => ({ ...p, end: e.target.value }))} className="oc-input" /></div>
+                      <button onClick={() => loadReportsSummary(reportsSummaryRange.start, reportsSummaryRange.end)} disabled={reportsSummaryLoading} className="h-11 px-4 rounded-xl bg-violet-600 text-white font-semibold hover:bg-violet-700 disabled:opacity-50">{reportsSummaryLoading ? '…' : 'Обновить'}</button>
+                    </div>
+                  </div>
+
+                  {!s ? (
+                    <div className="py-8 text-center text-slate-400">{reportsSummaryLoading ? 'Загрузка…' : 'Нет данных'}</div>
+                  ) : (
+                  <>
+                  {/* KPI cards */}
+                  <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 mb-5">
+                    <div className="rounded-2xl border border-amber-100 bg-amber-50 p-3"><div className="text-[11px] font-semibold uppercase text-amber-600">Собрано — врем.</div><div className="text-xl font-extrabold text-amber-800">{s.temp.toLocaleString('ru-RU')}</div></div>
+                    <div className="rounded-2xl border border-indigo-100 bg-indigo-50 p-3"><div className="text-[11px] font-semibold uppercase text-indigo-600">Собрано — сотр.</div><div className="text-xl font-extrabold text-indigo-800">{s.staff.toLocaleString('ru-RU')}</div></div>
+                    <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-3"><div className="text-[11px] font-semibold uppercase text-emerald-600">Собрано — вместе</div><div className="text-xl font-extrabold text-emerald-800">{togetherQty.toLocaleString('ru-RU')}</div></div>
+                    <div className="rounded-2xl border border-blue-100 bg-blue-50 p-3"><div className="text-[11px] font-semibold uppercase text-blue-600">Доставки</div><div className="text-xl font-extrabold text-blue-800">{money(s.delivery)}</div></div>
+                    <div className="rounded-2xl border border-violet-100 bg-violet-50 p-3"><div className="text-[11px] font-semibold uppercase text-violet-600">Закуп</div><div className="text-xl font-extrabold text-violet-800">{money(s.packaging)}</div></div>
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3"><div className="text-[11px] font-semibold uppercase text-slate-500">Коробки (остаток)</div><div className={`text-xl font-extrabold ${boxStock.remaining < 0 ? 'text-rose-600' : 'text-slate-800'}`}>{boxStock.remaining.toLocaleString('ru-RU')}</div></div>
+                  </div>
+
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                    {/* Cost structure */}
+                    <div className="rounded-2xl border border-slate-200 p-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <h4 className="font-bold text-slate-800 text-sm">Структура затрат</h4>
+                        <span className="text-sm font-extrabold text-slate-900">{money(costTotal)}</span>
+                      </div>
+                      <div className="flex h-3 w-full overflow-hidden rounded-full bg-slate-100 mb-3">
+                        {costs.map((c) => costTotal > 0 && c.value > 0 && (
+                          <div key={c.label} className={c.color} style={{ width: `${(c.value / costTotal) * 100}%` }} title={`${c.label}: ${money(c.value)}`} />
+                        ))}
+                      </div>
+                      <div className="space-y-1.5">
+                        {costs.map((c) => (
+                          <div key={c.label} className="flex items-center justify-between text-sm">
+                            <span className="inline-flex items-center gap-2 text-slate-600"><span className={`h-2.5 w-2.5 rounded-sm ${c.color}`} />{c.label}</span>
+                            <span className={`font-semibold ${c.text}`}>{money(c.value)} <span className="text-[11px] text-slate-400">{costTotal > 0 ? `${Math.round((c.value / costTotal) * 100)}%` : ''}</span></span>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="mt-3 grid grid-cols-2 gap-2">
+                        <div className="rounded-xl bg-slate-50 p-2.5"><div className="text-[11px] text-slate-500">Ср. цена сборки</div><div className="text-base font-bold text-slate-900">{avgAssembly.toFixed(2)} ₽/шт</div><div className="text-[10px] text-slate-400">ЗП ÷ собрано, без доставки</div></div>
+                        <div className="rounded-xl bg-slate-50 p-2.5"><div className="text-[11px] text-slate-500">Ср. цена (полная)</div><div className="text-base font-bold text-slate-900">{avgFull.toFixed(2)} ₽/шт</div><div className="text-[10px] text-slate-400">ЗП+доставка+закуп ÷ собрано</div></div>
+                      </div>
+                    </div>
+
+                    {/* Daily assembly chart for the period */}
+                    <div className="rounded-2xl border border-slate-200 p-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <h4 className="font-bold text-slate-800 text-sm">Собрано по дням</h4>
+                        <div className="flex items-center gap-3 text-xs">
+                          <span className="inline-flex items-center gap-1.5 text-slate-500"><span className="h-2.5 w-2.5 rounded-sm bg-indigo-500" /> сотр.</span>
+                          <span className="inline-flex items-center gap-1.5 text-slate-500"><span className="h-2.5 w-2.5 rounded-sm bg-emerald-500" /> врем.</span>
+                        </div>
+                      </div>
+                      <div className="flex items-end gap-[2px] h-44 overflow-x-auto">
+                        {s.daily.map(([dk, v]) => {
+                          const total = v.temp + v.staff;
+                          const h = Math.round((total / s.maxDay) * 150);
+                          const staffH = total > 0 ? Math.round((v.staff / total) * h) : 0;
+                          const tempH = h - staffH;
+                          return (
+                            <div key={`rs-${dk}`} className="flex-1 min-w-[10px] flex flex-col items-center gap-1" title={`${new Date(dk + 'T12:00:00').toLocaleDateString('ru-RU')}: всего ${total} (сотр ${v.staff}, врем ${v.temp})`}>
+                              <div className="w-full flex flex-col justify-end h-[150px]">
+                                {total > 0 && (<>
+                                  <div className="w-full bg-emerald-500 rounded-t-sm" style={{ height: `${tempH}px` }} />
+                                  <div className="w-full bg-indigo-500" style={{ height: `${staffH}px` }} />
+                                </>)}
+                              </div>
+                              <span className="text-[8px] text-slate-400">{dk.slice(8, 10)}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                  </>
+                  )}
+                </div>
+                );
+              })()}
 
               {loadingReports ? (
                 <div className="space-y-6">
