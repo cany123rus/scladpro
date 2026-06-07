@@ -1277,6 +1277,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [paymentReportToDelete, setPaymentReportToDelete] = useState<any | null>(null);
   const [paymentReportDeleting, setPaymentReportDeleting] = useState(false);
   const [deliverySupplierFilter, setDeliverySupplierFilter] = useState('all');
+  const [deliveryDateStart, setDeliveryDateStart] = useState('');
+  const [deliveryDateEnd, setDeliveryDateEnd] = useState('');
   const [deliveryForm, setDeliveryForm] = useState({
     date: new Date().toISOString().split('T')[0],
     courier: '',
@@ -1597,13 +1599,21 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     ].filter(Boolean))).sort((a, b) => a.localeCompare(b, 'ru'))
   ), [deliveryPersons, deliveryHistory]);
 
+  // Date-range filtered base for the delivery modal (affects cards + list).
+  const deliveryDateFiltered = useMemo(() => (deliveryHistory || []).filter((d: any) => {
+    const dk = String(d?.date || '').slice(0, 10);
+    if (deliveryDateStart && dk < deliveryDateStart) return false;
+    if (deliveryDateEnd && dk > deliveryDateEnd) return false;
+    return true;
+  }), [deliveryHistory, deliveryDateStart, deliveryDateEnd]);
+
   const filteredDeliveryHistory = useMemo(() => {
-    const rows = (deliveryHistory || []).filter((delivery: any) => {
+    const rows = (deliveryDateFiltered || []).filter((delivery: any) => {
       if (deliverySupplierFilter === 'all') return true;
       return (delivery?.rows || []).some((row: any) => String(row?.supplier_id || '') === String(deliverySupplierFilter));
     });
     return rows.sort((a: any, b: any) => String(b?.date || '').localeCompare(String(a?.date || '')));
-  }, [deliveryHistory, deliverySupplierFilter]);
+  }, [deliveryDateFiltered, deliverySupplierFilter]);
 
   const deliveryQuickPayRows = useMemo(() => {
     return (deliveryHistory || [])
@@ -1632,9 +1642,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     deliveryQuickPaySelectedRows.reduce((sum: number, delivery: any) => sum + Number(delivery?.amount || 0), 0)
   ), [deliveryQuickPaySelectedRows]);
 
-  const deliveryInfographics = useMemo(() => {
+  const computeDeliveryInfographics = (list: any[]) => {
     const bySupplier = new Map<string, { supplierId: string; supplierName: string; boxes: number; pallets: number; amount: number; unpaidAmount: number; deliveries: number }>();
-    (deliveryHistory || []).forEach((delivery: any) => {
+    (list || []).forEach((delivery: any) => {
       // A pallet counts the same as a box for cost allocation.
       const totalUnits = (delivery?.rows || []).reduce((sum: number, row: any) => sum + Number(row?.boxes || 0) + Number(row?.pallets || 0), 0) || 1;
       (delivery?.rows || []).forEach((row: any) => {
@@ -1659,11 +1669,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       supplierRows,
       totalBoxes: supplierRows.reduce((sum, row) => sum + row.boxes, 0),
       totalPallets: supplierRows.reduce((sum, row) => sum + row.pallets, 0),
-      totalAmount: (deliveryHistory || []).reduce((sum: number, delivery: any) => sum + Number(delivery?.amount || 0), 0),
-      unpaidCount: (deliveryHistory || []).filter((delivery: any) => !delivery?.is_paid).length,
-      unpaidAmount: (deliveryHistory || []).filter((delivery: any) => !delivery?.is_paid).reduce((sum: number, delivery: any) => sum + Number(delivery?.amount || 0), 0),
+      totalAmount: (list || []).reduce((sum: number, delivery: any) => sum + Number(delivery?.amount || 0), 0),
+      unpaidCount: (list || []).filter((delivery: any) => !delivery?.is_paid).length,
+      unpaidAmount: (list || []).filter((delivery: any) => !delivery?.is_paid).reduce((sum: number, delivery: any) => sum + Number(delivery?.amount || 0), 0),
     };
-  }, [deliveryHistory, suppliers]);
+  };
+  const deliveryInfographics = useMemo(() => computeDeliveryInfographics(deliveryHistory || []), [deliveryHistory, suppliers]);
+  const deliveryInfographicsFiltered = useMemo(() => computeDeliveryInfographics(deliveryDateFiltered || []), [deliveryDateFiltered, suppliers]);
 
   // All-time per-supplier report rows (qty, ЗП, доставка, закуп, итого, ср.цена).
   const reportsBySupplier = useMemo(() => {
@@ -25965,23 +25977,25 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
               {completedWorkStep === 'RATES' && (
                 <>
-                <div className="oc-card p-4 sm:p-6">
-                  <h3 className="font-bold text-lg mb-4">Расценки на работы</h3>
-                  <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 mb-6">
-                    <input
-                      type="text"
-                      placeholder="Название работы / товара"
-                      value={cwRateForm.name}
-                      onChange={e => setCwRateForm({...cwRateForm, name: e.target.value})}
-                      className="flex-1 p-2 border rounded-lg"
-                    />
-                    <input
-                      type="number"
-                      placeholder="Цена (₽)"
-                      value={cwRateForm.price}
-                      onChange={e => setCwRateForm({...cwRateForm, price: e.target.value})}
-                      className="w-full sm:w-32 p-2 border rounded-lg"
-                    />
+                <div className="rounded-3xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+                  <div className="flex items-center gap-3 bg-gradient-to-r from-indigo-600 to-violet-600 px-5 py-4 text-white">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white/15"><Wallet className="h-5 w-5" /></div>
+                    <div>
+                      <h3 className="font-bold text-lg leading-tight">Расценки на работы</h3>
+                      <p className="text-xs text-indigo-100">Цена за единицу — общая или индивидуально по сотрудникам</p>
+                    </div>
+                  </div>
+                  <div className="p-5">
+                  <div className="mb-5 grid grid-cols-1 sm:grid-cols-[1fr_160px_auto] gap-2 rounded-2xl border border-slate-200 bg-slate-50/60 p-3">
+                    <div>
+                      <label className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1">Название работы / товара</label>
+                      <input type="text" placeholder="Напр. ФБО, Упаковка…" value={cwRateForm.name} onChange={e => setCwRateForm({...cwRateForm, name: e.target.value})} className="oc-input w-full" />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1">Цена за шт. (₽)</label>
+                      <input type="number" step="0.01" placeholder="0" value={cwRateForm.price} onChange={e => setCwRateForm({...cwRateForm, price: e.target.value})} className="oc-input w-full" />
+                    </div>
+                    <div className="flex items-end">
                     <button
                       onClick={async () => {
                         if (!hasAssemblyButtonAccess('cw_rates_save')) return;
@@ -26031,44 +26045,50 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         }
                       }}
                       disabled={!hasAssemblyButtonAccess('cw_rates_save')}
-                      className={`px-4 py-2 ${editingRateId ? 'btn-success' : 'btn-primary'} ${!hasAssemblyButtonAccess('cw_rates_save') ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      className={`h-11 px-5 rounded-xl font-semibold text-white shadow-sm inline-flex items-center gap-2 ${editingRateId ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-indigo-600 hover:bg-indigo-700'} ${!hasAssemblyButtonAccess('cw_rates_save') ? 'opacity-50 cursor-not-allowed' : ''}`}
                     >
-                      {editingRateId ? 'Сохранить' : 'Добавить'}
+                      {editingRateId ? <><Save className="h-4 w-4" /> Сохранить</> : <><Plus className="h-4 w-4" /> Добавить</>}
                     </button>
+                    {editingRateId && (
+                      <button type="button" onClick={() => { setEditingRateId(null); setCwRateForm({ name: '', price: '' }); }} className="h-11 px-3 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 ml-2">Отмена</button>
+                    )}
+                    </div>
                   </div>
-                  <div className="space-y-3">
+                  <div className="space-y-2">
                     {cwWorkRates.map(rate => {
                       const rateConfig = getCwRateEmployeeConfig(String(rate.id));
                       const activeEmployees = employees.filter((employee: any) => !employee?.deleted_at);
                       return (
-                        <div key={rate.id} className="p-3 bg-slate-50 rounded-lg space-y-3">
+                        <div key={rate.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm hover:shadow-md transition-shadow space-y-3">
                           <div className="flex justify-between items-start gap-3 flex-wrap">
-                            <div>
-                              <div className="font-medium">{rate.name}</div>
-                              <div className="text-sm text-slate-500">
-                                {rateConfig.useSharedPrice ? `Одна цена для всех: ${rate.price} ₽` : 'Индивидуальные цены по сотрудникам'}
+                            <div className="flex items-center gap-3 min-w-0">
+                              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 font-bold">{String(rate.name || '?').slice(0, 1).toUpperCase()}</div>
+                              <div className="min-w-0">
+                                <div className="font-semibold text-slate-900 truncate">{rate.name}</div>
+                                <div className="text-xs text-slate-500">{rateConfig.useSharedPrice ? 'Одна цена для всех' : 'Индивидуальные цены по сотрудникам'}</div>
                               </div>
                             </div>
-                            <div className="flex items-center gap-2 sm:gap-4 flex-wrap justify-end">
-                              <span className="font-bold text-green-600">{rateConfig.useSharedPrice ? `${rate.price} ₽` : 'По сотрудникам'}</span>
+                            <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                              <span className="rounded-full bg-emerald-50 px-3 py-1 text-sm font-bold text-emerald-700 ring-1 ring-emerald-100">{rateConfig.useSharedPrice ? `${rate.price} ₽` : 'По сотрудникам'}</span>
                               <button
                                 onClick={() => setCwRateHistoryModal({ open: true, rateId: String(rate.id), rateName: String(rate.name || '') })}
-                                className="text-slate-500 hover:text-slate-700 text-xs px-2 py-1 rounded border border-slate-200"
+                                className="inline-flex items-center gap-1 text-slate-500 hover:text-slate-800 hover:bg-slate-100 text-xs px-2.5 py-1.5 rounded-lg border border-slate-200"
                               >
-                                История
+                                <History className="h-3.5 w-3.5" /> История
                               </button>
                               <button
                                 onClick={() => setCwRateBulkModal({ open: true, rateId: String(rate.id), rateName: String(rate.name || ''), oldPrice: String(rate.price || ''), price: String(rate.price || ''), start: new Date().toISOString().split('T')[0], end: new Date().toISOString().split('T')[0] })}
-                                className="text-indigo-600 hover:text-indigo-800 text-xs px-2 py-1 rounded border border-indigo-200"
+                                className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 text-xs px-2.5 py-1.5 rounded-lg border border-indigo-200"
                               >
-                                Обновить
+                                <RefreshCw className="h-3.5 w-3.5" /> Обновить
                               </button>
                               <button
                                 onClick={() => {
                                     setEditingRateId(rate.id);
                                     setCwRateForm({ name: rate.name, price: rate.price.toString() });
                                 }}
-                                className="text-blue-500 hover:text-blue-700"
+                                className="inline-flex items-center justify-center h-8 w-8 rounded-lg text-blue-600 hover:bg-blue-50"
+                                title="Редактировать"
                               >
                                 <Pencil className="h-4 w-4" />
                               </button>
@@ -26205,6 +26225,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         </div>
                       );
                     })}
+                  </div>
                   </div>
                 </div>
 
@@ -29150,25 +29171,30 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   </div>
 
                   <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
-                    <div className="mb-3 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                    <div className="mb-3 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
                       <div className="text-sm font-bold text-slate-900">Фильтр и поставщики с доставками</div>
-                      <select
-                        value={deliverySupplierFilter}
-                        onChange={(e) => setDeliverySupplierFilter(e.target.value)}
-                        className="oc-input h-11 rounded-xl bg-white text-sm md:max-w-xs"
-                      >
-                        <option value="all">Все поставщики с доставками</option>
-                        {deliveryInfographics.supplierRows.map((row) => (
-                          <option key={'delivery-filter-' + row.supplierId} value={row.supplierId}>{row.supplierName}</option>
-                        ))}
-                      </select>
+                      <div className="flex flex-col sm:flex-row sm:items-end gap-2">
+                        <div><label className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1">Дата с</label><input type="date" value={deliveryDateStart} onChange={(e) => setDeliveryDateStart(e.target.value)} className="oc-input h-11 rounded-xl bg-white text-sm" /></div>
+                        <div><label className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1">Дата по</label><input type="date" value={deliveryDateEnd} onChange={(e) => setDeliveryDateEnd(e.target.value)} className="oc-input h-11 rounded-xl bg-white text-sm" /></div>
+                        {(deliveryDateStart || deliveryDateEnd) && (
+                          <button type="button" onClick={() => { setDeliveryDateStart(''); setDeliveryDateEnd(''); }} className="h-11 px-3 rounded-xl border border-slate-200 text-sm text-slate-600 hover:bg-slate-50">Сброс</button>
+                        )}
+                        <div><label className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1">Поставщик</label>
+                          <select value={deliverySupplierFilter} onChange={(e) => setDeliverySupplierFilter(e.target.value)} className="oc-input h-11 rounded-xl bg-white text-sm sm:max-w-xs">
+                            <option value="all">Все поставщики</option>
+                            {deliveryInfographicsFiltered.supplierRows.map((row) => (
+                              <option key={'delivery-filter-' + row.supplierId} value={row.supplierId}>{row.supplierName}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
                     </div>
 
-                    {deliveryInfographics.supplierRows.length === 0 ? (
-                      <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-5 text-center text-sm text-slate-500">Пока нет доставок.</div>
+                    {deliveryInfographicsFiltered.supplierRows.length === 0 ? (
+                      <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-5 text-center text-sm text-slate-500">Нет доставок за выбранный период.</div>
                     ) : (
                       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
-                        {deliveryInfographics.supplierRows.map((row) => (
+                        {deliveryInfographicsFiltered.supplierRows.map((row) => (
                           <div key={'delivery-supplier-card-' + row.supplierId} className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
                             <div className="font-semibold text-slate-900 truncate" title={row.supplierName}>{row.supplierName}</div>
                             <div className="mt-2 grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
