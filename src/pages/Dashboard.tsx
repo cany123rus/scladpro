@@ -2494,8 +2494,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     try {
       const since = new Date(); since.setDate(since.getDate() - 29);
       const sinceStr = startStr || since.toISOString().slice(0, 10);
-      let tq = supabase.from('temporary_workers_logs').select('date, quantity, work_comment, worker_name, supplier_id').is('deleted_at', null).gte('date', sinceStr);
-      let sq = supabase.from('work_logs').select('date, quantity, employee_id, supplier_id, work_rates(name)').is('deleted_at', null).gte('date', sinceStr);
+      let tq = supabase.from('temporary_workers_logs').select('date, quantity, work_comment, worker_name, supplier_id, earnings').is('deleted_at', null).gte('date', sinceStr);
+      let sq = supabase.from('work_logs').select('date, quantity, employee_id, supplier_id, work_rates(name, price)').is('deleted_at', null).gte('date', sinceStr);
       if (endStr) { tq = tq.lte('date', endStr); sq = sq.lte('date', endStr); }
       const [tempRes, staffRes] = await Promise.all([tq, sq]);
       setAssemblyTempRows(Array.isArray(tempRes.data) ? tempRes.data : []);
@@ -2574,29 +2574,36 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       for (let d = new Date(sD); d <= eD; d.setDate(d.getDate() + 1)) days.set(d.toISOString().slice(0, 10), { temp: 0, staff: 0, people: {} });
     }
     const ensure = (dk: string) => { if (!days.has(dk)) days.set(dk, { temp: 0, staff: 0, people: {} }); return days.get(dk)!; };
-    const sup = new Map<string, { temp: number; staff: number }>();
+    const sup = new Map<string, { temp: number; staff: number; earn: number }>();
+    let earnTemp = 0; let earnStaff = 0;
     (assemblyTempRows || []).forEach((r: any) => {
       const dk = String(r.date || '').slice(0, 10);
       if (!inRange(dk) || !isAssemblyTempType(r.work_comment) || !matchGeneralAsm('temp', r)) return;
       const qty = Number(r.quantity || 0); if (qty <= 0) return;
-      const day = ensure(dk); day.temp += qty;
+      const earn = Number(r.earnings || 0);
+      const day = ensure(dk); day.temp += qty; earnTemp += earn;
       const nm = `${r.worker_name || 'Без имени'} (врем)`; day.people[nm] = (day.people[nm] || 0) + qty;
-      const sk = String(r.supplier_id || ''); const e = sup.get(sk) || { temp: 0, staff: 0 }; e.temp += qty; sup.set(sk, e);
+      const sk = String(r.supplier_id || ''); const e = sup.get(sk) || { temp: 0, staff: 0, earn: 0 }; e.temp += qty; e.earn += earn; sup.set(sk, e);
     });
     (assemblyStaffRows || []).forEach((r: any) => {
       const dk = String(r.date || '').slice(0, 10);
       if (!inRange(dk) || isAssemblyExcludedStaffRate(r.work_rates?.name) || !matchGeneralAsm('staff', r)) return;
       const qty = Number(r.quantity || 0); if (qty <= 0) return;
-      const day = ensure(dk); day.staff += qty;
+      const earn = qty * Number(r.work_rates?.price || 0);
+      const day = ensure(dk); day.staff += qty; earnStaff += earn;
       const nm = empNameById.get(String(r.employee_id)) || 'Сотрудник'; day.people[nm] = (day.people[nm] || 0) + qty;
-      const sk = String(r.supplier_id || ''); const e = sup.get(sk) || { temp: 0, staff: 0 }; e.staff += qty; sup.set(sk, e);
+      const sk = String(r.supplier_id || ''); const e = sup.get(sk) || { temp: 0, staff: 0, earn: 0 }; e.staff += qty; e.earn += earn; sup.set(sk, e);
     });
     const list = Array.from(days.entries()).sort((a, b) => a[0].localeCompare(b[0]));
     const maxDay = Math.max(1, ...list.map(([, v]) => v.temp + v.staff));
     const bySupplier = Array.from(sup.entries())
-      .map(([sid, v]) => ({ supplierId: sid, name: suppliers.find((s: any) => String(s.id) === sid)?.name || 'Без поставщика', temp: v.temp, staff: v.staff, total: v.temp + v.staff }))
+      .map(([sid, v]) => { const total = v.temp + v.staff; return { supplierId: sid, name: suppliers.find((s: any) => String(s.id) === sid)?.name || 'Без поставщика', temp: v.temp, staff: v.staff, total, earn: v.earn, avgPrice: total > 0 ? v.earn / total : 0 }; })
       .sort((a, b) => b.total - a.total);
-    return { list, maxDay, totalTemp: list.reduce((s, [, v]) => s + v.temp, 0), totalStaff: list.reduce((s, [, v]) => s + v.staff, 0), bySupplier };
+    const totalTemp = list.reduce((s, [, v]) => s + v.temp, 0);
+    const totalStaff = list.reduce((s, [, v]) => s + v.staff, 0);
+    const totalQty = totalTemp + totalStaff;
+    const totalEarn = earnTemp + earnStaff;
+    return { list, maxDay, totalTemp, totalStaff, bySupplier, earnTemp, earnStaff, totalEarn, avgPrice: totalQty > 0 ? totalEarn / totalQty : 0 };
   }, [assemblyTempRows, assemblyStaffRows, empNameById, suppliers, generalReportForm.start_date, generalReportForm.end_date, generalReportForm.supplier_id, generalReportForm.person_name]);
 
   // Assembled quantity per supplier (for the general report breakdown).
@@ -2777,8 +2784,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     let tempData: any[] = []; let staffData: any[] = [];
     try {
       const [tr, sr] = await Promise.all([
-        supabase.from('temporary_workers_logs').select('date, quantity, work_comment, supplier_id, worker_name').is('deleted_at', null).gte('date', start).lte('date', end),
-        supabase.from('work_logs').select('date, quantity, supplier_id, employee_id, work_rates(name)').is('deleted_at', null).gte('date', start).lte('date', end),
+        supabase.from('temporary_workers_logs').select('date, quantity, work_comment, supplier_id, worker_name, earnings').is('deleted_at', null).gte('date', start).lte('date', end),
+        supabase.from('work_logs').select('date, quantity, supplier_id, employee_id, work_rates(name, price)').is('deleted_at', null).gte('date', start).lte('date', end),
       ]);
       tempData = tr.data || []; staffData = sr.data || [];
     } catch { /* ignore */ }
@@ -2786,16 +2793,21 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     const passTempPerson = (r: any) => fPerson === 'all' || String(r.worker_name || '') === fPerson;
     const passStaffPerson = (r: any) => fPerson === 'all' || (empNameById.get(String(r.employee_id)) || '') === fPerson;
     const days = new Map<string, { temp: number; staff: number }>();
-    const sup = new Map<string, { temp: number; staff: number }>();
+    const sup = new Map<string, { temp: number; staff: number; earn: number }>();
+    let earnTemp = 0; let earnStaff = 0;
     const sD = new Date(start + 'T00:00:00'); const eD = new Date(end + 'T00:00:00');
     for (let d = new Date(sD); d <= eD; d.setDate(d.getDate() + 1)) days.set(d.toISOString().slice(0, 10), { temp: 0, staff: 0 });
-    tempData.forEach((r: any) => { const dk = String(r.date || '').slice(0, 10); if (days.has(dk) && isAssemblyTempType(r.work_comment) && passSup(r) && passTempPerson(r)) { const q = Number(r.quantity || 0); days.get(dk)!.temp += q; const sk = String(r.supplier_id || ''); const e = sup.get(sk) || { temp: 0, staff: 0 }; e.temp += q; sup.set(sk, e); } });
-    staffData.forEach((r: any) => { const dk = String(r.date || '').slice(0, 10); if (!days.has(dk) || isAssemblyExcludedStaffRate(r.work_rates?.name) || !passSup(r) || !passStaffPerson(r)) return; const q = Number(r.quantity || 0); days.get(dk)!.staff += q; const sk = String(r.supplier_id || ''); const e = sup.get(sk) || { temp: 0, staff: 0 }; e.staff += q; sup.set(sk, e); });
+    tempData.forEach((r: any) => { const dk = String(r.date || '').slice(0, 10); if (days.has(dk) && isAssemblyTempType(r.work_comment) && passSup(r) && passTempPerson(r)) { const q = Number(r.quantity || 0); const earn = Number(r.earnings || 0); days.get(dk)!.temp += q; earnTemp += earn; const sk = String(r.supplier_id || ''); const e = sup.get(sk) || { temp: 0, staff: 0, earn: 0 }; e.temp += q; e.earn += earn; sup.set(sk, e); } });
+    staffData.forEach((r: any) => { const dk = String(r.date || '').slice(0, 10); if (!days.has(dk) || isAssemblyExcludedStaffRate(r.work_rates?.name) || !passSup(r) || !passStaffPerson(r)) return; const q = Number(r.quantity || 0); const earn = q * Number(r.work_rates?.price || 0); days.get(dk)!.staff += q; earnStaff += earn; const sk = String(r.supplier_id || ''); const e = sup.get(sk) || { temp: 0, staff: 0, earn: 0 }; e.staff += q; e.earn += earn; sup.set(sk, e); });
     const aList = Array.from(days.entries());
     const bySupplier = Array.from(sup.entries())
-      .map(([sid, v]) => ({ name: suppliers.find((s: any) => String(s.id) === sid)?.name || 'Без поставщика', temp: v.temp, staff: v.staff, total: v.temp + v.staff }))
+      .map(([sid, v]) => { const total = v.temp + v.staff; return { name: suppliers.find((s: any) => String(s.id) === sid)?.name || 'Без поставщика', temp: v.temp, staff: v.staff, total, earn: v.earn, avgPrice: total > 0 ? v.earn / total : 0 }; })
       .sort((a, b) => b.total - a.total);
-    return { aList, aMax: Math.max(1, ...aList.map(([, v]) => v.temp + v.staff)), aTotalTemp: aList.reduce((s, [, v]) => s + v.temp, 0), aTotalStaff: aList.reduce((s, [, v]) => s + v.staff, 0), bySupplier };
+    const aTotalTemp = aList.reduce((s, [, v]) => s + v.temp, 0);
+    const aTotalStaff = aList.reduce((s, [, v]) => s + v.staff, 0);
+    const aTotalQty = aTotalTemp + aTotalStaff;
+    const aTotalEarn = earnTemp + earnStaff;
+    return { aList, aMax: Math.max(1, ...aList.map(([, v]) => v.temp + v.staff)), aTotalTemp, aTotalStaff, bySupplier, aTotalEarn, aAvgPrice: aTotalQty > 0 ? aTotalEarn / aTotalQty : 0 };
   };
 
   // Draw a modern assembly bar chart in a jsPDF doc; returns the y below it.
@@ -2843,28 +2855,33 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       sf([124, 58, 237]); doc.roundedRect(10, y, pageW - 20, 6, 1.5, 1.5, 'F');
       st([255, 255, 255]); doc.setFontSize(8.5); doc.text('Собрано по поставщикам', 13, y + 4);
       y += 9;
+      const cStaff = pageW - 95; const cTemp = pageW - 72; const cAll = pageW - 49; const cAvg = pageW - 13;
       st([100, 116, 139]); doc.setFontSize(6.5);
-      doc.text('Поставщик', 13, y); doc.text('сотр.', pageW - 70, y, { align: 'right' }); doc.text('врем.', pageW - 45, y, { align: 'right' }); doc.text('всего', pageW - 13, y, { align: 'right' });
+      doc.text('Поставщик', 13, y); doc.text('сотр.', cStaff, y, { align: 'right' }); doc.text('врем.', cTemp, y, { align: 'right' }); doc.text('всего', cAll, y, { align: 'right' }); doc.text('ср. цена', cAvg, y, { align: 'right' });
       y += 2; doc.setDrawColor(226, 232, 240); doc.setLineWidth(0.1); doc.line(12, y, pageW - 12, y); y += 3.5;
       bySup.forEach((s) => {
         if (y > doc.internal.pageSize.getHeight() - 12) { doc.addPage(); y = 16; }
         st([51, 65, 85]); doc.setFontSize(7);
-        doc.text(String(s.name).slice(0, 50), 13, y);
-        doc.text(s.staff.toLocaleString('ru-RU'), pageW - 70, y, { align: 'right' });
-        doc.text(s.temp.toLocaleString('ru-RU'), pageW - 45, y, { align: 'right' });
-        st([15, 23, 42]); doc.text(s.total.toLocaleString('ru-RU'), pageW - 13, y, { align: 'right' });
+        doc.text(String(s.name).slice(0, 44), 13, y);
+        doc.text(s.staff.toLocaleString('ru-RU'), cStaff, y, { align: 'right' });
+        doc.text(s.temp.toLocaleString('ru-RU'), cTemp, y, { align: 'right' });
+        st([15, 23, 42]); doc.text(s.total.toLocaleString('ru-RU'), cAll, y, { align: 'right' });
+        st([124, 58, 237]); doc.text(`${Number((s as any).avgPrice || 0).toFixed(2)} ₽`, cAvg, y, { align: 'right' });
         y += 5;
       });
       // Итого line
       const tStaff = bySup.reduce((a, s) => a + s.staff, 0);
       const tTemp = bySup.reduce((a, s) => a + s.temp, 0);
       const tAll = tStaff + tTemp;
+      const tEarn = bySup.reduce((a, s) => a + Number((s as any).earn || 0), 0);
+      const tAvg = tAll > 0 ? tEarn / tAll : 0;
       y += 0.5; doc.setDrawColor(148, 163, 184); doc.setLineWidth(0.3); doc.line(12, y, pageW - 12, y); y += 4;
       st([15, 23, 42]); doc.setFontSize(7.5);
       doc.text('Итого', 13, y);
-      doc.text(tStaff.toLocaleString('ru-RU'), pageW - 70, y, { align: 'right' });
-      doc.text(tTemp.toLocaleString('ru-RU'), pageW - 45, y, { align: 'right' });
-      doc.text(tAll.toLocaleString('ru-RU'), pageW - 13, y, { align: 'right' });
+      doc.text(tStaff.toLocaleString('ru-RU'), cStaff, y, { align: 'right' });
+      doc.text(tTemp.toLocaleString('ru-RU'), cTemp, y, { align: 'right' });
+      doc.text(tAll.toLocaleString('ru-RU'), cAll, y, { align: 'right' });
+      doc.text(`${tAvg.toFixed(2)} ₽`, cAvg, y, { align: 'right' });
       y += 8;
     }
     return y;
@@ -2877,13 +2894,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     const start = String(startStr || startDef.toISOString().slice(0, 10));
     try {
       const [tr, sr] = await Promise.all([
-        supabase.from('temporary_workers_logs').select('quantity, work_comment, supplier_id').is('deleted_at', null).gte('date', start).lte('date', end),
-        supabase.from('work_logs').select('quantity, supplier_id, work_rates(name)').is('deleted_at', null).gte('date', start).lte('date', end),
+        supabase.from('temporary_workers_logs').select('quantity, work_comment, supplier_id, earnings').is('deleted_at', null).gte('date', start).lte('date', end),
+        supabase.from('work_logs').select('quantity, supplier_id, work_rates(name, price)').is('deleted_at', null).gte('date', start).lte('date', end),
       ]);
-      const smap = new Map<string, { staff: number; temp: number }>();
-      (tr.data || []).forEach((r: any) => { if (!isAssemblyTempType(r.work_comment)) return; const q = Number(r.quantity || 0); const sk = String(r.supplier_id || ''); const e = smap.get(sk) || { staff: 0, temp: 0 }; e.temp += q; smap.set(sk, e); });
-      (sr.data || []).forEach((r: any) => { if (isAssemblyExcludedStaffRate(r.work_rates?.name)) return; const q = Number(r.quantity || 0); const sk = String(r.supplier_id || ''); const e = smap.get(sk) || { staff: 0, temp: 0 }; e.staff += q; smap.set(sk, e); });
-      return Array.from(smap.entries()).map(([sid, v]) => ({ 'Поставщик': suppliers.find((s: any) => String(s.id) === sid)?.name || 'Без поставщика', 'Сотрудники': v.staff, 'Временные': v.temp, 'Всего собрано': v.staff + v.temp })).sort((a, b) => b['Всего собрано'] - a['Всего собрано']);
+      const smap = new Map<string, { staff: number; temp: number; earn: number }>();
+      (tr.data || []).forEach((r: any) => { if (!isAssemblyTempType(r.work_comment)) return; const q = Number(r.quantity || 0); const sk = String(r.supplier_id || ''); const e = smap.get(sk) || { staff: 0, temp: 0, earn: 0 }; e.temp += q; e.earn += Number(r.earnings || 0); smap.set(sk, e); });
+      (sr.data || []).forEach((r: any) => { if (isAssemblyExcludedStaffRate(r.work_rates?.name)) return; const q = Number(r.quantity || 0); const sk = String(r.supplier_id || ''); const e = smap.get(sk) || { staff: 0, temp: 0, earn: 0 }; e.staff += q; e.earn += q * Number(r.work_rates?.price || 0); smap.set(sk, e); });
+      return Array.from(smap.entries()).map(([sid, v]) => { const total = v.staff + v.temp; return { 'Поставщик': suppliers.find((s: any) => String(s.id) === sid)?.name || 'Без поставщика', 'Сотрудники': v.staff, 'Временные': v.temp, 'Всего собрано': total, 'Сумма заработка': Math.round(v.earn * 100) / 100, 'Средняя цена сборки': total > 0 ? Math.round((v.earn / total) * 100) / 100 : 0 }; }).sort((a, b) => b['Всего собрано'] - a['Всего собрано']);
     } catch { return []; }
   };
 
@@ -2900,18 +2917,18 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         const startDef = new Date(); startDef.setDate(startDef.getDate() - 29);
         const start = String(generalReportForm.start_date || startDef.toISOString().slice(0, 10));
         const [tr, sr] = await Promise.all([
-          supabase.from('temporary_workers_logs').select('date, quantity, work_comment, worker_name, supplier_id').is('deleted_at', null).gte('date', start).lte('date', end),
-          supabase.from('work_logs').select('date, quantity, employee_id, supplier_id, work_rates(name)').is('deleted_at', null).gte('date', start).lte('date', end),
+          supabase.from('temporary_workers_logs').select('date, quantity, work_comment, worker_name, supplier_id, earnings').is('deleted_at', null).gte('date', start).lte('date', end),
+          supabase.from('work_logs').select('date, quantity, employee_id, supplier_id, work_rates(name, price)').is('deleted_at', null).gte('date', start).lte('date', end),
         ]);
         const fSup = String(generalReportForm.supplier_id || 'all');
         const fPerson = String(generalReportForm.person_name || 'all');
         const passSup = (r: any) => fSup === 'all' || String(r.supplier_id || '') === fSup;
         const dmap = new Map<string, { staff: number; temp: number }>();
-        const smap = new Map<string, { staff: number; temp: number }>();
-        (tr.data || []).forEach((r: any) => { if (!isAssemblyTempType(r.work_comment) || !passSup(r) || (fPerson !== 'all' && String(r.worker_name || '') !== fPerson)) return; const q = Number(r.quantity || 0); const dk = String(r.date).slice(0, 10); const d = dmap.get(dk) || { staff: 0, temp: 0 }; d.temp += q; dmap.set(dk, d); const sk = String(r.supplier_id || ''); const e = smap.get(sk) || { staff: 0, temp: 0 }; e.temp += q; smap.set(sk, e); });
-        (sr.data || []).forEach((r: any) => { if (isAssemblyExcludedStaffRate(r.work_rates?.name) || !passSup(r) || (fPerson !== 'all' && (empNameById.get(String(r.employee_id)) || '') !== fPerson)) return; const q = Number(r.quantity || 0); const dk = String(r.date).slice(0, 10); const d = dmap.get(dk) || { staff: 0, temp: 0 }; d.staff += q; dmap.set(dk, d); const sk = String(r.supplier_id || ''); const e = smap.get(sk) || { staff: 0, temp: 0 }; e.staff += q; smap.set(sk, e); });
+        const smap = new Map<string, { staff: number; temp: number; earn: number }>();
+        (tr.data || []).forEach((r: any) => { if (!isAssemblyTempType(r.work_comment) || !passSup(r) || (fPerson !== 'all' && String(r.worker_name || '') !== fPerson)) return; const q = Number(r.quantity || 0); const dk = String(r.date).slice(0, 10); const d = dmap.get(dk) || { staff: 0, temp: 0 }; d.temp += q; dmap.set(dk, d); const sk = String(r.supplier_id || ''); const e = smap.get(sk) || { staff: 0, temp: 0, earn: 0 }; e.temp += q; e.earn += Number(r.earnings || 0); smap.set(sk, e); });
+        (sr.data || []).forEach((r: any) => { if (isAssemblyExcludedStaffRate(r.work_rates?.name) || !passSup(r) || (fPerson !== 'all' && (empNameById.get(String(r.employee_id)) || '') !== fPerson)) return; const q = Number(r.quantity || 0); const dk = String(r.date).slice(0, 10); const d = dmap.get(dk) || { staff: 0, temp: 0 }; d.staff += q; dmap.set(dk, d); const sk = String(r.supplier_id || ''); const e = smap.get(sk) || { staff: 0, temp: 0, earn: 0 }; e.staff += q; e.earn += q * Number(r.work_rates?.price || 0); smap.set(sk, e); });
         asmRows = Array.from(dmap.entries()).sort((a, b) => a[0].localeCompare(b[0])).map(([dk, v]) => ({ 'Дата': xlsxDate(dk), 'Сотрудники': v.staff, 'Временные (ФБО/ФБС)': v.temp, 'Всего собрано': v.staff + v.temp }));
-        asmSupRows = Array.from(smap.entries()).map(([sid, v]) => ({ 'Поставщик': suppliers.find((s: any) => String(s.id) === sid)?.name || 'Без поставщика', 'Сотрудники': v.staff, 'Временные': v.temp, 'Всего собрано': v.staff + v.temp })).sort((a, b) => b['Всего собрано'] - a['Всего собрано']);
+        asmSupRows = Array.from(smap.entries()).map(([sid, v]) => { const total = v.staff + v.temp; return { 'Поставщик': suppliers.find((s: any) => String(s.id) === sid)?.name || 'Без поставщика', 'Сотрудники': v.staff, 'Временные': v.temp, 'Всего собрано': total, 'Сумма заработка': Math.round(v.earn * 100) / 100, 'Средняя цена сборки': total > 0 ? Math.round((v.earn / total) * 100) / 100 : 0 }; }).sort((a, b) => b['Всего собрано'] - a['Всего собрано']);
       } catch { /* ignore */ }
       const sheets = [
         { name: 'ЗП временные', rows: temp.length ? temp : [{ 'Нет данных': '' }] },
@@ -3104,9 +3121,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       doc.text('ТОВАРОВ', acX + 5, acY + 12.5);
       setFill([51, 65, 85]); doc.rect(acX + titleW, acY + 3, 0.4, acH - 6, 'F');
       const asmStats = [
-        { label: 'временные', value: asmData.aTotalTemp, rgb: [16, 185, 129] },
-        { label: 'сотрудники', value: asmData.aTotalStaff, rgb: [129, 140, 248] },
-        { label: 'вместе', value: asmData.aTotalTemp + asmData.aTotalStaff, rgb: [196, 181, 253] },
+        { label: 'временные', text: `${asmData.aTotalTemp.toLocaleString('ru-RU')} шт.`, rgb: [16, 185, 129] },
+        { label: 'сотрудники', text: `${asmData.aTotalStaff.toLocaleString('ru-RU')} шт.`, rgb: [129, 140, 248] },
+        { label: 'вместе', text: `${(asmData.aTotalTemp + asmData.aTotalStaff).toLocaleString('ru-RU')} шт.`, rgb: [196, 181, 253] },
+        { label: 'ср. цена сборки', text: `${asmData.aAvgPrice.toFixed(2)} ₽/шт`, rgb: [251, 191, 36] },
       ];
       const segArea = acW - titleW - 6;
       const segW = segArea / asmStats.length;
@@ -3116,7 +3134,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         setText([203, 213, 225]); doc.setFontSize(6.5);
         doc.text(s.label.toUpperCase(), sx + 4, acY + 7.5);
         setText([255, 255, 255]); doc.setFontSize(11);
-        doc.text(`${Number(s.value || 0).toLocaleString('ru-RU')} шт.`, sx + 4, acY + 13);
+        doc.text(s.text, sx + 4, acY + 13);
       });
 
       let y = drawAssemblyChartPdf(doc, acY + acH + 4, asmData);
@@ -30414,6 +30432,28 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       <div className="text-[11px] text-emerald-700">Собрано — вместе</div>
                       <div className="text-lg font-bold text-emerald-800">{(generalAssembly.totalTemp + generalAssembly.totalStaff).toLocaleString('ru-RU')}</div>
                     </div>
+                  </div>
+
+                  {/* Средняя цена сборки */}
+                  <div className="rounded-2xl border border-violet-200 bg-gradient-to-br from-violet-50 to-indigo-50 p-4 shadow-sm">
+                    <div className="flex items-center justify-between mb-3">
+                      <h4 className="font-bold text-slate-900 text-sm">Средняя цена сборки</h4>
+                      <div className="text-right">
+                        <div className="text-[11px] text-violet-600">За период (все поставщики)</div>
+                        <div className="text-xl font-extrabold text-violet-800">{generalAssembly.avgPrice.toFixed(2)} ₽<span className="text-xs font-medium text-violet-500"> / шт.</span></div>
+                      </div>
+                    </div>
+                    <div className="text-[11px] text-slate-500 mb-3">Заработок (временные + сотрудники) ÷ собранное кол-во. Доставка не учитывается. Сумма заработка: <b className="text-slate-700">{generalAssembly.totalEarn.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽</b> · кол-во: <b className="text-slate-700">{(generalAssembly.totalTemp + generalAssembly.totalStaff).toLocaleString('ru-RU')}</b></div>
+                    {generalAssembly.bySupplier.filter((s) => s.total > 0).length > 0 && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                        {generalAssembly.bySupplier.filter((s) => s.total > 0).map((s) => (
+                          <div key={`asm-avg-${s.supplierId}`} className="flex items-center justify-between rounded-lg bg-white/70 border border-violet-100 px-3 py-1.5 text-sm">
+                            <span className="text-slate-700 truncate" title={s.name}>{s.name}</span>
+                            <span className="shrink-0 ml-2 font-semibold text-violet-800">{s.avgPrice.toFixed(2)} ₽<span className="text-[11px] font-normal text-slate-400"> ({s.total.toLocaleString('ru-RU')} шт.)</span></span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   <div className="rounded-2xl border border-slate-200 bg-white p-4">
