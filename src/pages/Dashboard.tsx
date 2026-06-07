@@ -232,7 +232,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     logUiAction('Навигация', 'Переход в раздел', String(activeTab));
   }, [activeTab]);
 
-  const [supplierForm, setSupplierForm] = useState({ name: '', telegram_chat_id: '', wb_api_token: '' });
+  const [supplierForm, setSupplierForm] = useState({ name: '', telegram_chat_id: '', wb_api_token: '', wb_adv_api_token: '' });
   const [submittingSupplier, setSubmittingSupplier] = useState(false);
   const [editingSupplierId, setEditingSupplierId] = useState<string | null>(null);
   const [showSupplierQR, setShowSupplierQR] = useState<Supplier | null>(null);
@@ -9784,7 +9784,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       } else {
         await supabase.from('suppliers').insert([supplierForm]);
       }
-      setSupplierForm({ name: '', telegram_chat_id: '', wb_api_token: '' });
+      setSupplierForm({ name: '', telegram_chat_id: '', wb_api_token: '', wb_adv_api_token: '' });
       setEditingSupplierId(null);
       await fetchSuppliers(); // Ensure list is updated
     } catch (error: any) {
@@ -9795,7 +9795,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   };
 
   const handleEditSupplier = (supplier: Supplier) => {
-    setSupplierForm({ name: supplier.name, telegram_chat_id: supplier.telegram_chat_id || '', wb_api_token: supplier.wb_api_token || '' });
+    setSupplierForm({ name: supplier.name, telegram_chat_id: supplier.telegram_chat_id || '', wb_api_token: supplier.wb_api_token || '', wb_adv_api_token: (supplier as any).wb_adv_api_token || '' });
     setEditingSupplierId(supplier.id);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -14886,7 +14886,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     try {
       const { data, error } = await supabase
         .from('suppliers')
-        .select('id, name, telegram_chat_id, wb_api_token, created_at, deleted_at')
+        .select('id, name, telegram_chat_id, wb_api_token, wb_adv_api_token, created_at, deleted_at')
         .is('deleted_at', null)
         .order('created_at', { ascending: false });
       if (error) throw error;
@@ -16209,9 +16209,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   // Pull internal-advertising data via WB "Продвижение" API for the selected supplier.
   const loadAdsApiData = async () => {
     const supplier = (suppliers || []).find((s: any) => String(s?.id) === String(adsApiSupplierId));
-    if (!supplier?.wb_api_token) { setAdsApiError('У выбранного поставщика не указан WB API токен'); return; }
+    const rawToken = (supplier as any)?.wb_adv_api_token || supplier?.wb_api_token;
+    if (!rawToken) { setAdsApiError('У выбранного поставщика не указан WB API токен (нужен токен с категорией «Продвижение»)'); return; }
     if (!adsApiFrom || !adsApiTo) { setAdsApiError('Укажите период'); return; }
-    const token = String(supplier.wb_api_token).trim();
+    const token = String(rawToken).trim();
     const ADV = 'https://advert-api.wildberries.ru';
     setAdsApiLoading(true); setAdsApiError(null); setAdsApiData(null);
     try {
@@ -18466,13 +18467,24 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       value={supplierForm.wb_api_token || ''}
                       onChange={(e) => setSupplierForm({ ...supplierForm, wb_api_token: e.target.value.trim() })}
                       className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
-                      placeholder="eyJ..."
+                      placeholder="eyJ... (Статистика)"
+                      autoComplete="new-password"
+                    />
+                  </div>
+                  <div className="flex-1 w-full">
+                    <label className="block text-xs font-medium text-slate-500 mb-1.5 uppercase tracking-wide">API Токен WB (Продвижение)</label>
+                    <input
+                      type="text"
+                      value={supplierForm.wb_adv_api_token || ''}
+                      onChange={(e) => setSupplierForm({ ...supplierForm, wb_adv_api_token: e.target.value.trim() })}
+                      className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                      placeholder="eyJ... для раздела «Реклама API»"
                       autoComplete="new-password"
                     />
                   </div>
                   <div className="flex gap-2">
                     {editingSupplierId && (
-                      <button type="button" onClick={() => { setSupplierForm({ name: '', telegram_chat_id: '', wb_api_token: '' }); setEditingSupplierId(null); }} className="px-4 py-2.5 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200">
+                      <button type="button" onClick={() => { setSupplierForm({ name: '', telegram_chat_id: '', wb_api_token: '', wb_adv_api_token: '' }); setEditingSupplierId(null); }} className="px-4 py-2.5 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200">
                         <X className="h-5 w-5" />
                       </button>
                     )}
@@ -23297,7 +23309,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <label className="block text-xs text-slate-500 mb-1">Поставщик (с WB API токеном)</label>
                         <select value={adsApiSupplierId} onChange={(e) => setAdsApiSupplierId(e.target.value)} className="w-full md:w-[360px] px-3 py-2 text-sm border border-slate-300 rounded-lg bg-white">
                           <option value="">- Выберите поставщика -</option>
-                          {(suppliers || []).filter((s: any) => s.wb_api_token).map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                          {(suppliers || []).filter((s: any) => s.wb_adv_api_token || s.wb_api_token).map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
                         </select>
                       </div>
                       <div>
