@@ -16207,11 +16207,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   };
 
   // Pull internal-advertising data via WB "Продвижение" API for the selected supplier.
-  const loadAdsApiData = async () => {
+  const loadAdsApiData = async (fromArg?: string, toArg?: string) => {
+    const from = fromArg || adsApiFrom;
+    const to = toArg || adsApiTo;
     const supplier = (suppliers || []).find((s: any) => String(s?.id) === String(adsApiSupplierId));
     const rawToken = (supplier as any)?.wb_adv_api_token || supplier?.wb_api_token;
     if (!rawToken) { setAdsApiError('У выбранного поставщика не указан WB API токен (нужен токен с категорией «Продвижение»)'); return; }
-    if (!adsApiFrom || !adsApiTo) { setAdsApiError('Укажите период'); return; }
+    if (!from || !to) { setAdsApiError('Укажите период'); return; }
     const token = String(rawToken).trim();
     const ADV = 'https://advert-api.wildberries.ru';
     const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -16255,7 +16257,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       const stats: any[] = [];
       for (let i = 0; i < ids.length; i += 100) {
         if (i > 0) await sleep(61000);
-        const body = ids.slice(i, i + 100).map((id) => ({ id, interval: { begin: adsApiFrom, end: adsApiTo } }));
+        const body = ids.slice(i, i + 100).map((id) => ({ id, interval: { begin: from, end: to } }));
         const r = await wbFetch(`${ADV}/adv/v2/fullstats`, { method: 'POST', headers: { Authorization: token, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         if (!r.ok) throw new Error(`fullstats ${r.status}: ${(await r.text()).slice(0, 160)}`);
         const arr = await r.json();
@@ -16288,6 +16290,17 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     } finally {
       setAdsApiLoading(false);
     }
+  };
+
+  const adsApiPreset = (kind: 'today' | 'yesterday' | '7' | '30') => {
+    const iso = (d: Date) => d.toISOString().slice(0, 10);
+    const today = new Date();
+    let from: string, to: string;
+    if (kind === 'today') { from = to = iso(today); }
+    else if (kind === 'yesterday') { const y = new Date(today); y.setDate(y.getDate() - 1); from = to = iso(y); }
+    else { const n = kind === '7' ? 6 : 29; const s = new Date(today); s.setDate(s.getDate() - n); from = iso(s); to = iso(today); }
+    setAdsApiFrom(from); setAdsApiTo(to);
+    if (adsApiSupplierId) void loadAdsApiData(from, to);
   };
 
   const deleteWbApiHistoryItem = async (id: string, fileName?: string) => {
@@ -23337,9 +23350,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <label className="block text-xs text-slate-500 mb-1">по</label>
                         <input type="date" value={adsApiTo} onChange={(e) => setAdsApiTo(e.target.value)} className="px-2 py-2 text-xs border border-slate-300 rounded-lg" />
                       </div>
-                      <button onClick={loadAdsApiData} disabled={adsApiLoading || !adsApiSupplierId} className="px-4 py-2 text-sm font-semibold rounded-xl border border-indigo-300 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 shadow-sm disabled:opacity-50">
+                      <button onClick={() => loadAdsApiData()} disabled={adsApiLoading || !adsApiSupplierId} className="px-4 py-2 text-sm font-semibold rounded-xl border border-indigo-300 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 shadow-sm disabled:opacity-50">
                         {adsApiLoading ? 'Загрузка из WB…' : 'Загрузить данные'}
                       </button>
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {([['today','Сегодня'],['yesterday','Вчера'],['7','7 дней'],['30','30 дней']] as const).map(([k, l]) => (
+                        <button key={k} type="button" onClick={() => adsApiPreset(k)} disabled={adsApiLoading || !adsApiSupplierId} className="px-3 py-1.5 text-xs font-medium rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-50">{l}</button>
+                      ))}
                     </div>
                     {adsApiError && <div className="mt-3 text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg p-2">{adsApiError}</div>}
                     {adsApiLoading && <div className="mt-2 text-[11px] text-slate-400">При большом числе кампаний WB ограничивает 1 запрос/мин — загрузка может занять время.</div>}
@@ -23449,25 +23467,48 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             <table className="min-w-full text-xs">
                               <thead className="bg-slate-50 sticky top-0 z-10">
                                 <tr className="select-none">
-                                  {[['name','Кампания'],['sum','Расход'],['revenue','Выручка'],['views','Показы'],['clicks','Клики'],['atbs','Корзины'],['orders','Заказы']].map(([f,l]) => (
-                                    <th key={f} className="px-2 py-2 text-left cursor-pointer hover:text-indigo-600" onClick={() => setAdsApiCampSort((p) => ({ field: f, dir: p.field === f && p.dir === 'desc' ? 'asc' : 'desc' }))}>{l}{adsApiCampSort.field === f ? (adsApiCampSort.dir === 'asc' ? ' ▲' : ' ▼') : ''}</th>
+                                  {[['name','Кампания'],['sum','Расход'],['revenue','Зак. на сумму'],['views','Показы'],['clicks','Клики'],['atbs','Корзины'],['orders','Заказы']].map(([f,l]) => (
+                                    <th key={f} className={`px-2 py-2 cursor-pointer hover:text-indigo-600 ${f === 'name' ? 'text-left' : 'text-right'}`} onClick={() => setAdsApiCampSort((p) => ({ field: f, dir: p.field === f && p.dir === 'desc' ? 'asc' : 'desc' }))}>{l}{adsApiCampSort.field === f ? (adsApiCampSort.dir === 'asc' ? ' ▲' : ' ▼') : ''}</th>
                                   ))}
-                                  <th className="px-2 py-2 text-left">ДРР %</th>
-                                  <th className="px-2 py-2 text-left">CPC</th>
+                                  <th className="px-2 py-2 text-right">CTR %</th>
+                                  <th className="px-2 py-2 text-right">CPC ₽</th>
+                                  <th className="px-2 py-2 text-right">CPM ₽</th>
+                                  <th className="px-2 py-2 text-right">CR %</th>
+                                  <th className="px-2 py-2 text-right">CPS ₽</th>
+                                  <th className="px-2 py-2 text-right">ДРР %</th>
                                 </tr>
                               </thead>
                               <tbody>
+                                <tr className="border-t-2 border-slate-200 bg-slate-50 font-bold text-slate-900">
+                                  <td className="px-2 py-1.5">Итого</td>
+                                  <td className="px-2 py-1.5 text-right">{Math.round(t.sum).toLocaleString('ru-RU')}</td>
+                                  <td className="px-2 py-1.5 text-right">{Math.round(t.revenue).toLocaleString('ru-RU')}</td>
+                                  <td className="px-2 py-1.5 text-right">{t.views.toLocaleString('ru-RU')}</td>
+                                  <td className="px-2 py-1.5 text-right">{t.clicks.toLocaleString('ru-RU')}</td>
+                                  <td className="px-2 py-1.5 text-right">{t.atbs.toLocaleString('ru-RU')}</td>
+                                  <td className="px-2 py-1.5 text-right">{t.orders.toLocaleString('ru-RU')}</td>
+                                  <td className="px-2 py-1.5 text-right">{ctr.toFixed(2)}</td>
+                                  <td className="px-2 py-1.5 text-right">{cpc.toFixed(2)}</td>
+                                  <td className="px-2 py-1.5 text-right">{(t.views ? t.sum / t.views * 1000 : 0).toFixed(0)}</td>
+                                  <td className="px-2 py-1.5 text-right">{cr.toFixed(2)}</td>
+                                  <td className="px-2 py-1.5 text-right">{cpo.toFixed(0)}</td>
+                                  <td className="px-2 py-1.5 text-right">{drr.toFixed(1)}</td>
+                                </tr>
                                 {[...adsApiData.campaigns].sort((a: any, b: any) => { const f = adsApiCampSort.field; const mul = adsApiCampSort.dir === 'asc' ? 1 : -1; return f === 'name' ? String(a.name).localeCompare(String(b.name), 'ru') * mul : ((a[f] || 0) - (b[f] || 0)) * mul; }).map((c: any) => (
                                   <tr key={c.id} className="border-t border-slate-100 hover:bg-slate-50">
                                     <td className="px-2 py-1.5 max-w-[260px] truncate" title={c.name}>{c.name}</td>
-                                    <td className="px-2 py-1.5">{Math.round(c.sum).toLocaleString('ru-RU')}</td>
-                                    <td className="px-2 py-1.5">{Math.round(c.revenue).toLocaleString('ru-RU')}</td>
-                                    <td className="px-2 py-1.5">{c.views.toLocaleString('ru-RU')}</td>
-                                    <td className="px-2 py-1.5">{c.clicks.toLocaleString('ru-RU')}</td>
-                                    <td className="px-2 py-1.5">{c.atbs.toLocaleString('ru-RU')}</td>
-                                    <td className="px-2 py-1.5">{c.orders.toLocaleString('ru-RU')}</td>
-                                    <td className="px-2 py-1.5">{(c.revenue ? c.sum / c.revenue * 100 : 0).toFixed(1)}</td>
-                                    <td className="px-2 py-1.5">{(c.clicks ? c.sum / c.clicks : 0).toFixed(2)}</td>
+                                    <td className="px-2 py-1.5 text-right">{Math.round(c.sum).toLocaleString('ru-RU')}</td>
+                                    <td className="px-2 py-1.5 text-right">{Math.round(c.revenue).toLocaleString('ru-RU')}</td>
+                                    <td className="px-2 py-1.5 text-right">{c.views.toLocaleString('ru-RU')}</td>
+                                    <td className="px-2 py-1.5 text-right">{c.clicks.toLocaleString('ru-RU')}</td>
+                                    <td className="px-2 py-1.5 text-right">{c.atbs.toLocaleString('ru-RU')}</td>
+                                    <td className="px-2 py-1.5 text-right">{c.orders.toLocaleString('ru-RU')}</td>
+                                    <td className="px-2 py-1.5 text-right">{(c.views ? c.clicks / c.views * 100 : 0).toFixed(2)}</td>
+                                    <td className="px-2 py-1.5 text-right">{(c.clicks ? c.sum / c.clicks : 0).toFixed(2)}</td>
+                                    <td className="px-2 py-1.5 text-right">{(c.views ? c.sum / c.views * 1000 : 0).toFixed(0)}</td>
+                                    <td className="px-2 py-1.5 text-right">{(c.clicks ? c.orders / c.clicks * 100 : 0).toFixed(2)}</td>
+                                    <td className="px-2 py-1.5 text-right">{(c.orders ? c.sum / c.orders : 0).toFixed(0)}</td>
+                                    <td className={`px-2 py-1.5 text-right font-medium ${(() => { const d = c.revenue ? c.sum / c.revenue * 100 : 0; return d === 0 ? 'text-slate-400' : d <= 15 ? 'text-emerald-600' : d <= 22.5 ? 'text-amber-600' : 'text-rose-600'; })()}`}>{(c.revenue ? c.sum / c.revenue * 100 : 0).toFixed(1)}</td>
                                   </tr>
                                 ))}
                               </tbody>
