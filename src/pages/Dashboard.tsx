@@ -2617,6 +2617,37 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     return { list, maxDay, totalTemp, totalStaff, bySupplier, earnTemp, earnStaff, totalEarn, avgPrice: totalQty > 0 ? totalEarn / totalQty : 0 };
   }, [assemblyTempRows, assemblyStaffRows, empNameById, suppliers, generalReportForm.start_date, generalReportForm.end_date, generalReportForm.supplier_id, generalReportForm.person_name]);
 
+  // Packaging/other purchases for the general report (loaded on modal open).
+  const [generalPackagingRows, setGeneralPackagingRows] = useState<any[]>([]);
+  const loadGeneralPackaging = async (startStr?: string, endStr?: string) => {
+    try {
+      let q = supabase.from('packaging_purchase_log').select('created_at, quantity, size, price, delivery, supplier_id, kind, item_name').is('deleted_at', null);
+      if (startStr) q = q.gte('created_at', `${startStr}T00:00:00`);
+      if (endStr) q = q.lte('created_at', `${endStr}T23:59:59`);
+      const { data } = await q;
+      setGeneralPackagingRows(Array.isArray(data) ? data : []);
+    } catch (e) { console.warn('loadGeneralPackaging failed', e); }
+  };
+  useEffect(() => { if (showGeneralReportModal) loadGeneralPackaging(generalReportForm.start_date, generalReportForm.end_date); }, [showGeneralReportModal, generalReportForm.start_date, generalReportForm.end_date]);
+
+  const generalPackaging = useMemo(() => {
+    const sup = String(generalReportForm.supplier_id || 'all');
+    const rowCost = (r: any) => r?.kind === 'other' ? Number(r?.price || 0) : Number(r?.quantity || 0) * Number(r?.price || 0) + Number(r?.delivery || 0);
+    const bySup = new Map<string, { pack: number; other: number }>();
+    let totalPack = 0; let totalOther = 0;
+    (generalPackagingRows || []).forEach((r: any) => {
+      if (sup !== 'all' && String(r.supplier_id || '') !== sup) return;
+      const c = rowCost(r);
+      const sk = String(r.supplier_id || ''); const e = bySup.get(sk) || { pack: 0, other: 0 };
+      if (r.kind === 'other') { totalOther += c; e.other += c; } else { totalPack += c; e.pack += c; }
+      bySup.set(sk, e);
+    });
+    const bySupplier = Array.from(bySup.entries())
+      .map(([sid, v]) => ({ supplierId: sid, name: suppliers.find((s: any) => String(s.id) === sid)?.name || 'Без поставщика', pack: v.pack, other: v.other, total: v.pack + v.other }))
+      .sort((a, b) => b.total - a.total);
+    return { totalPack, totalOther, total: totalPack + totalOther, bySupplier };
+  }, [generalPackagingRows, suppliers, generalReportForm.supplier_id]);
+
   // Assembled quantity per supplier (for the general report breakdown).
   const assemblyBySupplier = useMemo(() => {
     const m = new Map<string, { temp: number; staff: number }>();
@@ -2915,6 +2946,33 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     } catch { return []; }
   };
 
+  // Fetch + aggregate packaging/other purchases for reports (filtered by supplier).
+  const buildPackagingForReport = async (startStr?: string, endStr?: string, supplierId?: string) => {
+    const fSup = String(supplierId || 'all');
+    let rows: any[] = [];
+    try {
+      let q = supabase.from('packaging_purchase_log').select('created_at, quantity, size, price, delivery, supplier_id, kind, item_name').is('deleted_at', null);
+      if (startStr) q = q.gte('created_at', `${startStr}T00:00:00`);
+      if (endStr) q = q.lte('created_at', `${endStr}T23:59:59`);
+      const { data } = await q; rows = Array.isArray(data) ? data : [];
+    } catch { /* ignore */ }
+    const cost = (r: any) => r?.kind === 'other' ? Number(r?.price || 0) : Number(r?.quantity || 0) * Number(r?.price || 0) + Number(r?.delivery || 0);
+    const bySup = new Map<string, { pack: number; other: number }>();
+    let totalPack = 0; let totalOther = 0; const detail: any[] = [];
+    rows.forEach((r: any) => {
+      if (fSup !== 'all' && String(r.supplier_id || '') !== fSup) return;
+      const c = cost(r);
+      const sk = String(r.supplier_id || ''); const e = bySup.get(sk) || { pack: 0, other: 0 };
+      if (r.kind === 'other') { totalOther += c; e.other += c; } else { totalPack += c; e.pack += c; }
+      bySup.set(sk, e);
+      detail.push(r);
+    });
+    const bySupplier = Array.from(bySup.entries())
+      .map(([sid, v]) => ({ name: suppliers.find((s: any) => String(s.id) === sid)?.name || 'Без поставщика', pack: v.pack, other: v.other, total: v.pack + v.other }))
+      .sort((a, b) => b.total - a.total);
+    return { totalPack, totalOther, total: totalPack + totalOther, bySupplier, detail, cost };
+  };
+
   const handleDownloadGeneralReportExcel = async () => {
     try {
       const temp = generalTempWorkerRows.map((r: any) => ({ 'Дата': xlsxDate(r.date), 'Сотрудник': r.worker_name || r.worker || 'Без имени', 'Поставщик': r.supplierName || '-', 'Тип работы': r.work_comment || r.comment || '-', 'Кол-во': Number(r.quantity || 0), 'Часы': Number(r.hours || 0), 'Заработано': Number(r.earnings || 0), 'Кто оплатил': String(r.paidByText || '-').replace(/₽/g, 'руб.'), 'Не оплачено': Number(r.remainingAmount || 0) }));
@@ -2941,12 +2999,18 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         asmRows = Array.from(dmap.entries()).sort((a, b) => a[0].localeCompare(b[0])).map(([dk, v]) => ({ 'Дата': xlsxDate(dk), 'Сотрудники': v.staff, 'Временные (ФБО/ФБС)': v.temp, 'Всего собрано': v.staff + v.temp }));
         asmSupRows = Array.from(smap.entries()).map(([sid, v]) => { const total = v.staff + v.temp; return { 'Поставщик': suppliers.find((s: any) => String(s.id) === sid)?.name || 'Без поставщика', 'Сотрудники': v.staff, 'Временные': v.temp, 'Всего собрано': total, 'Сумма заработка': Math.round(v.earn * 100) / 100, 'Средняя цена сборки': total > 0 ? Math.round((v.earn / total) * 100) / 100 : 0 }; }).sort((a, b) => b['Всего собрано'] - a['Всего собрано']);
       } catch { /* ignore */ }
+      // Закуп упаковки/прочее
+      const pkg = await buildPackagingForReport(generalReportForm.start_date, generalReportForm.end_date, generalReportForm.supplier_id);
+      const pkgDetail = pkg.detail.map((r: any) => ({ 'Дата': xlsxDate(String(r.created_at).slice(0, 10)), 'Поставщик': suppliers.find((s: any) => String(s.id) === String(r.supplier_id))?.name || '-', 'Вид': r.kind === 'other' ? 'Прочее' : 'Упаковка', 'Тип / Товар': r.kind === 'other' ? (r.item_name || '-') : (r.size || '-'), 'Кол-во': r.kind === 'other' ? '' : Number(r.quantity || 0), 'Цена за шт.': r.kind === 'other' ? '' : Number(r.price || 0), 'Доставка': r.kind === 'other' ? '' : Number(r.delivery || 0), 'Итого': Math.round(pkg.cost(r) * 100) / 100 }));
+      const pkgBySup = pkg.bySupplier.map((s: any) => ({ 'Поставщик': s.name, 'Упаковка': Math.round(s.pack * 100) / 100, 'Прочее': Math.round(s.other * 100) / 100, 'Итого': Math.round(s.total * 100) / 100 }));
       const sheets = [
         { name: 'ЗП временные', rows: temp.length ? temp : [{ 'Нет данных': '' }] },
         { name: 'Доставки', rows: delivery.length ? delivery : [{ 'Нет данных': '' }] },
         { name: 'Постоянные', rows: cw.length ? cw : [{ 'Нет данных': '' }] },
         { name: 'Сборка по дням', rows: asmRows.length ? asmRows : [{ 'Нет данных': '' }] },
         { name: 'Сборка по поставщикам', rows: asmSupRows.length ? asmSupRows : [{ 'Нет данных': '' }] },
+        { name: 'Закуп', rows: pkgDetail.length ? pkgDetail : [{ 'Нет данных': '' }] },
+        { name: 'Закуп по поставщикам', rows: pkgBySup.length ? pkgBySup : [{ 'Нет данных': '' }] },
       ];
       await downloadWorkbook(`obschiy_otchet_${generalReportForm.start_date || 'start'}_${generalReportForm.end_date || 'end'}.xlsx`, sheets);
     } catch (e: any) {
@@ -3149,6 +3213,39 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       });
 
       let y = drawAssemblyChartPdf(doc, acY + acH + 4, asmData);
+
+      // ── Затраты + закуп ──────────────────────────────────────────
+      const pkg = await buildPackagingForReport(generalReportForm.start_date, generalReportForm.end_date, generalReportForm.supplier_id);
+      const costStats = [
+        { label: 'ЗП временные', text: money(generalReportTotals.tempEarned), rgb: [16, 185, 129] },
+        { label: 'ЗП сотрудники', text: money(generalReportTotals.cwAmount), rgb: [99, 102, 241] },
+        { label: 'Доставка', text: money(generalReportTotals.deliveryAmount), rgb: [37, 99, 235] },
+        { label: 'Упаковка + прочее', text: money(pkg.total), rgb: [245, 158, 11] },
+      ];
+      if (y > pageH - 40) { doc.addPage(); y = 16; }
+      const costTotal = Number(generalReportTotals.tempEarned || 0) + Number(generalReportTotals.cwAmount || 0) + Number(generalReportTotals.deliveryAmount || 0) + pkg.total;
+      setFill([30, 41, 59]); doc.roundedRect(10, y, pageW - 20, 16, 2, 2, 'F');
+      setText([226, 232, 240]); doc.setFontSize(8.5); doc.text('ОБЩИЕ', 15, y + 7.5); setText([148, 163, 184]); doc.text('ЗАТРАТЫ', 15, y + 12.5);
+      setText([255, 255, 255]); doc.setFontSize(10); doc.text(money(costTotal), 15 + 26, y + 10);
+      const csArea = pageW - 20 - 60; const csW = csArea / costStats.length;
+      costStats.forEach((s, i) => {
+        const sx = 60 + csW * i;
+        setFill(s.rgb); doc.roundedRect(sx, y + 5.4, 2.4, 2.4, 0.6, 0.6, 'F');
+        setText([203, 213, 225]); doc.setFontSize(6.2); doc.text(s.label.toUpperCase(), sx + 4, y + 7.5);
+        setText([255, 255, 255]); doc.setFontSize(9.5); doc.text(s.text, sx + 4, y + 13);
+      });
+      y += 20;
+      // Packaging by supplier table
+      if (pkg.bySupplier.length) {
+        y = drawBand(y, 'Закуп упаковки и прочее', [245, 158, 11]);
+        baseTable({
+          startY: y,
+          head: [['Поставщик', 'Упаковка', 'Прочее', 'Итого']],
+          body: pkg.bySupplier.map((s: any) => [s.name, money(s.pack), money(s.other), money(s.total)]),
+          foot: [['Итого', money(pkg.totalPack), money(pkg.totalOther), money(pkg.total)]],
+        }, y, [245, 158, 11]);
+        y = ((doc as any).lastAutoTable?.finalY || y) + 9;
+      }
 
       y = drawBand(y, 'ЗП временные', [16, 185, 129]);
       baseTable({
@@ -3704,14 +3801,16 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   });
 
   // Purchase Packaging State
-  const [cwPurchaseForm, setCwPurchaseForm] = useState({ purchase_date: new Date().toISOString().slice(0, 10) });
+  const [cwPurchaseForm, setCwPurchaseForm] = useState<{ purchase_date: string; supplier_id: string }>({ purchase_date: new Date().toISOString().slice(0, 10), supplier_id: '' });
   const [cwPurchaseRows, setCwPurchaseRows] = useState<Array<{ id: string; quantity: string; size: string; price: string; delivery: string }>>([{ id: getSafeId(), quantity: '', size: '', price: '', delivery: '' }]);
+  const [cwPurchaseOtherRows, setCwPurchaseOtherRows] = useState<Array<{ id: string; item_name: string; price: string }>>([{ id: getSafeId(), item_name: '', price: '' }]);
   const [cwPurchaseHistory, setCwPurchaseHistory] = useState<any[]>([]);
+  const [cwPurchaseHistorySupplierFilter, setCwPurchaseHistorySupplierFilter] = useState('all');
 
   const fetchCwPurchaseHistory = async () => {
     const { data, error } = await supabase
       .from('packaging_purchase_log')
-      .select('id, created_at, quantity, size, price, delivery')
+      .select('id, created_at, quantity, size, price, delivery, supplier_id, kind, item_name')
       .is('deleted_at', null)
       .order('created_at', { ascending: false });
 
@@ -26880,144 +26979,174 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 </div>
               )}
 
-              {completedWorkStep === 'PURCHASE' && (
-                <div className="oc-card p-6">
-                    <h3 className="font-bold text-lg mb-4">Закуп упаковки</h3>
-                    <div className="grid grid-cols-1 gap-4 mb-6 max-w-3xl">
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">Дата покупки</label>
-                            <input
-                                type="date"
-                                value={cwPurchaseForm.purchase_date}
-                                onChange={e => setCwPurchaseForm({...cwPurchaseForm, purchase_date: e.target.value})}
-                                className="oc-select"
-                            />
-                        </div>
-
-                        {cwPurchaseRows.map((r, idx) => (
-                          <div key={r.id} className="border rounded-lg p-3 bg-slate-50">
-                            <div className="text-xs text-slate-500 mb-2">Упаковка #{idx + 1}</div>
-                            <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
-                              <input type="number" placeholder="Количество" value={r.quantity} onChange={(e) => setCwPurchaseRows(prev => prev.map(x => x.id === r.id ? { ...x, quantity: e.target.value } : x))} className="oc-select" />
-                              <input type="text" placeholder="Размер (например 30x40)" value={r.size} onChange={(e) => setCwPurchaseRows(prev => prev.map(x => x.id === r.id ? { ...x, size: e.target.value } : x))} className="oc-select" />
-                              <input type="number" step="0.1" placeholder="Цена (₽)" value={r.price} onChange={(e) => setCwPurchaseRows(prev => prev.map(x => x.id === r.id ? { ...x, price: e.target.value } : x))} className="oc-select" />
-                              <input type="number" step="0.1" placeholder="Доставка (₽)" value={r.delivery} onChange={(e) => setCwPurchaseRows(prev => prev.map(x => x.id === r.id ? { ...x, delivery: e.target.value } : x))} className="oc-select" />
-                            </div>
-                            {cwPurchaseRows.length > 1 && (
-                              <button type="button" onClick={() => setCwPurchaseRows(prev => prev.filter(x => x.id !== r.id))} className="mt-2 text-xs text-rose-600 hover:text-rose-700">Удалить упаковку</button>
-                            )}
-                          </div>
-                        ))}
-
-                        <button
-                          type="button"
-                          onClick={() => setCwPurchaseRows(prev => [...prev, { id: getSafeId(), quantity: '', size: '', price: '', delivery: '' }])}
-                          className="w-full py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50"
-                        >
-                          Добавить упаковку
-                        </button>
-
-                        <button
-                            onClick={async () => {
-                                if (!hasAssemblyButtonAccess('cw_purchase_add')) return;
-                                if (!cwPurchaseForm.purchase_date) {
-                                  showToast('Укажите дату покупки', 'error');
-                                  return;
-                                }
-
-                                const payload = cwPurchaseRows
-                                  .filter(x => x.quantity && x.size && x.price && x.delivery)
-                                  .map(x => ({
-                                    quantity: parseInt(x.quantity),
-                                    size: x.size,
-                                    price: parseFloat(x.price),
-                                    delivery: parseFloat(x.delivery),
-                                    created_at: new Date(`${cwPurchaseForm.purchase_date}T12:00:00`).toISOString()
-                                  }));
-
-                                if (!payload.length) {
-                                  showToast('Заполните хотя бы одну упаковку полностью', 'error');
-                                  return;
-                                }
-
-                                const { error } = await supabase.from('packaging_purchase_log').insert(payload as any);
-
-                                if (error) {
-                                  showToast('Ошибка добавления: ' + (error.message || 'неизвестно'), 'error');
-                                  return;
-                                }
-
-                                setCwPurchaseRows([{ id: getSafeId(), quantity: '', size: '', price: '', delivery: '' }]);
-                                setCwPurchaseForm({ purchase_date: new Date().toISOString().slice(0, 10) });
-                                await fetchCwPurchaseHistory();
-                                showToast(`Добавлено записей: ${payload.length}`, 'success');
-                            }}
-                            disabled={!hasAssemblyButtonAccess('cw_purchase_add')}
-                            className={`w-full py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors ${!hasAssemblyButtonAccess('cw_purchase_add') ? 'opacity-50 cursor-not-allowed' : ''}`}
-                        >
-                            Добавить
-                        </button>
+              {completedWorkStep === 'PURCHASE' && (() => {
+                const purchaseSupplierName = (id: any) => suppliers.find((s: any) => String(s.id) === String(id))?.name || '—';
+                const rowCost = (log: any) => log?.kind === 'other'
+                  ? Number(log?.price || 0)
+                  : Number(log?.quantity || 0) * Number(log?.price || 0) + Number(log?.delivery || 0);
+                const filteredPurchases = cwPurchaseHistory.filter((l) => cwPurchaseHistorySupplierFilter === 'all' || String(l.supplier_id || '') === cwPurchaseHistorySupplierFilter);
+                const totalAll = filteredPurchases.reduce((s, r) => s + rowCost(r), 0);
+                const totalPack = filteredPurchases.filter((r) => r.kind !== 'other').reduce((s, r) => s + rowCost(r), 0);
+                const totalOther = filteredPurchases.filter((r) => r.kind === 'other').reduce((s, r) => s + rowCost(r), 0);
+                const savePurchases = async () => {
+                  if (!hasAssemblyButtonAccess('cw_purchase_add')) return;
+                  if (!cwPurchaseForm.purchase_date) { showToast('Укажите дату покупки', 'error'); return; }
+                  if (!cwPurchaseForm.supplier_id) { showToast('Выберите поставщика', 'error'); return; }
+                  const createdAt = new Date(`${cwPurchaseForm.purchase_date}T12:00:00`).toISOString();
+                  const packPayload = cwPurchaseRows
+                    .filter(x => x.size && x.quantity && x.price)
+                    .map(x => ({ kind: 'packaging', supplier_id: cwPurchaseForm.supplier_id, quantity: parseInt(x.quantity), size: x.size, price: parseFloat(x.price), delivery: parseFloat(x.delivery || '0'), created_at: createdAt }));
+                  const otherPayload = cwPurchaseOtherRows
+                    .filter(x => x.item_name.trim() && x.price)
+                    .map(x => ({ kind: 'other', supplier_id: cwPurchaseForm.supplier_id, item_name: x.item_name.trim(), price: parseFloat(x.price), created_at: createdAt }));
+                  const payload = [...packPayload, ...otherPayload];
+                  if (!payload.length) { showToast('Заполните хотя бы одну запись', 'error'); return; }
+                  const { error } = await supabase.from('packaging_purchase_log').insert(payload as any);
+                  if (error) { showToast('Ошибка добавления: ' + (error.message || 'неизвестно'), 'error'); return; }
+                  setCwPurchaseRows([{ id: getSafeId(), quantity: '', size: '', price: '', delivery: '' }]);
+                  setCwPurchaseOtherRows([{ id: getSafeId(), item_name: '', price: '' }]);
+                  setCwPurchaseForm({ purchase_date: new Date().toISOString().slice(0, 10), supplier_id: '' });
+                  await fetchCwPurchaseHistory();
+                  showToast(`Добавлено записей: ${payload.length}`, 'success');
+                };
+                return (
+                <div className="space-y-5">
+                  {/* Form card */}
+                  <div className="rounded-3xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+                    <div className="flex items-center gap-3 bg-gradient-to-r from-indigo-600 to-violet-600 px-5 py-4 text-white">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white/15"><ShoppingCart className="h-5 w-5" /></div>
+                      <div>
+                        <h3 className="font-bold text-lg leading-tight">Закуп</h3>
+                        <p className="text-xs text-indigo-100">Упаковка и прочие траты по поставщикам</p>
+                      </div>
                     </div>
+                    <div className="p-5 space-y-5">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1.5">Дата покупки</label>
+                          <input type="date" value={cwPurchaseForm.purchase_date} onChange={e => setCwPurchaseForm({ ...cwPurchaseForm, purchase_date: e.target.value })} className="oc-input w-full" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1.5">Поставщик (для разделения трат)</label>
+                          <select value={cwPurchaseForm.supplier_id} onChange={e => setCwPurchaseForm({ ...cwPurchaseForm, supplier_id: e.target.value })} className="oc-input w-full">
+                            <option value="">Выберите поставщика</option>
+                            {suppliers.map((s) => <option key={`pp-sup-${s.id}`} value={String(s.id)}>{s.name}</option>)}
+                          </select>
+                        </div>
+                      </div>
 
-                    <h4 className="font-bold text-slate-900 mb-3">История закупок упаковки</h4>
-                    <div className="mb-3 rounded-xl border border-indigo-200 bg-indigo-50 p-3 text-sm">
-                      Сумма всех закупок упаковки: <span className="font-semibold text-indigo-800">{cwPurchaseHistory.reduce((s, r) => s + Number(r?.price || 0), 0).toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽</span>
+                      {/* Packaging types */}
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <h4 className="text-sm font-bold text-slate-800">Упаковка</h4>
+                          <button type="button" onClick={() => setCwPurchaseRows(prev => [...prev, { id: getSafeId(), quantity: '', size: '', price: '', delivery: '' }])} className="inline-flex items-center gap-1.5 text-sm font-semibold text-indigo-600 hover:text-indigo-700">
+                            <Plus className="h-4 w-4" /> Тип упаковки
+                          </button>
+                        </div>
+                        <div className="space-y-2">
+                          <div className="hidden md:grid grid-cols-[1.4fr_1fr_1fr_1fr_auto] gap-2 px-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                            <span>Тип упаковки</span><span>Количество</span><span>Цена за штуку</span><span>Доставка</span><span></span>
+                          </div>
+                          {cwPurchaseRows.map((r) => (
+                            <div key={r.id} className="grid grid-cols-1 md:grid-cols-[1.4fr_1fr_1fr_1fr_auto] gap-2 rounded-2xl border border-slate-200 bg-slate-50/60 p-2">
+                              <input type="text" placeholder="Тип упаковки (напр. Пакет 30x40)" value={r.size} onChange={(e) => setCwPurchaseRows(prev => prev.map(x => x.id === r.id ? { ...x, size: e.target.value } : x))} className="oc-input" />
+                              <input type="number" placeholder="Кол-во" value={r.quantity} onChange={(e) => setCwPurchaseRows(prev => prev.map(x => x.id === r.id ? { ...x, quantity: e.target.value } : x))} className="oc-input" />
+                              <input type="number" step="0.01" placeholder="Цена за шт." value={r.price} onChange={(e) => setCwPurchaseRows(prev => prev.map(x => x.id === r.id ? { ...x, price: e.target.value } : x))} className="oc-input" />
+                              <input type="number" step="0.01" placeholder="Доставка" value={r.delivery} onChange={(e) => setCwPurchaseRows(prev => prev.map(x => x.id === r.id ? { ...x, delivery: e.target.value } : x))} className="oc-input" />
+                              <button type="button" onClick={() => setCwPurchaseRows(prev => prev.length > 1 ? prev.filter(x => x.id !== r.id) : prev)} className="inline-flex items-center justify-center rounded-xl border border-slate-200 px-3 text-slate-400 hover:text-rose-600 hover:border-rose-200" title="Удалить"><Trash2 className="h-4 w-4" /></button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Other purchases */}
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <h4 className="text-sm font-bold text-slate-800">Закуп прочее</h4>
+                          <button type="button" onClick={() => setCwPurchaseOtherRows(prev => [...prev, { id: getSafeId(), item_name: '', price: '' }])} className="inline-flex items-center gap-1.5 text-sm font-semibold text-indigo-600 hover:text-indigo-700">
+                            <Plus className="h-4 w-4" /> Добавить
+                          </button>
+                        </div>
+                        <div className="space-y-2">
+                          {cwPurchaseOtherRows.map((r) => (
+                            <div key={r.id} className="grid grid-cols-1 md:grid-cols-[2fr_1fr_auto] gap-2 rounded-2xl border border-slate-200 bg-slate-50/60 p-2">
+                              <input type="text" placeholder="Товар" value={r.item_name} onChange={(e) => setCwPurchaseOtherRows(prev => prev.map(x => x.id === r.id ? { ...x, item_name: e.target.value } : x))} className="oc-input" />
+                              <input type="number" step="0.01" placeholder="Стоимость" value={r.price} onChange={(e) => setCwPurchaseOtherRows(prev => prev.map(x => x.id === r.id ? { ...x, price: e.target.value } : x))} className="oc-input" />
+                              <button type="button" onClick={() => setCwPurchaseOtherRows(prev => prev.length > 1 ? prev.filter(x => x.id !== r.id) : prev)} className="inline-flex items-center justify-center rounded-xl border border-slate-200 px-3 text-slate-400 hover:text-rose-600 hover:border-rose-200" title="Удалить"><Trash2 className="h-4 w-4" /></button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      <button onClick={savePurchases} disabled={!hasAssemblyButtonAccess('cw_purchase_add')} className={`w-full py-3 rounded-2xl bg-indigo-600 text-white font-semibold shadow-sm hover:bg-indigo-700 transition-colors ${!hasAssemblyButtonAccess('cw_purchase_add') ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                        Сохранить закуп
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* History card */}
+                  <div className="rounded-3xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+                    <div className="flex flex-col gap-3 px-5 py-4 border-b border-slate-100 md:flex-row md:items-center md:justify-between">
+                      <h4 className="font-bold text-slate-900">История закупок</h4>
+                      <select value={cwPurchaseHistorySupplierFilter} onChange={(e) => setCwPurchaseHistorySupplierFilter(e.target.value)} className="oc-input md:max-w-xs">
+                        <option value="all">Все поставщики</option>
+                        {suppliers.map((s) => <option key={`pp-flt-${s.id}`} value={String(s.id)}>{s.name}</option>)}
+                      </select>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-4">
+                      <div className="rounded-2xl border border-indigo-100 bg-indigo-50 p-3"><div className="text-[11px] font-semibold uppercase text-indigo-500">Упаковка</div><div className="text-xl font-extrabold text-indigo-800">{totalPack.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽</div></div>
+                      <div className="rounded-2xl border border-amber-100 bg-amber-50 p-3"><div className="text-[11px] font-semibold uppercase text-amber-600">Прочее</div><div className="text-xl font-extrabold text-amber-800">{totalOther.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽</div></div>
+                      <div className="rounded-2xl border border-slate-200 bg-slate-900 p-3"><div className="text-[11px] font-semibold uppercase text-slate-300">Итого</div><div className="text-xl font-extrabold text-white">{totalAll.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽</div></div>
                     </div>
                     <div className="overflow-x-auto">
-                        <table className="w-full text-left text-sm">
-                            <thead>
-                                <tr className="bg-slate-50 border-b border-slate-100">
-                                    <th className="px-4 py-2 font-medium text-slate-500">Дата</th>
-                                    <th className="px-4 py-2 font-medium text-slate-500">Количество</th>
-                                    <th className="px-4 py-2 font-medium text-slate-500">Размер</th>
-                                    <th className="px-4 py-2 font-medium text-slate-500">Цена</th>
-                                    <th className="px-4 py-2 font-medium text-slate-500">Доставка</th>
-                                    <th className="px-4 py-2 font-medium text-slate-500">Действия</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100">
-                                {cwPurchaseHistory.map(log => (
-                                    <tr key={log.id} className="hover:bg-slate-50">
-                                        <td className="px-4 py-2">{new Date(log.created_at).toLocaleDateString()}</td>
-                                        <td className="px-4 py-2 font-bold">{log.quantity}</td>
-                                        <td className="px-4 py-2">{log.size}</td>
-                                        <td className="px-4 py-2">{log.price} ₽</td>
-                                        <td className="px-4 py-2">{log.delivery} ₽</td>
-                                        <td className="px-4 py-2">
-                                            <button
-                                                onClick={async () => {
-                                                    if (!hasAssemblyButtonAccess('cw_purchase_delete')) return;
-                                                    if(!await confirmDialog('Удалить запись?')) return;
-                                                    const { error } = await supabase
-                                                      .from('packaging_purchase_log')
-                                                      .update({ deleted_at: new Date().toISOString() })
-                                                      .eq('id', log.id);
-                                                    if (error) {
-                                                      showToast('Ошибка удаления: ' + (error.message || 'неизвестно'), 'error');
-                                                      return;
-                                                    }
-                                                    await fetchCwPurchaseHistory();
-                                                }}
-                                                disabled={!hasAssemblyButtonAccess('cw_purchase_delete')}
-                                                className={`text-red-500 hover:text-red-700 ${!hasAssemblyButtonAccess('cw_purchase_delete') ? 'opacity-40 cursor-not-allowed' : ''}`}
-                                            >
-                                                <Trash2 className="h-4 w-4" />
-                                            </button>
-                                        </td>
-                                    </tr>
-                                ))}
-                                {cwPurchaseHistory.length === 0 && (
-                                    <tr>
-                                        <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
-                                            История пуста
-                                        </td>
-                                    </tr>
-                                )}
-                            </tbody>
-                        </table>
+                      <table className="w-full text-left text-sm">
+                        <thead>
+                          <tr className="bg-slate-50 border-y border-slate-100 text-xs uppercase text-slate-500">
+                            <th className="px-4 py-2.5 font-semibold">Дата</th>
+                            <th className="px-4 py-2.5 font-semibold">Поставщик</th>
+                            <th className="px-4 py-2.5 font-semibold">Тип / Товар</th>
+                            <th className="px-4 py-2.5 font-semibold text-right">Кол-во</th>
+                            <th className="px-4 py-2.5 font-semibold text-right">Цена/шт</th>
+                            <th className="px-4 py-2.5 font-semibold text-right">Доставка</th>
+                            <th className="px-4 py-2.5 font-semibold text-right">Итого</th>
+                            <th className="px-4 py-2.5 font-semibold text-right">Действия</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {filteredPurchases.map(log => (
+                            <tr key={log.id} className="hover:bg-slate-50">
+                              <td className="px-4 py-2.5 text-slate-700">{new Date(log.created_at).toLocaleDateString('ru-RU')}</td>
+                              <td className="px-4 py-2.5 text-slate-700">{purchaseSupplierName(log.supplier_id)}</td>
+                              <td className="px-4 py-2.5"><span className={`mr-2 text-[10px] px-1.5 py-0.5 rounded-full ${log.kind === 'other' ? 'bg-amber-100 text-amber-700' : 'bg-indigo-100 text-indigo-700'}`}>{log.kind === 'other' ? 'прочее' : 'упаковка'}</span>{log.kind === 'other' ? (log.item_name || '—') : (log.size || '—')}</td>
+                              <td className="px-4 py-2.5 text-right font-medium">{log.kind === 'other' ? '—' : log.quantity}</td>
+                              <td className="px-4 py-2.5 text-right">{log.kind === 'other' ? '—' : `${Number(log.price || 0).toLocaleString('ru-RU')} ₽`}</td>
+                              <td className="px-4 py-2.5 text-right">{log.kind === 'other' ? '—' : `${Number(log.delivery || 0).toLocaleString('ru-RU')} ₽`}</td>
+                              <td className="px-4 py-2.5 text-right font-bold text-slate-900">{rowCost(log).toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽</td>
+                              <td className="px-4 py-2.5 text-right">
+                                <button
+                                  onClick={async () => {
+                                    if (!hasAssemblyButtonAccess('cw_purchase_delete')) return;
+                                    if (!await confirmDialog('Удалить запись?')) return;
+                                    const { error } = await supabase.from('packaging_purchase_log').update({ deleted_at: new Date().toISOString() }).eq('id', log.id);
+                                    if (error) { showToast('Ошибка удаления: ' + (error.message || 'неизвестно'), 'error'); return; }
+                                    await fetchCwPurchaseHistory();
+                                  }}
+                                  disabled={!hasAssemblyButtonAccess('cw_purchase_delete')}
+                                  className={`text-red-500 hover:text-red-700 ${!hasAssemblyButtonAccess('cw_purchase_delete') ? 'opacity-40 cursor-not-allowed' : ''}`}
+                                ><Trash2 className="h-4 w-4" /></button>
+                              </td>
+                            </tr>
+                          ))}
+                          {filteredPurchases.length === 0 && (
+                            <tr><td colSpan={8} className="px-4 py-8 text-center text-slate-500">История пуста</td></tr>
+                          )}
+                        </tbody>
+                      </table>
                     </div>
+                  </div>
                 </div>
-              )}
+                );
+              })()}
 
               {(completedWorkStep === 'CALENDAR' || completedWorkStep === 'FORM') && (
                 <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
@@ -30540,6 +30669,55 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           <div key={`asm-avg-${s.supplierId}`} className="flex items-center justify-between rounded-lg bg-white/70 border border-violet-100 px-3 py-1.5 text-sm">
                             <span className="text-slate-700 truncate" title={s.name}>{s.name}</span>
                             <span className="shrink-0 ml-2 font-semibold text-violet-800">{s.avgPrice.toFixed(2)} ₽<span className="text-[11px] font-normal text-slate-400"> ({s.total.toLocaleString('ru-RU')} шт.)</span></span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Затраты: ЗП временные + ЗП сотрудники + доставка + упаковка */}
+                  {(() => {
+                    const zpTemp = Number(generalReportTotals.tempEarned || 0);
+                    const zpStaff = Number(generalReportTotals.cwAmount || 0);
+                    const delivery = Number(generalReportTotals.deliveryAmount || 0);
+                    const packaging = generalPackaging.total;
+                    const sum = zpTemp + zpStaff + delivery + packaging;
+                    const money = (v: number) => `${v.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽`;
+                    return (
+                      <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                        <div className="flex items-center justify-between mb-3">
+                          <h4 className="font-bold text-slate-900 text-sm">Общие затраты за период</h4>
+                          <div className="text-lg font-extrabold text-slate-900">{money(sum)}</div>
+                        </div>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                          <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3"><div className="text-[11px] text-emerald-700">ЗП временные</div><div className="text-base font-bold text-emerald-800">{money(zpTemp)}</div></div>
+                          <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-3"><div className="text-[11px] text-indigo-700">ЗП сотрудники</div><div className="text-base font-bold text-indigo-800">{money(zpStaff)}</div></div>
+                          <div className="rounded-xl border border-blue-200 bg-blue-50 p-3"><div className="text-[11px] text-blue-700">Доставка</div><div className="text-base font-bold text-blue-800">{money(delivery)}</div></div>
+                          <div className="rounded-xl border border-amber-200 bg-amber-50 p-3"><div className="text-[11px] text-amber-700">Упаковка + прочее</div><div className="text-base font-bold text-amber-800">{money(packaging)}</div></div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* Закуп упаковки инфографика */}
+                  <div className="rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 to-orange-50 p-4 shadow-sm">
+                    <div className="flex items-center justify-between mb-3">
+                      <h4 className="font-bold text-slate-900 text-sm">Закуп упаковки и прочее</h4>
+                      <div className="text-right">
+                        <div className="text-[11px] text-amber-600">Всего за период</div>
+                        <div className="text-xl font-extrabold text-amber-800">{generalPackaging.total.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽</div>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 mb-3">
+                      <div className="rounded-xl border border-amber-100 bg-white/70 p-3"><div className="text-[11px] text-slate-500">Упаковка</div><div className="text-base font-bold text-amber-800">{generalPackaging.totalPack.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽</div></div>
+                      <div className="rounded-xl border border-amber-100 bg-white/70 p-3"><div className="text-[11px] text-slate-500">Прочее</div><div className="text-base font-bold text-amber-800">{generalPackaging.totalOther.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽</div></div>
+                    </div>
+                    {generalPackaging.bySupplier.filter((s) => s.total > 0).length > 0 && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                        {generalPackaging.bySupplier.filter((s) => s.total > 0).map((s) => (
+                          <div key={`pkg-sup-${s.supplierId}`} className="flex items-center justify-between rounded-lg bg-white/70 border border-amber-100 px-3 py-1.5 text-sm">
+                            <span className="text-slate-700 truncate" title={s.name}>{s.name}</span>
+                            <span className="shrink-0 ml-2 font-semibold text-amber-800">{s.total.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽<span className="text-[11px] font-normal text-slate-400"> (уп {s.pack.toLocaleString('ru-RU')} · пр {s.other.toLocaleString('ru-RU')})</span></span>
                           </div>
                         ))}
                       </div>
