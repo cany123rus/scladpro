@@ -1510,6 +1510,27 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const palletsToBoxes = (boxes: number, pallets: number) =>
     Math.floor(Number(boxes) || 0) + Math.floor(Number(pallets) || 0) * BOXES_PER_PALLET;
 
+  // Box stock on warehouse: added via Закуп (тип содержит «короб»), spent via deliveries.
+  const isBoxPackaging = (size: any) => /короб/i.test(String(size || ''));
+  const [boxStock, setBoxStock] = useState<{ added: number; used: number; remaining: number; bySupplier: Array<{ supplierId: string; name: string; used: number }> }>({ added: 0, used: 0, remaining: 0, bySupplier: [] });
+  const loadBoxStock = async () => {
+    try {
+      const [ppRes, diRes] = await Promise.all([
+        supabase.from('packaging_purchase_log').select('quantity, size, kind').is('deleted_at', null),
+        supabase.from('delivery_items').select('supplier_id, boxes, pallets'),
+      ]);
+      const added = (ppRes.data || []).reduce((s: number, r: any) => s + ((r.kind !== 'other' && isBoxPackaging(r.size)) ? Number(r.quantity || 0) : 0), 0);
+      const bySup = new Map<string, number>();
+      let used = 0;
+      (diRes.data || []).forEach((r: any) => { const u = palletsToBoxes(Number(r.boxes || 0), Number(r.pallets || 0)); used += u; const k = String(r.supplier_id || ''); bySup.set(k, (bySup.get(k) || 0) + u); });
+      const bySupplier = Array.from(bySup.entries())
+        .map(([sid, u]) => ({ supplierId: sid, name: suppliers.find((s: any) => String(s.id) === sid)?.name || 'Без поставщика', used: u }))
+        .filter((x) => x.used > 0)
+        .sort((a, b) => b.used - a.used);
+      setBoxStock({ added, used, remaining: added - used, bySupplier });
+    } catch (e) { console.warn('loadBoxStock failed', e); }
+  };
+
   // Show the real composition: boxes only, pallets only, or both (pallets converted to boxes).
   const formatDeliveryUnits = (boxes: number, pallets: number) => {
     const parts: string[] = [];
@@ -2628,7 +2649,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       setGeneralPackagingRows(Array.isArray(data) ? data : []);
     } catch (e) { console.warn('loadGeneralPackaging failed', e); }
   };
-  useEffect(() => { if (showGeneralReportModal) loadGeneralPackaging(generalReportForm.start_date, generalReportForm.end_date); }, [showGeneralReportModal, generalReportForm.start_date, generalReportForm.end_date]);
+  useEffect(() => { if (showGeneralReportModal) { loadGeneralPackaging(generalReportForm.start_date, generalReportForm.end_date); loadBoxStock(); } }, [showGeneralReportModal, generalReportForm.start_date, generalReportForm.end_date]);
 
   const generalPackaging = useMemo(() => {
     const sup = String(generalReportForm.supplier_id || 'all');
@@ -3030,6 +3051,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         { name: 'Закуп', rows: pkgDetail.length ? pkgDetail : [{ 'Нет данных': '' }] },
         { name: 'Закуп по поставщикам', rows: pkgBySup.length ? pkgBySup : [{ 'Нет данных': '' }] },
         { name: 'Полная цена сборки', rows: (() => { const r = generalFullAvg.bySupplier.filter((s: any) => s.qty > 0).map((s: any) => ({ 'Поставщик': s.name, 'Собрано (шт)': s.qty, 'Затраты (ЗП+доставка+закуп)': Math.round(s.cost * 100) / 100, 'Цена за шт.': Math.round(s.avg * 100) / 100 })); r.push({ 'Поставщик': 'ИТОГО', 'Собрано (шт)': generalFullAvg.totalQty, 'Затраты (ЗП+доставка+закуп)': Math.round(generalFullAvg.totalCost * 100) / 100, 'Цена за шт.': Math.round(generalFullAvg.avg * 100) / 100 } as any); return r.length ? r : [{ 'Нет данных': '' }]; })() },
+        { name: 'Коробки на складе', rows: (() => { const r: any[] = [{ 'Показатель': 'Закуплено', 'Коробок': boxStock.added }, { 'Показатель': 'Израсходовано', 'Коробок': boxStock.used }, { 'Показатель': 'Остаток', 'Коробок': boxStock.remaining }]; return r; })() },
+        { name: 'Коробки по поставщикам', rows: boxStock.bySupplier.length ? boxStock.bySupplier.map((s: any) => ({ 'Поставщик': s.name, 'Израсходовано коробок': s.used })) : [{ 'Нет данных': '' }] },
       ];
       await downloadWorkbook(`obschiy_otchet_${generalReportForm.start_date || 'start'}_${generalReportForm.end_date || 'end'}.xlsx`, sheets);
     } catch (e: any) {
@@ -3296,6 +3319,21 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           foot: [['', '', '', '', '', '', 'Итого', money(pkg.total)]],
         }, y, [245, 158, 11]);
         y = ((doc as any).lastAutoTable?.finalY || y) + 9;
+      }
+
+      // Boxes on warehouse
+      {
+        if (y > pageH - 30) { doc.addPage(); y = 16; }
+        y = drawBand(y, `Коробки на складе — остаток: ${boxStock.remaining.toLocaleString('ru-RU')} шт. (закуплено ${boxStock.added.toLocaleString('ru-RU')}, израсходовано ${boxStock.used.toLocaleString('ru-RU')})`, [79, 70, 229]);
+        if (boxStock.bySupplier.length) {
+          baseTable({
+            startY: y,
+            head: [['Поставщик', 'Израсходовано коробок']],
+            body: boxStock.bySupplier.map((s: any) => [s.name, s.used.toLocaleString('ru-RU')]),
+            foot: [['Итого', boxStock.used.toLocaleString('ru-RU')]],
+          }, y, [79, 70, 229]);
+          y = ((doc as any).lastAutoTable?.finalY || y) + 9;
+        }
       }
 
       // Full assembly cost per unit by supplier
@@ -3870,6 +3908,21 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [cwPurchaseOtherRows, setCwPurchaseOtherRows] = useState<Array<{ id: string; item_name: string; price: string }>>([{ id: getSafeId(), item_name: '', price: '' }]);
   const [cwPurchaseHistory, setCwPurchaseHistory] = useState<any[]>([]);
   const [cwPurchaseHistorySupplierFilter, setCwPurchaseHistorySupplierFilter] = useState('all');
+  const [cwPurchaseEdit, setCwPurchaseEdit] = useState<any | null>(null);
+  const saveCwPurchaseEdit = async () => {
+    if (!cwPurchaseEdit) return;
+    const e = cwPurchaseEdit;
+    const patch: any = e.kind === 'other'
+      ? { supplier_id: e.supplier_id || null, item_name: String(e.item_name || '').trim(), price: parseFloat(e.price) || 0 }
+      : { supplier_id: e.supplier_id || null, size: String(e.size || '').trim(), quantity: parseInt(e.quantity) || 0, price: parseFloat(e.price) || 0, delivery: parseFloat(e.delivery) || 0 };
+    if (String(e.created_at_date || '')) patch.created_at = new Date(`${e.created_at_date}T12:00:00`).toISOString();
+    const { error } = await supabase.from('packaging_purchase_log').update(patch).eq('id', e.id);
+    if (error) { showToast('Ошибка сохранения: ' + (error.message || 'неизвестно'), 'error'); return; }
+    setCwPurchaseEdit(null);
+    await fetchCwPurchaseHistory();
+    await loadBoxStock();
+    showToast('Запись обновлена', 'success');
+  };
   // Packaging-type templates (dropdown in Закуп → Тип упаковки), each with a price.
   const [packagingTypeTemplates, setPackagingTypeTemplates] = useState<Array<{ name: string; price: number }>>([]);
   const [showPackagingTemplateModal, setShowPackagingTemplateModal] = useState(false);
@@ -4574,7 +4627,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     if (activeTab === 'completed' && completedWorkStep === 'PURCHASE') {
       fetchCwPurchaseHistory();
       loadPackagingTypeTemplates();
+      loadBoxStock();
     }
+    if (activeTab === 'wb_products') loadBoxStock();
     if (activeTab === 'completed' && completedWorkStep === 'RATES') {
       ensureCwTimeRateId().catch(() => {});
     }
@@ -20460,6 +20515,18 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
           {/* WB PRODUCTS TAB */}
           <div className={`w-full mx-auto px-2 md:px-4 ${activeTab === 'wb_products' ? '' : 'hidden'}`}>
+            <div className="mb-3 flex flex-wrap items-center gap-3 rounded-2xl border border-indigo-200 bg-gradient-to-r from-indigo-50 to-violet-50 px-4 py-3 shadow-sm">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-600 text-white shrink-0"><Package className="h-5 w-5" /></div>
+              <div className="mr-2">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-indigo-500">Коробок на складе</div>
+                <div className={`text-2xl font-extrabold leading-tight ${boxStock.remaining <= 0 ? 'text-rose-600' : boxStock.remaining < 50 ? 'text-amber-600' : 'text-indigo-800'}`}>{boxStock.remaining.toLocaleString('ru-RU')} шт.</div>
+              </div>
+              <div className="text-xs text-slate-500 leading-tight border-l border-indigo-200 pl-3">
+                <div>Закуплено: <b className="text-slate-700">{boxStock.added.toLocaleString('ru-RU')}</b></div>
+                <div>Израсходовано: <b className="text-slate-700">{boxStock.used.toLocaleString('ru-RU')}</b></div>
+              </div>
+              {boxStock.remaining < 50 && <span className="ml-auto rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700">Коробки заканчиваются</span>}
+            </div>
             <WBProductsSection>
               <React.Suspense fallback={<SectionSkeleton />}>
                 <WBProducts suppliers={suppliers} />
@@ -27097,17 +27164,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   if (!payload.length) { showToast('Заполните хотя бы одну запись', 'error'); return; }
                   const { error } = await supabase.from('packaging_purchase_log').insert(payload as any);
                   if (error) { showToast('Ошибка добавления: ' + (error.message || 'неизвестно'), 'error'); return; }
-                  // Update template prices for rows where "Новая цена" was used.
-                  const priceUpdates = cwPurchaseRows.filter(x => x.newPrice && x.size && x.price && packagingTypeTemplates.some(t => t.name === x.size));
-                  if (priceUpdates.length) {
-                    let tpls = packagingTypeTemplates.map(t => ({ ...t }));
-                    priceUpdates.forEach(u => { tpls = tpls.map(t => t.name === u.size ? { ...t, price: parseFloat(u.price) } : t); });
-                    await savePackagingTypeTemplates(tpls);
-                  }
                   setCwPurchaseRows([{ id: getSafeId(), quantity: '', size: '', price: '', delivery: '' }]);
                   setCwPurchaseOtherRows([{ id: getSafeId(), item_name: '', price: '' }]);
                   setCwPurchaseForm({ purchase_date: new Date().toISOString().slice(0, 10), supplier_ids: [] });
                   await fetchCwPurchaseHistory();
+                  await loadBoxStock();
                   showToast(`Добавлено записей: ${payload.length}${N > 1 ? ` (по ${N} поставщикам)` : ''}`, 'success');
                 };
                 return (
@@ -27252,17 +27313,24 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               <td className="px-4 py-2.5 text-right">{log.kind === 'other' ? '—' : `${Number(log.delivery || 0).toLocaleString('ru-RU')} ₽`}</td>
                               <td className="px-4 py-2.5 text-right font-bold text-slate-900">{rowCost(log).toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽</td>
                               <td className="px-4 py-2.5 text-right">
-                                <button
-                                  onClick={async () => {
-                                    if (!hasAssemblyButtonAccess('cw_purchase_delete')) return;
-                                    if (!await confirmDialog('Удалить запись?')) return;
-                                    const { error } = await supabase.from('packaging_purchase_log').update({ deleted_at: new Date().toISOString() }).eq('id', log.id);
-                                    if (error) { showToast('Ошибка удаления: ' + (error.message || 'неизвестно'), 'error'); return; }
-                                    await fetchCwPurchaseHistory();
-                                  }}
-                                  disabled={!hasAssemblyButtonAccess('cw_purchase_delete')}
-                                  className={`text-red-500 hover:text-red-700 ${!hasAssemblyButtonAccess('cw_purchase_delete') ? 'opacity-40 cursor-not-allowed' : ''}`}
-                                ><Trash2 className="h-4 w-4" /></button>
+                                <div className="inline-flex items-center gap-2">
+                                  <button
+                                    onClick={() => setCwPurchaseEdit({ id: log.id, kind: log.kind || 'packaging', supplier_id: String(log.supplier_id || ''), size: log.size || '', quantity: String(log.quantity ?? ''), price: String(log.price ?? ''), delivery: String(log.delivery ?? ''), item_name: log.item_name || '', created_at_date: String(log.created_at || '').slice(0, 10) })}
+                                    className="text-blue-500 hover:text-blue-700"
+                                    title="Редактировать"
+                                  ><Pencil className="h-4 w-4" /></button>
+                                  <button
+                                    onClick={async () => {
+                                      if (!hasAssemblyButtonAccess('cw_purchase_delete')) return;
+                                      if (!await confirmDialog('Удалить запись?')) return;
+                                      const { error } = await supabase.from('packaging_purchase_log').update({ deleted_at: new Date().toISOString() }).eq('id', log.id);
+                                      if (error) { showToast('Ошибка удаления: ' + (error.message || 'неизвестно'), 'error'); return; }
+                                      await fetchCwPurchaseHistory(); await loadBoxStock();
+                                    }}
+                                    disabled={!hasAssemblyButtonAccess('cw_purchase_delete')}
+                                    className={`text-red-500 hover:text-red-700 ${!hasAssemblyButtonAccess('cw_purchase_delete') ? 'opacity-40 cursor-not-allowed' : ''}`}
+                                  ><Trash2 className="h-4 w-4" /></button>
+                                </div>
                               </td>
                             </tr>
                           ))}
@@ -30875,6 +30943,35 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     )}
                   </div>
 
+                  {/* Коробки на складе */}
+                  <div className="rounded-2xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-violet-50 p-4 shadow-sm">
+                    <div className="flex items-center justify-between mb-3">
+                      <h4 className="font-bold text-slate-900 text-sm">Коробки на складе</h4>
+                      <div className="text-right">
+                        <div className="text-[11px] text-indigo-600">Остаток</div>
+                        <div className={`text-xl font-extrabold ${boxStock.remaining <= 0 ? 'text-rose-600' : 'text-indigo-800'}`}>{boxStock.remaining.toLocaleString('ru-RU')} шт.</div>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 mb-3">
+                      <div className="rounded-xl border border-indigo-100 bg-white/70 p-3"><div className="text-[11px] text-slate-500">Закуплено</div><div className="text-base font-bold text-indigo-800">{boxStock.added.toLocaleString('ru-RU')}</div></div>
+                      <div className="rounded-xl border border-indigo-100 bg-white/70 p-3"><div className="text-[11px] text-slate-500">Израсходовано</div><div className="text-base font-bold text-indigo-800">{boxStock.used.toLocaleString('ru-RU')}</div></div>
+                      <div className="rounded-xl border border-indigo-100 bg-white/70 p-3"><div className="text-[11px] text-slate-500">Остаток</div><div className="text-base font-bold text-indigo-800">{boxStock.remaining.toLocaleString('ru-RU')}</div></div>
+                    </div>
+                    {boxStock.bySupplier.length > 0 && (
+                      <div>
+                        <div className="text-[11px] font-semibold text-slate-500 mb-1.5">Израсходовано коробок по поставщикам (доставки)</div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                          {boxStock.bySupplier.map((s) => (
+                            <div key={`box-sup-${s.supplierId}`} className="flex items-center justify-between rounded-lg bg-white/70 border border-indigo-100 px-3 py-1.5 text-sm">
+                              <span className="text-slate-700 truncate" title={s.name}>{s.name}</span>
+                              <span className="shrink-0 ml-2 font-semibold text-indigo-800">{s.used.toLocaleString('ru-RU')} шт.</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
                   <div className="rounded-2xl border border-slate-200 bg-white p-4">
                     <div className="flex items-center justify-between mb-3">
                       <h4 className="font-bold text-slate-900 text-sm">Собрано по дням</h4>
@@ -31406,6 +31503,55 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 )}
                 <div className="mt-5 flex justify-end">
                   <button type="button" onClick={() => setShowPackagingTemplateModal(false)} className="px-4 py-2 rounded-lg border">Готово</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {cwPurchaseEdit && (
+            <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-[66] p-3" onClick={() => setCwPurchaseEdit(null)}>
+              <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
+                <h3 className="text-lg font-bold mb-4">Редактировать запись закупа</h3>
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1">Дата</label>
+                    <input type="date" value={cwPurchaseEdit.created_at_date} onChange={(e) => setCwPurchaseEdit((p: any) => ({ ...p, created_at_date: e.target.value }))} className="oc-input w-full" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1">Поставщик</label>
+                    <select value={cwPurchaseEdit.supplier_id} onChange={(e) => setCwPurchaseEdit((p: any) => ({ ...p, supplier_id: e.target.value }))} className="oc-input w-full">
+                      <option value="">—</option>
+                      {suppliers.map((s) => <option key={`ppe-${s.id}`} value={String(s.id)}>{s.name}</option>)}
+                    </select>
+                  </div>
+                  {cwPurchaseEdit.kind === 'other' ? (
+                    <>
+                      <div>
+                        <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1">Товар</label>
+                        <input type="text" value={cwPurchaseEdit.item_name} onChange={(e) => setCwPurchaseEdit((p: any) => ({ ...p, item_name: e.target.value }))} className="oc-input w-full" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1">Стоимость</label>
+                        <input type="number" step="0.01" value={cwPurchaseEdit.price} onChange={(e) => setCwPurchaseEdit((p: any) => ({ ...p, price: e.target.value }))} className="oc-input w-full" />
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div>
+                        <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1">Тип упаковки</label>
+                        <input type="text" value={cwPurchaseEdit.size} onChange={(e) => setCwPurchaseEdit((p: any) => ({ ...p, size: e.target.value }))} className="oc-input w-full" />
+                      </div>
+                      <div className="grid grid-cols-3 gap-2">
+                        <div><label className="block text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1">Кол-во</label><input type="number" value={cwPurchaseEdit.quantity} onChange={(e) => setCwPurchaseEdit((p: any) => ({ ...p, quantity: e.target.value }))} className="oc-input w-full" /></div>
+                        <div><label className="block text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1">Цена/шт</label><input type="number" step="0.01" value={cwPurchaseEdit.price} onChange={(e) => setCwPurchaseEdit((p: any) => ({ ...p, price: e.target.value }))} className="oc-input w-full" /></div>
+                        <div><label className="block text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1">Доставка</label><input type="number" step="0.01" value={cwPurchaseEdit.delivery} onChange={(e) => setCwPurchaseEdit((p: any) => ({ ...p, delivery: e.target.value }))} className="oc-input w-full" /></div>
+                      </div>
+                    </>
+                  )}
+                </div>
+                <div className="mt-5 flex justify-end gap-2">
+                  <button type="button" onClick={() => setCwPurchaseEdit(null)} className="px-4 py-2 rounded-lg border">Отмена</button>
+                  <button type="button" onClick={saveCwPurchaseEdit} className="px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">Сохранить</button>
                 </div>
               </div>
             </div>
