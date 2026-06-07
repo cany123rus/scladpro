@@ -11039,8 +11039,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [barterProductSearch, setBarterProductSearch] = useState('');
   const [barterCheckedProductIds, setBarterCheckedProductIds] = useState<string[]>([]);
   // How many barter / ad slots to create per product (manual, no auto count).
-  const [barterCreateBarterCount, setBarterCreateBarterCount] = useState('5');
-  const [barterCreateAdCount, setBarterCreateAdCount] = useState('2');
+  const [barterCreateBarterCount, setBarterCreateBarterCount] = useState('1');
+  const [barterCreateAdCount, setBarterCreateAdCount] = useState('0');
   const [barterCreateMergedCard, setBarterCreateMergedCard] = useState(false);
   const [barterMergeMode, setBarterMergeMode] = useState(false);
   const [barterMergeSelectedIds, setBarterMergeSelectedIds] = useState<string[]>([]);
@@ -22116,8 +22116,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
               {barterModalOpen && (
                 <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-3" onClick={() => closeBarterAddModal()}>
-                  <div className="w-full max-w-3xl bg-white rounded-2xl shadow-xl p-4" onClick={(e) => e.stopPropagation()}>
-                    <div className="flex items-center justify-between mb-3">
+                  <div className="w-full max-w-3xl max-h-[92dvh] flex flex-col bg-white rounded-2xl shadow-xl p-4" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-center justify-between mb-3 shrink-0">
                       <div className="text-base font-semibold text-slate-900">Добавить товар</div>
                       <button className="text-slate-500 hover:text-slate-700" onClick={() => closeBarterAddModal()}><X className="h-4 w-4" /></button>
                     </div>
@@ -22153,7 +22153,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <span className="block text-xs text-slate-500 mt-0.5">Если выбрать несколько товаров, сразу создастся одна объединённая карточка.</span>
                       </span>
                     </label>
-                    <div className="max-h-[45vh] overflow-y-auto border rounded-xl p-2 space-y-1">
+                    <div className="flex-1 min-h-0 overflow-y-auto border rounded-xl p-2 space-y-1">
                       {barterCatalogLoading ? (
                         <div className="text-sm text-slate-500 p-3">Загрузка товаров...</div>
                       ) : barterFilteredProducts.length === 0 ? (
@@ -22181,7 +22181,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         );
                       })}
                     </div>
-                    <div className="mt-3 flex justify-end gap-2">
+                    <div className="mt-3 flex justify-end gap-2 shrink-0">
                       <button className="btn-ghost" onClick={() => closeBarterAddModal()}>Отмена</button>
                       <button className="btn-primary" onClick={addSelectedBarterProducts} disabled={!barterCheckedProductIds.length || !barterSupplierId}>{barterCreateMergedCard ? 'Создать объединённую карточку' : 'Добавить выбранные'}</button>
                     </div>
