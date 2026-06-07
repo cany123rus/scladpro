@@ -64,10 +64,10 @@ async function syncSupplier(supabase: any, supplier: any, days: number, beginArg
   }
   const rows: any[] = []
   let firstCall = true
-  for (let i = 0; i < ids.length; i += 100) {
-    const idBatch = ids.slice(i, i + 100).join(',')
+  for (let i = 0; i < ids.length; i += 50) {           // WB v3 fullstats max 50 adverts/request
+    const idBatch = ids.slice(i, i + 50).join(',')
     for (const [b, e] of wins) {
-      if (!firstCall) await sleep(1500)
+      if (!firstCall) await sleep(2500)
       firstCall = false
       const r = await wbFetch(`${ADV}/adv/v3/fullstats?ids=${idBatch}&beginDate=${b}&endDate=${e}`, { headers: { Authorization: token } })
       if (r.status === 204) continue

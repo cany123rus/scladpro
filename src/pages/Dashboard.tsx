@@ -935,6 +935,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [adsApiCampSort, setAdsApiCampSort] = useState<{ field: string; dir: 'asc' | 'desc' }>({ field: 'sum', dir: 'desc' });
   const [adsApiSyncing, setAdsApiSyncing] = useState(false);
   const [adsApiLastSync, setAdsApiLastSync] = useState<string>('');
+  // drilldown по ключам/кластерам кампании
+  const [adsApiKwFor, setAdsApiKwFor] = useState<{ id: number; name: string } | null>(null);
+  const [adsApiKwLoading, setAdsApiKwLoading] = useState(false);
+  const [adsApiKwData, setAdsApiKwData] = useState<any[] | null>(null);
+  const [adsApiKwNote, setAdsApiKwNote] = useState<string>('');
+  const [adsApiKwSort, setAdsApiKwSort] = useState<{ field: string; dir: 'asc' | 'desc' }>({ field: 'sum', dir: 'desc' });
+  const [adsApiKwFilter, setAdsApiKwFilter] = useState<'all' | 'good' | 'bad'>('all');
   const [adsAnalyticsSheets, setAdsAnalyticsSheets] = useState<Array<{ name: string; columns: string[]; rows: any[] }>>([]);
   const [adsNmSort, setAdsNmSort] = useState<{ field: string; dir: 'asc' | 'desc' }>({ field: 'revenue', dir: 'desc' });
   const [adsKwSearch, setAdsKwSearch] = useState('');
@@ -16293,6 +16300,43 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     }
   };
 
+  // Загрузка ключей/кластеров одной кампании (живой запрос к WB через edge).
+  const loadAdsApiKeywords = async (advertId: number, name: string) => {
+    if (!adsApiSupplierId) { setAdsApiError('Выберите поставщика'); return; }
+    setAdsApiKwFor({ id: advertId, name });
+    setAdsApiKwLoading(true); setAdsApiKwData(null); setAdsApiKwNote('');
+    const base = (import.meta as any).env?.VITE_SUPABASE_URL || 'https://blygwkxjogmioebutiwn.supabase.co';
+    const key = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || 'sb_publishable_kSk_B3Y6eN5P9sCVk67-cg_uSGedHJX';
+    const iso = (d: Date) => d.toISOString().slice(0, 10);
+    const to = adsApiTo || iso(new Date());
+    const from = adsApiFrom || iso(new Date(Date.now() - 29 * 86400000));
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 120000);
+    try {
+      const r = await fetch(`${base}/functions/v1/wb-adv-keywords`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: key, Authorization: `Bearer ${key}` },
+        body: JSON.stringify({ supplier_id: adsApiSupplierId, advert_id: advertId, from, to }),
+        signal: ctrl.signal,
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok || data?.error) throw new Error(data?.error || `HTTP ${r.status}`);
+      const kws = data?.keywords || [];
+      setAdsApiKwData(kws);
+      if (!kws.length) {
+        setAdsApiKwNote(data?.kwErr === '429'
+          ? 'WB временно ограничил запросы (лимит ~5/мин). Повторите через минуту.'
+          : 'WB не вернул поисковые фразы по этой кампании за период (нет кластеров с >100 показов или поискового размещения).');
+      }
+    } catch (e: any) {
+      setAdsApiKwData([]);
+      setAdsApiKwNote(e?.name === 'AbortError' ? 'Долгий ответ WB — повторите.' : 'Ошибка: ' + (e?.message || 'не удалось загрузить'));
+    } finally {
+      clearTimeout(timer);
+      setAdsApiKwLoading(false);
+    }
+  };
+
   const adsApiPreset = (kind: 'today' | 'yesterday' | '7' | '30') => {
     const iso = (d: Date) => d.toISOString().slice(0, 10);
     const today = new Date();
@@ -23505,7 +23549,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                 </tr>
                                 {[...adsApiData.campaigns].sort((a: any, b: any) => { const f = adsApiCampSort.field; const mul = adsApiCampSort.dir === 'asc' ? 1 : -1; return f === 'name' ? String(a.name).localeCompare(String(b.name), 'ru') * mul : ((a[f] || 0) - (b[f] || 0)) * mul; }).map((c: any) => (
                                   <tr key={c.id} className="border-t border-slate-100 hover:bg-slate-50">
-                                    <td className="px-2 py-1.5 max-w-[260px] truncate" title={c.name}>{c.name}</td>
+                                    <td className="px-2 py-1.5 max-w-[300px]">
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="truncate max-w-[230px]" title={c.name}>{c.name}</span>
+                                        <button onClick={() => loadAdsApiKeywords(Number(c.id), c.name)} title="Ключи / кластеры по кампании" className="shrink-0 px-1.5 py-0.5 text-[10px] font-semibold rounded border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100">🔑 Ключи</button>
+                                      </div>
+                                    </td>
                                     <td className="px-2 py-1.5 text-right">{Math.round(c.sum).toLocaleString('ru-RU')}</td>
                                     <td className="px-2 py-1.5 text-right">{Math.round(c.revenue).toLocaleString('ru-RU')}</td>
                                     <td className="px-2 py-1.5 text-right">{c.views.toLocaleString('ru-RU')}</td>
@@ -23522,6 +23571,97 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                 ))}
                               </tbody>
                             </table>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {adsApiKwFor && (() => {
+                    const all = adsApiKwData || [];
+                    // классификация фраз
+                    const totalSum = all.reduce((s, k) => s + (k.sum || 0), 0);
+                    const avgCpc = (() => { const c = all.filter((k) => k.clicks > 0); return c.length ? c.reduce((s, k) => s + k.cpc, 0) / c.length : 0; })();
+                    const classify = (k: any): 'good' | 'bad' | 'mid' => {
+                      if (k.orders > 0 && k.ctr >= 4 && (!avgCpc || k.cpc <= avgCpc)) return 'good';
+                      if (k.sum >= Math.max(50, totalSum * 0.03) && k.orders === 0) return 'bad';
+                      if (k.clicks >= 15 && k.ctr < 2) return 'bad';
+                      return 'mid';
+                    };
+                    const enriched = all.map((k) => ({ ...k, cls: classify(k) }));
+                    const view = enriched.filter((k) => adsApiKwFilter === 'all' ? true : k.cls === adsApiKwFilter);
+                    const sorted = [...view].sort((a, b) => { const f = adsApiKwSort.field; const mul = adsApiKwSort.dir === 'asc' ? 1 : -1; return f === 'keyword' ? String(a.keyword).localeCompare(String(b.keyword), 'ru') * mul : ((a[f] || 0) - (b[f] || 0)) * mul; });
+                    const bad = enriched.filter((k) => k.cls === 'bad');
+                    const good = enriched.filter((k) => k.cls === 'good');
+                    const wastedSum = bad.reduce((s, k) => s + (k.sum || 0), 0);
+                    const num = (v: number, d = 0) => (v || 0).toLocaleString('ru-RU', { minimumFractionDigits: d, maximumFractionDigits: d });
+                    const cols: Array<[string, string]> = [['keyword', 'Фраза / кластер'], ['views', 'Показы'], ['clicks', 'Клики'], ['ctr', 'CTR %'], ['cpc', 'CPC ₽'], ['sum', 'Расход ₽'], ['orders', 'Заказы'], ['cr', 'CR %']];
+                    return (
+                      <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/50 backdrop-blur-sm p-0 sm:p-4" onClick={() => setAdsApiKwFor(null)}>
+                        <div className="bg-white rounded-t-3xl sm:rounded-3xl w-full sm:max-w-5xl max-h-[92vh] flex flex-col shadow-2xl" onClick={(e) => e.stopPropagation()}>
+                          <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="text-xs text-slate-400">Ключи и кластеры кампании</div>
+                              <div className="font-bold text-slate-800 truncate" title={adsApiKwFor.name}>{adsApiKwFor.name}</div>
+                            </div>
+                            <button onClick={() => setAdsApiKwFor(null)} className="shrink-0 w-9 h-9 rounded-full hover:bg-slate-100 text-slate-500 text-lg">✕</button>
+                          </div>
+                          <div className="p-5 overflow-auto">
+                            {adsApiKwLoading ? (
+                              <div className="py-12 text-center text-slate-500 text-sm">Загружаю данные из WB…</div>
+                            ) : (!adsApiKwData || adsApiKwData.length === 0) ? (
+                              <div className="py-10 text-center text-slate-500 text-sm whitespace-pre-line">{adsApiKwNote || 'Нет данных.'}</div>
+                            ) : (
+                              <>
+                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
+                                  <div className="rounded-xl bg-slate-50 p-3"><div className="text-[11px] text-slate-500">Всего фраз</div><div className="text-lg font-bold text-slate-800">{enriched.length}</div></div>
+                                  <div className="rounded-xl bg-emerald-50 p-3"><div className="text-[11px] text-emerald-700">Хорошие</div><div className="text-lg font-bold text-emerald-700">{good.length}</div></div>
+                                  <div className="rounded-xl bg-rose-50 p-3"><div className="text-[11px] text-rose-700">Плохие</div><div className="text-lg font-bold text-rose-700">{bad.length}</div></div>
+                                  <div className="rounded-xl bg-amber-50 p-3"><div className="text-[11px] text-amber-700">Слив на плохих</div><div className="text-lg font-bold text-amber-700">{num(wastedSum)} ₽</div></div>
+                                </div>
+
+                                {(bad.length > 0 || good.length > 0) && (
+                                  <div className="mb-4 rounded-xl border border-slate-200 p-3 text-xs space-y-2">
+                                    <div className="font-bold text-slate-700">Рекомендации</div>
+                                    {bad.length > 0 && <div className="text-rose-700">❌ Минусовать ({bad.length}): тратят деньги без заказов / низкий CTR. Топ: {bad.slice().sort((a, b) => b.sum - a.sum).slice(0, 6).map((k) => `«${k.keyword}»`).join(', ')}{bad.length > 6 ? '…' : ''}</div>}
+                                    {good.length > 0 && <div className="text-emerald-700">✅ Поднять ставку ({good.length}): дают заказы при хорошем CTR и низком CPC. Топ: {good.slice().sort((a, b) => b.orders - a.orders).slice(0, 6).map((k) => `«${k.keyword}»`).join(', ')}{good.length > 6 ? '…' : ''}</div>}
+                                  </div>
+                                )}
+
+                                <div className="flex items-center gap-2 mb-2">
+                                  {(['all', 'good', 'bad'] as const).map((f) => (
+                                    <button key={f} onClick={() => setAdsApiKwFilter(f)} className={`px-3 py-1 text-xs font-semibold rounded-lg border ${adsApiKwFilter === f ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>{f === 'all' ? 'Все' : f === 'good' ? 'Хорошие' : 'Плохие'}</button>
+                                  ))}
+                                  <span className="text-[11px] text-slate-400 ml-auto">{sorted.length} строк</span>
+                                </div>
+
+                                <div className="overflow-auto max-h-[50vh] border border-slate-100 rounded-lg">
+                                  <table className="min-w-full text-xs">
+                                    <thead className="bg-slate-50 sticky top-0 z-10">
+                                      <tr className="select-none">
+                                        {cols.map(([f, l]) => (
+                                          <th key={f} className={`px-2 py-2 cursor-pointer hover:text-indigo-600 ${f === 'keyword' ? 'text-left' : 'text-right'}`} onClick={() => setAdsApiKwSort((p) => ({ field: f, dir: p.field === f && p.dir === 'desc' ? 'asc' : 'desc' }))}>{l}{adsApiKwSort.field === f ? (adsApiKwSort.dir === 'asc' ? ' ▲' : ' ▼') : ''}</th>
+                                        ))}
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {sorted.map((k, i) => (
+                                        <tr key={i} className={`border-t border-slate-100 ${k.cls === 'good' ? 'bg-emerald-50/40' : k.cls === 'bad' ? 'bg-rose-50/40' : ''}`}>
+                                          <td className="px-2 py-1.5 max-w-[280px] truncate" title={k.keyword}>{k.cls === 'good' ? '✅ ' : k.cls === 'bad' ? '❌ ' : ''}{k.keyword}</td>
+                                          <td className="px-2 py-1.5 text-right">{num(k.views)}</td>
+                                          <td className="px-2 py-1.5 text-right">{num(k.clicks)}</td>
+                                          <td className="px-2 py-1.5 text-right">{num(k.ctr, 2)}</td>
+                                          <td className="px-2 py-1.5 text-right">{num(k.cpc, 2)}</td>
+                                          <td className="px-2 py-1.5 text-right">{num(k.sum)}</td>
+                                          <td className="px-2 py-1.5 text-right">{num(k.orders)}</td>
+                                          <td className="px-2 py-1.5 text-right">{num(k.cr, 2)}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </>
+                            )}
                           </div>
                         </div>
                       </div>
