@@ -1,30 +1,35 @@
 // Small presentational components extracted from Dashboard.tsx.
-import React, { useEffect, useRef } from 'react';
-import { Upload } from 'lucide-react';
-import { ensureExcelFileSize, ensureExcelRowLimit, readFirstSheetAsJson } from '../utils/safeExcel';
+import React, { useEffect, useRef, useState } from 'react';
+import { Upload, Loader2 } from 'lucide-react';
+import { ensureExcelFileSize, ensureExcelRowLimit } from '../utils/safeExcel';
+import { readFirstSheetAsJsonFast } from '../utils/excelWorkerClient';
 import { ensureBwip, lazyLibs } from './dashboardLazyLibs';
 
 export const ExcelUploader = ({ onUpload, disabled = false, maxFileBytes }: { onUpload: (data: any[], fileName?: string, sourceFile?: File) => void | Promise<void>; disabled?: boolean; maxFileBytes?: number }) => {
+  const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<string>('');
   return (
     <div className="oc-card p-6">
       <h2 className="text-lg font-bold text-slate-900 mb-4">Загрузка отчета</h2>
-      <div className={`border-2 border-dashed rounded-xl p-4 md:p-8 text-center transition-colors ${disabled ? 'border-slate-200 bg-slate-50' : 'border-slate-200 hover:border-indigo-500'}`}>
+      <div className={`border-2 border-dashed rounded-xl p-4 md:p-8 text-center transition-colors ${disabled || busy ? 'border-slate-200 bg-slate-50' : 'border-slate-200 hover:border-indigo-500'}`}>
         <input
           type="file"
           accept=".xlsx, .xls"
           multiple
-          disabled={disabled}
+          disabled={disabled || busy}
           onChange={async (e) => {
             const files = Array.from(e.target.files || []);
             if (!files.length) return;
 
             const errors: string[] = [];
+            setBusy(true);
 
             try {
               for (let fi = 0; fi < files.length; fi += 1) {
                 const file = files[fi];
+                setProgress(files.length > 1 ? `Файл ${fi + 1} из ${files.length}: ${file.name}` : `Обработка: ${file.name}`);
                 if (fi > 0) {
-                  await new Promise((r) => setTimeout(r, 350));
+                  await new Promise((r) => setTimeout(r, 200));
                 }
                 try {
                   const fileSizeError = ensureExcelFileSize(file, maxFileBytes);
@@ -33,8 +38,8 @@ export const ExcelUploader = ({ onUpload, disabled = false, maxFileBytes }: { on
                     continue;
                   }
 
-                  const buff = await file.arrayBuffer();
-                  const data = await readFirstSheetAsJson(buff);
+                  // Parsed in a Web Worker → UI stays responsive even for 60k+ rows.
+                  const data = await readFirstSheetAsJsonFast(file);
                   if (Array.isArray(data)) {
                     const rowLimitError = ensureExcelRowLimit(data.length);
                     if (rowLimitError) {
@@ -53,18 +58,20 @@ export const ExcelUploader = ({ onUpload, disabled = false, maxFileBytes }: { on
                 alert(`Часть файлов не обработана:\n\n${errors.slice(0, 8).join('\n')}`);
               }
             } finally {
+              setBusy(false);
+              setProgress('');
               if (e.target) e.target.value = '';
             }
           }}
           className="hidden"
           id="excel-upload"
         />
-        <label htmlFor="excel-upload" className={`flex flex-col items-center ${disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}>
+        <label htmlFor="excel-upload" className={`flex flex-col items-center ${disabled || busy ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}>
           <div className="p-4 bg-indigo-50 rounded-full mb-4">
-            <Upload className="h-8 w-8 text-indigo-600" />
+            {busy ? <Loader2 className="h-8 w-8 text-indigo-600 animate-spin" /> : <Upload className="h-8 w-8 text-indigo-600" />}
           </div>
-          <span className="text-slate-900 font-medium">{disabled ? 'Сначала выберите поставщика' : 'Нажмите для загрузки'}</span>
-          <span className="text-sm text-slate-500 mt-1">{disabled ? 'Загрузка недоступна без выбранного поставщика' : 'можно выбрать один или несколько файлов Excel'}</span>
+          <span className="text-slate-900 font-medium">{busy ? 'Обработка файла…' : disabled ? 'Сначала выберите поставщика' : 'Нажмите для загрузки'}</span>
+          <span className="text-sm text-slate-500 mt-1">{busy ? (progress || 'Парсинг в фоне, интерфейс не зависнет') : disabled ? 'Загрузка недоступна без выбранного поставщика' : 'можно выбрать один или несколько файлов Excel'}</span>
         </label>
       </div>
     </div>

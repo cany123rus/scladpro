@@ -22793,23 +22793,32 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           {activeTab === 'analytics' && (
             <div className="w-full max-w-none mx-auto">
               <div className="mb-6">
-                <h1 className="text-2xl font-bold text-slate-900">Аналитика</h1>
-                <p className="text-slate-500 mt-1">Разделённые модули: отчёты и реклама</p>
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setAnalyticsSubTab('reports')}
-                    className={`px-4 py-2 text-sm font-semibold rounded-xl border shadow-sm ${analyticsSubTab === 'reports' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'}`}
-                  >
-                    Аналитика отчётов
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setAnalyticsSubTab('ads')}
-                    className={`px-4 py-2 text-sm font-semibold rounded-xl border shadow-sm ${analyticsSubTab === 'ads' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'}`}
-                  >
-                    Аналитика рекламы
-                  </button>
+                <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-indigo-600 via-violet-600 to-fuchsia-600 p-6 sm:p-7 shadow-lg shadow-indigo-200/50">
+                  <div className="absolute -right-8 -top-8 h-40 w-40 rounded-full bg-white/10 blur-2xl" />
+                  <div className="absolute -right-2 bottom-0 opacity-20"><BarChart2 className="h-28 w-28 text-white" /></div>
+                  <div className="relative flex items-center gap-3">
+                    <div className="rounded-2xl bg-white/15 p-3 backdrop-blur-sm"><BarChart2 className="h-7 w-7 text-white" /></div>
+                    <div>
+                      <h1 className="text-2xl sm:text-3xl font-bold text-white">Аналитика</h1>
+                      <p className="text-indigo-100 text-sm mt-0.5">Отчёты Wildberries и эффективность рекламы</p>
+                    </div>
+                  </div>
+                  <div className="relative mt-5 inline-flex rounded-2xl bg-white/15 p-1 backdrop-blur-sm">
+                    <button
+                      type="button"
+                      onClick={() => setAnalyticsSubTab('reports')}
+                      className={`px-4 sm:px-5 py-2 text-sm font-semibold rounded-xl transition-all ${analyticsSubTab === 'reports' ? 'bg-white text-indigo-700 shadow-sm' : 'text-white/90 hover:bg-white/10'}`}
+                    >
+                      Аналитика отчётов
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAnalyticsSubTab('ads')}
+                      className={`px-4 sm:px-5 py-2 text-sm font-semibold rounded-xl transition-all ${analyticsSubTab === 'ads' ? 'bg-white text-indigo-700 shadow-sm' : 'text-white/90 hover:bg-white/10'}`}
+                    >
+                      Аналитика рекламы
+                    </button>
+                  </div>
                 </div>
               </div>
 

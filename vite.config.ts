@@ -5,6 +5,9 @@ import { youwareVitePlugin } from "@youware/vite-plugin-react";
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [youwareVitePlugin(), react()],
+  // Web workers use ES output so they can code-split (the Excel worker lazily
+  // imports exceljs). IIFE/UMD worker format can't code-split.
+  worker: { format: 'es' },
   server: {
     host: "127.0.0.1",
     port: 5173,
