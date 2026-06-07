@@ -21477,7 +21477,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   </div>
                 )}
 
-                {barterSection === 'barters_main' && !!barterTopSupplierId && <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-3">
+                {barterSection === 'barters_main' && !!barterTopSupplierId && <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
                   <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-4 shadow-sm">
                     <div className="text-xs uppercase tracking-wide text-slate-500">Карточки</div>
                     <div className="mt-2 text-3xl font-bold text-slate-900 leading-none">{monthStats.cards}</div>
@@ -21828,7 +21828,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             <>
                               <div className="space-y-2 mb-3">
                                 {(row.barter_links || []).map((_: any, i: number) => (
-                                  <div key={`barter-${row.id}-${i}`} className="grid grid-cols-1 md:grid-cols-[84px_1fr_150px_120px_120px_170px_118px_36px] gap-2 items-center rounded-xl border border-slate-200 bg-slate-50/70 p-2.5 md:border-0 md:bg-transparent md:p-0">
+                                  <div key={`barter-${row.id}-${i}`} className="grid grid-cols-1 xl:grid-cols-[84px_1fr_150px_120px_120px_170px_118px_36px] gap-2 items-center rounded-xl border border-slate-200 bg-slate-50/70 p-2.5 xl:border-0 xl:bg-transparent xl:p-0">
                                     <span className="text-xs text-slate-500">Бартер {i + 1}</span>
                                     <div className="flex flex-col sm:flex-row sm:items-center gap-2">
                                       <input
@@ -21926,7 +21926,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                               <div className="space-y-2 mb-1">
                                 {(row.ad_links || []).map((_: any, i: number) => (
-                                  <div key={`ad-${row.id}-${i}`} className="grid grid-cols-1 md:grid-cols-[84px_1fr_150px_120px_120px_170px_118px_36px] gap-2 items-center rounded-xl border border-slate-200 bg-slate-50/70 p-2.5 md:border-0 md:bg-transparent md:p-0">
+                                  <div key={`ad-${row.id}-${i}`} className="grid grid-cols-1 xl:grid-cols-[84px_1fr_150px_120px_120px_170px_118px_36px] gap-2 items-center rounded-xl border border-slate-200 bg-slate-50/70 p-2.5 xl:border-0 xl:bg-transparent xl:p-0">
                                     <span className="text-xs text-slate-500">Реклама {i + 1}</span>
                                     <div className="flex flex-col sm:flex-row sm:items-center gap-2">
                                       <input
@@ -22121,7 +22121,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       <div className="text-base font-semibold text-slate-900">Добавить товар</div>
                       <button className="text-slate-500 hover:text-slate-700" onClick={() => closeBarterAddModal()}><X className="h-4 w-4" /></button>
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-2 mb-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
                       <select value={barterSupplierId} onChange={(e) => setBarterSupplierId(e.target.value)} className="oc-select">
                         <option value="">Выберите поставщика</option>
                         {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
