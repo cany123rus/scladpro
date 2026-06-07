@@ -1886,11 +1886,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
   // Auto write-off the paid amount from the payer's "Деньги на складе" balance.
   // Send a writeoff notification to the admin via the dedicated writeoff bot.
-  const notifyWriteoff = async (params: { amount: number; ownerTitle?: string; comment?: string; by?: string }) => {
+  const notifyWriteoff = async (params: { amount: number; ownerTitle?: string; owner?: string; comment?: string; by?: string }) => {
     try {
       const token = String(writeoffBotToken || '').trim();
-      const chat = String(writeoffAdminChatId || '').trim();
-      if (!token || !chat) return;
+      if (!token) return;
       const lines = [
         '💸 Списание со склада',
         `Сумма: ${Math.abs(Number(params.amount || 0)).toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽`,
@@ -1899,7 +1898,19 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         params.by ? `Кто провёл: ${params.by}` : '',
         `Время: ${new Date().toLocaleString('ru-RU')}`,
       ].filter(Boolean);
-      await telegramService.sendMessage(token, chat, lines.join('\n'));
+      const msg = lines.join('\n');
+      // Recipients: admin chat + the supplier bound to this money account (if any).
+      const chats = new Set<string>();
+      const admin = String(writeoffAdminChatId || '').trim();
+      if (admin) chats.add(admin);
+      if (params.owner) {
+        const boundSupplier = suppliers.find((s: any) => s.warehouse_money_owner === params.owner);
+        const supChat = String(boundSupplier?.telegram_chat_id || '').trim();
+        if (supChat) chats.add(supChat);
+      }
+      for (const chat of chats) {
+        try { await telegramService.sendMessage(token, chat, msg); } catch (e) { console.warn('writeoff notify to', chat, 'failed', e); }
+      }
     } catch (e) {
       console.warn('writeoff notify failed', e);
     }
@@ -1917,7 +1928,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       }]);
       if (error) throw error;
       await fetchCwWarehouseMoneyHistory();
-      notifyWriteoff({ amount: total, ownerTitle: getSupplierNameForOwner(owner), comment, by: currentEmployee?.full_name || currentEmployee?.login });
+      notifyWriteoff({ amount: total, owner, ownerTitle: getSupplierNameForOwner(owner), comment, by: currentEmployee?.full_name || currentEmployee?.login });
     } catch (e: any) {
       console.warn('warehouse money writeoff failed', e);
       showToast('Оплата прошла, но списание со склада не удалось: ' + (e?.message || 'неизвестно'), 'warning');
@@ -4163,7 +4174,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
     if (mode === 'writeoff') {
       const ownerTitle = WAREHOUSE_MONEY_OWNERS.find((o) => o.id === owner)?.title || owner;
-      notifyWriteoff({ amount, ownerTitle, comment: form.comment, by: currentEmployee?.full_name || currentEmployee?.login });
+      notifyWriteoff({ amount, owner, ownerTitle, comment: form.comment, by: currentEmployee?.full_name || currentEmployee?.login });
     }
 
     setCwWarehouseMoneyForms((prev) => ({
@@ -4593,6 +4604,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       await loadPaymentReports();
       notifyWriteoff({
         amount: netTotal,
+        owner: salaryPayOwner,
         ownerTitle,
         comment: `Оплата ЗП${period ? ` (${period.label})` : ''}: ${selected.map((r) => r.employee_name).join(', ')}${finesTotal > 0 ? ` | штрафы −${finesTotal.toLocaleString('ru-RU')}₽` : ''}`,
         by: currentEmployee?.full_name || currentEmployee?.login,
@@ -9238,6 +9250,23 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     if (error) console.error('Error fetching suppliers:', error);
     else setSuppliers(data || []);
     setLoadingSuppliers(false);
+  };
+
+  // Bind a "Деньги на складе" account (sasha/leha) to a supplier. Each owner can
+  // belong to only one supplier; writeoffs then notify that supplier's chat.
+  const handleBindSupplierOwner = async (supplierId: string, owner: string | null) => {
+    try {
+      if (owner) {
+        // Release this owner from any other supplier first (unique constraint).
+        await supabase.from('suppliers').update({ warehouse_money_owner: null }).eq('warehouse_money_owner', owner);
+      }
+      const { error } = await supabase.from('suppliers').update({ warehouse_money_owner: owner }).eq('id', supplierId);
+      if (error) throw error;
+      await fetchSuppliers();
+      showToast(owner ? 'Счёт привязан к поставщику' : 'Привязка снята', 'success');
+    } catch (e: any) {
+      showToast('Ошибка привязки: ' + (e?.message || 'неизвестно'), 'error');
+    }
   };
 
   const handleSupplierSubmit = async (e: React.FormEvent) => {
@@ -17832,6 +17861,26 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           <button onClick={() => handleEditSupplier(supplier)} className="text-slate-400 hover:text-indigo-600 p-1 hover:bg-indigo-50 rounded"><Pencil className="h-4 w-4" /></button>
                           <button onClick={() => handleDeleteSupplier(supplier.id)} className="text-slate-400 hover:text-red-600 p-1 hover:bg-red-50 rounded"><Trash2 className="h-4 w-4" /></button>
                         </div>
+                      </div>
+                      <div className="mt-2">
+                        <label className="block text-[11px] font-medium text-slate-500 mb-1 uppercase tracking-wide">Деньги на складе</label>
+                        <select
+                          value={(supplier as any).warehouse_money_owner || ''}
+                          onChange={(e) => handleBindSupplierOwner(supplier.id, e.target.value || null)}
+                          className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                        >
+                          <option value="">— не привязано —</option>
+                          {WAREHOUSE_MONEY_OWNERS.filter((o) => {
+                            const cur = (supplier as any).warehouse_money_owner;
+                            const takenByOther = suppliers.some((s: any) => String(s.id) !== String(supplier.id) && s.warehouse_money_owner === o.id);
+                            return o.id === cur || !takenByOther;
+                          }).map((o) => (
+                            <option key={`bind-${supplier.id}-${o.id}`} value={o.id}>{o.title}</option>
+                          ))}
+                        </select>
+                        {(supplier as any).warehouse_money_owner && (
+                          <div className="mt-1 text-[11px] text-emerald-600">Уведомления о списаниях идут этому поставщику (TG: {supplier.telegram_chat_id})</div>
+                        )}
                       </div>
                       <div className="flex gap-2 mt-2">
                         <button className="flex-1 py-2.5 bg-slate-50 text-slate-600 text-sm font-medium rounded-lg hover:bg-slate-100 flex items-center justify-center" onClick={() => handleOpenSupplierHistory(supplier)}><History className="h-4 w-4 mr-2 text-slate-500" /> Поставки</button>
