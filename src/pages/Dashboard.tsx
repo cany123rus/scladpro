@@ -3371,6 +3371,20 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         return y + 9;
       };
 
+      // Ensure a band + its table fit on the current page; if not but they would
+      // fit on a fresh page, move to a new page so the table is not split ugly.
+      const fitOrPage = (yy: number, nRows: number, hasFoot: boolean) => {
+        const ROW_H = 6, HEAD_H = 8, FOOT_H = 8, BAND_H = 9, BOTTOM = 14, TOP = 16;
+        const needed = BAND_H + HEAD_H + nRows * ROW_H + (hasFoot ? FOOT_H : 0);
+        const avail = pageH - BOTTOM - yy;
+        const fullAvail = pageH - BOTTOM - TOP;
+        // whole table fits on a fresh page but not here → new page
+        if (needed > avail && needed <= fullAvail) { doc.addPage(); return TOP; }
+        // not even band + header + 2 rows fit → new page
+        if (avail < BAND_H + HEAD_H + ROW_H * 2) { doc.addPage(); return TOP; }
+        return yy;
+      };
+
       // Assembly daily chart (report period or last 30 days)
       const asmData = await buildAssemblyDailyForPdf(generalReportForm.start_date, generalReportForm.end_date, { supplierId: generalReportForm.supplier_id, personName: generalReportForm.person_name });
 
@@ -3406,15 +3420,32 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
       // Full assembly cost per unit by supplier (right after Собрано по поставщикам)
       if (generalFullAvg.bySupplier.filter((s: any) => s.qty > 0).length) {
-        if (y > pageH - 30) { doc.addPage(); y = 16; }
+        const favRows = generalFullAvg.bySupplier.filter((s: any) => s.qty > 0);
+        y = fitOrPage(y, favRows.length, true);
         y = drawBand(y, 'Средняя цена сборки (полная: ЗП + доставка + закуп)', [225, 29, 72]);
         baseTable({
           startY: y,
           head: [['Поставщик', 'Собрано, шт', 'Затраты', 'Цена/шт']],
-          body: generalFullAvg.bySupplier.filter((s: any) => s.qty > 0).map((s: any) => [s.name, s.qty.toLocaleString('ru-RU'), money(s.cost), `${s.avg.toFixed(2)} руб.`]),
+          body: favRows.map((s: any) => [s.name, s.qty.toLocaleString('ru-RU'), money(s.cost), `${s.avg.toFixed(2)} руб.`]),
           foot: [['Итого', generalFullAvg.totalQty.toLocaleString('ru-RU'), money(generalFullAvg.totalCost), `${generalFullAvg.avg.toFixed(2)} руб.`]],
         }, y, [225, 29, 72]);
         y = ((doc as any).lastAutoTable?.finalY || y) + 9;
+      }
+
+      // Boxes on stock (moved here — right after Средняя цена сборки полная)
+      {
+        const boxRows = generalBoxStock.bySupplier.length;
+        y = fitOrPage(y, boxRows || 1, boxRows > 0);
+        y = drawBand(y, `Коробки на складе — остаток: ${boxStock.remaining.toLocaleString('ru-RU')} шт. (за всё время: закуплено ${boxStock.added.toLocaleString('ru-RU')}, израсходовано ${boxStock.used.toLocaleString('ru-RU')})`, [79, 70, 229]);
+        if (boxRows) {
+          baseTable({
+            startY: y,
+            head: [['Поставщик', 'Израсходовано коробок']],
+            body: generalBoxStock.bySupplier.map((s: any) => [s.name, s.used.toLocaleString('ru-RU')]),
+            foot: [['Итого', generalBoxStock.used.toLocaleString('ru-RU')]],
+          }, y, [79, 70, 229]);
+          y = ((doc as any).lastAutoTable?.finalY || y) + 9;
+        }
       }
 
       // ── Затраты + закуп ──────────────────────────────────────────
@@ -3447,7 +3478,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       }
       // Full packaging detail table
       if (pkg.detail.length) {
-        if (y > pageH - 30) { doc.addPage(); y = 16; }
+        y = fitOrPage(y, Math.min(pkg.detail.length, 12), true);
         y = drawBand(y, 'Закуп — детализация', [245, 158, 11]);
         baseTable({
           startY: y,
@@ -3470,21 +3501,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         y = ((doc as any).lastAutoTable?.finalY || y) + 9;
       }
 
-      // Boxes (filtered by period/supplier)
-      {
-        if (y > pageH - 30) { doc.addPage(); y = 16; }
-        y = drawBand(y, `Коробки на складе — остаток: ${boxStock.remaining.toLocaleString('ru-RU')} шт. (за всё время: закуплено ${boxStock.added.toLocaleString('ru-RU')}, израсходовано ${boxStock.used.toLocaleString('ru-RU')})`, [79, 70, 229]);
-        if (generalBoxStock.bySupplier.length) {
-          baseTable({
-            startY: y,
-            head: [['Поставщик', 'Израсходовано коробок']],
-            body: generalBoxStock.bySupplier.map((s: any) => [s.name, s.used.toLocaleString('ru-RU')]),
-            foot: [['Итого', generalBoxStock.used.toLocaleString('ru-RU')]],
-          }, y, [79, 70, 229]);
-          y = ((doc as any).lastAutoTable?.finalY || y) + 9;
-        }
-      }
-
+      y = fitOrPage(y, generalTempWorkerRows.length, false);
       y = drawBand(y, 'ЗП временные', [16, 185, 129]);
       baseTable({
         startY: y,
@@ -3503,6 +3520,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       }, y, [16, 185, 129]);
       y = ((doc as any).lastAutoTable?.finalY || y) + 9;
 
+      y = fitOrPage(y, Math.min(generalDeliveryRows.length, 12), false);
       y = drawBand(y, 'Доставки', [37, 99, 235]);
       baseTable({
         startY: y,
@@ -3519,6 +3537,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       }, y, [37, 99, 235]);
       y = ((doc as any).lastAutoTable?.finalY || y) + 9;
 
+      y = fitOrPage(y, Math.min(generalReportCwRows.length, 12), false);
       y = drawBand(y, 'Постоянные сотрудники', [79, 70, 229]);
       baseTable({
         startY: y,
