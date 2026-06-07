@@ -16428,20 +16428,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const adsNmSortBtn = (field: string) => () => setAdsNmSort((p) => ({ field, dir: p.field === field && p.dir === 'desc' ? 'asc' : 'desc' }));
   const adsNmArw = (field: string) => adsNmSort.field === field ? (adsNmSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
 
-  // Searchable + sortable view over all keyword phrases that consume budget.
-  const adsKwView = React.useMemo(() => {
-    const q = adsKwSearch.trim().toLowerCase();
-    let list = adsViz.keywords || [];
-    if (q) list = list.filter((k: any) => String(k.phrase).toLowerCase().includes(q));
-    const { field, dir } = adsKwSort; const mul = dir === 'asc' ? 1 : -1;
-    return [...list].sort((a: any, b: any) => {
-      if (field === 'phrase') return String(a.phrase).localeCompare(String(b.phrase), 'ru') * mul;
-      return ((a[field] || 0) - (b[field] || 0)) * mul;
-    });
-  }, [adsViz.keywords, adsKwSearch, adsKwSort]);
-  const adsKwSortBtn = (field: string) => () => setAdsKwSort((p) => ({ field, dir: p.field === field && p.dir === 'desc' ? 'asc' : 'desc' }));
-  const adsKwArw = (field: string) => adsKwSort.field === field ? (adsKwSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
-
   // Visualisation data for the Ads dashboard: daily dynamics, keyword breakdown,
   // and the impressions→clicks→carts→orders funnel.
   const adsViz = React.useMemo(() => {
@@ -16510,6 +16496,20 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
     return { daily, keywords, kwSpendTotal, avgCpc, wasted, wastedSum, expensive, donut, funnel };
   }, [adsAnalyticsSheets, adsKpi]);
+
+  // Searchable + sortable view over all keyword phrases that consume budget.
+  const adsKwView = React.useMemo(() => {
+    const q = adsKwSearch.trim().toLowerCase();
+    let list = adsViz.keywords || [];
+    if (q) list = list.filter((k: any) => String(k.phrase).toLowerCase().includes(q));
+    const { field, dir } = adsKwSort; const mul = dir === 'asc' ? 1 : -1;
+    return [...list].sort((a: any, b: any) => {
+      if (field === 'phrase') return String(a.phrase).localeCompare(String(b.phrase), 'ru') * mul;
+      return ((a[field] || 0) - (b[field] || 0)) * mul;
+    });
+  }, [adsViz.keywords, adsKwSearch, adsKwSort]);
+  const adsKwSortBtn = (field: string) => () => setAdsKwSort((p) => ({ field, dir: p.field === field && p.dir === 'desc' ? 'asc' : 'desc' }));
+  const adsKwArw = (field: string) => adsKwSort.field === field ? (adsKwSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
 
   const handleAdsExcelUpload = async (file: File) => {
     await ensureExcel();
