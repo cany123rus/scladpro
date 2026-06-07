@@ -26208,8 +26208,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           </div>
                           {cwPurchaseRows.map((r) => {
                             const tpl = packagingTypeTemplates.find((t) => t.name === r.size);
+                            const rowTotal = (Number(r.quantity || 0) * Number(r.price || 0)) + Number(r.delivery || 0);
                             return (
-                            <div key={r.id} className="grid grid-cols-1 md:grid-cols-[1.4fr_1fr_1.3fr_1fr_auto] gap-2 rounded-2xl border border-slate-200 bg-slate-50/60 p-2">
+                            <div key={r.id} className="rounded-2xl border border-slate-200 bg-slate-50/60 p-2">
+                              <div className="grid grid-cols-1 md:grid-cols-[1.4fr_1fr_1.3fr_1fr_auto] gap-2">
                               <select value={r.size} onChange={(e) => { const name = e.target.value; const t = packagingTypeTemplates.find((x) => x.name === name); setCwPurchaseRows(prev => prev.map(x => x.id === r.id ? { ...x, size: name, price: (t && !x.newPrice) ? String(t.price || '') : x.price } : x)); }} className="oc-input">
                                 <option value="">Тип упаковки…</option>
                                 {packagingTypeTemplates.map((t) => <option key={`pt-${r.id}-${t.name}`} value={t.name}>{t.name}{t.price ? ` — ${t.price} ₽` : ''}</option>)}
@@ -26227,6 +26229,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               </div>
                               <input type="number" step="0.01" placeholder="Доставка" value={r.delivery} onChange={(e) => setCwPurchaseRows(prev => prev.map(x => x.id === r.id ? { ...x, delivery: e.target.value } : x))} className="oc-input" />
                               <button type="button" onClick={() => setCwPurchaseRows(prev => prev.length > 1 ? prev.filter(x => x.id !== r.id) : prev)} className="inline-flex items-center justify-center rounded-xl border border-slate-200 px-3 text-slate-400 hover:text-rose-600 hover:border-rose-200" title="Удалить"><Trash2 className="h-4 w-4" /></button>
+                              </div>
+                              <div className="mt-1.5 text-right text-xs text-slate-500">Итого: <b className="text-slate-900">{rowTotal.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽</b> <span className="text-[10px] text-slate-400">(кол-во × цена/шт + доставка)</span></div>
                             </div>
                             );
                           })}
