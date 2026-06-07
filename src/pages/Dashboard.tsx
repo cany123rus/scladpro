@@ -927,6 +927,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [analyticsSubTab, setAnalyticsSubTab] = useState<'reports' | 'ads'>('reports');
   const [adsAnalyticsSheets, setAdsAnalyticsSheets] = useState<Array<{ name: string; columns: string[]; rows: any[] }>>([]);
   const [adsNmSort, setAdsNmSort] = useState<{ field: string; dir: 'asc' | 'desc' }>({ field: 'revenue', dir: 'desc' });
+  const [adsKwSearch, setAdsKwSearch] = useState('');
+  const [adsKwSort, setAdsKwSort] = useState<{ field: string; dir: 'asc' | 'desc' }>({ field: 'spend', dir: 'desc' });
   const [adsAnalyticsFileName, setAdsAnalyticsFileName] = useState<string>('');
   const [adsSheetFilters, setAdsSheetFilters] = useState<Record<string, string>>({});
   const [adsSheetSorts, setAdsSheetSorts] = useState<Record<string, { col: string; dir: 'asc' | 'desc' }>>({});
@@ -16426,6 +16428,20 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const adsNmSortBtn = (field: string) => () => setAdsNmSort((p) => ({ field, dir: p.field === field && p.dir === 'desc' ? 'asc' : 'desc' }));
   const adsNmArw = (field: string) => adsNmSort.field === field ? (adsNmSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
 
+  // Searchable + sortable view over all keyword phrases that consume budget.
+  const adsKwView = React.useMemo(() => {
+    const q = adsKwSearch.trim().toLowerCase();
+    let list = adsViz.keywords || [];
+    if (q) list = list.filter((k: any) => String(k.phrase).toLowerCase().includes(q));
+    const { field, dir } = adsKwSort; const mul = dir === 'asc' ? 1 : -1;
+    return [...list].sort((a: any, b: any) => {
+      if (field === 'phrase') return String(a.phrase).localeCompare(String(b.phrase), 'ru') * mul;
+      return ((a[field] || 0) - (b[field] || 0)) * mul;
+    });
+  }, [adsViz.keywords, adsKwSearch, adsKwSort]);
+  const adsKwSortBtn = (field: string) => () => setAdsKwSort((p) => ({ field, dir: p.field === field && p.dir === 'desc' ? 'asc' : 'desc' }));
+  const adsKwArw = (field: string) => adsKwSort.field === field ? (adsKwSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
+
   // Visualisation data for the Ads dashboard: daily dynamics, keyword breakdown,
   // and the impressions→clicks→carts→orders funnel.
   const adsViz = React.useMemo(() => {
@@ -16477,7 +16493,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     const avgCpc = kwClicksTotal > 0 ? kwSpendTotal / kwClicksTotal : 0;
     // «Слив»: расход есть, кликов нет. «Дорогие»: CPC заметно выше среднего.
     const wasted = keywords.filter((k) => k.spend > 0 && k.clicks === 0).sort((a, b) => b.spend - a.spend);
-    const expensive = keywords.filter((k) => k.clicks >= 3 && avgCpc > 0 && k.cpc > avgCpc * 1.3).sort((a, b) => b.cpc - a.cpc);
+    const expensive = keywords.filter((k) => k.clicks >= 1 && avgCpc > 0 && k.cpc > avgCpc * 1.15).sort((a, b) => b.cpc - a.cpc);
     const wastedSum = wasted.reduce((s, k) => s + k.spend, 0);
     // Донат: топ-6 фраз + «прочее».
     const donutTop = keywords.slice(0, 6).map((k) => ({ label: k.phrase, value: k.spend }));
@@ -23142,6 +23158,49 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         </tbody>
                       </table>
                     </div>
+
+                    {/* Все поисковые фразы, на которые тратится бюджет */}
+                    {adsViz.keywords.length > 0 && (
+                      <>
+                        <div className="flex items-center justify-between mb-2 gap-3 flex-wrap">
+                          <h3 className="text-base font-semibold text-slate-900">Все поисковые фразы ({adsViz.keywords.length.toLocaleString('ru-RU')})</h3>
+                          <input
+                            value={adsKwSearch}
+                            onChange={(e) => setAdsKwSearch(e.target.value)}
+                            placeholder="Поиск фразы…"
+                            className="w-full md:w-[300px] px-3 py-2 text-xs border border-slate-300 rounded-lg"
+                          />
+                        </div>
+                        <div className="overflow-auto max-h-[60vh] border border-slate-100 rounded-lg">
+                          <table className="min-w-full text-xs">
+                            <thead className="bg-slate-50 sticky top-0 z-10">
+                              <tr className="select-none">
+                                <th className="px-2 py-2 text-left cursor-pointer hover:text-indigo-600" onClick={adsKwSortBtn('phrase')}>Поисковая фраза{adsKwArw('phrase')}</th>
+                                <th className="px-2 py-2 text-right cursor-pointer hover:text-indigo-600" onClick={adsKwSortBtn('clicks')}>Клики{adsKwArw('clicks')}</th>
+                                <th className="px-2 py-2 text-right cursor-pointer hover:text-indigo-600" onClick={adsKwSortBtn('spend')}>Расход ₽{adsKwArw('spend')}</th>
+                                <th className="px-2 py-2 text-right cursor-pointer hover:text-indigo-600" onClick={adsKwSortBtn('cpc')}>CPC ₽{adsKwArw('cpc')}</th>
+                                <th className="px-2 py-2 text-right">Доля бюджета</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {adsKwView.slice(0, 500).map((k: any) => (
+                                <tr key={k.phrase} className="border-t border-slate-100 hover:bg-slate-50">
+                                  <td className="px-2 py-1.5 text-slate-700 max-w-[420px] truncate" title={k.phrase}>{k.phrase}</td>
+                                  <td className="px-2 py-1.5 text-right">{k.clicks.toLocaleString('ru-RU')}</td>
+                                  <td className="px-2 py-1.5 text-right font-semibold text-slate-800">{Math.round(k.spend).toLocaleString('ru-RU')}</td>
+                                  <td className="px-2 py-1.5 text-right">{k.cpc.toFixed(2)}</td>
+                                  <td className="px-2 py-1.5 text-right text-slate-500">{(k.spend / (adsViz.kwSpendTotal || 1) * 100).toFixed(2)}%</td>
+                                </tr>
+                              ))}
+                              {adsKwView.length === 0 && (
+                                <tr><td colSpan={5} className="px-3 py-4 text-center text-slate-500">Ничего не найдено</td></tr>
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                        {adsKwView.length > 500 && <div className="text-[11px] text-slate-400 mt-1">Показаны первые 500 из {adsKwView.length.toLocaleString('ru-RU')}. Уточните поиск или отсортируйте.</div>}
+                      </>
+                    )}
 
                   </div>
                 </div>
