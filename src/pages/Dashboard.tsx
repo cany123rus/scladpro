@@ -779,6 +779,23 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [reportsSummaryRange, setReportsSummaryRange] = useState(reportsSummaryDefaultRange());
   const [reportsSummary, setReportsSummary] = useState<{ temp: number; staff: number; zpTemp: number; zpStaff: number; delivery: number; packaging: number; daily: Array<[string, { temp: number; staff: number }]>; maxDay: number } | null>(null);
   const [reportsSummaryLoading, setReportsSummaryLoading] = useState(false);
+  // All-time per-supplier aggregate (qty/ЗП/закуп) for the Reports section.
+  const [reportsAllTime, setReportsAllTime] = useState<Map<string, { qty: number; zpTemp: number; zpStaff: number; packaging: number }>>(new Map());
+  const loadReportsAllTime = async () => {
+    try {
+      const [tr, sr, pp] = await Promise.all([
+        supabase.from('temporary_workers_logs').select('supplier_id, quantity, work_comment, earnings').is('deleted_at', null),
+        supabase.from('work_logs').select('supplier_id, quantity, work_rates(name, price)').is('deleted_at', null),
+        supabase.from('packaging_purchase_log').select('supplier_id, quantity, price, delivery, kind').is('deleted_at', null),
+      ]);
+      const m = new Map<string, { qty: number; zpTemp: number; zpStaff: number; packaging: number }>();
+      const ensure = (k: string) => { const e = m.get(k) || { qty: 0, zpTemp: 0, zpStaff: 0, packaging: 0 }; m.set(k, e); return e; };
+      (tr.data || []).forEach((r: any) => { if (!isAssemblyTempType(r.work_comment)) return; const q = Number(r.quantity || 0); const e = ensure(String(r.supplier_id || '')); e.qty += q; e.zpTemp += Number(r.earnings || 0); });
+      (sr.data || []).forEach((r: any) => { if (isAssemblyExcludedStaffRate(r.work_rates?.name)) return; const q = Number(r.quantity || 0); const e = ensure(String(r.supplier_id || '')); e.qty += q; e.zpStaff += q * Number(r.work_rates?.price || 0); });
+      (pp.data || []).forEach((r: any) => { const e = ensure(String(r.supplier_id || '')); e.packaging += r.kind === 'other' ? Number(r.price || 0) : Number(r.quantity || 0) * Number(r.price || 0) + Number(r.delivery || 0); });
+      setReportsAllTime(m);
+    } catch (e) { console.warn('loadReportsAllTime failed', e); }
+  };
   const loadReportsSummary = async (startStr: string, endStr: string) => {
     setReportsSummaryLoading(true);
     try {
@@ -1647,6 +1664,22 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       unpaidAmount: (deliveryHistory || []).filter((delivery: any) => !delivery?.is_paid).reduce((sum: number, delivery: any) => sum + Number(delivery?.amount || 0), 0),
     };
   }, [deliveryHistory, suppliers]);
+
+  // All-time per-supplier report rows (qty, ЗП, доставка, закуп, итого, ср.цена).
+  const reportsBySupplier = useMemo(() => {
+    const deliveryBySup = new Map<string, number>();
+    (deliveryInfographics.supplierRows || []).forEach((r: any) => deliveryBySup.set(String(r.supplierId), Number(r.amount || 0)));
+    const keys = new Set<string>([...Array.from(reportsAllTime.keys()), ...Array.from(deliveryBySup.keys())]);
+    const rows = Array.from(keys).map((sid) => {
+      const a = reportsAllTime.get(sid) || { qty: 0, zpTemp: 0, zpStaff: 0, packaging: 0 };
+      const delivery = deliveryBySup.get(sid) || 0;
+      const zp = a.zpTemp + a.zpStaff;
+      const cost = zp + delivery + a.packaging;
+      return { supplierId: sid, name: suppliers.find((s: any) => String(s.id) === sid)?.name || 'Без поставщика', qty: a.qty, zpTemp: a.zpTemp, zpStaff: a.zpStaff, delivery, packaging: a.packaging, cost, avg: a.qty > 0 ? zp / a.qty : 0, avgFull: a.qty > 0 ? cost / a.qty : 0 };
+    }).filter((r) => r.qty > 0 || r.cost > 0).sort((a, b) => b.qty - a.qty);
+    const totals = rows.reduce((t, r) => ({ qty: t.qty + r.qty, zpTemp: t.zpTemp + r.zpTemp, zpStaff: t.zpStaff + r.zpStaff, delivery: t.delivery + r.delivery, packaging: t.packaging + r.packaging, cost: t.cost + r.cost }), { qty: 0, zpTemp: 0, zpStaff: 0, delivery: 0, packaging: 0, cost: 0 });
+    return { rows, totals };
+  }, [reportsAllTime, deliveryInfographics, suppliers]);
 
   const deliveryReportRows = useMemo(() => {
     const start = String(deliveryReportForm.start_date || '');
@@ -16518,7 +16551,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
   useEffect(() => {
     // Lazy-load data by active tab to reduce startup memory/load spikes.
-    if (activeTab === 'reports') { fetchReportsData(); loadAssemblyDaily(); loadBoxStock(); loadReportsSummary(reportsSummaryRange.start, reportsSummaryRange.end); }
+    if (activeTab === 'reports') { fetchReportsData(); loadAssemblyDaily(); loadBoxStock(); loadReportsSummary(reportsSummaryRange.start, reportsSummaryRange.end); loadReportsAllTime(); loadDeliveryData(); }
     if (activeTab === 'employees' || activeTab === 'warehouse' || activeTab === 'admin') fetchEmployees();
     if (activeTab === 'employees') loadPaymentReports();
     if (activeTab === 'reception') fetchReceptions();
@@ -24144,48 +24177,48 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 </div>
               ) : (
                 <div className="space-y-6">
+                  {(() => {
+                    const t = reportsBySupplier.totals;
+                    const zp = t.zpTemp + t.zpStaff;
+                    const avgFull = t.qty > 0 ? t.cost / t.qty : 0;
+                    const money = (v: number) => `${Math.round(Number(v || 0)).toLocaleString('ru-RU')} ₽`;
+                    return (
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    {/* Total Items */}
+                    {/* Собрано всего */}
                     <div className="group relative overflow-hidden rounded-3xl border border-slate-200 bg-white p-6 shadow-sm transition-all hover:shadow-lg hover:-translate-y-0.5">
                       <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-indigo-500 to-violet-500" />
                       <div className="flex items-center justify-between mb-4">
                         <span className="text-sm font-medium text-slate-500">Собрано товаров</span>
-                        <div className="p-2.5 bg-gradient-to-br from-indigo-500 to-violet-500 rounded-2xl shadow-sm">
-                          <Package className="h-5 w-5 text-white" />
-                        </div>
+                        <div className="p-2.5 bg-gradient-to-br from-indigo-500 to-violet-500 rounded-2xl shadow-sm"><Package className="h-5 w-5 text-white" /></div>
                       </div>
-                      <div className="text-3xl font-extrabold text-slate-900">{Number(reportTotals.items).toLocaleString('ru-RU')}</div>
-                      <p className="text-xs text-slate-400 mt-1">За все время · все поставщики</p>
+                      <div className="text-3xl font-extrabold text-slate-900">{Number(t.qty).toLocaleString('ru-RU')} <span className="text-base font-semibold text-slate-400">шт</span></div>
+                      <p className="text-xs text-slate-400 mt-1">За всё время · ФБО/ФБС + сотрудники</p>
                     </div>
 
-                    {/* Total Supplies */}
+                    {/* Затраты всего */}
                     <div className="group relative overflow-hidden rounded-3xl border border-slate-200 bg-white p-6 shadow-sm transition-all hover:shadow-lg hover:-translate-y-0.5">
                       <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-emerald-500 to-teal-500" />
                       <div className="flex items-center justify-between mb-4">
-                        <span className="text-sm font-medium text-slate-500">Всего поставок</span>
-                        <div className="p-2.5 bg-gradient-to-br from-emerald-500 to-teal-500 rounded-2xl shadow-sm">
-                          <Truck className="h-5 w-5 text-white" />
-                        </div>
+                        <span className="text-sm font-medium text-slate-500">Затраты всего</span>
+                        <div className="p-2.5 bg-gradient-to-br from-emerald-500 to-teal-500 rounded-2xl shadow-sm"><Wallet className="h-5 w-5 text-white" /></div>
                       </div>
-                      <div className="text-3xl font-extrabold text-slate-900">{Number(reportTotals.supplies).toLocaleString('ru-RU')}</div>
-                      <p className="text-xs text-slate-400 mt-1">За все время · все поставщики</p>
+                      <div className="text-3xl font-extrabold text-slate-900">{money(t.cost)}</div>
+                      <p className="text-xs text-slate-400 mt-1">ЗП {money(zp)} · доставка {money(t.delivery)} · закуп {money(t.packaging)}</p>
                     </div>
 
-                    {/* Avg Price in Stock */}
+                    {/* Средняя цена сборки (полная) */}
                     <div className="group relative overflow-hidden rounded-3xl border border-slate-200 bg-white p-6 shadow-sm transition-all hover:shadow-lg hover:-translate-y-0.5">
                       <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-fuchsia-500 to-purple-500" />
                       <div className="flex items-center justify-between mb-4">
-                        <span className="text-sm font-medium text-slate-500">Ср. цена на складе</span>
-                        <div className="p-2.5 bg-gradient-to-br from-fuchsia-500 to-purple-500 rounded-2xl shadow-sm">
-                          <FileSpreadsheet className="h-5 w-5 text-white" />
-                        </div>
+                        <span className="text-sm font-medium text-slate-500">Ср. цена сборки (полная)</span>
+                        <div className="p-2.5 bg-gradient-to-br from-fuchsia-500 to-purple-500 rounded-2xl shadow-sm"><FileSpreadsheet className="h-5 w-5 text-white" /></div>
                       </div>
-                      <div className="text-3xl font-extrabold text-slate-900">
-                        {reportTotals.avgPriceInStock.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽
-                      </div>
-                      <p className="text-xs text-slate-400 mt-1">За все время · все поставщики</p>
+                      <div className="text-3xl font-extrabold text-slate-900">{avgFull.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽<span className="text-base font-semibold text-slate-400">/шт</span></div>
+                      <p className="text-xs text-slate-400 mt-1">(ЗП+доставка+закуп) ÷ собрано · за всё время</p>
                     </div>
                   </div>
+                    );
+                  })()}
 
                   {/* Assembly infographic cards */}
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
@@ -24243,6 +24276,71 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         );
                       })}
                     </div>
+                  </div>
+
+                  {/* Сводная статистика по поставщикам (за всё время) */}
+                  <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                    <div className="flex items-center gap-2 mb-4">
+                      <div className="p-2 bg-violet-50 rounded-xl"><BarChart2 className="h-5 w-5 text-violet-600" /></div>
+                      <h3 className="text-lg font-bold text-slate-900">Сводная статистика по поставщикам</h3>
+                      <span className="text-xs text-slate-400">за всё время</span>
+                    </div>
+                    {reportsBySupplier.rows.length === 0 ? (
+                      <div className="py-8 text-center text-slate-400">Нет данных</div>
+                    ) : (() => {
+                      const money = (v: number) => `${Math.round(Number(v || 0)).toLocaleString('ru-RU')} ₽`;
+                      const maxQty = Math.max(1, ...reportsBySupplier.rows.map((r) => r.qty));
+                      const t = reportsBySupplier.totals;
+                      return (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-sm min-w-[760px]">
+                          <thead>
+                            <tr className="bg-slate-50 border-y border-slate-100 text-xs uppercase text-slate-500">
+                              <th className="px-4 py-2.5 font-semibold">Поставщик</th>
+                              <th className="px-4 py-2.5 font-semibold">Собрано</th>
+                              <th className="px-4 py-2.5 font-semibold text-right">ЗП врем.</th>
+                              <th className="px-4 py-2.5 font-semibold text-right">ЗП сотр.</th>
+                              <th className="px-4 py-2.5 font-semibold text-right">Доставка</th>
+                              <th className="px-4 py-2.5 font-semibold text-right">Закуп</th>
+                              <th className="px-4 py-2.5 font-semibold text-right">Итого</th>
+                              <th className="px-4 py-2.5 font-semibold text-right">Ср.цена/шт</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {reportsBySupplier.rows.map((r) => (
+                              <tr key={`rbs-${r.supplierId}`} className="hover:bg-slate-50">
+                                <td className="px-4 py-2.5 font-medium text-slate-800 max-w-[200px] truncate" title={r.name}>{r.name}</td>
+                                <td className="px-4 py-2.5">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-bold text-slate-900 w-14">{r.qty.toLocaleString('ru-RU')}</span>
+                                    <span className="h-2 rounded-full bg-indigo-400" style={{ width: `${Math.max(4, (r.qty / maxQty) * 90)}px` }} />
+                                  </div>
+                                </td>
+                                <td className="px-4 py-2.5 text-right text-emerald-700">{money(r.zpTemp)}</td>
+                                <td className="px-4 py-2.5 text-right text-indigo-700">{money(r.zpStaff)}</td>
+                                <td className="px-4 py-2.5 text-right text-blue-700">{money(r.delivery)}</td>
+                                <td className="px-4 py-2.5 text-right text-amber-700">{money(r.packaging)}</td>
+                                <td className="px-4 py-2.5 text-right font-bold text-slate-900">{money(r.cost)}</td>
+                                <td className="px-4 py-2.5 text-right font-semibold text-fuchsia-700">{r.avgFull.toFixed(2)} ₽</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                          <tfoot>
+                            <tr className="border-t-2 border-slate-200 bg-slate-50 font-bold text-slate-900">
+                              <td className="px-4 py-2.5">Итого</td>
+                              <td className="px-4 py-2.5">{t.qty.toLocaleString('ru-RU')}</td>
+                              <td className="px-4 py-2.5 text-right">{money(t.zpTemp)}</td>
+                              <td className="px-4 py-2.5 text-right">{money(t.zpStaff)}</td>
+                              <td className="px-4 py-2.5 text-right">{money(t.delivery)}</td>
+                              <td className="px-4 py-2.5 text-right">{money(t.packaging)}</td>
+                              <td className="px-4 py-2.5 text-right">{money(t.cost)}</td>
+                              <td className="px-4 py-2.5 text-right">{t.qty > 0 ? (t.cost / t.qty).toFixed(2) : '0'} ₽</td>
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </div>
+                      );
+                    })()}
                   </div>
 
                   {/* Report by Supplier Section */}
