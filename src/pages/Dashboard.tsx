@@ -24457,8 +24457,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                 {reportsDayFull && <th className="px-4 py-2">Поставщик</th>}
                                 <th className="px-4 py-2 cursor-pointer hover:text-slate-700" onClick={reportsDaySortBtn('type')}>Тип работы{reportsDayArw('type')}</th>
                                 {reportsDayFull && <th className="px-4 py-2 text-right cursor-pointer hover:text-slate-700" onClick={reportsDaySortBtn('hours')}>Часы{reportsDayArw('hours')}</th>}
-                                {reportsDayFull && <th className="px-4 py-2 text-right cursor-pointer hover:text-slate-700" onClick={reportsDaySortBtn('earnings')}>Заработок{reportsDayArw('earnings')}</th>}
                                 <th className="px-4 py-2 text-right cursor-pointer hover:text-slate-700" onClick={reportsDaySortBtn('qty')}>Количество{reportsDayArw('qty')}</th>
+                                {reportsDayFull && <th className="px-4 py-2 text-right cursor-pointer hover:text-slate-700" onClick={reportsDaySortBtn('earnings')}>Заработок{reportsDayArw('earnings')}</th>}
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
@@ -24469,8 +24469,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                   {reportsDayFull && <td className="px-4 py-2 text-slate-600">{r.supplier}</td>}
                                   <td className="px-4 py-2 text-slate-600">{r.type}</td>
                                   {reportsDayFull && <td className="px-4 py-2 text-right text-slate-600">{r.hours ? `${r.hours} ч.` : '—'}</td>}
-                                  {reportsDayFull && <td className="px-4 py-2 text-right font-semibold text-green-600">{r.earnings ? `${r.earnings.toLocaleString('ru-RU')} ₽` : '—'}</td>}
                                   <td className="px-4 py-2 text-right font-bold text-slate-900">{r.qty.toLocaleString('ru-RU')}</td>
+                                  {reportsDayFull && <td className="px-4 py-2 text-right font-semibold text-green-600">{r.earnings ? `${r.earnings.toLocaleString('ru-RU')} ₽` : '—'}</td>}
                                 </tr>
                               ))}
                             </tbody>
@@ -24505,8 +24505,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               <th className="px-4 py-2.5 font-semibold text-right">ЗП сотр.</th>
                               <th className="px-4 py-2.5 font-semibold text-right">Доставка</th>
                               <th className="px-4 py-2.5 font-semibold text-right">Закуп</th>
-                              <th className="px-4 py-2.5 font-semibold text-right">Итого</th>
                               <th className="px-4 py-2.5 font-semibold text-right">Ср.цена/шт</th>
+                              <th className="px-4 py-2.5 font-semibold text-right">Итого</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100">
@@ -24523,8 +24523,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                 <td className="px-4 py-2.5 text-right text-indigo-700">{money(r.zpStaff)}</td>
                                 <td className="px-4 py-2.5 text-right text-blue-700">{money(r.delivery)}</td>
                                 <td className="px-4 py-2.5 text-right text-amber-700">{money(r.packaging)}</td>
-                                <td className="px-4 py-2.5 text-right font-bold text-slate-900">{money(r.cost)}</td>
                                 <td className="px-4 py-2.5 text-right font-semibold text-fuchsia-700">{r.avgFull.toFixed(2)} ₽</td>
+                                <td className="px-4 py-2.5 text-right font-bold text-slate-900">{money(r.cost)}</td>
                               </tr>
                             ))}
                           </tbody>
@@ -24536,8 +24536,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               <td className="px-4 py-2.5 text-right">{money(t.zpStaff)}</td>
                               <td className="px-4 py-2.5 text-right">{money(t.delivery)}</td>
                               <td className="px-4 py-2.5 text-right">{money(t.packaging)}</td>
-                              <td className="px-4 py-2.5 text-right">{money(t.cost)}</td>
                               <td className="px-4 py-2.5 text-right">{t.qty > 0 ? (t.cost / t.qty).toFixed(2) : '0'} ₽</td>
+                              <td className="px-4 py-2.5 text-right">{money(t.cost)}</td>
                             </tr>
                           </tfoot>
                         </table>
