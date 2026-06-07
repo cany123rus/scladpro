@@ -3456,7 +3456,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         { label: 'Доставка', text: money(generalReportTotals.deliveryAmount), rgb: [37, 99, 235] },
         { label: 'Упаковка + прочее', text: money(pkg.total), rgb: [245, 158, 11] },
       ];
-      if (y > pageH - 40) { doc.addPage(); y = 16; }
+      // Keep the "ОБЩИЕ ЗАТРАТЫ" box glued to the "ЗП временные" table that
+      // follows it: need room for box (18+4) + band (9) + header (8) + 2 rows (12).
+      if ((pageH - 14 - y) < 22 + 9 + 8 + 12) { doc.addPage(); y = 16; }
       const costTotal = Number(generalReportTotals.tempEarned || 0) + Number(generalReportTotals.cwAmount || 0) + Number(generalReportTotals.deliveryAmount || 0) + pkg.total;
       {
         const cbY = y; const cbH = 18; const cbX = 12; const cbW = pageW - 24; const cbTitleW = 56;
@@ -3501,7 +3503,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         y = ((doc as any).lastAutoTable?.finalY || y) + 9;
       }
 
-      y = fitOrPage(y, generalTempWorkerRows.length, false);
+      // No fitOrPage here: this long table flows right after the costs box so
+      // they stay glued (room was already reserved above).
       y = drawBand(y, 'ЗП временные', [16, 185, 129]);
       baseTable({
         startY: y,
