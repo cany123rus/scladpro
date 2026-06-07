@@ -23143,59 +23143,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       </table>
                     </div>
 
-                    <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
-                      <h3 className="text-base font-semibold text-slate-900">Объединённая таблица (все 4 листа)</h3>
-                      <div className="text-xs text-slate-500">Строк: {adsUnified.viewRows.length} / {adsUnified.rows.length}</div>
-                    </div>
-
-                    <div className="mb-3">
-                      <input
-                        value={adsUnifiedFilter}
-                        onChange={(e) => setAdsUnifiedFilter(e.target.value)}
-                        placeholder="Фильтр по объединённой таблице"
-                        className="w-full md:w-[360px] px-3 py-2 text-xs border border-slate-300 rounded-lg"
-                      />
-                    </div>
-
-                    <div className="overflow-auto max-h-[58vh] border border-slate-100 rounded-lg">
-                      <table className="min-w-full text-xs">
-                        <thead className="bg-slate-50 sticky top-0 z-10">
-                          <tr>
-                            {adsUnified.columns.map((col) => (
-                              <th key={col} className="px-2 py-2 text-left font-semibold text-slate-700 whitespace-nowrap">
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setAdsUnifiedSort((prev) => {
-                                      const nextDir: 'asc' | 'desc' = prev.col === col ? (prev.dir === 'asc' ? 'desc' : 'asc') : 'asc';
-                                      return { col, dir: nextDir };
-                                    });
-                                  }}
-                                  className="hover:underline"
-                                >
-                                  {col === '__sheet' ? 'Лист' : col}
-                                  {adsUnifiedSort.col === col ? (adsUnifiedSort.dir === 'asc' ? ' ↑' : ' ↓') : ''}
-                                </button>
-                              </th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {adsUnified.viewRows.map((row, idx) => (
-                            <tr key={idx} className="border-t border-slate-100">
-                              {adsUnified.columns.map((col) => (
-                                <td key={`${idx}-${col}`} className="px-2 py-1.5 text-slate-700 whitespace-nowrap">{formatAdsCell((row as any)?.[col])}</td>
-                              ))}
-                            </tr>
-                          ))}
-                          {adsUnified.viewRows.length === 0 && (
-                            <tr>
-                              <td colSpan={Math.max(1, adsUnified.columns.length)} className="px-3 py-5 text-center text-slate-500">Нет данных по фильтру</td>
-                            </tr>
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
                   </div>
                 </div>
               )}
