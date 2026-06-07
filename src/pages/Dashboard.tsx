@@ -3086,8 +3086,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         { name: 'Закуп', rows: pkgDetail.length ? pkgDetail : [{ 'Нет данных': '' }] },
         { name: 'Закуп по поставщикам', rows: pkgBySup.length ? pkgBySup : [{ 'Нет данных': '' }] },
         { name: 'Полная цена сборки', rows: (() => { const r = generalFullAvg.bySupplier.filter((s: any) => s.qty > 0).map((s: any) => ({ 'Поставщик': s.name, 'Собрано (шт)': s.qty, 'Затраты (ЗП+доставка+закуп)': Math.round(s.cost * 100) / 100, 'Цена за шт.': Math.round(s.avg * 100) / 100 })); r.push({ 'Поставщик': 'ИТОГО', 'Собрано (шт)': generalFullAvg.totalQty, 'Затраты (ЗП+доставка+закуп)': Math.round(generalFullAvg.totalCost * 100) / 100, 'Цена за шт.': Math.round(generalFullAvg.avg * 100) / 100 } as any); return r.length ? r : [{ 'Нет данных': '' }]; })() },
-        { name: 'Коробки за период', rows: [{ 'Показатель': 'Закуплено (период)', 'Коробок': generalBoxStock.added }, { 'Показатель': 'Израсходовано (период)', 'Коробок': generalBoxStock.used }, { 'Показатель': 'Остаток за период', 'Коробок': generalBoxStock.remaining }, { 'Показатель': 'Остаток всего на складе', 'Коробок': boxStock.remaining }] },
-        { name: 'Коробки по поставщикам', rows: generalBoxStock.bySupplier.length ? generalBoxStock.bySupplier.map((s: any) => ({ 'Поставщик': s.name, 'Израсходовано коробок': s.used })) : [{ 'Нет данных': '' }] },
+        { name: 'Коробки на складе', rows: [{ 'Показатель': 'Закуплено всего', 'Коробок': boxStock.added }, { 'Показатель': 'Израсходовано всего', 'Коробок': boxStock.used }, { 'Показатель': 'Остаток', 'Коробок': boxStock.remaining }] },
+        { name: 'Коробки по поставщикам', rows: generalBoxStock.bySupplier.length ? generalBoxStock.bySupplier.map((s: any) => ({ 'Поставщик (за период)': s.name, 'Израсходовано коробок': s.used })) : [{ 'Нет данных': '' }] },
       ];
       await downloadWorkbook(`obschiy_otchet_${generalReportForm.start_date || 'start'}_${generalReportForm.end_date || 'end'}.xlsx`, sheets);
     } catch (e: any) {
@@ -3359,7 +3359,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       // Boxes (filtered by period/supplier)
       {
         if (y > pageH - 30) { doc.addPage(); y = 16; }
-        y = drawBand(y, `Коробки за период — закуплено ${generalBoxStock.added.toLocaleString('ru-RU')}, израсходовано ${generalBoxStock.used.toLocaleString('ru-RU')} (на складе всего: ${boxStock.remaining.toLocaleString('ru-RU')})`, [79, 70, 229]);
+        y = drawBand(y, `Коробки на складе — остаток: ${boxStock.remaining.toLocaleString('ru-RU')} шт. (за всё время: закуплено ${boxStock.added.toLocaleString('ru-RU')}, израсходовано ${boxStock.used.toLocaleString('ru-RU')})`, [79, 70, 229]);
         if (generalBoxStock.bySupplier.length) {
           baseTable({
             startY: y,
@@ -30978,23 +30978,23 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     )}
                   </div>
 
-                  {/* Коробки на складе (по фильтру периода/поставщика) */}
+                  {/* Коробки на складе (остаток — за всё время) */}
                   <div className="rounded-2xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-violet-50 p-4 shadow-sm">
                     <div className="flex items-center justify-between mb-3">
-                      <h4 className="font-bold text-slate-900 text-sm">Коробки (за период{generalReportForm.supplier_id !== 'all' ? ', по поставщику' : ''})</h4>
+                      <h4 className="font-bold text-slate-900 text-sm">Коробки на складе</h4>
                       <div className="text-right">
-                        <div className="text-[11px] text-indigo-600">Остаток за период</div>
-                        <div className={`text-xl font-extrabold ${generalBoxStock.remaining < 0 ? 'text-rose-600' : 'text-indigo-800'}`}>{generalBoxStock.remaining.toLocaleString('ru-RU')} шт.</div>
+                        <div className="text-[11px] text-indigo-600">Остаток (за всё время)</div>
+                        <div className={`text-xl font-extrabold ${boxStock.remaining < 0 ? 'text-rose-600' : 'text-indigo-800'}`}>{boxStock.remaining.toLocaleString('ru-RU')} шт.</div>
                       </div>
                     </div>
                     <div className="grid grid-cols-3 gap-2 mb-3">
-                      <div className="rounded-xl border border-indigo-100 bg-white/70 p-3"><div className="text-[11px] text-slate-500">Закуплено</div><div className="text-base font-bold text-indigo-800">{generalBoxStock.added.toLocaleString('ru-RU')}</div></div>
-                      <div className="rounded-xl border border-indigo-100 bg-white/70 p-3"><div className="text-[11px] text-slate-500">Израсходовано</div><div className="text-base font-bold text-indigo-800">{generalBoxStock.used.toLocaleString('ru-RU')}</div></div>
-                      <div className="rounded-xl border border-indigo-100 bg-white/70 p-3"><div className="text-[11px] text-slate-500">Остаток (всего на складе)</div><div className="text-base font-bold text-indigo-800">{boxStock.remaining.toLocaleString('ru-RU')}</div></div>
+                      <div className="rounded-xl border border-indigo-100 bg-white/70 p-3"><div className="text-[11px] text-slate-500">Закуплено всего</div><div className="text-base font-bold text-indigo-800">{boxStock.added.toLocaleString('ru-RU')}</div></div>
+                      <div className="rounded-xl border border-indigo-100 bg-white/70 p-3"><div className="text-[11px] text-slate-500">Израсходовано всего</div><div className="text-base font-bold text-indigo-800">{boxStock.used.toLocaleString('ru-RU')}</div></div>
+                      <div className="rounded-xl border border-indigo-100 bg-white/70 p-3"><div className="text-[11px] text-slate-500">Остаток</div><div className={`text-base font-bold ${boxStock.remaining < 0 ? 'text-rose-600' : 'text-indigo-800'}`}>{boxStock.remaining.toLocaleString('ru-RU')}</div></div>
                     </div>
                     {generalBoxStock.bySupplier.length > 0 && (
                       <div>
-                        <div className="text-[11px] font-semibold text-slate-500 mb-1.5">Израсходовано коробок по поставщикам (доставки)</div>
+                        <div className="text-[11px] font-semibold text-slate-500 mb-1.5">Израсходовано коробок по поставщикам (за период{generalReportForm.supplier_id !== 'all' ? ', по фильтру' : ''})</div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                           {generalBoxStock.bySupplier.map((s) => (
                             <div key={`box-sup-${s.supplierId}`} className="flex items-center justify-between rounded-lg bg-white/70 border border-indigo-100 px-3 py-1.5 text-sm">
