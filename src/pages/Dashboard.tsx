@@ -818,6 +818,28 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       setReportsSummary({ temp, staff, zpTemp, zpStaff, delivery, packaging, daily, maxDay });
     } catch (e) { console.warn('loadReportsSummary failed', e); } finally { setReportsSummaryLoading(false); }
   };
+  // Click-to-detail for a day in the Reports "Собрано по дням" chart.
+  const [reportsDayDetail, setReportsDayDetail] = useState<{ date: string; rows: Array<{ who: string; kind: string; type: string; qty: number }>; total: number } | null>(null);
+  const [reportsDayLoading, setReportsDayLoading] = useState(false);
+  const loadReportsDayDetail = async (dateStr: string) => {
+    setReportsDayLoading(true);
+    setReportsDayDetail({ date: dateStr, rows: [], total: 0 });
+    try {
+      const [tr, sr] = await Promise.all([
+        supabase.from('temporary_workers_logs').select('quantity, work_comment, worker_name').is('deleted_at', null).eq('date', dateStr),
+        supabase.from('work_logs').select('quantity, employee_id, work_rates(name)').is('deleted_at', null).eq('date', dateStr),
+      ]);
+      const gmap = new Map<string, { who: string; kind: string; types: string[]; qty: number }>();
+      const add = (who: string, kind: string, type: string, qty: number) => {
+        const key = `${kind}|${who}`; const g = gmap.get(key) || { who, kind, types: [], qty: 0 };
+        if (type && !g.types.includes(type)) g.types.push(type); g.qty += qty; gmap.set(key, g);
+      };
+      (tr.data || []).forEach((r: any) => { if (!isAssemblyTempType(r.work_comment)) return; const q = Number(r.quantity || 0); if (q <= 0) return; add(r.worker_name || 'Без имени', 'Временный', String(r.work_comment || ''), q); });
+      (sr.data || []).forEach((r: any) => { if (isAssemblyExcludedStaffRate(r.work_rates?.name)) return; const q = Number(r.quantity || 0); if (q <= 0) return; add(empNameById.get(String(r.employee_id)) || 'Сотрудник', 'Сотрудник', String(r.work_rates?.name || ''), q); });
+      const rows = Array.from(gmap.values()).map((g) => ({ who: g.who, kind: g.kind, type: g.types.join(' / '), qty: g.qty })).sort((a, b) => b.qty - a.qty);
+      setReportsDayDetail({ date: dateStr, rows, total: rows.reduce((s, r) => s + r.qty, 0) });
+    } catch (e) { console.warn('loadReportsDayDetail failed', e); } finally { setReportsDayLoading(false); }
+  };
   const [uploadedReportAnalytics, setUploadedReportAnalytics] = useState<any[]>([]);
   const [uploadedReportSummary, setUploadedReportSummary] = useState<any | null>(null);
   const [uploadedCostByKey, setUploadedCostByKey] = useState<Record<string, string>>({});
@@ -24183,6 +24205,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       <div className="flex items-center justify-between mb-3">
                         <h4 className="font-bold text-slate-800 text-sm">Собрано по дням</h4>
                         <div className="flex items-center gap-3 text-xs">
+                          <span className="text-[11px] text-slate-400">нажми на день</span>
                           <span className="inline-flex items-center gap-1.5 text-slate-500"><span className="h-2.5 w-2.5 rounded-sm bg-indigo-500" /> сотр.</span>
                           <span className="inline-flex items-center gap-1.5 text-slate-500"><span className="h-2.5 w-2.5 rounded-sm bg-emerald-500" /> врем.</span>
                         </div>
@@ -24193,21 +24216,56 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           const h = Math.round((total / s.maxDay) * 150);
                           const staffH = total > 0 ? Math.round((v.staff / total) * h) : 0;
                           const tempH = h - staffH;
+                          const selected = reportsDayDetail?.date === dk;
                           return (
-                            <div key={`rs-${dk}`} className="flex-1 min-w-[10px] flex flex-col items-center gap-1" title={`${new Date(dk + 'T12:00:00').toLocaleDateString('ru-RU')}: всего ${total} (сотр ${v.staff}, врем ${v.temp})`}>
+                            <button type="button" key={`rs-${dk}`} onClick={() => loadReportsDayDetail(dk)} className={`flex-1 min-w-[10px] flex flex-col items-center gap-1 rounded-md px-0.5 transition-colors ${selected ? 'bg-indigo-100' : 'hover:bg-indigo-50'}`} title={`${new Date(dk + 'T12:00:00').toLocaleDateString('ru-RU')}: всего ${total} (сотр ${v.staff}, врем ${v.temp}) — нажми для детализации`}>
                               <div className="w-full flex flex-col justify-end h-[150px]">
                                 {total > 0 && (<>
                                   <div className="w-full bg-emerald-500 rounded-t-sm" style={{ height: `${tempH}px` }} />
                                   <div className="w-full bg-indigo-500" style={{ height: `${staffH}px` }} />
                                 </>)}
                               </div>
-                              <span className="text-[8px] text-slate-400">{dk.slice(8, 10)}</span>
-                            </div>
+                              <span className={`text-[8px] ${selected ? 'text-indigo-700 font-bold' : 'text-slate-400'}`}>{dk.slice(8, 10)}</span>
+                            </button>
                           );
                         })}
                       </div>
                     </div>
                   </div>
+
+                  {/* Day detail */}
+                  {reportsDayDetail && (
+                    <div className="mt-5 rounded-2xl border border-indigo-200 bg-white overflow-hidden">
+                      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
+                        <h4 className="font-bold text-slate-900 text-sm">Детализация за {new Date(reportsDayDetail.date + 'T12:00:00').toLocaleDateString('ru-RU')}</h4>
+                        <div className="flex items-center gap-3">
+                          <span className="text-sm text-slate-500">Всего: <b className="text-slate-900">{reportsDayDetail.total.toLocaleString('ru-RU')}</b></span>
+                          <button onClick={() => setReportsDayDetail(null)} className="p-1.5 rounded-lg hover:bg-slate-100"><X className="h-4 w-4 text-slate-500" /></button>
+                        </div>
+                      </div>
+                      {reportsDayLoading ? (
+                        <div className="px-4 py-6 text-center text-slate-400 text-sm">Загрузка…</div>
+                      ) : reportsDayDetail.rows.length === 0 ? (
+                        <div className="px-4 py-6 text-center text-slate-400 text-sm">В этот день сборки не было</div>
+                      ) : (
+                        <table className="w-full text-left text-sm">
+                          <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
+                            <tr><th className="px-4 py-2">Сотрудник</th><th className="px-4 py-2">Категория</th><th className="px-4 py-2">Тип работы</th><th className="px-4 py-2 text-right">Количество</th></tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {reportsDayDetail.rows.map((r, i) => (
+                              <tr key={`rdd-${i}`} className="hover:bg-slate-50">
+                                <td className="px-4 py-2 font-medium text-slate-800">{r.who}</td>
+                                <td className="px-4 py-2"><span className={`text-xs px-2 py-0.5 rounded-full ${r.kind === 'Временный' ? 'bg-amber-100 text-amber-700' : 'bg-indigo-100 text-indigo-700'}`}>{r.kind}</span></td>
+                                <td className="px-4 py-2 text-slate-600">{r.type}</td>
+                                <td className="px-4 py-2 text-right font-bold text-slate-900">{r.qty.toLocaleString('ru-RU')}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+                  )}
                   </>
                   )}
                 </div>
