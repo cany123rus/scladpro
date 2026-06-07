@@ -2649,7 +2649,42 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       setGeneralPackagingRows(Array.isArray(data) ? data : []);
     } catch (e) { console.warn('loadGeneralPackaging failed', e); }
   };
-  useEffect(() => { if (showGeneralReportModal) { loadGeneralPackaging(generalReportForm.start_date, generalReportForm.end_date); loadBoxStock(); } }, [showGeneralReportModal, generalReportForm.start_date, generalReportForm.end_date]);
+  useEffect(() => { if (showGeneralReportModal) { loadGeneralPackaging(generalReportForm.start_date, generalReportForm.end_date); loadBoxStock(); loadGeneralBoxData(generalReportForm.start_date, generalReportForm.end_date); } }, [showGeneralReportModal, generalReportForm.start_date, generalReportForm.end_date]);
+
+  // Box purchases/usage within the report date range (supplier filter applied in memo).
+  const [generalBoxPurchaseRows, setGeneralBoxPurchaseRows] = useState<any[]>([]);
+  const [generalBoxDeliveryRows, setGeneralBoxDeliveryRows] = useState<any[]>([]);
+  const loadGeneralBoxData = async (startStr?: string, endStr?: string) => {
+    try {
+      let pq = supabase.from('packaging_purchase_log').select('quantity, size, kind, supplier_id, created_at').is('deleted_at', null);
+      if (startStr) pq = pq.gte('created_at', `${startStr}T00:00:00`);
+      if (endStr) pq = pq.lte('created_at', `${endStr}T23:59:59`);
+      let dq = supabase.from('delivery_items').select('supplier_id, boxes, pallets, delivery_logs!inner(date)');
+      if (startStr) dq = dq.gte('delivery_logs.date', startStr);
+      if (endStr) dq = dq.lte('delivery_logs.date', endStr);
+      const [pr, dr] = await Promise.all([pq, dq]);
+      setGeneralBoxPurchaseRows(Array.isArray(pr.data) ? pr.data : []);
+      setGeneralBoxDeliveryRows(Array.isArray(dr.data) ? dr.data : []);
+    } catch (e) { console.warn('loadGeneralBoxData failed', e); }
+  };
+
+  const generalBoxStock = useMemo(() => {
+    const sup = String(generalReportForm.supplier_id || 'all');
+    let added = 0; let used = 0; const bySup = new Map<string, number>();
+    (generalBoxPurchaseRows || []).forEach((r: any) => {
+      if (sup !== 'all' && String(r.supplier_id || '') !== sup) return;
+      if (r.kind !== 'other' && isBoxPackaging(r.size)) added += Number(r.quantity || 0);
+    });
+    (generalBoxDeliveryRows || []).forEach((r: any) => {
+      if (sup !== 'all' && String(r.supplier_id || '') !== sup) return;
+      const u = palletsToBoxes(Number(r.boxes || 0), Number(r.pallets || 0));
+      used += u; const k = String(r.supplier_id || ''); bySup.set(k, (bySup.get(k) || 0) + u);
+    });
+    const bySupplier = Array.from(bySup.entries())
+      .map(([sid, u]) => ({ supplierId: sid, name: suppliers.find((s: any) => String(s.id) === sid)?.name || 'Без поставщика', used: u }))
+      .filter((x) => x.used > 0).sort((a, b) => b.used - a.used);
+    return { added, used, remaining: added - used, bySupplier };
+  }, [generalBoxPurchaseRows, generalBoxDeliveryRows, suppliers, generalReportForm.supplier_id]);
 
   const generalPackaging = useMemo(() => {
     const sup = String(generalReportForm.supplier_id || 'all');
@@ -3051,8 +3086,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         { name: 'Закуп', rows: pkgDetail.length ? pkgDetail : [{ 'Нет данных': '' }] },
         { name: 'Закуп по поставщикам', rows: pkgBySup.length ? pkgBySup : [{ 'Нет данных': '' }] },
         { name: 'Полная цена сборки', rows: (() => { const r = generalFullAvg.bySupplier.filter((s: any) => s.qty > 0).map((s: any) => ({ 'Поставщик': s.name, 'Собрано (шт)': s.qty, 'Затраты (ЗП+доставка+закуп)': Math.round(s.cost * 100) / 100, 'Цена за шт.': Math.round(s.avg * 100) / 100 })); r.push({ 'Поставщик': 'ИТОГО', 'Собрано (шт)': generalFullAvg.totalQty, 'Затраты (ЗП+доставка+закуп)': Math.round(generalFullAvg.totalCost * 100) / 100, 'Цена за шт.': Math.round(generalFullAvg.avg * 100) / 100 } as any); return r.length ? r : [{ 'Нет данных': '' }]; })() },
-        { name: 'Коробки на складе', rows: (() => { const r: any[] = [{ 'Показатель': 'Закуплено', 'Коробок': boxStock.added }, { 'Показатель': 'Израсходовано', 'Коробок': boxStock.used }, { 'Показатель': 'Остаток', 'Коробок': boxStock.remaining }]; return r; })() },
-        { name: 'Коробки по поставщикам', rows: boxStock.bySupplier.length ? boxStock.bySupplier.map((s: any) => ({ 'Поставщик': s.name, 'Израсходовано коробок': s.used })) : [{ 'Нет данных': '' }] },
+        { name: 'Коробки за период', rows: [{ 'Показатель': 'Закуплено (период)', 'Коробок': generalBoxStock.added }, { 'Показатель': 'Израсходовано (период)', 'Коробок': generalBoxStock.used }, { 'Показатель': 'Остаток за период', 'Коробок': generalBoxStock.remaining }, { 'Показатель': 'Остаток всего на складе', 'Коробок': boxStock.remaining }] },
+        { name: 'Коробки по поставщикам', rows: generalBoxStock.bySupplier.length ? generalBoxStock.bySupplier.map((s: any) => ({ 'Поставщик': s.name, 'Израсходовано коробок': s.used })) : [{ 'Нет данных': '' }] },
       ];
       await downloadWorkbook(`obschiy_otchet_${generalReportForm.start_date || 'start'}_${generalReportForm.end_date || 'end'}.xlsx`, sheets);
     } catch (e: any) {
@@ -3321,16 +3356,16 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         y = ((doc as any).lastAutoTable?.finalY || y) + 9;
       }
 
-      // Boxes on warehouse
+      // Boxes (filtered by period/supplier)
       {
         if (y > pageH - 30) { doc.addPage(); y = 16; }
-        y = drawBand(y, `Коробки на складе — остаток: ${boxStock.remaining.toLocaleString('ru-RU')} шт. (закуплено ${boxStock.added.toLocaleString('ru-RU')}, израсходовано ${boxStock.used.toLocaleString('ru-RU')})`, [79, 70, 229]);
-        if (boxStock.bySupplier.length) {
+        y = drawBand(y, `Коробки за период — закуплено ${generalBoxStock.added.toLocaleString('ru-RU')}, израсходовано ${generalBoxStock.used.toLocaleString('ru-RU')} (на складе всего: ${boxStock.remaining.toLocaleString('ru-RU')})`, [79, 70, 229]);
+        if (generalBoxStock.bySupplier.length) {
           baseTable({
             startY: y,
             head: [['Поставщик', 'Израсходовано коробок']],
-            body: boxStock.bySupplier.map((s: any) => [s.name, s.used.toLocaleString('ru-RU')]),
-            foot: [['Итого', boxStock.used.toLocaleString('ru-RU')]],
+            body: generalBoxStock.bySupplier.map((s: any) => [s.name, s.used.toLocaleString('ru-RU')]),
+            foot: [['Итого', generalBoxStock.used.toLocaleString('ru-RU')]],
           }, y, [79, 70, 229]);
           y = ((doc as any).lastAutoTable?.finalY || y) + 9;
         }
@@ -30943,25 +30978,25 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     )}
                   </div>
 
-                  {/* Коробки на складе */}
+                  {/* Коробки на складе (по фильтру периода/поставщика) */}
                   <div className="rounded-2xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-violet-50 p-4 shadow-sm">
                     <div className="flex items-center justify-between mb-3">
-                      <h4 className="font-bold text-slate-900 text-sm">Коробки на складе</h4>
+                      <h4 className="font-bold text-slate-900 text-sm">Коробки (за период{generalReportForm.supplier_id !== 'all' ? ', по поставщику' : ''})</h4>
                       <div className="text-right">
-                        <div className="text-[11px] text-indigo-600">Остаток</div>
-                        <div className={`text-xl font-extrabold ${boxStock.remaining <= 0 ? 'text-rose-600' : 'text-indigo-800'}`}>{boxStock.remaining.toLocaleString('ru-RU')} шт.</div>
+                        <div className="text-[11px] text-indigo-600">Остаток за период</div>
+                        <div className={`text-xl font-extrabold ${generalBoxStock.remaining < 0 ? 'text-rose-600' : 'text-indigo-800'}`}>{generalBoxStock.remaining.toLocaleString('ru-RU')} шт.</div>
                       </div>
                     </div>
                     <div className="grid grid-cols-3 gap-2 mb-3">
-                      <div className="rounded-xl border border-indigo-100 bg-white/70 p-3"><div className="text-[11px] text-slate-500">Закуплено</div><div className="text-base font-bold text-indigo-800">{boxStock.added.toLocaleString('ru-RU')}</div></div>
-                      <div className="rounded-xl border border-indigo-100 bg-white/70 p-3"><div className="text-[11px] text-slate-500">Израсходовано</div><div className="text-base font-bold text-indigo-800">{boxStock.used.toLocaleString('ru-RU')}</div></div>
-                      <div className="rounded-xl border border-indigo-100 bg-white/70 p-3"><div className="text-[11px] text-slate-500">Остаток</div><div className="text-base font-bold text-indigo-800">{boxStock.remaining.toLocaleString('ru-RU')}</div></div>
+                      <div className="rounded-xl border border-indigo-100 bg-white/70 p-3"><div className="text-[11px] text-slate-500">Закуплено</div><div className="text-base font-bold text-indigo-800">{generalBoxStock.added.toLocaleString('ru-RU')}</div></div>
+                      <div className="rounded-xl border border-indigo-100 bg-white/70 p-3"><div className="text-[11px] text-slate-500">Израсходовано</div><div className="text-base font-bold text-indigo-800">{generalBoxStock.used.toLocaleString('ru-RU')}</div></div>
+                      <div className="rounded-xl border border-indigo-100 bg-white/70 p-3"><div className="text-[11px] text-slate-500">Остаток (всего на складе)</div><div className="text-base font-bold text-indigo-800">{boxStock.remaining.toLocaleString('ru-RU')}</div></div>
                     </div>
-                    {boxStock.bySupplier.length > 0 && (
+                    {generalBoxStock.bySupplier.length > 0 && (
                       <div>
                         <div className="text-[11px] font-semibold text-slate-500 mb-1.5">Израсходовано коробок по поставщикам (доставки)</div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                          {boxStock.bySupplier.map((s) => (
+                          {generalBoxStock.bySupplier.map((s) => (
                             <div key={`box-sup-${s.supplierId}`} className="flex items-center justify-between rounded-lg bg-white/70 border border-indigo-100 px-3 py-1.5 text-sm">
                               <span className="text-slate-700 truncate" title={s.name}>{s.name}</span>
                               <span className="shrink-0 ml-2 font-semibold text-indigo-800">{s.used.toLocaleString('ru-RU')} шт.</span>
