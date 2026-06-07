@@ -16264,13 +16264,17 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     // timeout + false "connection issue" banner; sync can run up to ~2.5 min.
     const base = (import.meta as any).env?.VITE_SUPABASE_URL || 'https://blygwkxjogmioebutiwn.supabase.co';
     const key = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || 'sb_publishable_kSk_B3Y6eN5P9sCVk67-cg_uSGedHJX';
+    // One 30-day window in a single SHORT request (stays well under the ~150s edge limit).
+    const iso = (d: Date) => d.toISOString().slice(0, 10);
+    const today = new Date();
+    const begin = new Date(today); begin.setUTCDate(begin.getUTCDate() - 30);
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 150000);
+    const timer = setTimeout(() => ctrl.abort(), 140000);
     try {
       const r = await fetch(`${base}/functions/v1/wb-adv-sync`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', apikey: key, Authorization: `Bearer ${key}` },
-        body: JSON.stringify({ supplier_id: adsApiSupplierId, days: 90 }),
+        body: JSON.stringify({ supplier_id: adsApiSupplierId, begin: iso(begin), end: iso(today) }),
         signal: ctrl.signal,
       });
       const data = await r.json().catch(() => ({}));
@@ -16281,7 +16285,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       await loadAdsApiData();
     } catch (e: any) {
       console.error('syncAdsApiNow error', e);
-      const msg = e?.name === 'AbortError' ? 'Синхронизация идёт дольше обычного. Данные подтянутся в фоне — нажмите «Показать» через минуту.' : 'Синхронизация: ' + (e?.message || 'ошибка. Проверьте токен «Продвижение».');
+      const msg = e?.name === 'AbortError' ? 'Синхронизация идёт дольше обычного. Данные дольются в фоне — нажмите «Показать» через минуту.' : 'Синхронизация: ' + (e?.message || 'ошибка. Проверьте токен «Продвижение».');
       setAdsApiError(msg);
     } finally {
       clearTimeout(timer);

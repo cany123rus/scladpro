@@ -25,7 +25,7 @@ function isoDaysAgo(n: number) {
   const d = new Date(); d.setDate(d.getDate() - n); return d.toISOString().slice(0, 10)
 }
 
-async function syncSupplier(supabase: any, supplier: any, days: number) {
+async function syncSupplier(supabase: any, supplier: any, days: number, beginArg?: string, endArg?: string) {
   const token = String(supplier.wb_adv_api_token || supplier.wb_api_token || '').trim()
   if (!token) return { ok: false, campaigns: 0, message: 'no token' }
 
@@ -49,9 +49,11 @@ async function syncSupplier(supabase: any, supplier: any, days: number) {
 
   // 3) fullstats — GET /adv/v3/fullstats (POST v2 устарел с 23.10.2025).
   //    Параметры: ids (через запятую), beginDate, endDate. Макс. 31 день за запрос.
-  const begin = isoDaysAgo(days), end = isoDaysAgo(0)
   const wins: Array<[string, string]> = []
-  {
+  if (beginArg && endArg) {
+    wins.push([beginArg, endArg])
+  } else {
+    const begin = isoDaysAgo(days), end = isoDaysAgo(0)
     let ws = new Date(begin + 'T00:00:00Z')
     const we = new Date(end + 'T00:00:00Z')
     while (ws.getTime() <= we.getTime()) {
@@ -110,10 +112,12 @@ Deno.serve(async (req) => {
     const supabase = createClient(supabaseUrl, serviceKey)
 
     const url = new URL(req.url)
-    let bodySupplier: any = null, bodyDays: any = null
-    try { if (req.method === 'POST') { const b = await req.json(); bodySupplier = b?.supplier_id; bodyDays = b?.days } } catch (_) {}
+    let bodySupplier: any = null, bodyDays: any = null, bodyBegin: any = null, bodyEnd: any = null
+    try { if (req.method === 'POST') { const b = await req.json(); bodySupplier = b?.supplier_id; bodyDays = b?.days; bodyBegin = b?.begin; bodyEnd = b?.end } } catch (_) {}
     const onlySupplier = url.searchParams.get('supplier_id') || bodySupplier
     const days = Math.min(90, Math.max(1, Number(url.searchParams.get('days') || bodyDays || '7')))
+    const begin = url.searchParams.get('begin') || bodyBegin || undefined
+    const end = url.searchParams.get('end') || bodyEnd || undefined
 
     let q = supabase.from('suppliers').select('id, name, wb_api_token, wb_adv_api_token').is('deleted_at', null)
     if (onlySupplier) q = q.eq('id', onlySupplier)
@@ -124,7 +128,7 @@ Deno.serve(async (req) => {
     const results: any[] = []
     for (const s of targets) {
       let res: any
-      try { res = await syncSupplier(supabase, s, days) }
+      try { res = await syncSupplier(supabase, s, days, begin, end) }
       catch (e: any) { res = { ok: false, campaigns: 0, message: String(e?.message || e).slice(0, 200) } }
       results.push({ supplier_id: s.id, name: s.name, ...res })
       await supabase.from('wb_adv_sync_log').insert({ supplier_id: s.id, ok: res.ok, campaigns: res.campaigns, message: res.message })
