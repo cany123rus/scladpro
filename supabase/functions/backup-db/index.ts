@@ -22,31 +22,45 @@ Deno.serve(async (req) => {
       .select('key, value')
       .in('key', ['backup_bot_token', 'backup_chat_id'])
 
-    // Defaults from Dashboard.tsx
-    let botToken = '8535851324:AAGug52myT700ifTAlha_APm__ykSpIS1TM'
-    let chatId = '498924112'
+    // Bot token / chat from settings (set in DB; no secrets hardcoded).
+    let botToken = Deno.env.get('BACKUP_BOT_TOKEN') ?? ''
+    let chatId = Deno.env.get('BACKUP_CHAT_ID') ?? ''
 
     if (settings) {
       const tokenSetting = settings.find(s => s.key === 'backup_bot_token')
       const chatSetting = settings.find(s => s.key === 'backup_chat_id')
-      
       if (tokenSetting?.value) botToken = tokenSetting.value
       if (chatSetting?.value) chatId = chatSetting.value
     }
 
-    // 2. Fetch Data
-    const tables = ['suppliers', 'products', 'supplies', 'boxes', 'supply_items', 'employees', 'receptions', 'work_logs', 'work_rates']
+    if (!botToken || !chatId) {
+      throw new Error('Backup bot not configured: set app_settings backup_bot_token and backup_chat_id')
+    }
+
+    // 2. Fetch Data — all public tables (minus cache/sensitive), dynamically.
+    let tables: string[] = []
+    const { data: tableList } = await supabase.rpc('get_backup_tables')
+    if (Array.isArray(tableList) && tableList.length) {
+      tables = tableList as string[]
+    } else {
+      tables = ['suppliers', 'supplies', 'supply_items', 'employees', 'receptions', 'work_logs', 'work_rates', 'temporary_workers_logs', 'delivery_logs', 'delivery_items', 'packaging_purchase_log', 'app_settings']
+    }
     const dbData: any = {}
 
     for (const table of tables) {
-      const { data, error } = await supabase.from(table).select('*')
-      if (error) {
-        console.error(`Error fetching ${table}:`, error)
-        // Continue with other tables or throw? Let's continue but log it.
-        dbData[table] = []
-      } else {
-        dbData[table] = data || []
+      // Page through rows so large tables don't get truncated at 1000.
+      const rows: any[] = []
+      let from = 0
+      const pageSize = 1000
+      while (true) {
+        const { data, error } = await supabase.from(table).select('*').range(from, from + pageSize - 1)
+        if (error) { console.error(`Error fetching ${table}:`, error); break }
+        if (!data || data.length === 0) break
+        rows.push(...data)
+        if (data.length < pageSize) break
+        from += pageSize
       }
+      dbData[table] = rows
     }
 
     // 3. Prepare File
