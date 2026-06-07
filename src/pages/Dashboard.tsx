@@ -16519,6 +16519,16 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       .map(([phrase, v]) => ({ phrase, ...v, cpc: v.clicks ? v.spend / v.clicks : 0 }))
       .sort((a, b) => b.spend - a.spend);
     const kwSpendTotal = keywords.reduce((s, k) => s + k.spend, 0);
+    const kwClicksTotal = keywords.reduce((s, k) => s + k.clicks, 0);
+    const avgCpc = kwClicksTotal > 0 ? kwSpendTotal / kwClicksTotal : 0;
+    // «Слив»: расход есть, кликов нет. «Дорогие»: CPC заметно выше среднего.
+    const wasted = keywords.filter((k) => k.spend > 0 && k.clicks === 0).sort((a, b) => b.spend - a.spend);
+    const expensive = keywords.filter((k) => k.clicks >= 3 && avgCpc > 0 && k.cpc > avgCpc * 1.3).sort((a, b) => b.cpc - a.cpc);
+    const wastedSum = wasted.reduce((s, k) => s + k.spend, 0);
+    // Донат: топ-6 фраз + «прочее».
+    const donutTop = keywords.slice(0, 6).map((k) => ({ label: k.phrase, value: k.spend }));
+    const donutRest = keywords.slice(6).reduce((s, k) => s + k.spend, 0);
+    const donut = donutRest > 0 ? [...donutTop, { label: 'Прочие фразы', value: donutRest }] : donutTop;
 
     // Funnel
     let carts = 0;
@@ -16528,7 +16538,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     });
     const funnel = { shows: adsKpi.shows, clicks: adsKpi.clicks, carts, orders: adsKpi.orders };
 
-    return { daily, keywords, kwSpendTotal, funnel };
+    return { daily, keywords, kwSpendTotal, avgCpc, wasted, wastedSum, expensive, donut, funnel };
   }, [adsAnalyticsSheets, adsKpi]);
 
   const handleAdsExcelUpload = async (file: File) => {
@@ -23053,6 +23063,97 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         })()}
                       </div>
                     </div>
+
+                    {adsViz.keywords.length > 0 && (
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                        {/* Донат распределения бюджета */}
+                        <div className="rounded-2xl border border-slate-200 p-4">
+                          <h4 className="font-bold text-slate-800 text-sm mb-3">Распределение бюджета по фразам</h4>
+                          {(() => {
+                            const palette = ['#6366f1', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981', '#3b82f6', '#94a3b8'];
+                            const total = adsViz.donut.reduce((s, d) => s + d.value, 0) || 1;
+                            let acc = 0;
+                            const R = 52, C = 2 * Math.PI * R;
+                            return (
+                              <div className="flex items-center gap-4 flex-wrap">
+                                <svg width="130" height="130" viewBox="0 0 130 130" className="shrink-0">
+                                  <g transform="translate(65,65) rotate(-90)">
+                                    <circle r={R} fill="none" stroke="#f1f5f9" strokeWidth="16" />
+                                    {adsViz.donut.map((d, i) => {
+                                      const frac = d.value / total;
+                                      const dash = `${frac * C} ${C}`;
+                                      const off = -acc * C; acc += frac;
+                                      return <circle key={i} r={R} fill="none" stroke={palette[i % palette.length]} strokeWidth="16" strokeDasharray={dash} strokeDashoffset={off} />;
+                                    })}
+                                  </g>
+                                </svg>
+                                <div className="flex-1 min-w-[160px] space-y-1">
+                                  {adsViz.donut.map((d, i) => (
+                                    <div key={i} className="flex items-center justify-between gap-2 text-xs">
+                                      <span className="flex items-center gap-1.5 min-w-0"><span className="h-2.5 w-2.5 rounded-sm shrink-0" style={{ background: palette[i % palette.length] }} /><span className="truncate text-slate-600">{d.label}</span></span>
+                                      <span className="text-slate-500 shrink-0">{(d.value / total * 100).toFixed(1)}%</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                          })()}
+                        </div>
+
+                        {/* Минус-фразы / неэффективные */}
+                        <div className="rounded-2xl border border-slate-200 p-4">
+                          <h4 className="font-bold text-slate-800 text-sm mb-1">Слабые фразы</h4>
+                          <p className="text-[11px] text-slate-400 mb-3">Средний CPC: {adsViz.avgCpc.toFixed(2)} ₽. Кандидаты на минус-фразы / снижение ставки.</p>
+                          {adsViz.wasted.length === 0 && adsViz.expensive.length === 0 ? (
+                            <div className="text-xs text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-lg p-3">Слива бюджета и аномально дорогих фраз не найдено 👍</div>
+                          ) : (
+                            <div className="space-y-3">
+                              {adsViz.wasted.length > 0 && (
+                                <div>
+                                  <div className="text-xs font-semibold text-rose-600 mb-1">Слив: расход без кликов ({Math.round(adsViz.wastedSum).toLocaleString('ru-RU')} ₽)</div>
+                                  <div className="space-y-1 max-h-32 overflow-auto pr-1">
+                                    {adsViz.wasted.slice(0, 8).map((k) => (
+                                      <div key={k.phrase} className="flex justify-between text-xs gap-2"><span className="truncate text-slate-600">{k.phrase}</span><span className="text-rose-600 shrink-0">{Math.round(k.spend).toLocaleString('ru-RU')} ₽</span></div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                              {adsViz.expensive.length > 0 && (
+                                <div>
+                                  <div className="text-xs font-semibold text-amber-600 mb-1">Дорогой CPC (выше среднего в 1.3×)</div>
+                                  <div className="space-y-1 max-h-32 overflow-auto pr-1">
+                                    {adsViz.expensive.slice(0, 8).map((k) => (
+                                      <div key={k.phrase} className="flex justify-between text-xs gap-2"><span className="truncate text-slate-600">{k.phrase}</span><span className="text-amber-600 shrink-0">CPC {k.cpc.toFixed(1)} ₽ · {k.clicks} кл.</span></div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* CPC по дням */}
+                    {adsViz.daily.length > 0 && (() => {
+                      const series = adsViz.daily.map((d) => ({ date: d.date, cpc: d.clicks ? d.spend / d.clicks : 0 }));
+                      const maxCpc = Math.max(0.01, ...series.map((s) => s.cpc));
+                      return (
+                        <div className="rounded-2xl border border-slate-200 p-4">
+                          <h4 className="font-bold text-slate-800 text-sm mb-3">CPC по дням <span className="text-[11px] font-normal text-slate-400">(стоимость клика)</span></h4>
+                          <div className="flex items-end gap-[3px] h-32 overflow-x-auto">
+                            {series.map((s) => (
+                              <div key={s.date} className="flex-1 min-w-[14px] flex flex-col items-center gap-1" title={`${new Date(s.date + 'T12:00:00').toLocaleDateString('ru-RU')}\nCPC: ${s.cpc.toFixed(2)} ₽`}>
+                                <div className="w-full flex flex-col justify-end h-[100px]">
+                                  <div className="w-full bg-gradient-to-t from-amber-500 to-orange-400 rounded-t-sm" style={{ height: `${Math.round((s.cpc / maxCpc) * 100)}px` }} />
+                                </div>
+                                <span className="text-[8px] text-slate-400">{s.date.slice(8, 10)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })()}
 
                     <div className="text-sm font-semibold text-slate-900 mb-2">Рекомендации по ключам</div>
                     {adsInsights.all.length === 0 && (
