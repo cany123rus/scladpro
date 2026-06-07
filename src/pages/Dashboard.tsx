@@ -16214,37 +16214,54 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     if (!adsApiFrom || !adsApiTo) { setAdsApiError('Укажите период'); return; }
     const token = String(rawToken).trim();
     const ADV = 'https://advert-api.wildberries.ru';
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    // Fetch with 429 backoff: WB rate-limits advert endpoints (fullstats ~1/min).
+    const wbFetch = async (url: string, opts: any = {}, tries = 5): Promise<Response> => {
+      for (let i = 0; i < tries; i++) {
+        const r = await fetch(url, opts);
+        if (r.status === 429) {
+          const ra = Number(r.headers.get('Retry-After')) || 0;
+          const wait = ra > 0 ? ra * 1000 : Math.min(70000, 15000 * (i + 1));
+          setAdsApiError(`WB ограничил частоту запросов — ожидание ${Math.round(wait / 1000)} с… (попытка ${i + 1})`);
+          await sleep(wait);
+          continue;
+        }
+        return r;
+      }
+      throw new Error('WB API: слишком много запросов (429). Подождите ~минуту и повторите.');
+    };
     setAdsApiLoading(true); setAdsApiError(null); setAdsApiData(null);
     try {
       // 1) Список ID кампаний
-      const cntRes = await fetch(`${ADV}/adv/v1/promotion/count`, { headers: { Authorization: token } });
+      const cntRes = await wbFetch(`${ADV}/adv/v1/promotion/count`, { headers: { Authorization: token } });
       if (!cntRes.ok) throw new Error(`WB API ${cntRes.status}: ${(await cntRes.text()).slice(0, 160)}`);
       const cnt = await cntRes.json();
       const ids: number[] = [];
       (cnt?.adverts || []).forEach((g: any) => (g?.advert_list || []).forEach((a: any) => { const id = Number(a?.advertId); if (id) ids.push(id); }));
       if (!ids.length) { setAdsApiError('У поставщика не найдено рекламных кампаний'); return; }
 
-      // 2) Имена кампаний (необязательно)
+      // 2) Имена кампаний (необязательно) — с паузами, чтобы не словить 429
       const nameMap = new Map<number, string>();
       for (let i = 0; i < ids.length; i += 50) {
         try {
-          const r = await fetch(`${ADV}/adv/v1/promotion/adverts`, { method: 'POST', headers: { Authorization: token, 'Content-Type': 'application/json' }, body: JSON.stringify(ids.slice(i, i + 50)) });
+          if (i > 0) await sleep(700);
+          const r = await wbFetch(`${ADV}/adv/v1/promotion/adverts`, { method: 'POST', headers: { Authorization: token, 'Content-Type': 'application/json' }, body: JSON.stringify(ids.slice(i, i + 50)) });
           if (r.ok) { const arr = await r.json(); (arr || []).forEach((c: any) => nameMap.set(Number(c?.advertId), c?.name || `#${c?.advertId}`)); }
         } catch {}
       }
 
       // 3) Полная статистика (rate limit ~1 запрос/мин, до 100 кампаний за запрос)
+      setAdsApiError(null);
       const stats: any[] = [];
-      const batches = Math.ceil(ids.length / 100);
       for (let i = 0; i < ids.length; i += 100) {
-        if (i > 0) await new Promise((r) => setTimeout(r, 61000));
+        if (i > 0) await sleep(61000);
         const body = ids.slice(i, i + 100).map((id) => ({ id, interval: { begin: adsApiFrom, end: adsApiTo } }));
-        const r = await fetch(`${ADV}/adv/v2/fullstats`, { method: 'POST', headers: { Authorization: token, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const r = await wbFetch(`${ADV}/adv/v2/fullstats`, { method: 'POST', headers: { Authorization: token, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         if (!r.ok) throw new Error(`fullstats ${r.status}: ${(await r.text()).slice(0, 160)}`);
         const arr = await r.json();
         if (Array.isArray(arr)) stats.push(...arr);
       }
-      void batches;
+      setAdsApiError(null);
 
       // 4) Агрегация
       const t = { views: 0, clicks: 0, sum: 0, atbs: 0, orders: 0, shks: 0, revenue: 0 };
