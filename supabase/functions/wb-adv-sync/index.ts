@@ -47,30 +47,46 @@ async function syncSupplier(supabase: any, supplier: any, days: number) {
     } catch (_) {}
   }
 
-  // 3) fullstats (rolling window of `days`)
+  // 3) fullstats — GET /adv/v3/fullstats (POST v2 устарел с 23.10.2025).
+  //    Параметры: ids (через запятую), beginDate, endDate. Макс. 31 день за запрос.
   const begin = isoDaysAgo(days), end = isoDaysAgo(0)
+  const wins: Array<[string, string]> = []
+  {
+    let ws = new Date(begin + 'T00:00:00Z')
+    const we = new Date(end + 'T00:00:00Z')
+    while (ws.getTime() <= we.getTime()) {
+      const wend = new Date(Math.min(we.getTime(), ws.getTime() + 30 * 86400000))
+      wins.push([ws.toISOString().slice(0, 10), wend.toISOString().slice(0, 10)])
+      ws = new Date(wend.getTime() + 86400000)
+    }
+  }
   const rows: any[] = []
+  let firstCall = true
   for (let i = 0; i < ids.length; i += 100) {
-    if (i > 0) await sleep(61000)
-    const body = ids.slice(i, i + 100).map((id) => ({ id, interval: { begin, end } }))
-    const r = await wbFetch(`${ADV}/adv/v2/fullstats`, { method: 'POST', headers: { Authorization: token, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-    if (!r.ok) throw new Error(`fullstats ${r.status}: ${(await r.text()).slice(0, 120)}`)
-    const arr = await r.json()
-    if (Array.isArray(arr)) {
-      arr.forEach((s: any) => {
-        const advertId = Number(s?.advertId)
-        const cname = nameMap.get(advertId) || `#${advertId}`
-        ;(s?.days || []).forEach((d: any) => {
-          const date = String(d?.date || '').slice(0, 10)
-          if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return
-          rows.push({
-            supplier_id: supplier.id, advert_id: advertId, date, campaign_name: cname,
-            views: Number(d?.views || 0), clicks: Number(d?.clicks || 0), sum: Number(d?.sum || 0),
-            atbs: Number(d?.atbs || 0), orders: Number(d?.orders || 0), shks: Number(d?.shks || 0),
-            sum_price: Number(d?.sum_price || 0), updated_at: new Date().toISOString(),
+    const idBatch = ids.slice(i, i + 100).join(',')
+    for (const [b, e] of wins) {
+      if (!firstCall) await sleep(1500)
+      firstCall = false
+      const r = await wbFetch(`${ADV}/adv/v3/fullstats?ids=${idBatch}&beginDate=${b}&endDate=${e}`, { headers: { Authorization: token } })
+      if (r.status === 204) continue
+      if (!r.ok) throw new Error(`fullstats ${r.status}: ${(await r.text()).slice(0, 120)}`)
+      const arr = await r.json()
+      if (Array.isArray(arr)) {
+        arr.forEach((s: any) => {
+          const advertId = Number(s?.advertId)
+          const cname = nameMap.get(advertId) || `#${advertId}`
+          ;(s?.days || []).forEach((d: any) => {
+            const date = String(d?.date || '').slice(0, 10)
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return
+            rows.push({
+              supplier_id: supplier.id, advert_id: advertId, date, campaign_name: cname,
+              views: Number(d?.views || 0), clicks: Number(d?.clicks || 0), sum: Number(d?.sum || 0),
+              atbs: Number(d?.atbs || 0), orders: Number(d?.orders || 0), shks: Number(d?.shks || 0),
+              sum_price: Number(d?.sum_price || 0), updated_at: new Date().toISOString(),
+            })
           })
         })
-      })
+      }
     }
   }
 
