@@ -3431,17 +3431,16 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     }
   };
 
-  // Send the general report PDF + short summary to the selected supplier via Telegram.
+  // Send the general report PDF + short summary to a chosen supplier via Telegram.
   const [sendingGeneralTelegram, setSendingGeneralTelegram] = useState(false);
-  const handleSendGeneralReportTelegram = async () => {
-    const supId = String(generalReportForm.supplier_id || 'all');
-    if (supId === 'all') { showToast('Выберите конкретного поставщика для отправки', 'error'); return; }
-    const supplier = suppliers.find((s: any) => String(s.id) === supId);
+  const [telegramRecipientModalOpen, setTelegramRecipientModalOpen] = useState(false);
+  const handleSendGeneralReportTelegram = async (recipientId: string) => {
+    const supplier = suppliers.find((s: any) => String(s.id) === String(recipientId));
     const chatId = String(supplier?.telegram_chat_id || '').trim();
     if (!chatId) { showToast('У поставщика не указан Telegram Chat ID', 'error'); return; }
     const token = String(writeoffBotToken || '').trim();
     if (!token) { showToast('Не настроен токен бота (АдминПанель → Боты)', 'error'); return; }
-    if (!await confirmDialog(`Отправить отчёт поставщику «${supplier?.name}» в Telegram?`)) return;
+    setTelegramRecipientModalOpen(false);
     setSendingGeneralTelegram(true);
     try {
       const built = await handleDownloadGeneralReportPdf({ returnBlob: true });
@@ -3449,10 +3448,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       const t = generalReportTotals;
       const money = (v: any) => `${Number(v || 0).toLocaleString('ru-RU', { maximumFractionDigits: 0 })} ₽`;
       const period = `${generalReportForm.start_date || ''} — ${generalReportForm.end_date || ''}`;
+      const filterSupplier = generalReportForm.supplier_id === 'all' ? 'Все поставщики' : (suppliers.find((s: any) => String(s.id) === String(generalReportForm.supplier_id))?.name || '-');
       const lines = [
         `📊 Общий отчёт`,
-        `Поставщик: ${supplier?.name}`,
         `Период: ${period}`,
+        `Фильтр (поставщик): ${filterSupplier}`,
         ``,
         `🧩 Собрано: ${(generalAssembly.totalTemp + generalAssembly.totalStaff).toLocaleString('ru-RU')} шт (врем ${generalAssembly.totalTemp.toLocaleString('ru-RU')} · сотр ${generalAssembly.totalStaff.toLocaleString('ru-RU')})`,
         `💰 ЗП временные: ${money(t.tempEarned)}`,
@@ -30898,10 +30898,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <button type="button" onClick={handleDownloadGeneralReportExcel} className="h-11 flex-1 px-4 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 inline-flex items-center justify-center gap-2 whitespace-nowrap shadow-sm">
                           <FileSpreadsheet className="h-4 w-4" /> Excel
                         </button>
+                        <button type="button" onClick={() => setTelegramRecipientModalOpen(true)} disabled={sendingGeneralTelegram} title="Отправить отчёт в Telegram" className={`h-11 w-11 shrink-0 rounded-xl inline-flex items-center justify-center shadow-sm text-white ${sendingGeneralTelegram ? 'bg-sky-300 cursor-not-allowed' : 'bg-sky-500 hover:bg-sky-600'}`}>
+                          <Send className="h-5 w-5" />
+                        </button>
                       </div>
-                      <button type="button" onClick={handleSendGeneralReportTelegram} disabled={sendingGeneralTelegram || generalReportForm.supplier_id === 'all'} title={generalReportForm.supplier_id === 'all' ? 'Выберите поставщика' : 'Отправить отчёт поставщику в Telegram'} className={`h-11 w-full px-4 rounded-xl inline-flex items-center justify-center gap-2 whitespace-nowrap shadow-sm font-medium text-white ${sendingGeneralTelegram || generalReportForm.supplier_id === 'all' ? 'bg-sky-300 cursor-not-allowed' : 'bg-sky-500 hover:bg-sky-600'}`}>
-                        <Send className="h-4 w-4" /> {sendingGeneralTelegram ? 'Отправка…' : 'Отправить в Telegram поставщику'}
-                      </button>
                     </div>
                   </div>
 
@@ -31652,6 +31652,40 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 <div className="mt-5 flex justify-end gap-2">
                   <button type="button" onClick={() => setCwPurchaseEdit(null)} className="px-4 py-2 rounded-lg border">Отмена</button>
                   <button type="button" onClick={saveCwPurchaseEdit} className="px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">Сохранить</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {telegramRecipientModalOpen && (
+            <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-[80] p-3" onClick={() => setTelegramRecipientModalOpen(false)}>
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+                <div className="flex items-center gap-2 px-5 py-4 border-b border-slate-100">
+                  <Send className="h-5 w-5 text-sky-500" />
+                  <h3 className="font-bold text-slate-900">Кому отправить отчёт</h3>
+                </div>
+                <div className="p-3 overflow-y-auto">
+                  {suppliers.filter((s: any) => String(s.telegram_chat_id || '').trim()).length === 0 ? (
+                    <div className="px-3 py-8 text-center text-sm text-slate-400">Нет поставщиков с Telegram Chat ID.<br />Заполните Chat ID в разделе «Поставщики».</div>
+                  ) : (
+                    <div className="space-y-1">
+                      {suppliers.filter((s: any) => String(s.telegram_chat_id || '').trim()).map((s: any) => (
+                        <button
+                          key={`tg-recipient-${s.id}`}
+                          type="button"
+                          onClick={() => handleSendGeneralReportTelegram(String(s.id))}
+                          disabled={sendingGeneralTelegram}
+                          className="w-full flex items-center justify-between rounded-xl border border-slate-200 px-3 py-2.5 text-left text-sm hover:bg-sky-50 hover:border-sky-200 disabled:opacity-50"
+                        >
+                          <span className="font-medium text-slate-800 truncate">{s.name}</span>
+                          <span className="ml-2 shrink-0 text-xs text-slate-400">TG: {s.telegram_chat_id}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="px-5 py-3 border-t border-slate-100 flex justify-end">
+                  <button type="button" onClick={() => setTelegramRecipientModalOpen(false)} className="px-4 py-2 rounded-lg border text-sm">Отмена</button>
                 </div>
               </div>
             </div>
