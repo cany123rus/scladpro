@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useNavigate } from 'react-router-dom';
-import { QrCode, User, Lock, Loader2, Camera, X, Eye, EyeOff } from 'lucide-react';
+import { QrCode, User, Lock, Loader2, Camera, X, Eye, EyeOff, Delete, KeyRound } from 'lucide-react';
 import jsQR from 'jsqr';
 import { telegramService } from '../services/telegram.service';
 import { storeCurrentEmployee } from '../utils/employeeStorage';
@@ -21,6 +21,95 @@ export default function Login() {
   const streamRef = useRef<MediaStream | null>(null);
   const scannerInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
+
+  // ── PIN (быстрый вход) ───────────────────────────────────────────────
+  const PIN_LEN = 6;
+  const PIN_MAX_FAILS = 5;
+  const PIN_FAIL_KEY = 'pin_fail_count';
+  const getDeviceId = () => {
+    let d = localStorage.getItem('employee_device_id') || '';
+    if (!d) { d = `dev_${Math.random().toString(36).slice(2, 10)}_${Date.now().toString(36)}`; localStorage.setItem('employee_device_id', d); }
+    return d;
+  };
+  const [pinProfiles, setPinProfiles] = useState<Array<{ employee_id: string; full_name: string; role: string; label: string | null }>>([]);
+  const [showPinScreen, setShowPinScreen] = useState(false);
+  const [pin, setPin] = useState('');
+  const [pinError, setPinError] = useState<string | null>(null);
+  const [pinVerifying, setPinVerifying] = useState(false);
+  const [pinSetupEmployee, setPinSetupEmployee] = useState<any>(null);
+  const [setupPin, setSetupPin] = useState('');
+  const [setupPin2, setSetupPin2] = useState('');
+  const [setupSaving, setSetupSaving] = useState(false);
+
+  // Load PIN profiles registered on this device → show PIN screen by default.
+  useEffect(() => {
+    (async () => {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('token') || params.get('t') || params.get('auth')) return; // token login takes over
+      try {
+        const { data } = await supabase.rpc('list_device_pin_profiles', { p_device_id: getDeviceId() });
+        if (Array.isArray(data) && data.length) { setPinProfiles(data); setShowPinScreen(true); }
+      } catch {}
+    })();
+  }, []);
+
+  // After any successful authentication: store, report, and either prompt to set
+  // a PIN on this device (first time) or go straight to the app.
+  const afterAuth = async (employee: any, opts?: { skipPinPrompt?: boolean }) => {
+    if (!employee) throw new Error('Сотрудник не найден');
+    if (await isEmployeeBlocked(String(employee.id))) throw new Error('Сотрудник заблокирован');
+    storeCurrentEmployee(employee);
+    void sendLoginReport(employee);
+    localStorage.removeItem(PIN_FAIL_KEY);
+    const hasPin = pinProfiles.some((p) => String(p.employee_id) === String(employee.id));
+    if (!opts?.skipPinPrompt && !hasPin) {
+      setPinSetupEmployee(employee);
+      setSetupPin(''); setSetupPin2('');
+      return; // defer navigation until the user sets or skips the PIN
+    }
+    navigate('/');
+  };
+
+  const verifyPin = async (code: string) => {
+    setPinVerifying(true); setPinError(null);
+    try {
+      const d = getDeviceId();
+      const { data } = await supabase.rpc('verify_employee_pin', { p_device_id: d, p_pin: code });
+      if (data) { await afterAuth(data, { skipPinPrompt: true }); return; }
+      const n = Number(localStorage.getItem(PIN_FAIL_KEY) || '0') + 1;
+      localStorage.setItem(PIN_FAIL_KEY, String(n));
+      if (n >= PIN_MAX_FAILS) {
+        try { await supabase.rpc('clear_device_pins', { p_device_id: d }); } catch {}
+        localStorage.removeItem(PIN_FAIL_KEY);
+        setPinProfiles([]); setShowPinScreen(false);
+        setError('Слишком много неверных попыток. Войдите логином и паролем.');
+      } else {
+        setPinError(`Неверный PIN. Осталось попыток: ${PIN_MAX_FAILS - n}`);
+      }
+      setPin('');
+    } catch (e: any) {
+      setPinError('Ошибка проверки PIN'); setPin('');
+    } finally {
+      setPinVerifying(false);
+    }
+  };
+
+  // auto-verify when 6 digits entered
+  useEffect(() => {
+    if (showPinScreen && pin.length === PIN_LEN && !pinVerifying) { void verifyPin(pin); }
+  }, [pin, showPinScreen]);
+
+  const saveSetupPinWith = async (confirmCode: string) => {
+    if (!/^[0-9]{6}$/.test(setupPin)) { setPinError('PIN должен быть из 6 цифр'); return; }
+    if (setupPin !== confirmCode) { setPinError('PIN-коды не совпадают'); setSetupPin2(''); return; }
+    setSetupSaving(true); setPinError(null);
+    try {
+      await supabase.rpc('set_employee_pin', { p_employee_id: pinSetupEmployee.id, p_device_id: getDeviceId(), p_pin: setupPin, p_label: pinSetupEmployee.full_name || null });
+    } catch {}
+    setSetupSaving(false);
+    setPinSetupEmployee(null);
+    navigate('/');
+  };
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -239,12 +328,7 @@ export default function Login() {
         }
 
         // Employee found
-        if (await isEmployeeBlocked(String(employee.id))) {
-          throw new Error('Сотрудник заблокирован');
-        }
-        storeCurrentEmployee(employee);
-        void sendLoginReport(employee);
-        navigate('/');
+        await afterAuth(employee);
         return;
       }
 
@@ -258,11 +342,7 @@ export default function Login() {
   };
 
   const completeEmployeeLogin = async (employee: any) => {
-    if (!employee) throw new Error('Сотрудник не найден');
-    if (await isEmployeeBlocked(String(employee.id))) throw new Error('Сотрудник заблокирован');
-    storeCurrentEmployee(employee);
-    void sendLoginReport(employee);
-    navigate('/');
+    await afterAuth(employee);
   };
 
   const processQrLogin = async (rawCode: string) => {
@@ -478,6 +558,25 @@ export default function Login() {
     };
   }, [scanning]);
 
+  const renderKeypad = (onDigit: (d: string) => void, onBack: () => void) => (
+    <div className="grid grid-cols-3 gap-3 max-w-xs mx-auto w-full">
+      {['1','2','3','4','5','6','7','8','9'].map((d) => (
+        <button key={d} type="button" onClick={() => onDigit(d)} className="h-16 rounded-2xl bg-slate-100 text-2xl font-semibold text-slate-800 active:bg-slate-200 hover:bg-slate-150 transition-colors">{d}</button>
+      ))}
+      <span />
+      <button type="button" onClick={() => onDigit('0')} className="h-16 rounded-2xl bg-slate-100 text-2xl font-semibold text-slate-800 active:bg-slate-200 transition-colors">0</button>
+      <button type="button" onClick={onBack} className="h-16 rounded-2xl flex items-center justify-center text-slate-500 hover:bg-slate-100 transition-colors"><Delete className="h-6 w-6" /></button>
+    </div>
+  );
+
+  const renderDots = (len: number) => (
+    <div className="flex items-center justify-center gap-3 my-6">
+      {Array.from({ length: PIN_LEN }).map((_, i) => (
+        <span key={i} className={`h-3.5 w-3.5 rounded-full transition-colors ${i < len ? 'bg-indigo-600' : 'bg-slate-200'}`} />
+      ))}
+    </div>
+  );
+
   return (
     <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-xl p-6 md:p-8 w-full max-w-md relative">
@@ -489,10 +588,40 @@ export default function Login() {
           <p className="text-slate-500">Вход в систему</p>
         </div>
 
+        {showPinScreen ? (
+          <div className="space-y-2">
+            <div className="text-center">
+              <div className="inline-flex items-center justify-center h-12 w-12 rounded-2xl bg-indigo-50 text-indigo-600 mb-2"><KeyRound className="h-6 w-6" /></div>
+              <div className="text-lg font-semibold text-slate-900">Быстрый вход</div>
+              <div className="text-sm text-slate-500">Введите PIN-код</div>
+              {pinProfiles.length > 0 && (
+                <div className="text-xs text-slate-400 mt-1 truncate">{pinProfiles.map((p) => p.full_name).filter(Boolean).join(' · ')}</div>
+              )}
+            </div>
+            {renderDots(pin.length)}
+            {pinError && <div className="text-center text-sm text-red-600 mb-2">{pinError}</div>}
+            {pinVerifying ? (
+              <div className="flex justify-center py-4"><Loader2 className="animate-spin h-6 w-6 text-indigo-600" /></div>
+            ) : (
+              renderKeypad(
+                (d) => { setPinError(null); setPin((prev) => (prev.length < PIN_LEN ? prev + d : prev)); },
+                () => { setPinError(null); setPin((prev) => prev.slice(0, -1)); }
+              )
+            )}
+            <button
+              type="button"
+              onClick={() => { setShowPinScreen(false); setPin(''); setPinError(null); }}
+              className="w-full mt-4 text-sm text-slate-500 hover:text-slate-700 py-2"
+            >
+              Войти логином и паролем
+            </button>
+          </div>
+        ) : (
+        <>
         <div className="bg-slate-100 p-1 rounded-xl flex mb-8">
           <button
             className={`flex-1 py-2 text-sm font-medium rounded-lg transition-all ${
-              mode === 'password' 
+              mode === 'password'
                 ? 'bg-white text-slate-900 shadow-sm' 
                 : 'text-slate-500 hover:text-slate-700'
             }`}
@@ -610,7 +739,51 @@ export default function Login() {
             </button>
           </div>
         )}
+        </>
+        )}
       </div>
+
+      {/* Set-PIN prompt after a full login */}
+      {pinSetupEmployee && (
+        <div className="fixed inset-0 z-[60] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+            <div className="text-center mb-2">
+              <div className="inline-flex items-center justify-center h-12 w-12 rounded-2xl bg-indigo-50 text-indigo-600 mb-2"><KeyRound className="h-6 w-6" /></div>
+              <div className="text-lg font-semibold text-slate-900">Быстрый вход по PIN</div>
+              <div className="text-sm text-slate-500">{setupPin.length < PIN_LEN ? 'Придумайте PIN из 6 цифр' : 'Повторите PIN для подтверждения'}</div>
+              <div className="text-xs text-slate-400 mt-1">{pinSetupEmployee.full_name}</div>
+            </div>
+            {renderDots(setupPin.length < PIN_LEN ? setupPin.length : setupPin2.length)}
+            {pinError && <div className="text-center text-sm text-red-600 mb-2">{pinError}</div>}
+            {setupSaving ? (
+              <div className="flex justify-center py-4"><Loader2 className="animate-spin h-6 w-6 text-indigo-600" /></div>
+            ) : setupPin.length < PIN_LEN ? (
+              renderKeypad(
+                (d) => { setPinError(null); setSetupPin((p) => (p.length < PIN_LEN ? p + d : p)); },
+                () => setSetupPin((p) => p.slice(0, -1))
+              )
+            ) : (
+              renderKeypad(
+                (d) => {
+                  setPinError(null);
+                  setSetupPin2((p) => {
+                    const next = p.length < PIN_LEN ? p + d : p;
+                    if (next.length === PIN_LEN) setTimeout(() => saveSetupPinWith(next), 50);
+                    return next;
+                  });
+                },
+                () => setSetupPin2((p) => p.slice(0, -1))
+              )
+            )}
+            <div className="flex gap-2 mt-4">
+              <button type="button" onClick={() => { setPinSetupEmployee(null); navigate('/'); }} className="flex-1 py-3 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 font-medium">Пропустить</button>
+              {setupPin.length === PIN_LEN && (
+                <button type="button" onClick={() => { setSetupPin(''); setSetupPin2(''); setPinError(null); }} className="flex-1 py-3 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 font-medium">Сбросить</button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Scanner Modal */}
       {scanning && (
