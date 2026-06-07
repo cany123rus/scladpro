@@ -3459,6 +3459,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         `👷 Постоянные: ${money(t.cwAmount)}`,
         `🚚 Доставки: ${money(t.deliveryAmount)}`,
         `📦 Закуп упаковки/прочее: ${money(generalPackaging.total)}`,
+        `🧮 Средняя цена сборки: ${generalAssembly.avgPrice.toFixed(2)} ₽/шт (ЗП врем+сотр ÷ собрано, без доставки)`,
         `🧮 Средняя цена сборки (полная): ${generalFullAvg.avg.toFixed(2)} ₽/шт`,
         `📦 Коробки на складе: ${boxStock.remaining.toLocaleString('ru-RU')} шт`,
         ``,
