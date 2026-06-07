@@ -3136,10 +3136,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     }
   };
 
-  const handleDownloadGeneralReportPdf = async () => {
+  const handleDownloadGeneralReportPdf = async (opts?: { returnBlob?: boolean }): Promise<{ blob: Blob; name: string } | void> => {
     await ensurePdfLibs();
     try {
-      showToast('Создаю общий PDF отчёт...', 'success');
+      if (!opts?.returnBlob) showToast('Создаю общий PDF отчёт...', 'success');
       const doc = new lazyLibs.jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
       const money = (value: any) => `${Number(value || 0).toLocaleString('ru-RU', { maximumFractionDigits: 2 })} руб.`;
       const dateRu = (value: string) => value ? new Date(`${value}T12:00:00`).toLocaleDateString('ru-RU') : '-';
@@ -3423,10 +3423,53 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       }, y, [79, 70, 229]);
 
       const safeName = `obschiy_otchet_${generalReportForm.start_date || 'start'}_${generalReportForm.end_date || 'end'}`.replace(/[^a-zA-Z0-9_\-.]+/g, '_');
+      if (opts?.returnBlob) return { blob: doc.output('blob'), name: `${safeName}.pdf` };
       doc.save(`${safeName}.pdf`);
     } catch (error: any) {
       console.error('General report PDF error:', error);
       showToast('Ошибка создания PDF: ' + (error?.message || 'неизвестно'), 'error');
+    }
+  };
+
+  // Send the general report PDF + short summary to the selected supplier via Telegram.
+  const [sendingGeneralTelegram, setSendingGeneralTelegram] = useState(false);
+  const handleSendGeneralReportTelegram = async () => {
+    const supId = String(generalReportForm.supplier_id || 'all');
+    if (supId === 'all') { showToast('Выберите конкретного поставщика для отправки', 'error'); return; }
+    const supplier = suppliers.find((s: any) => String(s.id) === supId);
+    const chatId = String(supplier?.telegram_chat_id || '').trim();
+    if (!chatId) { showToast('У поставщика не указан Telegram Chat ID', 'error'); return; }
+    const token = String(writeoffBotToken || '').trim();
+    if (!token) { showToast('Не настроен токен бота (АдминПанель → Боты)', 'error'); return; }
+    if (!await confirmDialog(`Отправить отчёт поставщику «${supplier?.name}» в Telegram?`)) return;
+    setSendingGeneralTelegram(true);
+    try {
+      const built = await handleDownloadGeneralReportPdf({ returnBlob: true });
+      if (!built) throw new Error('Не удалось сформировать PDF');
+      const t = generalReportTotals;
+      const money = (v: any) => `${Number(v || 0).toLocaleString('ru-RU', { maximumFractionDigits: 0 })} ₽`;
+      const period = `${generalReportForm.start_date || ''} — ${generalReportForm.end_date || ''}`;
+      const lines = [
+        `📊 Общий отчёт`,
+        `Поставщик: ${supplier?.name}`,
+        `Период: ${period}`,
+        ``,
+        `🧩 Собрано: ${(generalAssembly.totalTemp + generalAssembly.totalStaff).toLocaleString('ru-RU')} шт (врем ${generalAssembly.totalTemp.toLocaleString('ru-RU')} · сотр ${generalAssembly.totalStaff.toLocaleString('ru-RU')})`,
+        `💰 ЗП временные: ${money(t.tempEarned)}`,
+        `👷 Постоянные: ${money(t.cwAmount)}`,
+        `🚚 Доставки: ${money(t.deliveryAmount)}`,
+        `📦 Закуп упаковки/прочее: ${money(generalPackaging.total)}`,
+        `🧮 Средняя цена сборки (полная): ${generalFullAvg.avg.toFixed(2)} ₽/шт`,
+        `📦 Коробки на складе: ${boxStock.remaining.toLocaleString('ru-RU')} шт`,
+        ``,
+        `Итого затрат: ${money(generalFullAvg.totalCost)}`,
+      ];
+      await telegramService.sendDocument(token, chatId, built.blob, built.name, lines.join('\n'));
+      showToast(`Отчёт отправлен поставщику «${supplier?.name}»`, 'success');
+    } catch (e: any) {
+      showToast('Ошибка отправки в Telegram: ' + (e?.message || 'неизвестно'), 'error');
+    } finally {
+      setSendingGeneralTelegram(false);
     }
   };
 
@@ -30856,6 +30899,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           <FileSpreadsheet className="h-4 w-4" /> Excel
                         </button>
                       </div>
+                      <button type="button" onClick={handleSendGeneralReportTelegram} disabled={sendingGeneralTelegram || generalReportForm.supplier_id === 'all'} title={generalReportForm.supplier_id === 'all' ? 'Выберите поставщика' : 'Отправить отчёт поставщику в Telegram'} className={`h-11 w-full px-4 rounded-xl inline-flex items-center justify-center gap-2 whitespace-nowrap shadow-sm font-medium text-white ${sendingGeneralTelegram || generalReportForm.supplier_id === 'all' ? 'bg-sky-300 cursor-not-allowed' : 'bg-sky-500 hover:bg-sky-600'}`}>
+                        <Send className="h-4 w-4" /> {sendingGeneralTelegram ? 'Отправка…' : 'Отправить в Telegram поставщику'}
+                      </button>
                     </div>
                   </div>
 
