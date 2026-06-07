@@ -135,10 +135,13 @@ export default function Login() {
     if (!/^[0-9]{6}$/.test(setupPin)) { setPinError('PIN должен быть из 6 цифр'); return; }
     if (setupPin !== confirmCode) { setPinError('PIN-коды не совпадают'); setSetupPin2(''); return; }
     setSetupSaving(true); setPinError(null);
-    try {
-      await supabase.rpc('set_employee_pin', { p_employee_id: pinSetupEmployee.id, p_device_id: getDeviceId(), p_pin: setupPin, p_label: pinSetupEmployee.full_name || null });
-    } catch {}
+    const { error } = await supabase.rpc('set_employee_pin', { p_employee_id: pinSetupEmployee.id, p_device_id: getDeviceId(), p_pin: setupPin, p_label: pinSetupEmployee.full_name || null });
     setSetupSaving(false);
+    if (error) {
+      setPinError('Не удалось сохранить PIN: ' + (error.message || 'ошибка'));
+      setSetupPin(''); setSetupPin2('');
+      return;
+    }
     setPinSetupEmployee(null);
     navigate('/');
   };
