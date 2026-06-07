@@ -10536,6 +10536,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [barterTopSupplierId, setBarterTopSupplierId] = useState('');
   const [barterProductSearch, setBarterProductSearch] = useState('');
   const [barterCheckedProductIds, setBarterCheckedProductIds] = useState<string[]>([]);
+  // How many barter / ad slots to create per product (manual, no auto count).
+  const [barterCreateBarterCount, setBarterCreateBarterCount] = useState('5');
+  const [barterCreateAdCount, setBarterCreateAdCount] = useState('2');
   const [barterCreateMergedCard, setBarterCreateMergedCard] = useState(false);
   const [barterMergeMode, setBarterMergeMode] = useState(false);
   const [barterMergeSelectedIds, setBarterMergeSelectedIds] = useState<string[]>([]);
@@ -12751,6 +12754,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     const currentSupplierId = String(barterSupplierId || barterTopSupplierId || '').trim();
     const selectedMap = new Map((barterCatalogProducts || []).map((p: any) => [String(p.id), p]));
     const supplier = suppliers.find((s: any) => String(s.id) === String(currentSupplierId));
+    const bCount = Math.max(0, Math.floor(Number(barterCreateBarterCount) || 0));
+    const aCount = Math.max(0, Math.floor(Number(barterCreateAdCount) || 0));
     const newRows = barterCheckedProductIds
       .map((pid) => selectedMap.get(String(pid)))
       .filter(Boolean)
@@ -12768,18 +12773,18 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         product_variant_labels: getBarterVariantLabel(p) ? [getBarterVariantLabel(p)] : [],
         product_variants_count: 1,
         product_photo: String(p?.photoUrl || p?.photos?.[0]?.big || p?.photos?.[0]?.tm || ''),
-        barter_links: Array(5 + barterGlobalExtra).fill(''),
-        barter_dates: Array(5 + barterGlobalExtra).fill(''),
-        barter_prices: Array(5 + barterGlobalExtra).fill(''),
-        barter_views: Array(5 + barterGlobalExtra).fill(''),
-        barter_ratings: Array(5 + barterGlobalExtra).fill(''),
-        barter_published: Array(5 + barterGlobalExtra).fill(false),
-        ad_links: Array(2 + adGlobalExtra).fill(''),
-        ad_dates: Array(2 + adGlobalExtra).fill(''),
-        ad_prices: Array(2 + adGlobalExtra).fill(''),
-        ad_views: Array(2 + adGlobalExtra).fill(''),
-        ad_ratings: Array(2 + adGlobalExtra).fill(''),
-        ad_published: Array(2 + adGlobalExtra).fill(false),
+        barter_links: Array(bCount).fill(''),
+        barter_dates: Array(bCount).fill(''),
+        barter_prices: Array(bCount).fill(''),
+        barter_views: Array(bCount).fill(''),
+        barter_ratings: Array(bCount).fill(''),
+        barter_published: Array(bCount).fill(false),
+        ad_links: Array(aCount).fill(''),
+        ad_dates: Array(aCount).fill(''),
+        ad_prices: Array(aCount).fill(''),
+        ad_views: Array(aCount).fill(''),
+        ad_ratings: Array(aCount).fill(''),
+        ad_published: Array(aCount).fill(false),
       }));
 
     const prevRows = barterRows || [];
@@ -12795,7 +12800,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     let mergedCreated = false;
     let nextRows = [...prevRows];
     if (barterCreateMergedCard && append.length >= 2) {
-      const mergedRow = mergeBarterRowsIntoSingle(append, { barterExtra: 0, adExtra: 0 });
+      const mergedRow = mergeBarterRowsIntoSingle(append, { barterExtra: bCount - 5, adExtra: aCount - 2 });
       if (mergedRow) {
         mergedCreated = true;
         nextRows = [...prevRows, mergedRow as any];
@@ -21611,6 +21616,16 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       <button type="button" onClick={refreshBarterPhotos} disabled={barterPhotoLoading || !barterSupplierId} className="btn-ghost disabled:opacity-60">
                         {barterPhotoLoading ? 'Обновляю фото...' : 'Обновить фото'}
                       </button>
+                    </div>
+                    <div className="mb-3 grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-xs font-medium text-slate-500 mb-1 uppercase tracking-wide">Сколько бартеров создать</label>
+                        <input type="number" min="0" value={barterCreateBarterCount} onChange={(e) => setBarterCreateBarterCount(e.target.value)} className="oc-input w-full" placeholder="0" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-slate-500 mb-1 uppercase tracking-wide">Сколько реклам создать</label>
+                        <input type="number" min="0" value={barterCreateAdCount} onChange={(e) => setBarterCreateAdCount(e.target.value)} className="oc-input w-full" placeholder="0" />
+                      </div>
                     </div>
                     <label className="mb-3 flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700">
                       <input
