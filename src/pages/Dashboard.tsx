@@ -24291,9 +24291,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     </div>
                     <div className="relative overflow-hidden rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
                       <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-emerald-500 to-teal-500" />
-                      <div className="flex items-center justify-between mb-2"><span className="text-sm font-medium text-slate-500">Собрано — вместе</span><div className="p-2 bg-emerald-50 rounded-xl"><Box className="h-5 w-5 text-emerald-600" /></div></div>
-                      <div className="text-3xl font-extrabold text-emerald-600">{((reportsSummary?.temp || 0) + (reportsSummary?.staff || 0)).toLocaleString('ru-RU')}</div>
-                      <p className="text-xs text-slate-400 mt-1">общее количество · за период</p>
+                      <div className="flex items-center justify-between mb-2"><span className="text-sm font-medium text-slate-500">Ср. цена сборки</span><div className="p-2 bg-emerald-50 rounded-xl"><Box className="h-5 w-5 text-emerald-600" /></div></div>
+                      <div className="text-3xl font-extrabold text-emerald-600">{(() => { const q = (reportsSummary?.temp || 0) + (reportsSummary?.staff || 0); const zp = (reportsSummary?.zpTemp || 0) + (reportsSummary?.zpStaff || 0); return (q > 0 ? zp / q : 0).toFixed(2); })()} ₽<span className="text-base font-semibold text-slate-400">/шт</span></div>
+                      <p className="text-xs text-slate-400 mt-1">ЗП временные + сотрудники ÷ собрано · за период</p>
                     </div>
                   </div>
 
