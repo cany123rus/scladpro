@@ -24363,6 +24363,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <h3 className="text-lg font-bold text-slate-900">Собрано по дням (30 дней)</h3>
                       </div>
                       <div className="flex items-center gap-3 text-xs">
+                        <span className="text-[11px] text-slate-400">нажми на день</span>
                         <span className="inline-flex items-center gap-1.5 text-slate-500"><span className="h-2.5 w-2.5 rounded-sm bg-indigo-500" /> Сотрудники: <b className="text-slate-700">{assemblyDaily.totalStaff.toLocaleString('ru-RU')}</b></span>
                         <span className="inline-flex items-center gap-1.5 text-slate-500"><span className="h-2.5 w-2.5 rounded-sm bg-emerald-500" /> Временные: <b className="text-slate-700">{assemblyDaily.totalTemp.toLocaleString('ru-RU')}</b></span>
                       </div>
@@ -24376,19 +24377,54 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         const people = Object.entries(v.people).sort((a, b) => b[1] - a[1]);
                         const dLabel = new Date(dk + 'T12:00:00').toLocaleDateString('ru-RU');
                         const title = `${dLabel}\nВсего: ${total} (сотрудники ${v.staff}, временные ${v.temp})` + (people.length ? '\n\nКто собрал:\n' + people.map(([n, q]) => `• ${n}: ${q}`).join('\n') : '\nНет сборки');
+                        const selected = reportsDayDetail?.date === dk;
                         return (
-                          <div key={`asm-${dk}`} className="flex-1 min-w-[14px] flex flex-col items-center gap-1 rounded-md px-0.5 hover:bg-indigo-50/70 transition-colors cursor-default" title={title}>
+                          <button type="button" key={`asm-${dk}`} onClick={() => loadReportsDayDetail(dk)} className={`flex-1 min-w-[14px] flex flex-col items-center gap-1 rounded-md px-0.5 transition-colors ${selected ? 'bg-indigo-100' : 'hover:bg-indigo-50/70'}`} title={title + '\n\n(нажми для детализации)'}>
                             <div className="w-full flex flex-col justify-end h-[190px]">
                               {total > 0 && (<>
                                 <div className="w-full bg-emerald-500 rounded-t-sm transition-all hover:brightness-95" style={{ height: `${tempH}px` }} />
                                 <div className="w-full bg-indigo-500 transition-all hover:brightness-110" style={{ height: `${staffH}px` }} />
                               </>)}
                             </div>
-                            <span className="text-[9px] text-slate-400">{dk.slice(8, 10)}</span>
-                          </div>
+                            <span className={`text-[9px] ${selected ? 'text-indigo-700 font-bold' : 'text-slate-400'}`}>{dk.slice(8, 10)}</span>
+                          </button>
                         );
                       })}
                     </div>
+
+                    {/* Day detail (click on a bar above) */}
+                    {reportsDayDetail && (
+                      <div className="mt-5 rounded-2xl border border-indigo-200 bg-white overflow-hidden">
+                        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
+                          <h4 className="font-bold text-slate-900 text-sm">Детализация за {new Date(reportsDayDetail.date + 'T12:00:00').toLocaleDateString('ru-RU')}</h4>
+                          <div className="flex items-center gap-3">
+                            <span className="text-sm text-slate-500">Всего: <b className="text-slate-900">{reportsDayDetail.total.toLocaleString('ru-RU')}</b></span>
+                            <button onClick={() => setReportsDayDetail(null)} className="p-1.5 rounded-lg hover:bg-slate-100"><X className="h-4 w-4 text-slate-500" /></button>
+                          </div>
+                        </div>
+                        {reportsDayLoading ? (
+                          <div className="px-4 py-6 text-center text-slate-400 text-sm">Загрузка…</div>
+                        ) : reportsDayDetail.rows.length === 0 ? (
+                          <div className="px-4 py-6 text-center text-slate-400 text-sm">В этот день сборки не было</div>
+                        ) : (
+                          <table className="w-full text-left text-sm">
+                            <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
+                              <tr><th className="px-4 py-2">Сотрудник</th><th className="px-4 py-2">Категория</th><th className="px-4 py-2">Тип работы</th><th className="px-4 py-2 text-right">Количество</th></tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                              {reportsDayDetail.rows.map((r, i) => (
+                                <tr key={`rdd2-${i}`} className="hover:bg-slate-50">
+                                  <td className="px-4 py-2 font-medium text-slate-800">{r.who}</td>
+                                  <td className="px-4 py-2"><span className={`text-xs px-2 py-0.5 rounded-full ${r.kind === 'Временный' ? 'bg-amber-100 text-amber-700' : 'bg-indigo-100 text-indigo-700'}`}>{r.kind}</span></td>
+                                  <td className="px-4 py-2 text-slate-600">{r.type}</td>
+                                  <td className="px-4 py-2 text-right font-bold text-slate-900">{r.qty.toLocaleString('ru-RU')}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   {/* Сводная статистика по поставщикам (за всё время) */}
