@@ -13093,25 +13093,51 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     setPrintFiles(prev => prev.map(f => f.id === id ? { ...f, printed_at: new Date().toLocaleString('ru-RU') } : f));
 
     const file = printFiles.find(f => f.id === id);
-    if (file) {
-      logAction('Печать файла', `Распечатан файл: ${file.name}`, currentEmployee?.id);
-      if (file.type.includes('image')) {
-        const win = window.open('', '_blank');
-        if (win) {
-          win.document.write(`
-            <html>
-              <head><title>Print</title></head>
-              <body style="margin:0; display:flex; justify-content:center; align-items:center; min-height:100vh;">
-                <img src="${file.url}" style="max-width:100%; max-height:100vh;" onload="setTimeout(() => { window.print(); }, 500)" />
-              </body>
-            </html>
-          `);
-          win.document.close();
-        }
-      } else {
-        window.open(file.url, '_blank');
-      }
-    }
+    if (!file) return;
+    logAction('Печать файла', `Распечатан файл: ${file.name}`, currentEmployee?.id);
+
+    const isImage = String(file.type || '').includes('image');
+    const safeName = String(file.name || 'Документ').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    // Tablet-friendly preview window: shows the file + a big Печать button.
+    // window.print() opens the OS print dialog where a Bluetooth/Wi-Fi printer can be chosen.
+    const win = window.open('', '_blank');
+    if (!win) { showToast('Разрешите всплывающие окна для печати', 'warning'); return; }
+    const body = isImage
+      ? `<img id="pf" src="${file.url}" alt="${safeName}" />`
+      : `<iframe id="pf" src="${file.url}" title="${safeName}"></iframe>`;
+    const printJs = isImage
+      ? `window.focus(); window.print();`
+      : `try{ var f=document.getElementById('pf'); f.focus(); (f.contentWindow||window).print(); }catch(e){ window.print(); }`;
+    win.document.write(`
+      <!doctype html><html><head><meta charset="utf-8"/>
+        <meta name="viewport" content="width=device-width, initial-scale=1"/>
+        <title>${safeName}</title>
+        <style>
+          *{box-sizing:border-box} body{margin:0;font-family:-apple-system,system-ui,sans-serif;background:#0f172a;color:#fff;height:100vh;display:flex;flex-direction:column}
+          .bar{display:flex;gap:10px;align-items:center;padding:12px 16px;background:#111827;position:sticky;top:0;z-index:5}
+          .bar .name{flex:1;font-size:15px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+          .btn{appearance:none;border:0;border-radius:12px;padding:14px 22px;font-size:17px;font-weight:700;cursor:pointer}
+          .print{background:#4f46e5;color:#fff} .close{background:#374151;color:#fff}
+          .stage{flex:1;display:flex;align-items:center;justify-content:center;overflow:auto;background:#1e293b}
+          #pf{width:100%;height:100%;border:0;background:#fff}
+          img#pf{max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain}
+          @media print{.bar{display:none}.stage{background:#fff}body{background:#fff}}
+        </style></head>
+      <body>
+        <div class="bar">
+          <span class="name">${safeName}</span>
+          <button class="btn print" onclick="${printJs.replace(/"/g, '&quot;')}">🖨 Печать</button>
+          <button class="btn close" onclick="window.close()">Закрыть</button>
+        </div>
+        <div class="stage">${body}</div>
+        <script>
+          var el=document.getElementById('pf');
+          var go=function(){ setTimeout(function(){ ${printJs} }, 600); };
+          if(el){ if(el.tagName==='IFRAME'){ el.addEventListener('load', go); } else { el.addEventListener('load', go); } }
+        </script>
+      </body></html>
+    `);
+    win.document.close();
   };
 
   const handleDeletePrintFile = async (id: string) => {
