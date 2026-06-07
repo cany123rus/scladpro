@@ -933,6 +933,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [adsApiError, setAdsApiError] = useState<string | null>(null);
   const [adsApiData, setAdsApiData] = useState<any>(null);
   const [adsApiCampSort, setAdsApiCampSort] = useState<{ field: string; dir: 'asc' | 'desc' }>({ field: 'sum', dir: 'desc' });
+  const [adsApiSyncing, setAdsApiSyncing] = useState(false);
+  const [adsApiLastSync, setAdsApiLastSync] = useState<string>('');
   const [adsAnalyticsSheets, setAdsAnalyticsSheets] = useState<Array<{ name: string; columns: string[]; rows: any[] }>>([]);
   const [adsNmSort, setAdsNmSort] = useState<{ field: string; dir: 'asc' | 'desc' }>({ field: 'revenue', dir: 'desc' });
   const [adsKwSearch, setAdsKwSearch] = useState('');
@@ -16206,89 +16208,70 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     }
   };
 
-  // Pull internal-advertising data via WB "Продвижение" API for the selected supplier.
+  // Read advertising stats from our DB snapshot (filled by the wb-adv-sync edge
+  // function on a schedule). Instant — no WB API call, no rate limits.
   const loadAdsApiData = async (fromArg?: string, toArg?: string) => {
     const from = fromArg || adsApiFrom;
     const to = toArg || adsApiTo;
-    const supplier = (suppliers || []).find((s: any) => String(s?.id) === String(adsApiSupplierId));
-    const rawToken = (supplier as any)?.wb_adv_api_token || supplier?.wb_api_token;
-    if (!rawToken) { setAdsApiError('У выбранного поставщика не указан WB API токен (нужен токен с категорией «Продвижение»)'); return; }
+    if (!adsApiSupplierId) { setAdsApiError('Выберите поставщика'); return; }
     if (!from || !to) { setAdsApiError('Укажите период'); return; }
-    const token = String(rawToken).trim();
-    const ADV = 'https://advert-api.wildberries.ru';
-    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-    // Fetch with 429 backoff: WB rate-limits advert endpoints (fullstats ~1/min).
-    const wbFetch = async (url: string, opts: any = {}, tries = 5): Promise<Response> => {
-      for (let i = 0; i < tries; i++) {
-        const r = await fetch(url, opts);
-        if (r.status === 429) {
-          const ra = Number(r.headers.get('Retry-After')) || 0;
-          const wait = ra > 0 ? ra * 1000 : Math.min(70000, 15000 * (i + 1));
-          setAdsApiError(`WB ограничил частоту запросов — ожидание ${Math.round(wait / 1000)} с… (попытка ${i + 1})`);
-          await sleep(wait);
-          continue;
-        }
-        return r;
-      }
-      throw new Error('WB API: слишком много запросов (429). Подождите ~минуту и повторите.');
-    };
-    setAdsApiLoading(true); setAdsApiError(null); setAdsApiData(null);
+    setAdsApiLoading(true); setAdsApiError(null);
     try {
-      // 1) Список ID кампаний
-      const cntRes = await wbFetch(`${ADV}/adv/v1/promotion/count`, { headers: { Authorization: token } });
-      if (!cntRes.ok) throw new Error(`WB API ${cntRes.status}: ${(await cntRes.text()).slice(0, 160)}`);
-      const cnt = await cntRes.json();
-      const ids: number[] = [];
-      (cnt?.adverts || []).forEach((g: any) => (g?.advert_list || []).forEach((a: any) => { const id = Number(a?.advertId); if (id) ids.push(id); }));
-      if (!ids.length) { setAdsApiError('У поставщика не найдено рекламных кампаний'); return; }
-
-      // 2) Имена кампаний (необязательно) — с паузами, чтобы не словить 429
-      const nameMap = new Map<number, string>();
-      for (let i = 0; i < ids.length; i += 50) {
-        try {
-          if (i > 0) await sleep(700);
-          const r = await wbFetch(`${ADV}/adv/v1/promotion/adverts`, { method: 'POST', headers: { Authorization: token, 'Content-Type': 'application/json' }, body: JSON.stringify(ids.slice(i, i + 50)) });
-          if (r.ok) { const arr = await r.json(); (arr || []).forEach((c: any) => nameMap.set(Number(c?.advertId), c?.name || `#${c?.advertId}`)); }
-        } catch {}
-      }
-
-      // 3) Полная статистика (rate limit ~1 запрос/мин, до 100 кампаний за запрос)
-      setAdsApiError(null);
-      const stats: any[] = [];
-      for (let i = 0; i < ids.length; i += 100) {
-        if (i > 0) await sleep(61000);
-        const body = ids.slice(i, i + 100).map((id) => ({ id, interval: { begin: from, end: to } }));
-        const r = await wbFetch(`${ADV}/adv/v2/fullstats`, { method: 'POST', headers: { Authorization: token, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-        if (!r.ok) throw new Error(`fullstats ${r.status}: ${(await r.text()).slice(0, 160)}`);
-        const arr = await r.json();
-        if (Array.isArray(arr)) stats.push(...arr);
-      }
-      setAdsApiError(null);
-
-      // 4) Агрегация
+      const { data, error } = await supabase
+        .from('wb_adv_stats_daily')
+        .select('advert_id, date, campaign_name, views, clicks, sum, atbs, orders, shks, sum_price')
+        .eq('supplier_id', adsApiSupplierId)
+        .gte('date', from).lte('date', to);
+      if (error) throw error;
+      const rows = data || [];
       const t = { views: 0, clicks: 0, sum: 0, atbs: 0, orders: 0, shks: 0, revenue: 0 };
       const dayMap = new Map<string, { spend: number; clicks: number; orders: number; revenue: number; views: number }>();
-      const campaigns: any[] = [];
-      stats.forEach((s: any) => {
-        const sp = Number(s?.sum || 0), rev = Number(s?.sum_price || 0);
-        t.views += Number(s?.views || 0); t.clicks += Number(s?.clicks || 0); t.sum += sp;
-        t.atbs += Number(s?.atbs || 0); t.orders += Number(s?.orders || 0); t.shks += Number(s?.shks || 0); t.revenue += rev;
-        campaigns.push({ id: s?.advertId, name: nameMap.get(Number(s?.advertId)) || `#${s?.advertId}`, views: Number(s?.views || 0), clicks: Number(s?.clicks || 0), sum: sp, atbs: Number(s?.atbs || 0), orders: Number(s?.orders || 0), revenue: rev });
-        (s?.days || []).forEach((d: any) => {
-          const date = String(d?.date || '').slice(0, 10);
-          const e = dayMap.get(date) || { spend: 0, clicks: 0, orders: 0, revenue: 0, views: 0 };
-          e.spend += Number(d?.sum || 0); e.clicks += Number(d?.clicks || 0); e.orders += Number(d?.orders || 0); e.revenue += Number(d?.sum_price || 0); e.views += Number(d?.views || 0);
-          dayMap.set(date, e);
-        });
+      const campMap = new Map<number, any>();
+      rows.forEach((r: any) => {
+        const sp = Number(r.sum || 0), rev = Number(r.sum_price || 0);
+        t.views += Number(r.views || 0); t.clicks += Number(r.clicks || 0); t.sum += sp;
+        t.atbs += Number(r.atbs || 0); t.orders += Number(r.orders || 0); t.shks += Number(r.shks || 0); t.revenue += rev;
+        const e = dayMap.get(r.date) || { spend: 0, clicks: 0, orders: 0, revenue: 0, views: 0 };
+        e.spend += sp; e.clicks += Number(r.clicks || 0); e.orders += Number(r.orders || 0); e.revenue += rev; e.views += Number(r.views || 0);
+        dayMap.set(r.date, e);
+        const c = campMap.get(r.advert_id) || { id: r.advert_id, name: r.campaign_name || `#${r.advert_id}`, views: 0, clicks: 0, sum: 0, atbs: 0, orders: 0, revenue: 0 };
+        c.views += Number(r.views || 0); c.clicks += Number(r.clicks || 0); c.sum += sp; c.atbs += Number(r.atbs || 0); c.orders += Number(r.orders || 0); c.revenue += rev;
+        if (r.campaign_name) c.name = r.campaign_name;
+        campMap.set(r.advert_id, c);
       });
-      const daily = Array.from(dayMap.entries()).filter(([d]) => /^\d{4}/.test(d)).sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([date, v]) => ({ date, ...v }));
+      const daily = Array.from(dayMap.entries()).sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([date, v]) => ({ date, ...v }));
+      const campaigns = Array.from(campMap.values()).sort((a, b) => b.sum - a.sum);
       setAdsApiData({ totals: t, daily, campaigns, count: campaigns.length });
-      showToast(`Загружено кампаний: ${campaigns.length}`, 'success');
+      // last sync time
+      try {
+        const { data: log } = await supabase.from('wb_adv_sync_log').select('ran_at').eq('supplier_id', adsApiSupplierId).order('ran_at', { ascending: false }).limit(1).maybeSingle();
+        if (log?.ran_at) setAdsApiLastSync(new Date(log.ran_at).toLocaleString('ru-RU'));
+      } catch {}
+      if (!rows.length) setAdsApiError('Нет данных за период. Нажмите «Синхронизировать с WB», чтобы загрузить из кабинета.');
     } catch (e: any) {
       console.error('loadAdsApiData error', e);
-      setAdsApiError(e?.message || 'Ошибка WB API. Проверьте, что токен имеет категорию «Продвижение».');
+      setAdsApiError(e?.message || 'Ошибка чтения данных');
     } finally {
       setAdsApiLoading(false);
+    }
+  };
+
+  // Trigger a server-side sync (edge function) for the selected supplier, then reload from DB.
+  const syncAdsApiNow = async () => {
+    if (!adsApiSupplierId) { setAdsApiError('Выберите поставщика'); return; }
+    setAdsApiSyncing(true); setAdsApiError(null);
+    try {
+      const { data, error } = await supabase.functions.invoke('wb-adv-sync', { body: { supplier_id: adsApiSupplierId, days: 90 } });
+      if (error) throw error;
+      const res = (data?.results || [])[0];
+      if (res && !res.ok) throw new Error(res.message || 'Ошибка синхронизации');
+      showToast(`Синхронизация завершена${res ? `: кампаний ${res.campaigns}` : ''}`, 'success');
+      await loadAdsApiData();
+    } catch (e: any) {
+      console.error('syncAdsApiNow error', e);
+      setAdsApiError('Синхронизация: ' + (e?.message || 'ошибка. Проверьте токен «Продвижение». При лимите WB повторите через минуту.'));
+    } finally {
+      setAdsApiSyncing(false);
     }
   };
 
@@ -23332,8 +23315,16 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
               {analyticsSubTab === 'ads_api' && (
                 <div className="w-full mb-4 space-y-4">
                   <div className="bg-white rounded-xl border border-slate-100 p-4">
-                    <h2 className="text-lg font-semibold text-slate-900">Реклама через WB API</h2>
-                    <p className="text-sm text-slate-500 mt-1">Данные тянутся напрямую из кабинета по API «Продвижение» выбранного поставщика — с заказами, выручкой и ДРР по дням.</p>
+                    <div className="flex items-start justify-between gap-3 flex-wrap">
+                      <div>
+                        <h2 className="text-lg font-semibold text-slate-900">Реклама через WB API</h2>
+                        <p className="text-sm text-slate-500 mt-1">Данные собираются в фоне каждые 30 мин и хранятся 90 дней. Раздел читает их из базы мгновенно — заказы, выручка и ДРР по дням.</p>
+                        {adsApiLastSync && <p className="text-[11px] text-slate-400 mt-1">Последняя синхронизация: {adsApiLastSync}</p>}
+                      </div>
+                      <button onClick={syncAdsApiNow} disabled={adsApiSyncing || !adsApiSupplierId} className="px-4 py-2 text-sm font-semibold rounded-xl border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 shadow-sm disabled:opacity-50">
+                        {adsApiSyncing ? 'Синхронизация…' : '↻ Синхронизировать с WB'}
+                      </button>
+                    </div>
                     <div className="mt-4 flex flex-wrap items-end gap-3">
                       <div className="min-w-[240px]">
                         <label className="block text-xs text-slate-500 mb-1">Поставщик (с WB API токеном)</label>
@@ -23351,7 +23342,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <input type="date" value={adsApiTo} onChange={(e) => setAdsApiTo(e.target.value)} className="px-2 py-2 text-xs border border-slate-300 rounded-lg" />
                       </div>
                       <button onClick={() => loadAdsApiData()} disabled={adsApiLoading || !adsApiSupplierId} className="px-4 py-2 text-sm font-semibold rounded-xl border border-indigo-300 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 shadow-sm disabled:opacity-50">
-                        {adsApiLoading ? 'Загрузка из WB…' : 'Загрузить данные'}
+                        {adsApiLoading ? 'Загрузка…' : 'Показать'}
                       </button>
                     </div>
                     <div className="mt-3 flex flex-wrap gap-2">
@@ -23360,7 +23351,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       ))}
                     </div>
                     {adsApiError && <div className="mt-3 text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg p-2">{adsApiError}</div>}
-                    {adsApiLoading && <div className="mt-2 text-[11px] text-slate-400">При большом числе кампаний WB ограничивает 1 запрос/мин — загрузка может занять время.</div>}
+                    {adsApiSyncing && <div className="mt-2 text-[11px] text-slate-400">Тянем данные из WB (первая синхронизация может занять до минуты)…</div>}
                   </div>
 
                   {adsApiData && (() => {
