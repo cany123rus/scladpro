@@ -24092,6 +24092,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     <div className="flex flex-wrap items-center gap-2">
                       <button
                         type="button"
+                        onClick={() => setUploadedViewTab('summary')}
+                        className={`px-3 py-1.5 text-xs rounded-xl shadow-sm ${uploadedViewTab === 'summary' ? 'bg-indigo-600 text-white' : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}
+                      >
+                        Сводка
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => setUploadedViewTab('table')}
                         className={`px-3 py-1.5 text-xs rounded-xl shadow-sm ${uploadedViewTab === 'table' ? 'bg-indigo-600 text-white' : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}
                       >
