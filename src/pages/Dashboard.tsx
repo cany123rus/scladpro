@@ -24546,8 +24546,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <div className="space-y-1.5 max-h-80 overflow-auto pr-1">
                           {rows.length === 0 ? <div className="text-xs text-slate-400 py-4 text-center">Нет данных</div> : rows.map((r: any, i: number) => (
                             <div key={i} className="flex items-center gap-2 text-xs">
-                              {photo && (r.code ? <img src={wbPhoto(r.code)} data-fb="0" onError={(e: any) => { const el = e.currentTarget; if (el.dataset.fb === '0') { el.dataset.fb = '1'; el.src = wbPhotoBase(r.code) + '.jpg'; } else { el.style.visibility = 'hidden'; } }} className="w-8 h-10 rounded object-cover bg-slate-100 shrink-0" loading="lazy" /> : <div className="w-8 h-10 rounded bg-slate-100 shrink-0" />)}
-                              <div className="w-44 text-slate-600 leading-tight line-clamp-2 break-words" title={r.name || r.key}>{photo ? (r.code || '—') : (r.name || r.key)}</div>
+                              {photo && (r.code ? <img src={wbPhoto(r.code)} data-fb="0" onError={(e: any) => { const el = e.currentTarget; if (el.dataset.fb === '0') { el.dataset.fb = '1'; el.src = wbPhotoBase(r.code) + '.jpg'; } else { el.style.visibility = 'hidden'; } }} onClick={(e: any) => setUploadedPhotoPreview({ src: e.currentTarget.src, title: String(r.code) })} className="w-14 h-[72px] rounded-lg object-cover bg-slate-100 shrink-0 cursor-zoom-in" loading="lazy" /> : <div className="w-14 h-[72px] rounded-lg bg-slate-100 shrink-0" />)}
+                              <div className="w-40 text-slate-600 leading-tight line-clamp-2 break-words" title={r.name || r.key}>{photo ? (r.code ? <a href={`https://www.wildberries.ru/catalog/${r.code}/detail.aspx`} target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline font-medium">{r.code}</a> : '—') : (r.name || r.key)}</div>
                               <div className="flex-1 h-4 bg-slate-100 rounded overflow-hidden"><div className={color(r)} style={{ width: `${Math.max(2, Math.abs(val(r)) / max * 100)}%`, height: '100%' }} /></div>
                               <div className="w-28 text-right font-medium text-slate-700">{fmt(r)}</div>
                             </div>
@@ -24573,12 +24573,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             <div className="relative shrink-0" style={{ width: 160, height: 160 }}>
                               <svg width="160" height="160" viewBox="0 0 160 160" className="-rotate-90">
                                 <defs><linearGradient id="ringGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stopColor="#34d399" /><stop offset="100%" stopColor="#059669" /></linearGradient></defs>
-                                <circle cx="80" cy="80" r={R} fill="none" stroke="#eef2f6" strokeWidth="14" />
-                                <circle cx="80" cy="80" r={R} fill="none" stroke="url(#ringGrad)" strokeWidth="14" strokeLinecap="round" strokeDasharray={`${dash} ${C}`} />
+                                <circle cx="80" cy="80" r={R} fill="none" stroke="#eef2f6" strokeWidth="11" />
+                                <circle cx="80" cy="80" r={R} fill="none" stroke="url(#ringGrad)" strokeWidth="11" strokeLinecap="round" strokeDasharray={`${dash} ${C}`} />
                               </svg>
-                              <div className="absolute inset-0 flex flex-col items-center justify-center">
-                                <div className="text-3xl font-extrabold text-slate-900">{payoutPct}%</div>
-                                <div className="text-[11px] text-slate-400 mt-0.5">к перечислению</div>
+                              <div className="absolute inset-0 flex flex-col items-center justify-center text-center leading-none">
+                                <div className="text-2xl font-extrabold text-slate-900">{payoutPct}%</div>
+                                <div className="text-[9px] text-slate-400 mt-1 w-[88px]">к перечислению</div>
                               </div>
                             </div>
                             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 flex-1 w-full">
@@ -24618,8 +24618,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               <tbody>
                                 {[...prods].map((p) => ({ ...p, ppu: p.sold > 0 ? p.profit / p.sold : 0 })).sort((a: any, b: any) => { const f = summaryProdSort.field; const m = summaryProdSort.dir === 'asc' ? 1 : -1; return ((a[f] || 0) - (b[f] || 0)) * m; }).map((p: any, i: number) => (
                                   <tr key={i} className={`border-t border-slate-100 hover:bg-slate-50 ${p.profit < 0 ? 'bg-rose-50/40' : ''}`}>
-                                    <td className="px-2.5 py-1.5">{p.code ? <img src={wbPhoto(p.code)} data-fb="0" onError={(e: any) => { const el = e.currentTarget; if (el.dataset.fb === '0') { el.dataset.fb = '1'; el.src = wbPhotoBase(p.code) + '.jpg'; } else { el.style.visibility = 'hidden'; } }} className="w-20 h-24 rounded-lg object-cover bg-slate-100" loading="lazy" /> : <div className="w-20 h-24 rounded-lg bg-slate-100" />}</td>
-                                    <td className="px-2.5 py-1.5 text-left font-medium text-slate-700">{p.code || '—'}</td>
+                                    <td className="px-2.5 py-1.5">{p.code ? <img src={wbPhoto(p.code)} data-fb="0" onError={(e: any) => { const el = e.currentTarget; if (el.dataset.fb === '0') { el.dataset.fb = '1'; el.src = wbPhotoBase(p.code) + '.jpg'; } else { el.style.visibility = 'hidden'; } }} onClick={(e: any) => setUploadedPhotoPreview({ src: e.currentTarget.src, title: `${p.code} ${p.name || ''}` })} className="w-20 h-24 rounded-lg object-cover bg-slate-100 cursor-zoom-in" loading="lazy" /> : <div className="w-20 h-24 rounded-lg bg-slate-100" />}</td>
+                                    <td className="px-2.5 py-1.5 text-left font-medium">{p.code ? <a href={`https://www.wildberries.ru/catalog/${p.code}/detail.aspx`} target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline">{p.code}</a> : '—'}</td>
                                     <td className="px-2.5 py-1.5 text-right">{Number(p.sold).toLocaleString('ru-RU')}</td>
                                     <td className="px-2.5 py-1.5 text-right">{rub(p.sales)}</td>
                                     <td className={`px-2.5 py-1.5 text-right font-medium ${p.margin < 0 ? 'text-rose-600' : 'text-emerald-600'}`}>{pct(p.margin)}</td>
@@ -24691,19 +24691,19 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             )}
                           </Card>
 
-                          {/* Топ-5 товаров по прибыли */}
+                          {/* Топ-5 товаров по прибыли (только с артикулами) */}
                           <Card title="Топ-5 товаров по прибыли">
-                            <Bars photo rows={top.slice(0, 5)} val={(r: any) => r.profit} color={() => 'bg-emerald-500'} fmt={(r: any) => rub(r.profit)} />
+                            <Bars photo rows={top.filter((p) => p.code).slice(0, 5)} val={(r: any) => r.profit} color={() => 'bg-emerald-500'} fmt={(r: any) => rub(r.profit)} />
                           </Card>
 
-                          {/* Антитоп-5 товаров */}
+                          {/* Антитоп-5 товаров (только с артикулами; без рекламы/хранения) */}
                           <Card title="Антитоп-5 (минимальная прибыль)">
-                            <Bars photo rows={[...byProfitDesc].slice(-5).reverse()} val={(r: any) => Math.abs(r.profit)} color={(r: any) => r.profit < 0 ? 'bg-rose-500' : 'bg-amber-400'} fmt={(r: any) => rub(r.profit)} />
+                            <Bars photo rows={[...byProfitDesc].filter((p) => p.code).slice(-5).reverse()} val={(r: any) => Math.abs(r.profit)} color={(r: any) => r.profit < 0 ? 'bg-rose-500' : 'bg-amber-400'} fmt={(r: any) => rub(r.profit)} />
                           </Card>
 
-                          {/* Склады продаж — сумма продаж + доля */}
+                          {/* Склады продаж — шт + сумма + доля */}
                           <Card title="Склады продаж">
-                            <Bars rows={[...wh].sort((a, b) => b.sales_net - a.sales_net)} val={(r: any) => r.sales_net} color={() => 'bg-blue-500'} fmt={(r: any) => `${rub(r.sales_net)} · ${pct(r.share_pct)}`} />
+                            <Bars rows={[...wh].sort((a, b) => b.sales_net - a.sales_net)} val={(r: any) => r.sales_net} color={() => 'bg-blue-500'} fmt={(r: any) => `${Number(r.sold_qty).toLocaleString('ru-RU')} шт · ${rub(r.sales_net)} · ${pct(r.share_pct)}`} />
                           </Card>
 
                           {/* Города продаж — доля города в общих продажах */}
