@@ -23733,14 +23733,44 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         return;
                       }
                       const result = processUploadedWbReport(rows, { turbo });
+                      // Проверка дубля: по номеру отчёта, иначе по периоду. Если отчёт
+                      // уже есть — он уже открыт (распарсен выше), не дублируем; спрашиваем,
+                      // обновить ли существующую запись.
+                      const sm: any = result?.summary || {};
+                      const dnum = String(sm?.report_number || '').trim();
+                      const norm = (v: any) => v ? String(new Date(v).toISOString()).slice(0, 10) : '';
+                      const dps = norm(sm?.period_start), dpe = norm(sm?.period_end);
+                      let alreadyExists = false;
+                      try {
+                        const { data: ex } = await supabase
+                          .from('analytics_upload_history')
+                          .select('id, summary_json')
+                          .eq('supplier_id', uploadedSelectedSupplierId)
+                          .order('created_at', { ascending: false })
+                          .limit(400);
+                        alreadyExists = (ex || []).some((x: any) => {
+                          const rn = String(x?.summary_json?.report_number || '').trim();
+                          if (dnum && rn) return rn === dnum;
+                          const xps = norm(x?.summary_json?.period_start), xpe = norm(x?.summary_json?.period_end);
+                          return !!dps && !!dpe && xps === dps && xpe === dpe;
+                        });
+                      } catch (_) {}
+
+                      if (alreadyExists) {
+                        const doUpdate = await confirmDialog('Такой отчёт уже есть в истории. Обновить его данными из этого файла?');
+                        if (!doUpdate) {
+                          showToast('Отчёт открыт. В истории он уже есть — повторно не сохраняем.', 'info');
+                          return;
+                        }
+                      }
+
                       if (result?.summary) {
-                        // RAW WB history must be saved even if analytics is empty,
-                        // so future recalculation can use original report rows.
                         await saveUploadedRawReportHistory(rows, fileName || 'uploaded_report.xlsx', result.summary, sourceFile);
                       }
                       if (result?.summary && Array.isArray(result?.analytics) && result.analytics.length > 0) {
                         await saveUploadedReportHistory(fileName || 'uploaded_report.xlsx', result.summary, result.analytics);
                       }
+                      if (alreadyExists) showToast('Отчёт обновлён в истории.', 'success');
                     }}
                   />
                 </div>
