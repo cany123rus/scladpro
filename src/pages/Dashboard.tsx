@@ -871,6 +871,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   // Доп. агрегации по отчёту: по складам / ПВЗ / стране / дням (для инфографики).
   const [uploadedReportGeo, setUploadedReportGeo] = useState<{ byWarehouse: any[]; byOffice: any[]; byCountry: any[]; dailyTotals: any[] } | null>(null);
   const [summaryProdSort, setSummaryProdSort] = useState<{ field: string; dir: 'asc' | 'desc' }>({ field: 'profit', dir: 'desc' });
+  const [summaryExpanded, setSummaryExpanded] = useState<Record<string, boolean>>({});
   const [uploadedCostByKey, setUploadedCostByKey] = useState<Record<string, string>>({});
   const [uploadedSelectedSupplierId, setUploadedSelectedSupplierId] = useState<string>('');
   const [uploadedPhotoMap, setUploadedPhotoMap] = useState<Record<string, string>>({});
@@ -24509,7 +24510,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       const sNet = Number(x.sales_net || 0);
                       const salesGross = Number(x.sales_gross || 0);
                       const retSum = Number(x.returns_gross || 0);
-                      return { code: x.code, name: x.name, sales: sNet, profit, sold, ret: Number(x.return_qty || 0), retSum, salesGross, margin: sNet > 0 ? profit / sNet * 100 : 0, retPct: salesGross > 0 ? retSum / salesGross * 100 : 0, share: sales > 0 ? sNet / sales * 100 : 0 };
+                      return { code: x.code, name: x.name, sales: sNet, profit, sold, ret: Number(x.return_qty || 0), retSum, salesGross, sizes: x.size_breakdown_list || [], sizesStr: x.size_breakdown || '', margin: sNet > 0 ? profit / sNet * 100 : 0, retPct: salesGross > 0 ? retSum / salesGross * 100 : 0, share: sales > 0 ? sNet / sales * 100 : 0 };
                     });
                     const byProfitDesc = [...prods].sort((a, b) => b.profit - a.profit);
                     const top = byProfitDesc;
@@ -24526,6 +24527,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     const hostFor = (vol: number) => { const t = [143,287,431,719,1007,1061,1115,1169,1313,1601,1655,1919,2045,2189,2405,2621,2837,3053,3269,3485,3701,3917,4133,4349,4565,4877,5189,5501,5813,6125,6437,6749,7061,7373,7685,7997,8309,8621]; let i = 0; while (i < t.length && vol > t[i]) i++; return `basket-${String(i + 1).padStart(2, '0')}.wbbasket.ru`; };
                     const wbPhotoBase = (nm: any) => { const n = Number(nm); if (!n) return ''; const vol = Math.floor(n / 100000), part = Math.floor(n / 1000); return `https://${hostFor(vol)}/vol${vol}/part${part}/${n}/images/c246x328/1`; };
                     const wbPhoto = (nm: any) => { const b = wbPhotoBase(nm); return b ? `${b}.webp` : ''; };
+                    const wbPhotoBig = (nm: any) => { const n = Number(nm); if (!n) return ''; const vol = Math.floor(n / 100000), part = Math.floor(n / 1000); return `https://${hostFor(vol)}/vol${vol}/part${part}/${n}/images/big/1.webp`; };
+                    const hasArticle = (p: any) => /^\d{4,}$/.test(String(p?.code || '').trim());
+                    const rubK = (v: number) => Math.abs(v) >= 1000 ? Math.round(v / 1000).toLocaleString('ru-RU') + 'к ₽' : Math.round(v) + ' ₽';
                     // структура расходов
                     const costParts = [
                       { label: 'Логистика', v: Number(s.logistics_sum || 0), c: 'bg-blue-500' },
@@ -24546,10 +24550,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <div className="space-y-1.5 max-h-80 overflow-auto pr-1">
                           {rows.length === 0 ? <div className="text-xs text-slate-400 py-4 text-center">Нет данных</div> : rows.map((r: any, i: number) => (
                             <div key={i} className="flex items-center gap-2 text-xs">
-                              {photo && (r.code ? <img src={wbPhoto(r.code)} data-fb="0" onError={(e: any) => { const el = e.currentTarget; if (el.dataset.fb === '0') { el.dataset.fb = '1'; el.src = wbPhotoBase(r.code) + '.jpg'; } else { el.style.visibility = 'hidden'; } }} onClick={(e: any) => setUploadedPhotoPreview({ src: e.currentTarget.src, title: String(r.code) })} className="w-14 h-[72px] rounded-lg object-cover bg-slate-100 shrink-0 cursor-zoom-in" loading="lazy" /> : <div className="w-14 h-[72px] rounded-lg bg-slate-100 shrink-0" />)}
+                              {photo && (r.code ? <img src={wbPhoto(r.code)} data-fb="0" onError={(e: any) => { const el = e.currentTarget; if (el.dataset.fb === '0') { el.dataset.fb = '1'; el.src = wbPhotoBase(r.code) + '.jpg'; } else { el.style.visibility = 'hidden'; } }} onClick={() => setUploadedPhotoPreview({ src: wbPhotoBig(r.code), title: `${r.code} ${r.name || ''}` })} className="w-14 h-[72px] rounded-lg object-cover bg-slate-100 shrink-0 cursor-zoom-in" loading="lazy" /> : <div className="w-14 h-[72px] rounded-lg bg-slate-100 shrink-0" />)}
                               <div className="w-40 text-slate-600 leading-tight line-clamp-2 break-words" title={r.name || r.key}>{photo ? (r.code ? <a href={`https://www.wildberries.ru/catalog/${r.code}/detail.aspx`} target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline font-medium">{r.code}</a> : '—') : (r.name || r.key)}</div>
                               <div className="flex-1 h-4 bg-slate-100 rounded overflow-hidden"><div className={color(r)} style={{ width: `${Math.max(2, Math.abs(val(r)) / max * 100)}%`, height: '100%' }} /></div>
-                              <div className="w-28 text-right font-medium text-slate-700">{fmt(r)}</div>
+                              <div className="w-36 shrink-0 text-right text-[11px] leading-tight font-medium text-slate-700 whitespace-nowrap">{fmt(r)}</div>
                             </div>
                           ))}
                         </div>
@@ -24616,10 +24620,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                 </tr>
                               </thead>
                               <tbody>
-                                {[...prods].map((p) => ({ ...p, ppu: p.sold > 0 ? p.profit / p.sold : 0 })).sort((a: any, b: any) => { const f = summaryProdSort.field; const m = summaryProdSort.dir === 'asc' ? 1 : -1; return ((a[f] || 0) - (b[f] || 0)) * m; }).map((p: any, i: number) => (
-                                  <tr key={i} className={`border-t border-slate-100 hover:bg-slate-50 ${p.profit < 0 ? 'bg-rose-50/40' : ''}`}>
-                                    <td className="px-2.5 py-1.5">{p.code ? <img src={wbPhoto(p.code)} data-fb="0" onError={(e: any) => { const el = e.currentTarget; if (el.dataset.fb === '0') { el.dataset.fb = '1'; el.src = wbPhotoBase(p.code) + '.jpg'; } else { el.style.visibility = 'hidden'; } }} onClick={(e: any) => setUploadedPhotoPreview({ src: e.currentTarget.src, title: `${p.code} ${p.name || ''}` })} className="w-20 h-24 rounded-lg object-cover bg-slate-100 cursor-zoom-in" loading="lazy" /> : <div className="w-20 h-24 rounded-lg bg-slate-100" />}</td>
-                                    <td className="px-2.5 py-1.5 text-left font-medium">{p.code ? <a href={`https://www.wildberries.ru/catalog/${p.code}/detail.aspx`} target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline">{p.code}</a> : '—'}</td>
+                                {[...prods].map((p) => ({ ...p, ppu: p.sold > 0 ? p.profit / p.sold : 0 })).sort((a: any, b: any) => { const f = summaryProdSort.field; const m = summaryProdSort.dir === 'asc' ? 1 : -1; return ((a[f] || 0) - (b[f] || 0)) * m; }).map((p: any, i: number) => {
+                                  const exp = !!summaryExpanded[String(p.code)];
+                                  return (
+                                  <React.Fragment key={i}>
+                                  <tr className={`border-t border-slate-100 hover:bg-slate-50 ${p.profit < 0 ? 'bg-rose-50/40' : ''}`}>
+                                    <td className="px-2.5 py-1.5">{p.code ? <img src={wbPhoto(p.code)} data-fb="0" onError={(e: any) => { const el = e.currentTarget; if (el.dataset.fb === '0') { el.dataset.fb = '1'; el.src = wbPhotoBase(p.code) + '.jpg'; } else { el.style.visibility = 'hidden'; } }} onClick={() => setUploadedPhotoPreview({ src: wbPhotoBig(p.code), title: `${p.code} ${p.name || ''}` })} className="w-20 h-24 rounded-lg object-cover bg-slate-100 cursor-zoom-in" loading="lazy" /> : <div className="w-20 h-24 rounded-lg bg-slate-100" />}</td>
+                                    <td className="px-2.5 py-1.5 text-left font-medium whitespace-nowrap">{p.code ? <a href={`https://www.wildberries.ru/catalog/${p.code}/detail.aspx`} target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline">{p.code}</a> : '—'}{(p.sizes && p.sizes.length > 0) && <button onClick={() => setSummaryExpanded((prev) => ({ ...prev, [String(p.code)]: !prev[String(p.code)] }))} className="ml-2 text-[10px] px-1.5 py-0.5 rounded border border-slate-200 text-slate-500 hover:bg-slate-100">{exp ? '▲ размеры' : '▾ размеры'}</button>}</td>
                                     <td className="px-2.5 py-1.5 text-right">{Number(p.sold).toLocaleString('ru-RU')}</td>
                                     <td className="px-2.5 py-1.5 text-right">{rub(p.sales)}</td>
                                     <td className={`px-2.5 py-1.5 text-right font-medium ${p.margin < 0 ? 'text-rose-600' : 'text-emerald-600'}`}>{pct(p.margin)}</td>
@@ -24628,7 +24635,25 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                     <td className={`px-2.5 py-1.5 text-right ${p.retPct > 20 ? 'text-rose-600 font-medium' : 'text-slate-600'}`}>{pct(p.retPct)}</td>
                                     <td className="px-2.5 py-1.5 text-right text-violet-700">{pct(p.share)}</td>
                                   </tr>
-                                ))}
+                                  {exp && p.sizes && p.sizes.length > 0 && (
+                                    <tr className="bg-slate-50/60">
+                                      <td colSpan={9} className="px-3 py-2">
+                                        <div className="flex flex-wrap gap-1.5">
+                                          {p.sizes.map((z: any, zi: number) => (
+                                            <span key={zi} className="inline-flex items-center gap-1 rounded-lg bg-white border border-slate-200 px-2 py-1 text-[11px]">
+                                              <b className="text-slate-700">{z.size}</b>
+                                              <span className="text-emerald-600">прод {Number(z.sold_net_qty ?? z.net ?? 0).toLocaleString('ru-RU')}</span>
+                                              {Number(z.return_qty ?? z.ret ?? 0) > 0 && <span className="text-rose-500">возвр {Number(z.return_qty ?? z.ret ?? 0)}</span>}
+                                              <span className="text-slate-500">{rub(z.sales_net ?? 0)}</span>
+                                            </span>
+                                          ))}
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  )}
+                                  </React.Fragment>
+                                  );
+                                })}
                               </tbody>
                             </table>
                           </div>
@@ -24693,22 +24718,22 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                           {/* Топ-5 товаров по прибыли (только с артикулами) */}
                           <Card title="Топ-5 товаров по прибыли">
-                            <Bars photo rows={top.filter((p) => p.code).slice(0, 5)} val={(r: any) => r.profit} color={() => 'bg-emerald-500'} fmt={(r: any) => rub(r.profit)} />
+                            <Bars photo rows={top.filter(hasArticle).slice(0, 5)} val={(r: any) => r.profit} color={() => 'bg-emerald-500'} fmt={(r: any) => rub(r.profit)} />
                           </Card>
 
                           {/* Антитоп-5 товаров (только с артикулами; без рекламы/хранения) */}
                           <Card title="Антитоп-5 (минимальная прибыль)">
-                            <Bars photo rows={[...byProfitDesc].filter((p) => p.code).slice(-5).reverse()} val={(r: any) => Math.abs(r.profit)} color={(r: any) => r.profit < 0 ? 'bg-rose-500' : 'bg-amber-400'} fmt={(r: any) => rub(r.profit)} />
+                            <Bars photo rows={[...byProfitDesc].filter(hasArticle).slice(-5).reverse()} val={(r: any) => Math.abs(r.profit)} color={(r: any) => r.profit < 0 ? 'bg-rose-500' : 'bg-amber-400'} fmt={(r: any) => rub(r.profit)} />
                           </Card>
 
                           {/* Склады продаж — шт + сумма + доля */}
                           <Card title="Склады продаж">
-                            <Bars rows={[...wh].sort((a, b) => b.sales_net - a.sales_net)} val={(r: any) => r.sales_net} color={() => 'bg-blue-500'} fmt={(r: any) => `${Number(r.sold_qty).toLocaleString('ru-RU')} шт · ${rub(r.sales_net)} · ${pct(r.share_pct)}`} />
+                            <Bars rows={[...wh].sort((a, b) => b.sales_net - a.sales_net)} val={(r: any) => r.sales_net} color={() => 'bg-blue-500'} fmt={(r: any) => `${Number(r.sold_qty).toLocaleString('ru-RU')} шт · ${rubK(r.sales_net)} · ${pct(r.share_pct)}`} />
                           </Card>
 
                           {/* Города продаж — доля города в общих продажах */}
                           <Card title={`Города продаж (${offices.length})`}>
-                            <Bars rows={offices} val={(r: any) => r.share_pct} color={() => 'bg-cyan-500'} fmt={(r: any) => `${pct(r.share_pct)} · ${rub(r.sales_net)}`} />
+                            <Bars rows={offices} val={(r: any) => r.share_pct} color={() => 'bg-cyan-500'} fmt={(r: any) => `${pct(r.share_pct)} · ${rubK(r.sales_net)}`} />
                           </Card>
                         </div>
                       </div>
@@ -25220,14 +25245,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           )}
 
           {uploadedPhotoPreview && (
-            <div className="fixed inset-0 z-[140] bg-black/70 flex items-center justify-center p-4" onClick={() => setUploadedPhotoPreview(null)}>
-              <div className="max-w-[95vw] max-h-[92vh]" onClick={(e) => e.stopPropagation()}>
-                <div className="flex items-center justify-between mb-2 text-white">
-                  <div className="text-sm truncate max-w-[80vw]">{uploadedPhotoPreview.title || 'Фото товара'}</div>
-                  <button type="button" onClick={() => setUploadedPhotoPreview(null)} className="px-2 py-1 text-xs rounded border border-white/40 hover:bg-white/10">Закрыть</button>
-                </div>
-                <img src={uploadedPhotoPreview.src} alt={uploadedPhotoPreview.title || 'Фото товара'} className="max-w-[95vw] max-h-[86vh] object-contain rounded-lg bg-white" />
-              </div>
+            <div className="fixed inset-0 z-[140] bg-black/80 flex items-center justify-center p-4" onClick={() => setUploadedPhotoPreview(null)}>
+              <button type="button" onClick={() => setUploadedPhotoPreview(null)} className="absolute top-4 right-4 w-11 h-11 rounded-full bg-white/15 hover:bg-white/25 text-white text-xl flex items-center justify-center">✕</button>
+              <img
+                src={uploadedPhotoPreview.src}
+                alt={uploadedPhotoPreview.title || 'Фото товара'}
+                onClick={(e) => e.stopPropagation()}
+                onError={(e: any) => { const el = e.currentTarget; const s = String(el.src); if (s.endsWith('big/1.webp')) el.src = s.replace('big/1.webp', 'big/1.jpg'); else if (s.endsWith('big/1.jpg')) el.src = s.replace('/big/1.jpg', '/c516x688/1.webp'); }}
+                className="max-w-[92vw] max-h-[92vh] object-contain rounded-2xl bg-white shadow-2xl"
+              />
             </div>
           )}
 
