@@ -15343,6 +15343,29 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     return Array.isArray(data) ? data : [];
   };
 
+  // Пересчёт отчёта из исходного Excel в Storage (даёт свежие гео-агрегации,
+  // эквайринг и т.п. — то, чего нет в сохранённой сводке старых отчётов).
+  const reparseHistoryFromFile = async (sumObj: any): Promise<boolean> => {
+    const bucket = sumObj?.source_file_bucket;
+    const path = sumObj?.source_file_path;
+    if (!bucket || !path) return false;
+    try {
+      showToast('Пересчитываю отчёт из файла…', 'info');
+      const { data, error } = await supabase.storage.from(bucket).download(path);
+      if (error || !data) return false;
+      const buf = await data.arrayBuffer();
+      const rows = await readFirstSheetAsJson<Record<string, any>>(buf, { defval: '' });
+      if (!Array.isArray(rows) || rows.length === 0) return false;
+      processUploadedWbReport(rows);
+      setUploadedViewTab('summary');
+      showToast('Отчёт пересчитан из файла', 'success');
+      return true;
+    } catch (e) {
+      console.warn('reparseHistoryFromFile failed', e);
+      return false;
+    }
+  };
+
   const openUploadedHistoryItem = async (item: any) => {
     try {
       let analytics = Array.isArray(item?.analytics_json) ? item.analytics_json : [];
@@ -15355,6 +15378,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           summary = found?.summary_json || summary;
         }
       }
+      // Пробуем пересчитать из исходного файла (полная инфографика + эквайринг).
+      if (await reparseHistoryFromFile(summary)) return;
+      // Файла нет — показываем сохранённую сводку; гео-графики недоступны.
+      setUploadedReportGeo(null);
       if (!Array.isArray(analytics) || analytics.length === 0) {
         showToast('В этом отчёте нет сохранённых данных аналитики', 'error');
         return;
@@ -24482,7 +24509,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           {rows.length === 0 ? <div className="text-xs text-slate-400 py-4 text-center">Нет данных</div> : rows.map((r: any, i: number) => (
                             <div key={i} className="flex items-center gap-2 text-xs">
                               {photo && (r.code ? <img src={wbPhoto(r.code)} onError={(e: any) => { e.currentTarget.style.visibility = 'hidden'; }} className="w-7 h-9 rounded object-cover bg-slate-100 shrink-0" loading="lazy" /> : <div className="w-7 h-9 rounded bg-slate-100 shrink-0" />)}
-                              <div className="w-28 truncate text-slate-600" title={r.name || r.key}>{r.name || r.key}</div>
+                              <div className="w-28 truncate text-slate-600" title={r.name || r.key}>{photo ? (r.code || '—') : (r.name || r.key)}</div>
                               <div className="flex-1 h-4 bg-slate-100 rounded overflow-hidden"><div className={color(r)} style={{ width: `${Math.max(2, Math.abs(val(r)) / max * 100)}%`, height: '100%' }} /></div>
                               <div className="w-28 text-right font-medium text-slate-700">{fmt(r)}</div>
                             </div>
@@ -24503,23 +24530,24 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     return (
                       <div className="space-y-4 mb-2">
                         {/* Hero: кольцо % к перечислению + ключевые цифры */}
-                        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-                          <div className="flex flex-col sm:flex-row items-center gap-6">
-                            <div className="relative shrink-0" style={{ width: 140, height: 140 }}>
-                              <svg width="140" height="140" viewBox="0 0 140 140" className="-rotate-90">
-                                <circle cx="70" cy="70" r={R} fill="none" stroke="#e2e8f0" strokeWidth="12" />
-                                <circle cx="70" cy="70" r={R} fill="none" stroke="#22c55e" strokeWidth="12" strokeLinecap="round" strokeDasharray={`${dash} ${C}`} />
+                        <div className="rounded-3xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-6 shadow-sm">
+                          <div className="flex flex-col sm:flex-row items-center gap-8">
+                            <div className="relative shrink-0" style={{ width: 160, height: 160 }}>
+                              <svg width="160" height="160" viewBox="0 0 160 160" className="-rotate-90">
+                                <defs><linearGradient id="ringGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stopColor="#34d399" /><stop offset="100%" stopColor="#059669" /></linearGradient></defs>
+                                <circle cx="80" cy="80" r={R} fill="none" stroke="#eef2f6" strokeWidth="14" />
+                                <circle cx="80" cy="80" r={R} fill="none" stroke="url(#ringGrad)" strokeWidth="14" strokeLinecap="round" strokeDasharray={`${dash} ${C}`} />
                               </svg>
                               <div className="absolute inset-0 flex flex-col items-center justify-center">
-                                <div className="text-2xl font-extrabold text-slate-900">{payoutPct}%</div>
-                                <div className="text-[11px] text-slate-400">к перечислению</div>
+                                <div className="text-3xl font-extrabold text-slate-900">{payoutPct}%</div>
+                                <div className="text-[11px] text-slate-400 mt-0.5">к перечислению</div>
                               </div>
                             </div>
-                            <div className="grid grid-cols-2 gap-x-8 gap-y-4 flex-1 w-full">
-                              <div><div className="text-xl font-extrabold text-slate-900">{rub(payoutHero)}</div><div className="text-xs text-slate-400">К перечислению</div></div>
-                              <div><div className="text-xl font-extrabold text-slate-900">{rub(sales)}</div><div className="text-xs text-slate-400">Выручка</div></div>
-                              <div><div className="text-xl font-extrabold text-rose-600">{Number(s.return_qty || 0).toLocaleString('ru-RU')}</div><div className="text-xs text-slate-400">Возвраты</div></div>
-                              <div><div className="text-xl font-extrabold text-slate-900">{avgCheck.toLocaleString('ru-RU', { maximumFractionDigits: 1 })} ₽</div><div className="text-xs text-slate-400">Средний чек</div></div>
+                            <div className="grid grid-cols-2 gap-3 flex-1 w-full">
+                              <div className="rounded-2xl bg-emerald-50 p-4"><div className="text-lg sm:text-xl font-extrabold text-emerald-700">{rub(payoutHero)}</div><div className="text-xs text-emerald-600/70 mt-0.5">К перечислению</div></div>
+                              <div className="rounded-2xl bg-indigo-50 p-4"><div className="text-lg sm:text-xl font-extrabold text-indigo-700">{rub(sales)}</div><div className="text-xs text-indigo-600/70 mt-0.5">Выручка</div></div>
+                              <div className="rounded-2xl bg-rose-50 p-4"><div className="text-lg sm:text-xl font-extrabold text-rose-600">{Number(s.return_qty || 0).toLocaleString('ru-RU')} шт</div><div className="text-xs text-rose-500/70 mt-0.5">Возвраты</div></div>
+                              <div className="rounded-2xl bg-violet-50 p-4"><div className="text-lg sm:text-xl font-extrabold text-violet-700">{avgCheck.toLocaleString('ru-RU', { maximumFractionDigits: 1 })} ₽</div><div className="text-xs text-violet-600/70 mt-0.5">Средний чек</div></div>
                             </div>
                           </div>
                         </div>
@@ -24552,7 +24580,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               <>
                                 <div className="flex items-end gap-1 h-32">
                                   {days.map((d: any, i: number) => (
-                                    <div key={i} className="flex-1 flex flex-col items-center justify-end group" title={`${d.key}: ${rub(d.sales_net)}`}>
+                                    <div key={i} className="flex-1 flex flex-col items-center justify-end group h-full" title={`${new Date(d.key).toLocaleDateString('ru-RU')}: ${rub(d.sales_net)}`}>
                                       <div className="w-full rounded-t bg-indigo-400 group-hover:bg-indigo-600 transition-colors" style={{ height: `${Math.max(2, d.sales_net / maxDaySales * 100)}%` }} />
                                     </div>
                                   ))}
@@ -24571,7 +24599,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               <>
                                 <div className="flex items-end gap-1 h-32">
                                   {days.map((d: any, i: number) => (
-                                    <div key={i} className="flex-1 flex flex-col items-center justify-end group" title={`${d.key}: ${d.sold_qty} выкупов`}>
+                                    <div key={i} className="flex-1 flex flex-col items-center justify-end group h-full" title={`${new Date(d.key).toLocaleDateString('ru-RU')}: ${d.sold_qty} выкупов`}>
                                       <div className="w-full rounded-t bg-emerald-400 group-hover:bg-emerald-600 transition-colors" style={{ height: `${Math.max(2, d.sold_qty / maxDayBuyout * 100)}%` }} />
                                     </div>
                                   ))}
@@ -24603,9 +24631,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             <Bars photo rows={[...prods].filter((p) => p.ret > 0).sort((a, b) => b.retPct - a.retPct)} val={(r: any) => r.retPct} color={() => 'bg-rose-400'} fmt={(r: any) => `${pct(r.retPct)} (${r.ret} шт)`} />
                           </Card>
 
-                          {/* Склады продаж */}
+                          {/* Склады продаж — кол-во отправленных товаров */}
                           <Card title="Склады продаж">
-                            <Bars rows={wh} val={(r: any) => r.sales_net} color={() => 'bg-blue-500'} fmt={(r: any) => `${rub(r.sales_net)} · выкуп ${pct(r.buyout_pct)}`} />
+                            <Bars rows={[...wh].sort((a, b) => b.sold_qty - a.sold_qty)} val={(r: any) => r.sold_qty} color={() => 'bg-blue-500'} fmt={(r: any) => `${Number(r.sold_qty).toLocaleString('ru-RU')} шт · ${rub(r.sales_net)}`} />
                           </Card>
 
                           {/* Города продаж */}
