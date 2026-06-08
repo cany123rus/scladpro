@@ -1064,7 +1064,13 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
           await Promise.all(fontUrls.map(async (font) => {
             let base64 = wbFontBase64Cache[font.url];
             if (!base64) {
-              const res = await fetch(font.url);
+              // Таймаут: на планшете/слабой сети fetch шрифта без отмены может
+              // висеть бесконечно → «вечная подготовка PDF».
+              const ac = new AbortController();
+              const ft = setTimeout(() => ac.abort(), 8000);
+              let res: Response;
+              try { res = await fetch(font.url, { signal: ac.signal }); }
+              finally { clearTimeout(ft); }
               if (!res.ok) throw new Error(`Failed to load ${font.url}`);
               const blob = await res.blob();
               base64 = await new Promise<string>((resolve, reject) => {
@@ -1232,17 +1238,24 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
 
       const blobUrl = doc.output('bloburl');
       if (!isDesktopView) {
-        // Планшет/мобильный: iframe с blob внутри popup на этих браузерах (особенно
-        // iOS Safari) часто не отображается и «висит». Открываем PDF напрямую в
-        // нативном просмотрщике — файл показывается сразу. ПК-поведение не меняем.
-        if (preview) {
-          try {
-            preview.location.href = blobUrl as string;
-          } catch {
-            doc.save(`wb-stickers-${Date.now()}.pdf`);
-          }
+        // Планшет/мобильный: прямой redirect popup на blob-URL часто «висит»
+        // (iOS Safari/Android Chrome). Пишем в popup страницу со ссылкой на PDF
+        // и авто-открытием — даже если авто-открытие заблокировано, есть кнопка.
+        const fileName = `wb-stickers-${Date.now()}.pdf`;
+        if (preview && !preview.closed) {
+          preview.document.open();
+          preview.document.write(`
+            <html><head><title>PDF готов</title><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+            <body style="margin:0;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;gap:18px;font-family:Arial,sans-serif;background:#f9fafb;color:#374151;">
+              <div style="font-size:16px;">PDF со стикерами готов</div>
+              <a id="open" href="${blobUrl}" download="${fileName}" style="padding:14px 28px;background:#4f46e5;color:#fff;border-radius:12px;text-decoration:none;font-size:16px;font-weight:600;">Открыть / скачать PDF</a>
+              <div style="font-size:12px;color:#9ca3af;">Если файл не открылся автоматически — нажмите кнопку</div>
+              <script>setTimeout(function(){try{document.getElementById('open').click();}catch(e){}},300);</script>
+            </body></html>
+          `);
+          preview.document.close();
         } else {
-          doc.save(`wb-stickers-${Date.now()}.pdf`);
+          doc.save(fileName);
         }
       } else if (preview) {
         preview.document.write(`
