@@ -899,6 +899,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [uploadedHistorySelectedIds, setUploadedHistorySelectedIds] = useState<Record<string, boolean>>({});
   const [uploadedHistoryCollapsedMonths, setUploadedHistoryCollapsedMonths] = useState<Record<number, boolean>>({});
   const [uploadedRawHistoryPickerOpen, setUploadedRawHistoryPickerOpen] = useState(false);
+  const [historySel, setHistorySel] = useState<Record<string, boolean>>({});
+  const [rawSel, setRawSel] = useState<Record<string, boolean>>({});
   const [uploadedRawHistoryCollapsedMonths, setUploadedRawHistoryCollapsedMonths] = useState<Record<number, boolean>>({});
   const [uploadedRawReports, setUploadedRawReports] = useState<any[]>([]);
   const [uploadedRawHistoryYear, setUploadedRawHistoryYear] = useState<number | null>(null);
@@ -15133,6 +15135,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       };
 
       const saveWithPayload = async (p: any) => {
+        // Дедуп: по номеру отчёта, а если его нет (в WB-отчёте колонки нет) —
+        // по поставщику + периоду (чтобы один и тот же отчёт не плодил дубли).
+        let existingId: string | null = null;
         if (reportNumber) {
           const { data: existing, error: findErr } = await supabase
             .from('analytics_upload_reports_raw')
@@ -15141,17 +15146,22 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
             .eq('report_number', reportNumber)
             .maybeSingle();
           if (findErr) throw findErr;
-
-          if (existing?.id) {
-            const { error } = await supabase
-              .from('analytics_upload_reports_raw')
-              .update(p)
-              .eq('id', existing.id);
-            if (error) throw error;
-          } else {
-            const { error } = await supabase.from('analytics_upload_reports_raw').insert(p);
-            if (error) throw error;
-          }
+          existingId = existing?.id ? String(existing.id) : null;
+        } else if (p?.period_start && p?.period_end) {
+          const { data: existing, error: findErr } = await supabase
+            .from('analytics_upload_reports_raw')
+            .select('id')
+            .eq('supplier_id', uploadedSelectedSupplierId)
+            .eq('period_start', p.period_start)
+            .eq('period_end', p.period_end)
+            .limit(1)
+            .maybeSingle();
+          if (findErr) throw findErr;
+          existingId = existing?.id ? String(existing.id) : null;
+        }
+        if (existingId) {
+          const { error } = await supabase.from('analytics_upload_reports_raw').update(p).eq('id', existingId);
+          if (error) throw error;
         } else {
           const { error } = await supabase.from('analytics_upload_reports_raw').insert(p);
           if (error) throw error;
@@ -15712,6 +15722,42 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     }
   };
 
+  // ── Массовое удаление в историях отчётов ──
+  const deleteUploadedHistoryMany = async (ids: string[]) => {
+    const list = Array.from(new Set((ids || []).map(String).filter(Boolean)));
+    if (!list.length) return;
+    const ok = await confirmDialog(`Удалить выбранные отчёты (${list.length})?`);
+    if (!ok) return;
+    try {
+      const { error } = await supabase.from('analytics_upload_history').delete().in('id', list);
+      if (error) throw error;
+      setUploadedHistory((prev) => (prev || []).filter((x: any) => !list.includes(String(x.id))));
+      setHistorySel({});
+      setUploadedHistorySelectedIds({});
+      showToast(`Удалено отчётов: ${list.length}`, 'success');
+    } catch (e) {
+      console.error('deleteUploadedHistoryMany error', e);
+      showToast('Не удалось удалить выбранные отчёты', 'error');
+    }
+  };
+
+  const deleteUploadedRawHistoryMany = async (ids: string[]) => {
+    const list = Array.from(new Set((ids || []).map(String).filter(Boolean)));
+    if (!list.length) return;
+    const ok = await confirmDialog(`Удалить выбранные WB-отчёты (${list.length})?`);
+    if (!ok) return;
+    try {
+      const { error } = await supabase.from('analytics_upload_reports_raw').delete().in('id', list);
+      if (error) throw error;
+      setRawSel({});
+      await loadUploadedRawReportHistory(uploadedSelectedSupplierId);
+      showToast(`Удалено WB-отчётов: ${list.length}`, 'success');
+    } catch (e) {
+      console.error('deleteUploadedRawHistoryMany error', e);
+      showToast('Не удалось удалить выбранные WB-отчёты', 'error');
+    }
+  };
+
   const saveUploadedReportHistory = async (fileName?: string, summaryArg?: any, analyticsArg?: any[]) => {
     const summaryToSave = summaryArg || uploadedReportSummary;
     const analyticsToSave = analyticsArg || uploadedReportAnalytics;
@@ -15720,7 +15766,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     try {
       const reportNumber = String((summaryToSave as any)?.report_number || '').trim();
       let duplicateId: string | null = null;
-      if (reportNumber) {
+      {
         const { data: existingRows, error: checkError } = await supabase
           .from('analytics_upload_history')
           .select('id, summary_json, created_at')
@@ -15736,7 +15782,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           const rn = String(x?.summary_json?.report_number || '').trim();
           const xps = x?.summary_json?.period_start ? new Date(x.summary_json.period_start).toISOString().slice(0, 10) : '';
           const xpe = x?.summary_json?.period_end ? new Date(x.summary_json.period_end).toISOString().slice(0, 10) : '';
-          return rn === reportNumber && xps === psIso && xpe === peIso;
+          // Если есть номер отчёта — сверяем по номеру+периоду; иначе по периоду.
+          if (reportNumber) return rn === reportNumber && xps === psIso && xpe === peIso;
+          return !!psIso && !!peIso && xps === psIso && xpe === peIso;
         });
 
         if (duplicate?.id) duplicateId = String(duplicate.id);
@@ -23741,9 +23789,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
               {uploadedRawHistoryPickerOpen && (
                 <div className="fixed inset-0 z-[121] bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
                   <div className="w-full max-w-2xl bg-white rounded-2xl shadow-2xl border border-slate-200 p-4">
-                    <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center justify-between mb-3 gap-2">
                       <div className="text-base font-semibold text-slate-900">История отчётов WB</div>
-                      <button type="button" onClick={() => setUploadedRawHistoryPickerOpen(false)} className="px-3 py-1.5 text-xs font-medium rounded-xl border border-slate-200 bg-white hover:bg-slate-50 shadow-sm">Закрыть</button>
+                      <div className="flex items-center gap-2">
+                        {Object.values(rawSel).filter(Boolean).length > 0 && (
+                          <button type="button" onClick={() => deleteUploadedRawHistoryMany(Object.keys(rawSel).filter((k) => rawSel[k]))} className="px-3 py-1.5 text-xs font-semibold rounded-xl border border-red-300 bg-red-50 text-red-700 hover:bg-red-100 shadow-sm">Удалить выбранные ({Object.values(rawSel).filter(Boolean).length})</button>
+                        )}
+                        <button type="button" onClick={() => { setUploadedRawHistoryPickerOpen(false); setRawSel({}); }} className="px-3 py-1.5 text-xs font-medium rounded-xl border border-slate-200 bg-white hover:bg-slate-50 shadow-sm">Закрыть</button>
+                      </div>
                     </div>
                     <div className="mb-3 flex flex-wrap items-center gap-2">
                       {uploadedRawHistoryYears.map((y) => (
@@ -23783,12 +23836,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           <div className="space-y-2">
                             {items.map((h: any) => (
                               <div key={h.id} className="flex items-center justify-between bg-white border border-slate-200 rounded-lg px-3 py-2 gap-2">
-                                <div className="min-w-0">
-                                  <div className="text-xs font-medium text-slate-800 truncate">{h.file_name || 'Без имени'}</div>
-                                  <div className="text-[11px] text-slate-500">{new Date(h.created_at).toLocaleString('ru-RU')}</div>
-                                  {h?.summary_json?.report_number && (
-                                    <div className="text-[11px] text-indigo-600">Отчёт № {h.summary_json.report_number}</div>
-                                  )}
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <input type="checkbox" checked={!!rawSel[String(h.id)]} onChange={(e) => setRawSel((prev) => ({ ...prev, [String(h.id)]: e.target.checked }))} className="w-4 h-4 shrink-0" />
+                                  <div className="min-w-0">
+                                    <div className="text-xs font-medium text-slate-800 truncate">{h.file_name || 'Без имени'}</div>
+                                    <div className="text-[11px] text-slate-500">{new Date(h.created_at).toLocaleString('ru-RU')}</div>
+                                    {h?.summary_json?.report_number && (
+                                      <div className="text-[11px] text-indigo-600">Отчёт № {h.summary_json.report_number}</div>
+                                    )}
+                                  </div>
                                 </div>
                                 <div className="flex items-center gap-2">
                                   <button onClick={() => openUploadedRawHistoryItem(h)} className="px-3 py-1.5 text-xs font-medium rounded-xl border border-slate-200 bg-white hover:bg-slate-50 shadow-sm">Открыть</button>
@@ -23858,6 +23914,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         })()}
                       </button>
                       <div className="ml-auto text-xs text-slate-600">Выбрано: {uploadedHistorySelectedCount}</div>
+                      {uploadedHistorySelectedCount > 0 && (
+                        <button type="button" onClick={() => deleteUploadedHistoryMany(Object.keys(uploadedHistorySelectedIds).filter((k) => uploadedHistorySelectedIds[k]))} className="px-3 py-1.5 text-xs font-semibold rounded-xl border border-red-300 bg-red-50 text-red-700 hover:bg-red-100 shadow-sm">Удалить выбранные</button>
+                      )}
                       <button type="button" onClick={openUploadedHistorySelected} className="px-3 py-1.5 text-xs font-semibold rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 shadow-sm">Отчёт по выбранным периодам</button>
                     </div>
 
