@@ -917,7 +917,7 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
         <html>
           <head><title>Подготовка печати...</title></head>
           <body style="margin:0;display:flex;align-items:center;justify-content:center;height:100vh;font-family:Arial,sans-serif;color:#374151;background:#f9fafb;">
-            Подготавливаю PDF для печати...
+            <div id="wbPrintProgress">Подготавливаю PDF для печати...</div>
           </body>
         </html>
       `);
@@ -1028,13 +1028,14 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
 
       let layout = layoutDefaults;
       try {
-        let raw: string | null = null;
+        let raw: string | null = localStorage.getItem('wb_label_layout_v1');
 
-        const { data: layoutRows } = await supabase
-          .from('app_settings')
-          .select('value')
-          .eq('key', 'wb_label_layout_v1')
-          .limit(1);
+        // Запрос layout с таймаутом 5с: ресилиент-fetch клиента может тянуть до
+        // 35с и держать «Подготавливаю PDF». Если есть localStorage — не ждём сеть.
+        const layoutRows = raw ? null : await Promise.race([
+          supabase.from('app_settings').select('value').eq('key', 'wb_label_layout_v1').limit(1).then((r) => r.data),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000)),
+        ]);
 
         const layoutRow = Array.isArray(layoutRows) ? layoutRows[0] : null;
 
@@ -1094,6 +1095,17 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
       const canvas = document.createElement('canvas');
 
       for (let i = 0; i < items.length; i++) {
+        // Прогресс в окне + yield каждые 20 меток: на планшете большой тираж
+        // генерируется секунды-десятки, без этого вкладка «висит» без признаков.
+        if (i % 20 === 0) {
+          try {
+            if (preview && !preview.closed) {
+              const el = preview.document.getElementById('wbPrintProgress');
+              if (el) el.textContent = `Подготавливаю PDF… ${i} / ${items.length}`;
+            }
+          } catch {}
+          await new Promise((r) => setTimeout(r, 0));
+        }
         const item = items[i];
         const { variant, honestSignCode, supplierName } = item;
         const { product, size, barcode } = variant;
