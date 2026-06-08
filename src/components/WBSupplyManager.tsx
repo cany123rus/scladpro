@@ -520,6 +520,9 @@ export const WBSupplyManager = ({
   const [orderHistory, setOrderHistory] = useState<Array<{ id: string; supplierId: string; supplierName: string; createdAt: string; fileName: string; dataUrl: string; totalQty: number; totalCost: number }>>([]);
   const [orderHistoryOpen, setOrderHistoryOpen] = useState(false);
   const [orderPdfNameModalOpen, setOrderPdfNameModalOpen] = useState(false);
+  // Порядок товаров в отчёте (nmID -> позиция, 1..N). Пустой = порядок по умолчанию.
+  const [orderArrangeOpen, setOrderArrangeOpen] = useState(false);
+  const [orderArrangeSeq, setOrderArrangeSeq] = useState<Record<number, number>>({});
   const [orderPdfFileName, setOrderPdfFileName] = useState('');
   const [orderMissingCostsModalOpen, setOrderMissingCostsModalOpen] = useState(false);
   const [pendingOrderExport, setPendingOrderExport] = useState<null | { type: 'pdf'; fileName?: string } | { type: 'excel' }>(null);
@@ -3341,7 +3344,7 @@ export const WBSupplyManager = ({
           }
       });
 
-      return Object.values(groupedItems).map(item => {
+      const result = Object.values(groupedItems).map(item => {
           item.sizes.sort((a, b) => {
               const sizeA = String(a.size).toUpperCase();
               const sizeB = String(b.size).toUpperCase();
@@ -3363,6 +3366,23 @@ export const WBSupplyManager = ({
           });
           return item;
       });
+
+      // Применяем заданный пользователем порядок (если есть). Товары с
+      // выставленной позицией идут первыми по возрастанию, остальные — после,
+      // в исходном порядке.
+      const hasSeq = Object.keys(orderArrangeSeq).length > 0;
+      if (hasSeq) {
+        const baseIndex = new Map<number, number>();
+        result.forEach((it, i) => baseIndex.set(it.product.nmID, i));
+        result.sort((a, b) => {
+          const pa = orderArrangeSeq[a.product.nmID];
+          const pb = orderArrangeSeq[b.product.nmID];
+          const ka = pa != null ? pa : 1e9 + (baseIndex.get(a.product.nmID) || 0);
+          const kb = pb != null ? pb : 1e9 + (baseIndex.get(b.product.nmID) || 0);
+          return ka - kb;
+        });
+      }
+      return result;
   };
 
   const getOrderStoredCost = (row: any, overrides?: Record<string, number>) => {
@@ -6010,6 +6030,7 @@ export const WBSupplyManager = ({
                 setOrderCostEditorOpen(true);
               }} className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-700 shadow-sm transition-all hover:bg-slate-50 hover:border-slate-300 active:scale-[0.97]">Себестоимость</button>
               <button onClick={() => setOrderHistoryOpen(true)} className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-700 shadow-sm transition-all hover:bg-slate-50 hover:border-slate-300 active:scale-[0.97]">История заказов</button>
+              <button onClick={() => setOrderArrangeOpen(true)} disabled={!supplyOrderSummaryRows.length} className="inline-flex items-center gap-1.5 rounded-xl border border-violet-200 bg-violet-50 px-3.5 py-2 text-sm font-medium text-violet-700 shadow-sm transition-all hover:bg-violet-100 active:scale-[0.97] disabled:opacity-50">Порядок{Object.keys(orderArrangeSeq).length ? ` (${Object.keys(orderArrangeSeq).length})` : ''}</button>
               <button
                 onClick={generateSupplyOrderExcel}
                 disabled={!supplyOrderSummaryRows.length}
@@ -6169,6 +6190,66 @@ export const WBSupplyManager = ({
           </div>
         </div>
       )}
+
+      {orderArrangeOpen && (() => {
+        const items = buildSupplyOrderItems();
+        const photoOf = (p: any) => p?.photos?.[0]?.c246x328 || p?.photos?.[0]?.c516x688 || p?.photos?.[0]?.big || '';
+        const toggle = (nmId: number) => {
+          setOrderArrangeSeq((prev) => {
+            const next = { ...prev };
+            if (next[nmId] != null) {
+              // снять и пере-нумеровать оставшиеся
+              delete next[nmId];
+              const ordered = Object.entries(next).sort((a, b) => a[1] - b[1]);
+              const renum: Record<number, number> = {};
+              ordered.forEach(([id], i) => { renum[Number(id)] = i + 1; });
+              return renum;
+            }
+            const maxPos = Object.values(next).reduce((m, v) => Math.max(m, v), 0);
+            next[nmId] = maxPos + 1;
+            return next;
+          });
+        };
+        return (
+          <div className="fixed inset-0 z-[132] bg-slate-900/55 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setOrderArrangeOpen(false)}>
+            <div className="w-full sm:max-w-3xl max-h-[92vh] flex flex-col bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl" onClick={(e) => e.stopPropagation()}>
+              <div className="p-4 border-b border-slate-200 flex items-center justify-between gap-3">
+                <div>
+                  <div className="font-semibold text-slate-900">Порядок товаров в отчёте</div>
+                  <div className="text-xs text-slate-500 mt-0.5">Нажимайте на фото в нужной последовательности — номер проставится автоматически. Без выбора — порядок по умолчанию.</div>
+                </div>
+                <button onClick={() => setOrderArrangeOpen(false)} className="shrink-0 w-9 h-9 rounded-full hover:bg-slate-100 text-slate-500 text-lg">✕</button>
+              </div>
+              <div className="p-4 overflow-auto">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                  {items.map((it) => {
+                    const nmId = it.product.nmID;
+                    const pos = orderArrangeSeq[nmId];
+                    const photo = photoOf(it.product);
+                    const qty = it.sizes.reduce((s, x) => s + x.quantity, 0);
+                    return (
+                      <button key={nmId} onClick={() => toggle(nmId)} className={`relative text-left rounded-xl border-2 overflow-hidden transition-all ${pos != null ? 'border-violet-500 ring-2 ring-violet-200' : 'border-slate-200 hover:border-slate-300'}`}>
+                        <div className="aspect-[3/4] bg-slate-100 flex items-center justify-center overflow-hidden">
+                          {photo ? <img src={photo} alt="" className="w-full h-full object-cover" loading="lazy" /> : <span className="text-slate-300 text-xs">нет фото</span>}
+                        </div>
+                        <div className={`absolute top-1.5 left-1.5 w-7 h-7 rounded-full flex items-center justify-center text-sm font-bold shadow ${pos != null ? 'bg-violet-600 text-white' : 'bg-white/80 text-slate-400 border border-slate-300'}`}>{pos != null ? pos : '+'}</div>
+                        <div className="p-1.5">
+                          <div className="text-[11px] text-slate-700 line-clamp-2 leading-tight" title={it.product.title}>{it.product.title || '-'}</div>
+                          <div className="text-[10px] text-slate-400 mt-0.5">{it.product.nmID} • {qty} шт.</div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="p-4 border-t border-slate-200 flex items-center justify-between gap-2">
+                <button onClick={() => setOrderArrangeSeq({})} className="px-4 py-2 rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50 text-sm">Сбросить</button>
+                <button onClick={() => setOrderArrangeOpen(false)} className="px-5 py-2 rounded-lg bg-violet-600 text-white hover:bg-violet-700 text-sm font-semibold">Готово</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {orderCostEditorOpen && (
         <div className="fixed inset-0 z-[131] bg-slate-900/55 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setOrderCostEditorOpen(false)}>
