@@ -23,6 +23,7 @@ export default function Login() {
   const navigate = useNavigate();
 
   // ── PIN (быстрый вход) ───────────────────────────────────────────────
+  const PIN_ENABLED = false; // вход по PIN отключён (всегда логин+пароль)
   const PIN_LEN = 6;
   const PIN_MAX_FAILS = 5;
   const PIN_FAIL_KEY = 'pin_fail_count';
@@ -44,6 +45,7 @@ export default function Login() {
   // Load PIN profiles registered on this device → show PIN screen by default.
   useEffect(() => {
     (async () => {
+      if (!PIN_ENABLED) return; // PIN-вход отключён
       const params = new URLSearchParams(window.location.search);
       if (params.get('token') || params.get('t') || params.get('auth')) return; // token login takes over
       try {
@@ -62,7 +64,7 @@ export default function Login() {
     void sendLoginReport(employee);
     localStorage.removeItem(PIN_FAIL_KEY);
     const hasPin = pinProfiles.some((p) => String(p.employee_id) === String(employee.id));
-    if (!opts?.skipPinPrompt && !hasPin) {
+    if (PIN_ENABLED && !opts?.skipPinPrompt && !hasPin) {
       setPinSetupEmployee(employee);
       setSetupPin(''); setSetupPin2('');
       return; // defer navigation until the user sets or skips the PIN
