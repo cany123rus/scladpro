@@ -14699,7 +14699,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         item.acquiring_percent_count += 1;
       }
 
-      if (isSale || isReturn) {
+      // Размер привязываем и к сервисным строкам (логистика/хранение/штраф),
+      // если в строке указан реальный размер — тогда логистика по размерам точная.
+      const hasRealSize = !!sizeValue && sizeValue !== 'Без размера';
+      if (isSale || isReturn || hasRealSize) {
         if (!item.size_stats[sizeValue]) {
           item.size_stats[sizeValue] = {
             sold: 0,
@@ -23776,7 +23779,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       } catch (_) {}
 
                       if (alreadyExists) {
-                        const doUpdate = await confirmDialog('Такой отчёт уже есть в истории. Обновить его данными из этого файла?');
+                        const doUpdate = await confirmDialog({ title: 'Отчёт уже есть', message: 'Такой отчёт уже есть в истории. Обновить его данными из этого файла?', tone: 'primary', confirmText: 'Обновить', cancelText: 'Не обновлять' });
                         if (!doUpdate) {
                           showToast('Отчёт открыт. В истории он уже есть — повторно не сохраняем.', 'info');
                           return;
@@ -24402,8 +24405,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     const wbPhotoBig = (nm: any) => { const n = Number(nm); if (!n) return ''; const vol = Math.floor(n / 100000), part = Math.floor(n / 1000); return `https://${hostFor(vol)}/vol${vol}/part${part}/${n}/images/big/1.webp`; };
                     const hasArticle = (p: any) => /^\d{4,}$/.test(String(p?.code || '').trim());
                     const rubK = (v: number) => Math.abs(v) >= 1000 ? Math.round(v / 1000).toLocaleString('ru-RU') + 'к ₽' : Math.round(v) + ' ₽';
-                    // структура расходов
+                    // структура расходов (включая себестоимость проданного)
+                    const costSumTotal = prods.reduce((a: number, p: any) => a + Number(p.costSum || 0), 0);
                     const costParts = [
+                      { label: 'Себестоимость', v: costSumTotal, c: 'bg-orange-500' },
                       { label: 'Логистика', v: Number(s.logistics_sum || 0), c: 'bg-blue-500' },
                       { label: 'Хранение', v: Number(s.storage_sum || 0), c: 'bg-cyan-500' },
                       { label: 'Штрафы', v: Number(s.fine_sum || 0), c: 'bg-rose-500' },
@@ -24425,7 +24430,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               {photo && (r.code ? <img src={wbPhoto(r.code)} data-fb="0" onError={(e: any) => { const el = e.currentTarget; if (el.dataset.fb === '0') { el.dataset.fb = '1'; el.src = wbPhotoBase(r.code) + '.jpg'; } else { el.style.visibility = 'hidden'; } }} onClick={() => setUploadedPhotoPreview({ src: wbPhotoBig(r.code), title: `${r.code} ${r.name || ''}` })} className="w-14 h-[72px] rounded-lg object-cover bg-slate-100 shrink-0 cursor-zoom-in" loading="lazy" /> : <div className="w-14 h-[72px] rounded-lg bg-slate-100 shrink-0" />)}
                               <div className="w-40 text-slate-600 leading-tight line-clamp-2 break-words" title={r.name || r.key}>{photo ? (r.code ? <a href={`https://www.wildberries.ru/catalog/${r.code}/detail.aspx`} target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline font-medium">{r.code}</a> : '—') : (r.name || r.key)}</div>
                               <div className="flex-1 h-4 bg-slate-100 rounded overflow-hidden"><div className={color(r)} style={{ width: `${Math.max(2, Math.abs(val(r)) / max * 100)}%`, height: '100%' }} /></div>
-                              <div className="w-36 shrink-0 text-right text-[11px] leading-tight font-medium text-slate-700 whitespace-nowrap">{fmt(r)}</div>
+                              <div className="w-48 shrink-0 text-right text-[11px] leading-tight font-medium text-slate-700 whitespace-nowrap">{fmt(r)}</div>
                             </div>
                           ))}
                         </div>
@@ -24440,7 +24445,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     const payoutHero = Number(s.payout_net || 0);
                     const payoutPct = sales > 0 ? Math.round(payoutHero / sales * 100) : 0;
                     const avgCheck = Number(s.sold_qty || 0) > 0 ? sales / Number(s.sold_qty || 0) : 0;
-                    const costSumTotal = prods.reduce((a: number, p: any) => a + Number(p.costSum || 0), 0);
                     const orderedQty = Number(s.ordered_qty || 0);
                     const soldQty = Number(s.sold_qty || 0);
                     const retQtyHero = Number(s.return_legs_qty || s.return_qty || 0);
@@ -24522,7 +24526,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                           <table className="min-w-full text-[11px]">
                                             <thead className="bg-slate-100 text-slate-500">
                                               <tr>
-                                                {['Размер', 'Продажи', 'Возвраты ₽', 'Логистика', 'К перечисл.', 'Итого к оплате', 'Себест.', 'Ср. заработок', 'Прибыль/шт', 'Заработок', 'Продано шт', 'Возвр. шт'].map((h, hi) => (
+                                                {['Размер', 'Продажи', 'Возвраты ₽', 'Логистика', 'К перечисл.', 'Итого к оплате', 'Себест.', 'Прибыль/шт', 'Заработок', 'Продано шт', 'Возвр. шт'].map((h, hi) => (
                                                   <th key={hi} className={`px-2 py-1.5 whitespace-nowrap ${hi === 0 ? 'text-left' : 'text-right'}`}>{h}</th>
                                                 ))}
                                               </tr>
@@ -24533,7 +24537,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                                 const ztopay = Number(z.to_pay_total ?? 0);
                                                 const zlog = Number(z.logistics_sum ?? 0) + logToSpread * (zsold / soldGrossTotal);
                                                 const ztax = Number(z.tax_sum ?? 0);
-                                                const zavg = zsold > 0 ? ztopay / zsold - Number(p.cost || 0) : 0;
                                                 const zprofit = ztopay - Number(p.cost || 0) * zsold - ztax;
                                                 const zppu = zsold > 0 ? zprofit / zsold : 0;
                                                 return (
@@ -24545,7 +24548,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                                     <td className="px-2 py-1.5 text-right">{rub(z.payout_net ?? 0)}</td>
                                                     <td className="px-2 py-1.5 text-right text-indigo-600">{rub(ztopay)}</td>
                                                     <td className="px-2 py-1.5 text-right text-slate-400">{rub(p.cost || 0)}</td>
-                                                    <td className="px-2 py-1.5 text-right">{rub(zavg)}</td>
                                                     <td className={`px-2 py-1.5 text-right ${zppu < 0 ? 'text-rose-600' : 'text-slate-700'}`}>{rub(zppu)}</td>
                                                     <td className={`px-2 py-1.5 text-right font-semibold ${zprofit < 0 ? 'text-rose-600' : 'text-emerald-600'}`}>{rub(zprofit)}</td>
                                                     <td className="px-2 py-1.5 text-right">{zsold.toLocaleString('ru-RU')}</td>
@@ -24638,12 +24640,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                           {/* Склады продаж — шт + сумма + доля */}
                           <Card title="Склады продаж">
-                            <Bars rows={[...wh].sort((a, b) => b.sales_net - a.sales_net)} val={(r: any) => r.sales_net} color={() => 'bg-blue-500'} fmt={(r: any) => `${Number(r.sold_qty).toLocaleString('ru-RU')} шт · ${rubK(r.sales_net)} · ${pct(r.share_pct)}`} />
+                            <Bars rows={[...wh].sort((a, b) => b.sales_net - a.sales_net)} val={(r: any) => r.sales_net} color={() => 'bg-blue-500'} fmt={(r: any) => `${Number(r.sold_qty).toLocaleString('ru-RU')} шт · ${rub(r.sales_net)} · ${pct(r.share_pct)}`} />
                           </Card>
 
                           {/* Города продаж — доля города в общих продажах */}
                           <Card title={`Города продаж (${offices.length})`}>
-                            <Bars rows={offices} val={(r: any) => r.share_pct} color={() => 'bg-cyan-500'} fmt={(r: any) => `${pct(r.share_pct)} · ${rubK(r.sales_net)}`} />
+                            <Bars rows={offices} val={(r: any) => r.share_pct} color={() => 'bg-cyan-500'} fmt={(r: any) => `${Number(r.sold_qty).toLocaleString('ru-RU')} шт · ${rub(r.sales_net)} · ${pct(r.share_pct)}`} />
                           </Card>
                         </div>
                       </div>
