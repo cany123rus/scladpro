@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useState, useRef, useTransition, useMemo, useCallback } from 'react';
+import React, { useEffect, useState, useRef, useTransition, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
@@ -969,11 +969,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     } catch {}
   }, [uploadedShareHiddenKeys]);
 
-  const [wbApiFromDate, setWbApiFromDate] = useState('');
-  const [wbApiToDate, setWbApiToDate] = useState('');
-  const [wbApiDownloadLoading, setWbApiDownloadLoading] = useState(false);
-  const [wbApiHistoryOpen, setWbApiHistoryOpen] = useState(false);
-  const [wbApiHistory, setWbApiHistory] = useState<any[]>([]);
   const [openDatePicker, setOpenDatePicker] = useState<string | null>(null);
   const [supabaseConnectionIssue, setSupabaseConnectionIssue] = useState<string | null>(null);
 
@@ -14897,10 +14892,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       };
     }).sort((a, b) => Number(b.sales_net || 0) - Number(a.sales_net || 0));
 
+    // Локальная дата YYYY-MM-DD без UTC-сдвига (toISOString уводил период на день назад).
+    const localISO = (d: Date | null) => d ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` : null;
     const summary = {
       report_number: reportNumber || null,
-      period_start: periodStart ? periodStart.toISOString() : null,
-      period_end: periodEnd ? periodEnd.toISOString() : null,
+      period_start: localISO(periodStart),
+      period_end: localISO(periodEnd),
       items: analytics.length,
       sales_net: analytics.reduce((s, x) => s + Number(x.sales_net || 0), 0),
       returns_gross: analytics.reduce((s, x) => s + Number(x.returns_gross || 0), 0),
@@ -15648,10 +15645,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       };
     }).sort((a: any, b: any) => Number(b.sales_net || 0) - Number(a.sales_net || 0));
 
+    const localISO2 = (d: Date | null) => d ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` : null;
     const summary = {
       report_number: null,
-      period_start: periodStart ? periodStart.toISOString() : null,
-      period_end: periodEnd ? periodEnd.toISOString() : null,
+      period_start: localISO2(periodStart),
+      period_end: localISO2(periodEnd),
       items: analytics.length,
       sales_net: analytics.reduce((acc: number, x: any) => acc + Number(x.sales_net || 0), 0),
       returns_gross: analytics.reduce((acc: number, x: any) => acc + Number(x.returns_gross || 0), 0),
@@ -16184,184 +16182,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   };
 
 
-  const loadWbApiHistory = async () => {
-    if (!uploadedSelectedSupplierId) {
-      setWbApiHistory([]);
-      return;
-    }
-    try {
-      const { data, error } = await supabase
-        .from('analytics_wb_api_reports')
-        .select('id, supplier_id, supplier_name, period_start, period_end, file_name, rows_json, created_at')
-        .eq('supplier_id', uploadedSelectedSupplierId)
-        .order('period_start', { ascending: true })
-        .order('created_at', { ascending: true })
-        .limit(300);
-      if (error) throw error;
-      setWbApiHistory(Array.isArray(data) ? data : []);
-    } catch (e) {
-      console.error('loadWbApiHistory error', e);
-      setWbApiHistory([]);
-    }
-  };
-
-  const downloadWbApiRowsExcel = async (rows: any[], fileName: string) => {
-    const safeRows = Array.isArray(rows) ? rows : [];
-    if (!safeRows.length) {
-      showToast('Нет данных для скачивания', 'error');
-      return;
-    }
-
-    const ruMap: Record<string, string> = {
-      realizationreport_id: 'Номер отчета реализации',
-      date_from: 'Дата начала периода',
-      date_to: 'Дата конца периода',
-      create_dt: 'Дата формирования',
-      currency_name: 'Валюта',
-      suppliercontract_code: 'Договор поставщика',
-      rrd_id: 'ID строки отчета',
-      gi_id: 'ID заказа',
-      subject_name: 'Предмет',
-      nm_id: 'Код номенклатуры',
-      brand_name: 'Бренд',
-      sa_name: 'Артикул поставщика',
-      ts_name: 'Размер',
-      barcode: 'Баркод',
-      doc_type_name: 'Тип документа',
-      quantity: 'Количество',
-      retail_price: 'Розничная цена',
-      retail_amount: 'Сумма розничной цены',
-      sale_percent: 'Согласованный процент скидки',
-      commission_percent: 'Процент комиссии',
-      office_name: 'Склад',
-      supplier_oper_name: 'Операция поставщика',
-      order_dt: 'Дата заказа',
-      sale_dt: 'Дата продажи',
-      rr_dt: 'Дата отчёта',
-      shk_id: 'ШК ID',
-      retail_price_withdisc_rub: 'Цена со скидкой (руб)',
-      delivery_amount: 'Кол-во доставок',
-      return_amount: 'Кол-во возвратов',
-      delivery_rub: 'Логистика (руб)',
-      gi_box_type_name: 'Тип короба',
-      product_discount_for_report: 'Скидка WB',
-      supplier_promo: 'Промокод поставщика',
-      rid: 'RID',
-      ppvz_spp_prc: 'Скидка постоянного покупателя, %',
-      ppvz_kvw_prc_base: 'Базовый % вознаграждения',
-      ppvz_kvw_prc: 'Итоговый % вознаграждения',
-      ppvz_sales_commission: 'Вознаграждение WB',
-      ppvz_for_pay: 'К перечислению',
-      ppvz_reward: 'Возмещение расходов WB',
-      acquiring_fee: 'Эквайринг',
-      acquiring_percent: 'Размер комиссии эквайринга, %',
-      acquiring_bank: 'Банк эквайринга',
-      ppvz_vw: 'К перечислению продавцу за товар',
-      ppvz_vw_nds: 'НДС к перечислению продавцу',
-      ppvz_office_id: 'ID офиса',
-      ppvz_office_name: 'Офис',
-      ppvz_supplier_id: 'ID поставщика',
-      ppvz_supplier_name: 'Поставщик',
-      ppvz_inn: 'ИНН',
-      declaration_number: 'Номер таможенной декларации',
-      sticker_id: 'Номер стикера',
-      site_country: 'Страна сайта',
-      srid: 'SRID',
-      penalty: 'Штрафы',
-      additional_payment: 'Доплаты',
-      rebill_logistic_cost: 'Логистика (ребиллинг)',
-      rebill_logistic_org: 'Организация ребиллинга',
-      storage_fee: 'Хранение',
-      deduction: 'Удержания',
-      acceptance: 'Платная приемка',
-      report_type: 'Тип отчёта',
-    };
-
-    const keys = Array.from(safeRows.reduce((acc: Set<string>, r: any) => {
-      Object.keys(r || {}).forEach((k) => acc.add(k));
-      return acc;
-    }, new Set<string>()));
-
-    const headers = keys.map((k) => ruMap[String(k)] || String(k));
-    const localizedRows = safeRows.map((r: any) => {
-      const out: Record<string, any> = {};
-      keys.forEach((k, idx) => {
-        out[headers[idx]] = r?.[k];
-      });
-      return out;
-    });
-
-    await downloadWorkbook(fileName, [{ name: 'WB основной отчёт', rows: localizedRows, headers }]);
-  };
-
-  const fetchWbMainReportRows = async (token: string, dateFrom: string, dateTo: string) => {
-    const all: any[] = [];
-    let rrdid = 0;
-    const limit = 100000;
-    for (let i = 0; i < 30; i++) {
-      const url = `https://statistics-api.wildberries.ru/api/v5/supplier/reportDetailByPeriod?dateFrom=${encodeURIComponent(dateFrom)}&dateTo=${encodeURIComponent(dateTo)}&limit=${limit}&rrdid=${rrdid}`;
-      const res = await fetch(url, { headers: { Authorization: token.trim() } });
-      if (!res.ok) {
-        const txt = await res.text();
-        throw new Error(`WB API ${res.status}: ${txt?.slice(0, 180) || 'ошибка'}`);
-      }
-      const arr = await res.json();
-      const chunk = Array.isArray(arr) ? arr : [];
-      if (!chunk.length) break;
-      all.push(...chunk);
-      const last = chunk[chunk.length - 1];
-      const nextRrdid = Number(last?.rrd_id || last?.rrdId || 0);
-      if (!nextRrdid || chunk.length < limit) break;
-      rrdid = nextRrdid;
-    }
-    return all;
-  };
-
-  const downloadWbReportsFromApi = async () => {
-    if (!uploadedSelectedSupplierId) {
-      showToast('Сначала выберите поставщика', 'error');
-      return;
-    }
-    if (!wbApiFromDate || !wbApiToDate) {
-      showToast('Укажите период отчёта', 'error');
-      return;
-    }
-    const supplier = (suppliers || []).find((s: any) => String(s?.id) === String(uploadedSelectedSupplierId));
-    if (!supplier?.wb_api_token) {
-      showToast('У поставщика нет WB API токена', 'error');
-      return;
-    }
-
-    try {
-      setWbApiDownloadLoading(true);
-      const rows = await fetchWbMainReportRows(String(supplier.wb_api_token || ''), wbApiFromDate, wbApiToDate);
-      if (!rows.length) {
-        showToast('WB API вернул пустой отчёт за период', 'info');
-        return;
-      }
-
-      const fileName = `${String(supplier.name || 'Поставщик').replace(/[\/:*?"<>|]+/g, '_')}_Период отчета_${wbApiFromDate}_${wbApiToDate}_Отчет с WB.xlsx`;
-      await downloadWbApiRowsExcel(rows, fileName);
-
-      const { error } = await supabase.from('analytics_wb_api_reports').insert({
-        supplier_id: uploadedSelectedSupplierId,
-        supplier_name: String(supplier.name || ''),
-        period_start: wbApiFromDate,
-        period_end: wbApiToDate,
-        file_name: fileName,
-        rows_json: shouldStoreRawRows ? rows : [],
-        source: 'wb_api_main',
-      });
-      if (error) throw error;
-      await loadWbApiHistory();
-      showToast(`Скачано строк из WB API: ${rows.length}`, 'success');
-    } catch (e: any) {
-      console.error('downloadWbReportsFromApi error', e);
-      showToast(e?.message || 'Не удалось скачать отчёт с WB API', 'error');
-    } finally {
-      setWbApiDownloadLoading(false);
-    }
-  };
 
   // Read advertising stats from our DB snapshot (filled by the wb-adv-sync edge
   // function on a schedule). Instant — no WB API call, no rate limits.
@@ -16496,20 +16316,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     if (adsApiSupplierId) void loadAdsApiData(from, to);
   };
 
-  const deleteWbApiHistoryItem = async (id: string, fileName?: string) => {
-    if (!id) return;
-    const ok = await confirmDialog(`Удалить из хранилища WB API: ${String(fileName || 'файл')}?`);
-    if (!ok) return;
-    try {
-      const { error } = await supabase.from('analytics_wb_api_reports').delete().eq('id', id);
-      if (error) throw error;
-      await loadWbApiHistory();
-      showToast('Файл удалён из хранилища WB API', 'success');
-    } catch (e: any) {
-      console.error('deleteWbApiHistoryItem error', e);
-      showToast(e?.message || 'Не удалось удалить файл', 'error');
-    }
-  };
 
   const uploadedHistoryMonthNames = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
 
@@ -17035,7 +16841,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     if (uploadedSelectedSupplierId) {
       loadUploadedReportHistory(uploadedSelectedSupplierId);
       loadUploadedRawReportHistory(uploadedSelectedSupplierId);
-      loadWbApiHistory();
     } else {
       setUploadedRawReports([]);
     }
@@ -23854,30 +23659,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     >
                       История отчётов WB
                     </button>
-                    <div className="flex items-end gap-2 flex-wrap">
-                      <div>
-                        <label className="block text-[11px] text-slate-500 mb-1">Период c</label>
-                        <input type="date" value={wbApiFromDate} onChange={(e) => setWbApiFromDate(e.target.value)} className="px-2 py-2 text-xs border border-slate-300 rounded-lg bg-white" />
-                      </div>
-                      <div>
-                        <label className="block text-[11px] text-slate-500 mb-1">по</label>
-                        <input type="date" value={wbApiToDate} onChange={(e) => setWbApiToDate(e.target.value)} className="px-2 py-2 text-xs border border-slate-300 rounded-lg bg-white" />
-                      </div>
-                      <button
-                        onClick={downloadWbReportsFromApi}
-                        disabled={!uploadedSelectedSupplierId || wbApiDownloadLoading}
-                        className="px-4 py-2 text-sm font-semibold rounded-xl border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 shadow-sm disabled:opacity-50"
-                      >
-                        {wbApiDownloadLoading ? 'Скачиваю WB...' : 'Скачать отчёты с WB'}
-                      </button>
-                      <button
-                        onClick={() => setWbApiHistoryOpen(true)}
-                        disabled={!uploadedSelectedSupplierId}
-                        className="px-4 py-2 text-sm font-semibold rounded-xl border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 shadow-sm disabled:opacity-50"
-                      >
-                        Хранилище WB API
-                      </button>
-                    </div>
                   </div>
 
                   <ExcelUploader
@@ -23951,34 +23732,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       })}
                       {!uploadedShareLinksLoading && uploadedShareLinks.length === 0 && (
                         <div className="text-xs text-slate-500">Ссылок пока нет</div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {wbApiHistoryOpen && (
-                <div className="fixed inset-0 z-[123] bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
-                  <div className="w-full max-w-3xl bg-white rounded-2xl shadow-2xl border border-slate-200 p-4">
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="text-base font-semibold text-slate-900">Хранилище WB API</div>
-                      <button type="button" onClick={() => setWbApiHistoryOpen(false)} className="px-3 py-1.5 text-xs font-medium rounded-xl border border-slate-200 bg-white hover:bg-slate-50 shadow-sm">Закрыть</button>
-                    </div>
-                    <div className="max-h-[62vh] overflow-auto space-y-2 pr-1">
-                      {wbApiHistory.map((h: any) => (
-                        <div key={h.id} className="flex items-center justify-between gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2">
-                          <div className="min-w-0">
-                            <div className="text-xs font-medium text-slate-800 truncate">{h.file_name || 'Без имени'}</div>
-                            <div className="text-[11px] text-slate-500">Период: {h.period_start || '-'} - {h.period_end || '-'} • {new Date(h.created_at).toLocaleString('ru-RU')}</div>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <button type="button" onClick={() => downloadWbApiRowsExcel(Array.isArray(h.rows_json) ? h.rows_json : [], h.file_name || 'wb_report.xlsx')} className="px-3 py-1.5 text-xs rounded-xl border border-slate-200 bg-white hover:bg-slate-50 shadow-sm">Скачать</button>
-                            <button type="button" onClick={() => deleteWbApiHistoryItem(String(h.id), h.file_name)} className="p-2 rounded-xl border border-red-200 bg-red-50 text-red-700 hover:bg-red-100 shadow-sm" title="Удалить"><Trash2 className="h-4 w-4" /></button>
-                          </div>
-                        </div>
-                      ))}
-                      {wbApiHistory.length === 0 && (
-                        <div className="text-xs text-slate-500">Хранилище WB API пусто</div>
                       )}
                     </div>
                   </div>
