@@ -14403,6 +14403,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     }
   };
 
+  // Закрытие редактора = применить + сохранить введённую себестоимость
+  // (иначе при перезагрузке отчёта вернётся пустое значение из БД).
+  const closeUploadedCostEditor = async () => {
+    if (uploadedSelectedSupplierId) {
+      try { await saveUploadedCostsFromEditor(); return; } catch { /* fallthrough */ }
+    }
+    setUploadedCostEditorOpen(false);
+  };
+
   const processUploadedWbReport = (rows: any[], opts?: { turbo?: boolean }) => {
     const turbo = Boolean(opts?.turbo);
     const toNum = (v: any) => {
@@ -14965,6 +14974,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     if (missingCount > 0 && !turbo) {
       setUploadedCostEditorValues((prev) => ({ ...prev, ...missingCostValues }));
       setUploadedCostEditorSearch('');
+      // Показываем ТОЛЬКО товары без себестоимости (а не весь список).
+      setUploadedCostEditorFilter('without_price');
+      setUploadedCostEditorLockedKeys(Object.keys(missingCostValues));
       setUploadedCostEditorOpen(true);
       showToast(`Найдено новых товаров без себестоимости: ${missingCount}. Заполните себестоимость.`, 'warning');
     } else if (turbo) {
@@ -15804,6 +15816,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   };
 
   const normalizeNmId = (v: any) => String(v ?? '').replace(/\D+/g, '').replace(/^0+/, '');
+  // Синтез WB-CDN URL фото по nmID (фолбэк, когда в БД фото нет).
+  const wbBasketHost = (vol: number) => { const t = [143,287,431,719,1007,1061,1115,1169,1313,1601,1655,1919,2045,2189,2405,2621,2837,3053,3269,3485,3701,3917,4133,4349,4565,4877,5189,5501,5813,6125,6437,6749,7061,7373,7685,7997,8309,8621]; let i = 0; while (i < t.length && vol > t[i]) i++; return `basket-${String(i + 1).padStart(2, '0')}.wbbasket.ru`; };
+  const wbSynthPhotos = (code: string) => {
+    const n = Number(normalizeNmId(code)); if (!n) return [] as string[];
+    const vol = Math.floor(n / 100000), part = Math.floor(n / 1000);
+    const base = `https://${wbBasketHost(vol)}/vol${vol}/part${part}/${n}/images/c246x328/1`;
+    return [`${base}.webp`, `${base}.jpg`];
+  };
   const getUploadedPhotoCandidates = (code: string) => {
     const raw = String(code || '').trim();
     const norm = normalizeNmId(raw);
@@ -15811,6 +15831,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
     if (uploadedPhotoMap[raw]) candidates.push(uploadedPhotoMap[raw]);
     if (norm && uploadedPhotoMap[norm]) candidates.push(uploadedPhotoMap[norm]);
+    // Фолбэк: прямые ссылки на WB-CDN (если из БД фото не нашлось/не открылось).
+    candidates.push(...wbSynthPhotos(raw));
 
     const failed = uploadedFailedPhotoUrlsRef.current;
     return Array.from(new Set(candidates.filter(Boolean))).filter((u) => !failed.has(String(u)));
@@ -24482,7 +24504,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     // прибыль по товару
                     const prods = (uploadedReportAnalytics || []).map((x: any) => {
                       const sold = Number(x.sold_qty || 0);
-                      const cost = Number(uploadedPersistedCostByCode[String(x.code || '').trim()] || uploadedCostByKey[String(x.code || '').trim()] || 0);
+                      const cost = Number(getUploadedCostValue(x) || 0);
                       const profit = (Number(x.to_pay_total || 0)) - cost * sold - Number(x.tax_sum || 0);
                       const sNet = Number(x.sales_net || 0);
                       const salesGross = Number(x.sales_gross || 0);
@@ -24679,9 +24701,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             <Bars photo rows={[...byProfitDesc].slice(-5).reverse()} val={(r: any) => Math.abs(r.profit)} color={(r: any) => r.profit < 0 ? 'bg-rose-500' : 'bg-amber-400'} fmt={(r: any) => rub(r.profit)} />
                           </Card>
 
-                          {/* Склады продаж — кол-во отправленных + доля продаж */}
+                          {/* Склады продаж — сумма продаж + доля */}
                           <Card title="Склады продаж">
-                            <Bars rows={[...wh].sort((a, b) => b.sold_qty - a.sold_qty)} val={(r: any) => r.sold_qty} color={() => 'bg-blue-500'} fmt={(r: any) => `${Number(r.sold_qty).toLocaleString('ru-RU')} шт · ${pct(r.share_pct)}`} />
+                            <Bars rows={[...wh].sort((a, b) => b.sales_net - a.sales_net)} val={(r: any) => r.sales_net} color={() => 'bg-blue-500'} fmt={(r: any) => `${rub(r.sales_net)} · ${pct(r.share_pct)}`} />
                           </Card>
 
                           {/* Города продаж — доля города в общих продажах */}
@@ -25113,10 +25135,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
 
           {uploadedCostEditorOpen && (
-            <div className="fixed inset-0 z-[135] bg-slate-900/55 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setUploadedCostEditorOpen(false)}>
+            <div className="fixed inset-0 z-[135] bg-slate-900/55 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => { void closeUploadedCostEditor(); }}>
               <div className="w-full max-w-5xl max-h-[90vh] overflow-hidden bg-white rounded-2xl shadow-2xl" onClick={(e) => e.stopPropagation()}>
                 <div className="p-4 border-b border-slate-200 flex items-center justify-between gap-3">
-                  <div className="font-semibold text-slate-900">Редактор себестоимости</div>
+                  <div className="font-semibold text-slate-900">Редактор себестоимости <span className="text-xs font-normal text-slate-400">(закрытие = сохранение)</span></div>
                   <div className="flex items-center gap-2 flex-wrap justify-end">
                     <input
                       type="text"
@@ -25148,7 +25170,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     <button type="button" onClick={saveUploadedCostsFromEditor} disabled={uploadedSavingCosts} className="px-3 py-2 text-sm rounded-lg border border-emerald-300 text-emerald-700 hover:bg-emerald-50 disabled:opacity-60">
                       {uploadedSavingCosts ? 'Сохраняю...' : 'Сохранить'}
                     </button>
-                    <button type="button" onClick={() => setUploadedCostEditorOpen(false)} className="px-3 py-2 text-sm rounded-lg border border-slate-300 hover:bg-slate-50">Закрыть</button>
+                    <button type="button" onClick={() => { void closeUploadedCostEditor(); }} className="px-3 py-2 text-sm rounded-lg border border-slate-300 hover:bg-slate-50">Закрыть</button>
                   </div>
                 </div>
                 <div className="p-4 overflow-auto max-h-[78vh]">
