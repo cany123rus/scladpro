@@ -23744,8 +23744,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       // Номер отчёта: из колонки, иначе вытаскиваем из имени файла
                       // (самая длинная цифровая группа ≥6 знаков) и сохраняем в БД.
                       if (!String(sm?.report_number || '').trim()) {
-                        const groups = String(fileName || '').match(/\d{6,}/g) || [];
-                        const fromName = groups.sort((a, b) => b.length - a.length)[0] || '';
+                        // Номер из имени файла: убираем даты (дд.мм.гггг) и исключаем
+                        // длинные timestamp'ы (≥12 цифр). Берём первую группу 6–11 цифр.
+                        const cleaned = String(fileName || '').replace(/\d{1,2}[.\-/]\d{1,2}[.\-/]\d{2,4}/g, ' ');
+                        const groups = (cleaned.match(/\d{6,}/g) || []).filter((g) => g.length <= 11);
+                        const fromName = groups[0] || '';
                         if (fromName) sm.report_number = fromName;
                       }
                       const dnum = String(sm?.report_number || '').trim();
