@@ -24496,8 +24496,34 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         {children}
                       </div>
                     );
+                    const payoutHero = Number(s.payout_net || 0);
+                    const payoutPct = sales > 0 ? Math.round(payoutHero / sales * 100) : 0;
+                    const avgCheck = Number(s.sold_qty || 0) > 0 ? sales / Number(s.sold_qty || 0) : 0;
+                    const R = 52, C = 2 * Math.PI * R, dash = C * Math.min(1, Math.max(0, payoutPct / 100));
                     return (
                       <div className="space-y-4 mb-2">
+                        {/* Hero: кольцо % к перечислению + ключевые цифры */}
+                        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                          <div className="flex flex-col sm:flex-row items-center gap-6">
+                            <div className="relative shrink-0" style={{ width: 140, height: 140 }}>
+                              <svg width="140" height="140" viewBox="0 0 140 140" className="-rotate-90">
+                                <circle cx="70" cy="70" r={R} fill="none" stroke="#e2e8f0" strokeWidth="12" />
+                                <circle cx="70" cy="70" r={R} fill="none" stroke="#22c55e" strokeWidth="12" strokeLinecap="round" strokeDasharray={`${dash} ${C}`} />
+                              </svg>
+                              <div className="absolute inset-0 flex flex-col items-center justify-center">
+                                <div className="text-2xl font-extrabold text-slate-900">{payoutPct}%</div>
+                                <div className="text-[11px] text-slate-400">к перечислению</div>
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-x-8 gap-y-4 flex-1 w-full">
+                              <div><div className="text-xl font-extrabold text-slate-900">{rub(payoutHero)}</div><div className="text-xs text-slate-400">К перечислению</div></div>
+                              <div><div className="text-xl font-extrabold text-slate-900">{rub(sales)}</div><div className="text-xs text-slate-400">Выручка</div></div>
+                              <div><div className="text-xl font-extrabold text-rose-600">{Number(s.return_qty || 0).toLocaleString('ru-RU')}</div><div className="text-xs text-slate-400">Возвраты</div></div>
+                              <div><div className="text-xl font-extrabold text-slate-900">{avgCheck.toLocaleString('ru-RU', { maximumFractionDigits: 1 })} ₽</div><div className="text-xs text-slate-400">Средний чек</div></div>
+                            </div>
+                          </div>
+                        </div>
+
                         {/* KPI плитки */}
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                           <div className="rounded-2xl p-4 bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow"><div className="text-[11px] opacity-80">Чистая прибыль</div><div className="text-xl font-extrabold">{rub(profitNet)}</div><div className="text-[11px] opacity-80 mt-0.5">маржа {sales > 0 ? pct(profitNet / sales * 100) : '—'}</div></div>
