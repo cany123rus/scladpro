@@ -14379,7 +14379,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       Object.entries(uploadedCostEditorValues || {}).forEach(([code, val]) => {
         const c = String(code || '').trim();
         const num = Number(String(val ?? '').replace(',', '.'));
-        if (c && Number.isFinite(num) && String(val).trim() !== '') nextByCode[c] = num;
+        if (c && Number.isFinite(num) && String(val).trim() !== '') {
+          nextByCode[c] = num;                                    // ключ «код|название»
+          const bare = c.split('|')[0].trim();                    // и голый «код» — чтобы
+          if (bare) nextByCode[bare] = num;                       // перебить устаревшее значение
+        }
       });
       await persistUploadedCostsByCode(nextByCode);
       setUploadedPersistedCostByCode(nextByCode);
@@ -23737,6 +23741,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       // уже есть — он уже открыт (распарсен выше), не дублируем; спрашиваем,
                       // обновить ли существующую запись.
                       const sm: any = result?.summary || {};
+                      // Номер отчёта: из колонки, иначе вытаскиваем из имени файла
+                      // (самая длинная цифровая группа ≥6 знаков) и сохраняем в БД.
+                      if (!String(sm?.report_number || '').trim()) {
+                        const groups = String(fileName || '').match(/\d{6,}/g) || [];
+                        const fromName = groups.sort((a, b) => b.length - a.length)[0] || '';
+                        if (fromName) sm.report_number = fromName;
+                      }
                       const dnum = String(sm?.report_number || '').trim();
                       const norm = (v: any) => v ? String(new Date(v).toISOString()).slice(0, 10) : '';
                       const dps = norm(sm?.period_start), dpe = norm(sm?.period_end);
@@ -24455,16 +24466,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               <div className="rounded-2xl bg-blue-50 p-3.5"><div className="text-base sm:text-lg font-extrabold text-blue-700">{sales > 0 ? pct(Number(s.logistics_sum || 0) / sales * 100) : '—'}</div><div className="text-[11px] text-blue-600/70 mt-0.5">Логистика</div></div>
                               <div className="rounded-2xl bg-fuchsia-50 p-3.5"><div className="text-base sm:text-lg font-extrabold text-fuchsia-700">{sales > 0 ? pct(Number(s.withhold_sum || 0) / sales * 100) : '—'}</div><div className="text-[11px] text-fuchsia-600/70 mt-0.5">Реклама WB</div></div>
                               <div className="rounded-2xl bg-cyan-50 p-3.5"><div className="text-base sm:text-lg font-extrabold text-cyan-700">{sales > 0 ? pct(Number(s.storage_sum || 0) / sales * 100) : '—'}</div><div className="text-[11px] text-cyan-600/70 mt-0.5">Хранение</div></div>
+                              <div className={`rounded-2xl p-3.5 ${profitNet < 0 ? 'bg-rose-100' : 'bg-emerald-100'}`}><div className={`text-base sm:text-lg font-extrabold ${profitNet < 0 ? 'text-rose-700' : 'text-emerald-700'}`}>{rub(profitNet)}</div><div className={`text-[11px] mt-0.5 ${profitNet < 0 ? 'text-rose-600/70' : 'text-emerald-600/70'}`}>Чистая прибыль · {sales > 0 ? pct(profitNet / sales * 100) : '—'}</div></div>
+                              <div className="rounded-2xl bg-amber-50 p-3.5"><div className="text-base sm:text-lg font-extrabold text-amber-700">{rub(costTotal)}</div><div className="text-[11px] text-amber-600/70 mt-0.5">Расходы всего · {sales > 0 ? pct(costTotal / sales * 100) : '—'}</div></div>
                             </div>
                           </div>
-                        </div>
-
-                        {/* KPI плитки */}
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                          <div className="rounded-2xl p-4 bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow"><div className="text-[11px] opacity-80">Чистая прибыль</div><div className="text-xl font-extrabold">{rub(profitNet)}</div><div className="text-[11px] opacity-80 mt-0.5">маржа {sales > 0 ? pct(profitNet / sales * 100) : '—'}</div></div>
-                          <div className="rounded-2xl p-4 bg-white border border-slate-200 shadow-sm"><div className="text-[11px] text-slate-500">% возвратов</div><div className="text-xl font-extrabold text-rose-600">{pct(retPctTotal)}</div><div className="text-[11px] text-slate-400 mt-0.5">выкуп {pct(buyoutPct)}</div></div>
-                          <div className="rounded-2xl p-4 bg-white border border-slate-200 shadow-sm"><div className="text-[11px] text-slate-500">% логистики</div><div className="text-xl font-extrabold text-blue-600">{pct(logPct)}</div><div className="text-[11px] text-slate-400 mt-0.5">от выручки</div></div>
-                          <div className="rounded-2xl p-4 bg-white border border-slate-200 shadow-sm"><div className="text-[11px] text-slate-500">Расходы всего</div><div className="text-xl font-extrabold text-amber-600">{rub(costTotal)}</div><div className="text-[11px] text-slate-400 mt-0.5">{sales > 0 ? pct(costTotal / sales * 100) : '—'} от выручки</div></div>
                         </div>
 
                         {/* Крупная таблица товаров с фото и сортировкой */}
@@ -25107,10 +25112,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                   onChange={(e) => {
                                     const value = e.target.value;
                                     const num = Number(String(value || '').replace(',', '.'));
+                                    const bareCode = String(editorKey).split('|')[0].trim();
                                     setUploadedCostEditorValues((prev) => ({ ...prev, [editorKey]: value }));
-                                    setUploadedCostByKey((prev) => ({ ...prev, [editorKey]: value }));
+                                    setUploadedCostByKey((prev) => ({ ...prev, [editorKey]: value, ...(bareCode ? { [bareCode]: value } : {}) }));
                                     if (Number.isFinite(num) && num >= 0) {
-                                      setUploadedPersistedCostByCode((prev) => ({ ...prev, [editorKey]: num }));
+                                      setUploadedPersistedCostByCode((prev) => ({ ...prev, [editorKey]: num, ...(bareCode ? { [bareCode]: num } : {}) }));
                                     }
                                   }}
                                   className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm"
