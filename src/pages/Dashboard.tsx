@@ -781,12 +781,20 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [reportsSummaryLoading, setReportsSummaryLoading] = useState(false);
   // All-time per-supplier aggregate (qty/ЗП/закуп) for the Reports section.
   const [reportsAllTime, setReportsAllTime] = useState<Map<string, { qty: number; zpTemp: number; zpStaff: number; packaging: number }>>(new Map());
-  const loadReportsAllTime = async () => {
+  // Режим сводной по поставщикам: true = за всё время, false = за выбранный период.
+  const [reportsBySupAllTime, setReportsBySupAllTime] = useState(false);
+  const loadReportsAllTime = async (range?: { start: string; end: string } | null) => {
     try {
+      // range == null → за всё время; иначе фильтруем по дате (date / created_at).
+      const withRange = <T extends { gte: any; lte: any }>(q: T, col: string): T => {
+        if (!range) return q;
+        return (q as any).gte(col, col === 'created_at' ? `${range.start}T00:00:00` : range.start)
+                         .lte(col, col === 'created_at' ? `${range.end}T23:59:59` : range.end) as T;
+      };
       const [tr, sr, pp] = await Promise.all([
-        supabase.from('temporary_workers_logs').select('supplier_id, quantity, work_comment, earnings').is('deleted_at', null),
-        supabase.from('work_logs').select('supplier_id, quantity, work_rates(name, price)').is('deleted_at', null),
-        supabase.from('packaging_purchase_log').select('supplier_id, quantity, price, delivery, kind').is('deleted_at', null),
+        withRange(supabase.from('temporary_workers_logs').select('supplier_id, quantity, work_comment, earnings, date').is('deleted_at', null) as any, 'date'),
+        withRange(supabase.from('work_logs').select('supplier_id, quantity, work_rates(name, price), date').is('deleted_at', null) as any, 'date'),
+        withRange(supabase.from('packaging_purchase_log').select('supplier_id, quantity, price, delivery, kind, created_at').is('deleted_at', null) as any, 'created_at'),
       ]);
       const m = new Map<string, { qty: number; zpTemp: number; zpStaff: number; packaging: number }>();
       const ensure = (k: string) => { const e = m.get(k) || { qty: 0, zpTemp: 0, zpStaff: 0, packaging: 0 }; m.set(k, e); return e; };
@@ -1732,8 +1740,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
   // All-time per-supplier report rows (qty, ЗП, доставка, закуп, итого, ср.цена).
   const reportsBySupplier = useMemo(() => {
+    // Доставка тоже учитывает режим период/всё время (по дате доставки).
+    const deliverySource = reportsBySupAllTime
+      ? deliveryInfographics
+      : computeDeliveryInfographics((deliveryHistory || []).filter((d: any) => {
+          const dk = String(d?.date || '').slice(0, 10);
+          return dk >= reportsSummaryRange.start && dk <= reportsSummaryRange.end;
+        }));
     const deliveryBySup = new Map<string, number>();
-    (deliveryInfographics.supplierRows || []).forEach((r: any) => deliveryBySup.set(String(r.supplierId), Number(r.amount || 0)));
+    (deliverySource.supplierRows || []).forEach((r: any) => deliveryBySup.set(String(r.supplierId), Number(r.amount || 0)));
     const keys = new Set<string>([...Array.from(reportsAllTime.keys()), ...Array.from(deliveryBySup.keys())]);
     const rows = Array.from(keys).map((sid) => {
       const a = reportsAllTime.get(sid) || { qty: 0, zpTemp: 0, zpStaff: 0, packaging: 0 };
@@ -1744,7 +1759,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     }).filter((r) => r.qty > 0 || r.cost > 0).sort((a, b) => b.qty - a.qty);
     const totals = rows.reduce((t, r) => ({ qty: t.qty + r.qty, zpTemp: t.zpTemp + r.zpTemp, zpStaff: t.zpStaff + r.zpStaff, delivery: t.delivery + r.delivery, packaging: t.packaging + r.packaging, cost: t.cost + r.cost }), { qty: 0, zpTemp: 0, zpStaff: 0, delivery: 0, packaging: 0, cost: 0 });
     return { rows, totals };
-  }, [reportsAllTime, deliveryInfographics, suppliers]);
+  }, [reportsAllTime, deliveryInfographics, deliveryHistory, reportsBySupAllTime, reportsSummaryRange.start, reportsSummaryRange.end, suppliers]);
 
   const deliveryReportRows = useMemo(() => {
     const start = String(deliveryReportForm.start_date || '');
@@ -16854,9 +16869,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     };
   }, [sortedFilteredUploadedAnalytics, uploadedReportSummary, uploadedExtraCosts, uploadedCostByKey, uploadedPersistedCostByCode]);
 
+  // Пере-загрузка сводной по поставщикам при смене режима «всё время / период».
+  useEffect(() => {
+    if (activeTab === 'reports') loadReportsAllTime(reportsBySupAllTime ? null : reportsSummaryRange);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reportsBySupAllTime, reportsSummaryRange.start, reportsSummaryRange.end]);
+
   useEffect(() => {
     // Lazy-load data by active tab to reduce startup memory/load spikes.
-    if (activeTab === 'reports') { fetchReportsData(); loadAssemblyDaily(); loadBoxStock(); loadReportsSummary(reportsSummaryRange.start, reportsSummaryRange.end); loadReportsAllTime(); loadDeliveryData(); }
+    if (activeTab === 'reports') { fetchReportsData(); loadAssemblyDaily(); loadBoxStock(); loadReportsSummary(reportsSummaryRange.start, reportsSummaryRange.end); loadReportsAllTime(reportsBySupAllTime ? null : reportsSummaryRange); loadDeliveryData(); }
     if (activeTab === 'employees' || activeTab === 'warehouse' || activeTab === 'admin') fetchEmployees();
     if (activeTab === 'employees') loadPaymentReports();
     if (activeTab === 'reception') fetchReceptions();
@@ -25185,10 +25206,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                   {/* Сводная статистика по поставщикам (за всё время) */}
                   <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-                    <div className="flex items-center gap-2 mb-4">
+                    <div className="flex items-center gap-2 mb-4 flex-wrap">
                       <div className="p-2 bg-violet-50 rounded-xl"><BarChart2 className="h-5 w-5 text-violet-600" /></div>
                       <h3 className="text-lg font-bold text-slate-900">Сводная статистика по поставщикам</h3>
-                      <span className="text-xs text-slate-400">за всё время</span>
+                      <span className="text-xs text-slate-400">{reportsBySupAllTime ? 'за всё время' : `${reportsSummaryRange.start} — ${reportsSummaryRange.end}`}</span>
+                      <div className="ml-auto inline-flex rounded-xl border border-slate-200 overflow-hidden">
+                        <button onClick={() => setReportsBySupAllTime(false)} className={`px-3 py-1.5 text-xs font-semibold transition-colors ${!reportsBySupAllTime ? 'bg-violet-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>За период</button>
+                        <button onClick={() => setReportsBySupAllTime(true)} className={`px-3 py-1.5 text-xs font-semibold transition-colors ${reportsBySupAllTime ? 'bg-violet-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>За всё время</button>
+                      </div>
                     </div>
                     {reportsBySupplier.rows.length === 0 ? (
                       <div className="py-8 text-center text-slate-400">Нет данных</div>
