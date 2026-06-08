@@ -870,6 +870,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [uploadedReportSummary, setUploadedReportSummary] = useState<any | null>(null);
   // Доп. агрегации по отчёту: по складам / ПВЗ / стране / дням (для инфографики).
   const [uploadedReportGeo, setUploadedReportGeo] = useState<{ byWarehouse: any[]; byOffice: any[]; byCountry: any[]; dailyTotals: any[] } | null>(null);
+  const [summaryProdSort, setSummaryProdSort] = useState<{ field: string; dir: 'asc' | 'desc' }>({ field: 'profit', dir: 'desc' });
   const [uploadedCostByKey, setUploadedCostByKey] = useState<Record<string, string>>({});
   const [uploadedSelectedSupplierId, setUploadedSelectedSupplierId] = useState<string>('');
   const [uploadedPhotoMap, setUploadedPhotoMap] = useState<Record<string, string>>({});
@@ -24570,6 +24571,37 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           <div className="rounded-2xl p-4 bg-white border border-slate-200 shadow-sm"><div className="text-[11px] text-slate-500">Расходы всего</div><div className="text-xl font-extrabold text-amber-600">{rub(costTotal)}</div><div className="text-[11px] text-slate-400 mt-0.5">{sales > 0 ? pct(costTotal / sales * 100) : '—'} от выручки</div></div>
                         </div>
 
+                        {/* Крупная таблица товаров с фото и сортировкой */}
+                        <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+                          <div className="px-4 py-3 border-b border-slate-100 font-bold text-slate-800 text-sm">Товары ({prods.length})</div>
+                          <div className="overflow-auto max-h-[70vh]">
+                            <table className="min-w-full text-xs">
+                              <thead className="bg-slate-50 sticky top-0 z-10">
+                                <tr className="select-none">
+                                  {([['photo', 'Фото'], ['code', 'Артикул'], ['sold', 'Продано'], ['sales', 'Выручка'], ['margin', 'Маржа %'], ['profit', 'Прибыль'], ['ppu', 'Приб/шт'], ['retPct', 'Возврат %'], ['share', 'Доля %']] as [string, string][]).map(([f, l]) => (
+                                    <th key={f} className={`px-2.5 py-2 whitespace-nowrap ${f === 'photo' ? '' : 'cursor-pointer hover:text-indigo-600'} ${['code', 'photo'].includes(f) ? 'text-left' : 'text-right'}`} onClick={() => f !== 'photo' && setSummaryProdSort((p) => ({ field: f, dir: p.field === f && p.dir === 'desc' ? 'asc' : 'desc' }))}>{l}{summaryProdSort.field === f ? (summaryProdSort.dir === 'asc' ? ' ▲' : ' ▼') : ''}</th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {[...prods].map((p) => ({ ...p, ppu: p.sold > 0 ? p.profit / p.sold : 0 })).sort((a: any, b: any) => { const f = summaryProdSort.field; const m = summaryProdSort.dir === 'asc' ? 1 : -1; return ((a[f] || 0) - (b[f] || 0)) * m; }).map((p: any, i: number) => (
+                                  <tr key={i} className={`border-t border-slate-100 hover:bg-slate-50 ${p.profit < 0 ? 'bg-rose-50/40' : ''}`}>
+                                    <td className="px-2.5 py-1.5">{p.code ? <img src={wbPhoto(p.code)} data-fb="0" onError={(e: any) => { const el = e.currentTarget; if (el.dataset.fb === '0') { el.dataset.fb = '1'; el.src = wbPhotoBase(p.code) + '.jpg'; } else { el.style.visibility = 'hidden'; } }} className="w-8 h-10 rounded object-cover bg-slate-100" loading="lazy" /> : <div className="w-8 h-10 rounded bg-slate-100" />}</td>
+                                    <td className="px-2.5 py-1.5 text-left font-medium text-slate-700">{p.code || '—'}</td>
+                                    <td className="px-2.5 py-1.5 text-right">{Number(p.sold).toLocaleString('ru-RU')}</td>
+                                    <td className="px-2.5 py-1.5 text-right">{rub(p.sales)}</td>
+                                    <td className={`px-2.5 py-1.5 text-right font-medium ${p.margin < 0 ? 'text-rose-600' : 'text-emerald-600'}`}>{pct(p.margin)}</td>
+                                    <td className={`px-2.5 py-1.5 text-right font-bold ${p.profit < 0 ? 'text-rose-600' : 'text-slate-800'}`}>{rub(p.profit)}</td>
+                                    <td className="px-2.5 py-1.5 text-right">{rub(p.ppu)}</td>
+                                    <td className={`px-2.5 py-1.5 text-right ${p.retPct > 20 ? 'text-rose-600 font-medium' : 'text-slate-600'}`}>{pct(p.retPct)}</td>
+                                    <td className="px-2.5 py-1.5 text-right text-violet-700">{pct(p.share)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+
                         <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-4 auto-rows-fr">
                           {/* Структура расходов — % считается от продаж */}
                           <Card title="Структура расходов (% от продаж)">
@@ -24619,26 +24651,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                 </div>
                               </>
                             )}
-                          </Card>
-
-                          {/* Товары по прибыли — все */}
-                          <Card title={`Товары по прибыли (${top.length})`}>
-                            <Bars photo rows={top} val={(r: any) => r.profit} color={(r: any) => r.profit < 0 ? 'bg-rose-500' : 'bg-emerald-500'} fmt={(r: any) => rub(r.profit)} />
-                          </Card>
-
-                          {/* Убыточные товары */}
-                          <Card title={`Убыточные товары (${loss.length})`}>
-                            <Bars photo rows={loss} val={(r: any) => Math.abs(r.profit)} color={() => 'bg-rose-500'} fmt={(r: any) => rub(r.profit)} />
-                          </Card>
-
-                          {/* Доля в выручке — все */}
-                          <Card title="Доля в выручке">
-                            <Bars photo rows={[...prods].sort((a, b) => b.sales - a.sales)} val={(r: any) => r.share} color={() => 'bg-violet-500'} fmt={(r: any) => `${pct(r.share)} · ${rub(r.sales)}`} />
-                          </Card>
-
-                          {/* Возвраты по товарам — сумма возврата ÷ сумма продаж */}
-                          <Card title="Возвраты по товарам (₽ возврата ÷ продажи)">
-                            <Bars photo rows={[...prods].filter((p) => p.retSum > 0).sort((a, b) => b.retPct - a.retPct)} val={(r: any) => r.retPct} color={() => 'bg-rose-400'} fmt={(r: any) => `${pct(r.retPct)} · ${rub(r.retSum)}`} />
                           </Card>
 
                           {/* Склады продаж — кол-во отправленных + доля продаж */}
