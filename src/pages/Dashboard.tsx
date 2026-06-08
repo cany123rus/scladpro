@@ -14547,8 +14547,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     const extractRegion = (s: string) => {
       const t = String(s || '').trim();
       if (!t) return '';
-      const m = t.match(/^(.*?(?:область|обл\.?|край|республика|респ\.?|округ|АО))/i);
+      // «Республика Татарстan», «Респ. Коми» — название идёт ПОСЛЕ слова.
+      let m = t.match(/^(респ(?:ублика)?\.?\s+[А-Яа-яЁё-]+)/i);
+      if (m) return m[1].replace(/\s+/g, ' ').trim();
+      // «Томская область», «Краснодарский край», «ХМАО» — название ПЕРЕД ключевым словом.
+      m = t.match(/^(.*?\b(?:область|обл\.?|край|округ|АО))/i);
       if (m) return m[1].trim();
+      // Города фед. значения / прочее — до уличных маркеров, 1–2 слова.
       const cut = t.split(/\s+(?:улица|ул\.?|проспект|пр-?кт|пр\.?|переулок|пер\.?|шоссе|бульвар|б-р|набережная|наб\.?|площадь|пл\.?|проезд|тракт|микрорайон|мкр|д\.?\s*\d)/i)[0];
       return cut.split(/\s+/).slice(0, 2).join(' ').trim() || t;
     };
@@ -24520,7 +24525,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           {rows.length === 0 ? <div className="text-xs text-slate-400 py-4 text-center">Нет данных</div> : rows.map((r: any, i: number) => (
                             <div key={i} className="flex items-center gap-2 text-xs">
                               {photo && (r.code ? <img src={wbPhoto(r.code)} data-fb="0" onError={(e: any) => { const el = e.currentTarget; if (el.dataset.fb === '0') { el.dataset.fb = '1'; el.src = wbPhotoBase(r.code) + '.jpg'; } else { el.style.visibility = 'hidden'; } }} className="w-8 h-10 rounded object-cover bg-slate-100 shrink-0" loading="lazy" /> : <div className="w-8 h-10 rounded bg-slate-100 shrink-0" />)}
-                              <div className="w-28 truncate text-slate-600" title={r.name || r.key}>{photo ? (r.code || '—') : (r.name || r.key)}</div>
+                              <div className="w-44 text-slate-600 leading-tight line-clamp-2 break-words" title={r.name || r.key}>{photo ? (r.code || '—') : (r.name || r.key)}</div>
                               <div className="flex-1 h-4 bg-slate-100 rounded overflow-hidden"><div className={color(r)} style={{ width: `${Math.max(2, Math.abs(val(r)) / max * 100)}%`, height: '100%' }} /></div>
                               <div className="w-28 text-right font-medium text-slate-700">{fmt(r)}</div>
                             </div>
@@ -24554,11 +24559,16 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                 <div className="text-[11px] text-slate-400 mt-0.5">к перечислению</div>
                               </div>
                             </div>
-                            <div className="grid grid-cols-2 gap-3 flex-1 w-full">
-                              <div className="rounded-2xl bg-emerald-50 p-4"><div className="text-lg sm:text-xl font-extrabold text-emerald-700">{rub(payoutHero)}</div><div className="text-xs text-emerald-600/70 mt-0.5">К перечислению</div></div>
-                              <div className="rounded-2xl bg-indigo-50 p-4"><div className="text-lg sm:text-xl font-extrabold text-indigo-700">{rub(sales)}</div><div className="text-xs text-indigo-600/70 mt-0.5">Выручка</div></div>
-                              <div className="rounded-2xl bg-rose-50 p-4"><div className="text-lg sm:text-xl font-extrabold text-rose-600">{Number(s.return_qty || 0).toLocaleString('ru-RU')} шт</div><div className="text-xs text-rose-500/70 mt-0.5">Возвраты</div></div>
-                              <div className="rounded-2xl bg-violet-50 p-4"><div className="text-lg sm:text-xl font-extrabold text-violet-700">{avgCheck.toLocaleString('ru-RU', { maximumFractionDigits: 1 })} ₽</div><div className="text-xs text-violet-600/70 mt-0.5">Средний чек</div></div>
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 flex-1 w-full">
+                              <div className="rounded-2xl bg-emerald-50 p-3.5"><div className="text-base sm:text-lg font-extrabold text-emerald-700">{rub(payoutHero)}</div><div className="text-[11px] text-emerald-600/70 mt-0.5">К перечислению</div></div>
+                              <div className="rounded-2xl bg-indigo-50 p-3.5"><div className="text-base sm:text-lg font-extrabold text-indigo-700">{rub(sales)}</div><div className="text-[11px] text-indigo-600/70 mt-0.5">Выручка</div></div>
+                              <div className="rounded-2xl bg-sky-50 p-3.5"><div className="text-base sm:text-lg font-extrabold text-sky-700">{Number(s.sold_qty || 0).toLocaleString('ru-RU')} шт</div><div className="text-[11px] text-sky-600/70 mt-0.5">Продано</div></div>
+                              <div className="rounded-2xl bg-rose-50 p-3.5"><div className="text-base sm:text-lg font-extrabold text-rose-600">{Number(s.return_qty || 0).toLocaleString('ru-RU')} шт</div><div className="text-[11px] text-rose-500/70 mt-0.5">Возвраты</div></div>
+                              <div className="rounded-2xl bg-violet-50 p-3.5"><div className="text-base sm:text-lg font-extrabold text-violet-700">{avgCheck.toLocaleString('ru-RU', { maximumFractionDigits: 1 })} ₽</div><div className="text-[11px] text-violet-600/70 mt-0.5">Средний чек</div></div>
+                              <div className="rounded-2xl bg-blue-50 p-3.5"><div className="text-base sm:text-lg font-extrabold text-blue-700">{sales > 0 ? pct(Number(s.logistics_sum || 0) / sales * 100) : '—'}</div><div className="text-[11px] text-blue-600/70 mt-0.5">Логистика</div></div>
+                              <div className="rounded-2xl bg-fuchsia-50 p-3.5"><div className="text-base sm:text-lg font-extrabold text-fuchsia-700">{sales > 0 ? pct(Number(s.withhold_sum || 0) / sales * 100) : '—'}</div><div className="text-[11px] text-fuchsia-600/70 mt-0.5">Реклама WB</div></div>
+                              <div className="rounded-2xl bg-cyan-50 p-3.5"><div className="text-base sm:text-lg font-extrabold text-cyan-700">{sales > 0 ? pct(Number(s.storage_sum || 0) / sales * 100) : '—'}</div><div className="text-[11px] text-cyan-600/70 mt-0.5">Хранение</div></div>
+                              <div className="rounded-2xl bg-amber-50 p-3.5"><div className="text-base sm:text-lg font-extrabold text-amber-700">{sales > 0 ? pct(Number(s.acquiring_sum || 0) / sales * 100) : '—'}</div><div className="text-[11px] text-amber-600/70 mt-0.5">Эквайринг</div></div>
                             </div>
                           </div>
                         </div>
@@ -24586,7 +24596,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               <tbody>
                                 {[...prods].map((p) => ({ ...p, ppu: p.sold > 0 ? p.profit / p.sold : 0 })).sort((a: any, b: any) => { const f = summaryProdSort.field; const m = summaryProdSort.dir === 'asc' ? 1 : -1; return ((a[f] || 0) - (b[f] || 0)) * m; }).map((p: any, i: number) => (
                                   <tr key={i} className={`border-t border-slate-100 hover:bg-slate-50 ${p.profit < 0 ? 'bg-rose-50/40' : ''}`}>
-                                    <td className="px-2.5 py-1.5">{p.code ? <img src={wbPhoto(p.code)} data-fb="0" onError={(e: any) => { const el = e.currentTarget; if (el.dataset.fb === '0') { el.dataset.fb = '1'; el.src = wbPhotoBase(p.code) + '.jpg'; } else { el.style.visibility = 'hidden'; } }} className="w-8 h-10 rounded object-cover bg-slate-100" loading="lazy" /> : <div className="w-8 h-10 rounded bg-slate-100" />}</td>
+                                    <td className="px-2.5 py-1.5">{p.code ? <img src={wbPhoto(p.code)} data-fb="0" onError={(e: any) => { const el = e.currentTarget; if (el.dataset.fb === '0') { el.dataset.fb = '1'; el.src = wbPhotoBase(p.code) + '.jpg'; } else { el.style.visibility = 'hidden'; } }} className="w-20 h-24 rounded-lg object-cover bg-slate-100" loading="lazy" /> : <div className="w-20 h-24 rounded-lg bg-slate-100" />}</td>
                                     <td className="px-2.5 py-1.5 text-left font-medium text-slate-700">{p.code || '—'}</td>
                                     <td className="px-2.5 py-1.5 text-right">{Number(p.sold).toLocaleString('ru-RU')}</td>
                                     <td className="px-2.5 py-1.5 text-right">{rub(p.sales)}</td>
@@ -24605,14 +24615,20 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-4 auto-rows-fr">
                           {/* Структура расходов — % считается от продаж */}
                           <Card title="Структура расходов (% от продаж)">
-                            <div className="flex h-4 w-full overflow-hidden rounded-full bg-slate-100 mb-3">
+                            <div className="flex h-5 w-full overflow-hidden rounded-full bg-slate-100 mb-4">
                               {costParts.map((p) => costTotal > 0 && <div key={p.label} className={p.c} style={{ width: `${p.v / costTotal * 100}%` }} title={`${p.label}: ${rub(p.v)}`} />)}
                             </div>
-                            <div className="space-y-1">
-                              {costParts.map((p) => (
-                                <div key={p.label} className="flex items-center justify-between text-xs"><span className="flex items-center gap-1.5 text-slate-600"><span className={`w-2.5 h-2.5 rounded-sm ${p.c}`} />{p.label}</span><span className="font-medium text-slate-800">{rub(p.v)} · {sales > 0 ? pct(p.v / sales * 100) : '—'}</span></div>
-                              ))}
-                              <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-100 mt-1"><span className="font-semibold text-slate-700">Все расходы</span><span className="font-bold text-slate-900">{rub(costTotal)} · {sales > 0 ? pct(costTotal / sales * 100) : '—'}</span></div>
+                            <div className="space-y-2.5">
+                              {costParts.map((p) => { const sp = sales > 0 ? p.v / sales * 100 : 0; return (
+                                <div key={p.label}>
+                                  <div className="flex items-center justify-between text-xs mb-1"><span className="flex items-center gap-1.5 text-slate-600"><span className={`w-2.5 h-2.5 rounded-sm ${p.c}`} />{p.label}</span><span className="font-medium text-slate-800">{rub(p.v)} · {pct(sp)}</span></div>
+                                  <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden"><div className={`${p.c} h-full rounded-full`} style={{ width: `${Math.min(100, sp)}%` }} /></div>
+                                </div>
+                              ); })}
+                            </div>
+                            <div className="mt-4 pt-3 border-t border-slate-100 grid grid-cols-2 gap-2">
+                              <div className="rounded-xl bg-slate-50 p-3"><div className="text-[11px] text-slate-500">Все расходы</div><div className="font-extrabold text-slate-800">{rub(costTotal)}</div><div className="text-[11px] text-slate-400">{sales > 0 ? pct(costTotal / sales * 100) : '—'} от продаж</div></div>
+                              <div className="rounded-xl bg-emerald-50 p-3"><div className="text-[11px] text-emerald-600">Чистая прибыль</div><div className="font-extrabold text-emerald-700">{rub(profitNet)}</div><div className="text-[11px] text-emerald-500/70">маржа {sales > 0 ? pct(profitNet / sales * 100) : '—'}</div></div>
                             </div>
                           </Card>
 
@@ -24651,6 +24667,16 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                 </div>
                               </>
                             )}
+                          </Card>
+
+                          {/* Топ-5 товаров по прибыли */}
+                          <Card title="Топ-5 товаров по прибыли">
+                            <Bars photo rows={top.slice(0, 5)} val={(r: any) => r.profit} color={() => 'bg-emerald-500'} fmt={(r: any) => rub(r.profit)} />
+                          </Card>
+
+                          {/* Антитоп-5 товаров */}
+                          <Card title="Антитоп-5 (минимальная прибыль)">
+                            <Bars photo rows={[...byProfitDesc].slice(-5).reverse()} val={(r: any) => Math.abs(r.profit)} color={(r: any) => r.profit < 0 ? 'bg-rose-500' : 'bg-amber-400'} fmt={(r: any) => rub(r.profit)} />
                           </Card>
 
                           {/* Склады продаж — кол-во отправленных + доля продаж */}
