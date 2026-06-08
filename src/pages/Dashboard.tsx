@@ -24654,17 +24654,41 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                     <td className="px-2.5 py-1.5 text-right text-violet-700">{pct(p.share)}</td>
                                   </tr>
                                   {exp && p.sizes && p.sizes.length > 0 && (
-                                    <tr className="bg-slate-50/60">
-                                      <td colSpan={9} className="px-3 py-2">
-                                        <div className="flex flex-wrap gap-1.5">
-                                          {p.sizes.map((z: any, zi: number) => (
-                                            <span key={zi} className="inline-flex items-center gap-1 rounded-lg bg-white border border-slate-200 px-2 py-1 text-[11px]">
-                                              <b className="text-slate-700">{z.size}</b>
-                                              <span className="text-emerald-600">прод {Number(z.sold_net_qty ?? z.net ?? 0).toLocaleString('ru-RU')}</span>
-                                              {Number(z.return_qty ?? z.ret ?? 0) > 0 && <span className="text-rose-500">возвр {Number(z.return_qty ?? z.ret ?? 0)}</span>}
-                                              <span className="text-slate-500">{rub(z.sales_net ?? 0)}</span>
-                                            </span>
-                                          ))}
+                                    <tr className="bg-slate-50/70">
+                                      <td colSpan={9} className="px-3 py-3">
+                                        <div className="overflow-auto rounded-lg border border-slate-200 bg-white">
+                                          <table className="min-w-full text-[11px]">
+                                            <thead className="bg-slate-100 text-slate-500">
+                                              <tr>
+                                                {['Размер', 'Продажи', 'Возвраты ₽', 'Логистика', 'К перечисл.', 'Итого к оплате', 'Себест.', 'Ср. заработок', 'Заработок', 'Продано шт', 'Возвр. шт'].map((h, hi) => (
+                                                  <th key={hi} className={`px-2 py-1.5 whitespace-nowrap ${hi === 0 ? 'text-left' : 'text-right'}`}>{h}</th>
+                                                ))}
+                                              </tr>
+                                            </thead>
+                                            <tbody>
+                                              {p.sizes.map((z: any, zi: number) => {
+                                                const zsold = Number(z.sold_net_qty ?? z.net ?? z.sold ?? 0);
+                                                const ztopay = Number(z.to_pay_total ?? 0);
+                                                const zavg = zsold > 0 ? ztopay / zsold - Number(p.cost || 0) : 0;
+                                                const zearn = zavg * zsold;
+                                                return (
+                                                  <tr key={zi} className="border-t border-slate-100">
+                                                    <td className="px-2 py-1.5 text-left font-medium text-slate-700">{z.size}</td>
+                                                    <td className="px-2 py-1.5 text-right">{rub(z.sales_net ?? 0)}</td>
+                                                    <td className="px-2 py-1.5 text-right text-rose-500">{rub(z.returns_gross ?? 0)}</td>
+                                                    <td className="px-2 py-1.5 text-right">{rub(z.logistics_sum ?? 0)}</td>
+                                                    <td className="px-2 py-1.5 text-right">{rub(z.payout_net ?? 0)}</td>
+                                                    <td className="px-2 py-1.5 text-right text-indigo-600">{rub(ztopay)}</td>
+                                                    <td className="px-2 py-1.5 text-right text-slate-400">{rub(p.cost || 0)}</td>
+                                                    <td className="px-2 py-1.5 text-right">{rub(zavg)}</td>
+                                                    <td className={`px-2 py-1.5 text-right font-semibold ${zearn < 0 ? 'text-rose-600' : 'text-emerald-600'}`}>{rub(zearn)}</td>
+                                                    <td className="px-2 py-1.5 text-right">{zsold.toLocaleString('ru-RU')}</td>
+                                                    <td className="px-2 py-1.5 text-right">{Number(z.return_qty ?? z.ret ?? 0).toLocaleString('ru-RU')}</td>
+                                                  </tr>
+                                                );
+                                              })}
+                                            </tbody>
+                                          </table>
                                         </div>
                                       </td>
                                     </tr>
