@@ -14571,6 +14571,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     const byOffice = new Map<string, any>();
     const byCountry = new Map<string, any>();
     const dayTotals = new Map<string, any>();
+    // Заказы/возвраты по «Виды логистики, штрафов и корректировок ВВ»:
+    //   «К клиенту при продаже» = доставлено клиенту (заказ),
+    //   «От клиента при возврате» = возврат от клиента.
+    let orderedLegs = 0;
+    let returnLegs = 0;
     let periodStart: Date | null = null;
     let periodEnd: Date | null = null;
 
@@ -14591,6 +14596,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       const code = String(row?.['Код номенклатуры'] ?? row?.['nmID'] ?? '').trim();
       const name = String(row?.['Название'] ?? row?.['Предмет'] ?? row?.['Артикул поставщика'] ?? row?.['Бренд'] ?? '').trim() || 'Без названия';
       const key = `${code}|${name}`;
+
+      const logKind = String(row?.['Виды логистики, штрафов и корректировок ВВ'] ?? '').toLowerCase();
+      if (logKind.includes('к клиенту при продаже')) orderedLegs += 1;
+      if (logKind.includes('от клиента при возврате')) returnLegs += 1;
 
       const docType = String(row?.['Тип документа'] ?? '').toLowerCase();
       const reason = String(row?.['Обоснование для оплаты'] ?? '').toLowerCase();
@@ -14904,6 +14913,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       to_pay_total: analytics.reduce((s, x) => s + Number(x.to_pay_total || 0), 0),
       sold_qty: analytics.reduce((s, x) => s + Number(x.sold_qty || 0), 0),
       return_qty: analytics.reduce((s, x) => s + Number(x.return_qty || 0), 0),
+      ordered_qty: orderedLegs,
+      return_legs_qty: returnLegs,
       acquiring_sum: analytics.reduce((s, x) => s + Number(x.acquiring_sum || 0), 0),
       acquiring_percent: (analytics.reduce((s, x) => s + Number(x.acquiring_sum || 0), 0) > 0 && analytics.reduce((s, x) => s + Number(x.sales_net || 0), 0) > 0)
         ? (analytics.reduce((s, x) => s + Number(x.acquiring_sum || 0), 0) / analytics.reduce((s, x) => s + Number(x.sales_net || 0), 0)) * 100
@@ -24510,7 +24521,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       const sNet = Number(x.sales_net || 0);
                       const salesGross = Number(x.sales_gross || 0);
                       const retSum = Number(x.returns_gross || 0);
-                      return { code: x.code, name: x.name, sales: sNet, profit, sold, ret: Number(x.return_qty || 0), retSum, salesGross, sizes: x.size_breakdown_list || [], sizesStr: x.size_breakdown || '', margin: sNet > 0 ? profit / sNet * 100 : 0, retPct: salesGross > 0 ? retSum / salesGross * 100 : 0, share: sales > 0 ? sNet / sales * 100 : 0 };
+                      return { code: x.code, name: x.name, sales: sNet, profit, sold, cost, costSum: cost * sold, ret: Number(x.return_qty || 0), retSum, salesGross, sizes: x.size_breakdown_list || [], sizesStr: x.size_breakdown || '', margin: sNet > 0 ? profit / sNet * 100 : 0, retPct: salesGross > 0 ? retSum / salesGross * 100 : 0, share: sales > 0 ? sNet / sales * 100 : 0 };
                     });
                     const byProfitDesc = [...prods].sort((a, b) => b.profit - a.profit);
                     const top = byProfitDesc;
@@ -24568,6 +24579,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     const payoutHero = Number(s.payout_net || 0);
                     const payoutPct = sales > 0 ? Math.round(payoutHero / sales * 100) : 0;
                     const avgCheck = Number(s.sold_qty || 0) > 0 ? sales / Number(s.sold_qty || 0) : 0;
+                    const costSumTotal = prods.reduce((a: number, p: any) => a + Number(p.costSum || 0), 0);
+                    const orderedQty = Number(s.ordered_qty || 0);
+                    const soldQty = Number(s.sold_qty || 0);
+                    const retQtyHero = Number(s.return_legs_qty || s.return_qty || 0);
+                    const buyoutRate = orderedQty > 0 ? soldQty / orderedQty * 100 : 0;
+                    const retRate = orderedQty > 0 ? retQtyHero / orderedQty * 100 : 0;
                     const R = 52, C = 2 * Math.PI * R, dash = C * Math.min(1, Math.max(0, payoutPct / 100));
                     return (
                       <div className="space-y-4 mb-2">
@@ -24588,13 +24605,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 flex-1 w-full">
                               <div className="rounded-2xl bg-emerald-50 p-3.5"><div className="text-base sm:text-lg font-extrabold text-emerald-700">{rub(payoutHero)}</div><div className="text-[11px] text-emerald-600/70 mt-0.5">К перечислению</div></div>
                               <div className="rounded-2xl bg-indigo-50 p-3.5"><div className="text-base sm:text-lg font-extrabold text-indigo-700">{rub(sales)}</div><div className="text-[11px] text-indigo-600/70 mt-0.5">Выручка</div></div>
-                              <div className="rounded-2xl bg-sky-50 p-3.5"><div className="text-base sm:text-lg font-extrabold text-sky-700">{Number(s.sold_qty || 0).toLocaleString('ru-RU')} шт</div><div className="text-[11px] text-sky-600/70 mt-0.5">Продано</div></div>
-                              <div className="rounded-2xl bg-rose-50 p-3.5"><div className="text-base sm:text-lg font-extrabold text-rose-600">{Number(s.return_qty || 0).toLocaleString('ru-RU')} шт</div><div className="text-[11px] text-rose-500/70 mt-0.5">Возвраты</div></div>
+                              <div className="rounded-2xl bg-slate-100 p-3.5"><div className="text-base sm:text-lg font-extrabold text-slate-700">{orderedQty.toLocaleString('ru-RU')} шт</div><div className="text-[11px] text-slate-500 mt-0.5">Заказано</div></div>
+                              <div className="rounded-2xl bg-sky-50 p-3.5"><div className="text-base sm:text-lg font-extrabold text-sky-700">{soldQty.toLocaleString('ru-RU')} шт</div><div className="text-[11px] text-sky-600/70 mt-0.5">Выкуплено · {orderedQty > 0 ? pct(buyoutRate) : '—'}</div></div>
+                              <div className="rounded-2xl bg-rose-50 p-3.5"><div className="text-base sm:text-lg font-extrabold text-rose-600">{retQtyHero.toLocaleString('ru-RU')} шт</div><div className="text-[11px] text-rose-500/70 mt-0.5">Возвраты · {orderedQty > 0 ? pct(retRate) : '—'}</div></div>
+                              <div className="rounded-2xl bg-orange-50 p-3.5"><div className="text-base sm:text-lg font-extrabold text-orange-700">{rub(costSumTotal)}</div><div className="text-[11px] text-orange-600/70 mt-0.5">Себестоимость · {sales > 0 ? pct(costSumTotal / sales * 100) : '—'}</div></div>
                               <div className="rounded-2xl bg-violet-50 p-3.5"><div className="text-base sm:text-lg font-extrabold text-violet-700">{avgCheck.toLocaleString('ru-RU', { maximumFractionDigits: 1 })} ₽</div><div className="text-[11px] text-violet-600/70 mt-0.5">Средний чек</div></div>
                               <div className="rounded-2xl bg-blue-50 p-3.5"><div className="text-base sm:text-lg font-extrabold text-blue-700">{sales > 0 ? pct(Number(s.logistics_sum || 0) / sales * 100) : '—'}</div><div className="text-[11px] text-blue-600/70 mt-0.5">Логистика</div></div>
                               <div className="rounded-2xl bg-fuchsia-50 p-3.5"><div className="text-base sm:text-lg font-extrabold text-fuchsia-700">{sales > 0 ? pct(Number(s.withhold_sum || 0) / sales * 100) : '—'}</div><div className="text-[11px] text-fuchsia-600/70 mt-0.5">Реклама WB</div></div>
                               <div className="rounded-2xl bg-cyan-50 p-3.5"><div className="text-base sm:text-lg font-extrabold text-cyan-700">{sales > 0 ? pct(Number(s.storage_sum || 0) / sales * 100) : '—'}</div><div className="text-[11px] text-cyan-600/70 mt-0.5">Хранение</div></div>
-                              <div className="rounded-2xl bg-amber-50 p-3.5"><div className="text-base sm:text-lg font-extrabold text-amber-700">{sales > 0 ? pct(Number(s.acquiring_sum || 0) / sales * 100) : '—'}</div><div className="text-[11px] text-amber-600/70 mt-0.5">Эквайринг</div></div>
                             </div>
                           </div>
                         </div>
