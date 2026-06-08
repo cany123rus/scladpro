@@ -868,6 +868,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   }, [reportsDayDetail, reportsDayFull, reportsDaySort]);
   const [uploadedReportAnalytics, setUploadedReportAnalytics] = useState<any[]>([]);
   const [uploadedReportSummary, setUploadedReportSummary] = useState<any | null>(null);
+  // Доп. агрегации по отчёту: по складам / ПВЗ / стране / дням (для инфографики).
+  const [uploadedReportGeo, setUploadedReportGeo] = useState<{ byWarehouse: any[]; byOffice: any[]; byCountry: any[]; dailyTotals: any[] } | null>(null);
   const [uploadedCostByKey, setUploadedCostByKey] = useState<Record<string, string>>({});
   const [uploadedSelectedSupplierId, setUploadedSelectedSupplierId] = useState<string>('');
   const [uploadedPhotoMap, setUploadedPhotoMap] = useState<Record<string, string>>({});
@@ -14538,6 +14540,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
     const grouped = new Map<string, any>();
     const daily = new Map<string, any>();
+    // Гео/время-агрегации (склад отгрузки, ПВЗ выдачи, страна, день — итоги по всем товарам).
+    const geoBucket = () => ({ sales_net: 0, payout_net: 0, logistics_sum: 0, sold_qty: 0, return_qty: 0 });
+    const byWarehouse = new Map<string, any>();
+    const byOffice = new Map<string, any>();
+    const byCountry = new Map<string, any>();
+    const dayTotals = new Map<string, any>();
     let periodStart: Date | null = null;
     let periodEnd: Date | null = null;
 
@@ -14748,6 +14756,32 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         daily.set(dk, cur);
       }
 
+      // Гео/время агрегации (только продуктовые операции)
+      if (isSale || isReturn) {
+        const wh = pickTextByIncludes(row, ['склад']) || String(row?.['Склад'] ?? '').trim() || '—';
+        const office = String(row?.['Наименование офиса доставки'] ?? '').trim() || pickTextByIncludes(row, ['офис', 'доставк']) || '—';
+        const country = String(row?.['Страна'] ?? '').trim() || '—';
+        const addGeo = (m: Map<string, any>, k: string) => {
+          if (!k || k === '—') return;
+          const e = m.get(k) || { key: k, ...geoBucket() };
+          if (isSale) { e.sales_net += Math.max(0, sales); e.payout_net += Math.max(0, payout); if (isQtyEligibleSale) e.sold_qty += Math.abs(qty) > 0 ? Math.abs(qty) : 1; }
+          else { e.sales_net -= Math.abs(sales); e.payout_net -= Math.abs(payout); if (isQtyEligibleReturn) e.return_qty += Math.abs(qty) > 0 ? Math.abs(qty) : 1; }
+          e.logistics_sum += logistics;
+          m.set(k, e);
+        };
+        addGeo(byWarehouse, wh);
+        addGeo(byOffice, office);
+        addGeo(byCountry, country);
+        if (opDate && !Number.isNaN(opDate.getTime())) {
+          const dKey = `${opDate.getFullYear()}-${String(opDate.getMonth() + 1).padStart(2, '0')}-${String(opDate.getDate()).padStart(2, '0')}`;
+          const e = dayTotals.get(dKey) || { key: dKey, ...geoBucket() };
+          if (isSale) { e.sales_net += Math.max(0, sales); e.payout_net += Math.max(0, payout); if (isQtyEligibleSale) e.sold_qty += Math.abs(qty) > 0 ? Math.abs(qty) : 1; }
+          else { e.sales_net -= Math.abs(sales); e.payout_net -= Math.abs(payout); if (isQtyEligibleReturn) e.return_qty += Math.abs(qty) > 0 ? Math.abs(qty) : 1; }
+          e.logistics_sum += logistics;
+          dayTotals.set(dKey, e);
+        }
+      }
+
       grouped.set(key, item);
     });
 
@@ -14872,6 +14906,18 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
     setUploadedReportAnalytics(analytics);
     setUploadedReportSummary(summary);
+    // Гео/время агрегации для инфографики
+    const finishGeo = (m: Map<string, any>) => [...m.values()].map((e) => ({
+      ...e,
+      buyout_pct: (e.sold_qty + e.return_qty) > 0 ? (e.sold_qty / (e.sold_qty + e.return_qty)) * 100 : 0,
+      logistics_pct: e.sales_net > 0 ? (e.logistics_sum / e.sales_net) * 100 : 0,
+    })).sort((a, b) => b.sales_net - a.sales_net);
+    setUploadedReportGeo({
+      byWarehouse: finishGeo(byWarehouse),
+      byOffice: finishGeo(byOffice).slice(0, 30),
+      byCountry: finishGeo(byCountry),
+      dailyTotals: [...dayTotals.values()].sort((a, b) => String(a.key).localeCompare(String(b.key))),
+    });
     const seededCosts: Record<string, string> = {};
     const missingCostValues: Record<string, string> = {};
     let missingCount = 0;
@@ -24344,6 +24390,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   )}
 
                   {uploadedViewTab === 'summary' && (
+                  <>
                   <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
                     <div className="bg-slate-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-slate-500">Номенклатур</div><div className="font-bold">{uploadedSummaryForView.items}</div></div>
                     <div className="bg-slate-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-slate-500">Продажи</div><div className="font-bold">{Number(uploadedSummaryForView.sales_net || 0).toLocaleString('ru-RU')}</div></div>
@@ -24365,6 +24412,144 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     <div className="bg-slate-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-slate-500">Эквайринг/Комиссии</div><div className="font-bold">{Number(uploadedSummaryForView.acquiring_sum || 0).toLocaleString('ru-RU')}</div></div>
                     <div className="bg-slate-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-slate-500">Комиссия эквайринга, %</div><div className="font-bold">{Number(uploadedSummaryForView.acquiring_percent || 0).toLocaleString('ru-RU', { maximumFractionDigits: 2 })}</div></div>
                   </div>
+
+                  {(() => {
+                    const s = uploadedSummaryForView; if (!s) return null;
+                    const rub = (v: number) => Math.round(Number(v || 0)).toLocaleString('ru-RU') + ' ₽';
+                    const pct = (v: number) => (Number(v || 0)).toFixed(1) + '%';
+                    const sales = Number(s.sales_net || 0);
+                    const geo = uploadedReportGeo;
+                    // прибыль по товару
+                    const prods = (uploadedReportAnalytics || []).map((x: any) => {
+                      const sold = Number(x.sold_qty || 0);
+                      const cost = Number(uploadedPersistedCostByCode[String(x.code || '').trim()] || uploadedCostByKey[String(x.code || '').trim()] || 0);
+                      const profit = (Number(x.to_pay_total || 0)) - cost * sold - Number(x.tax_sum || 0);
+                      const sNet = Number(x.sales_net || 0);
+                      return { code: x.code, name: x.name, sales: sNet, profit, sold, ret: Number(x.return_qty || 0), margin: sNet > 0 ? profit / sNet * 100 : 0, retPct: (sold + Number(x.return_qty || 0)) > 0 ? Number(x.return_qty || 0) / (sold + Number(x.return_qty || 0)) * 100 : 0, share: sales > 0 ? sNet / sales * 100 : 0 };
+                    });
+                    const byProfitDesc = [...prods].sort((a, b) => b.profit - a.profit);
+                    const top = byProfitDesc.slice(0, 5);
+                    const anti = byProfitDesc.slice(-5).reverse();
+                    const days = (geo?.dailyTotals || []);
+                    const maxDaySales = Math.max(1, ...days.map((d: any) => d.sales_net));
+                    const bestDay = days.length ? [...days].sort((a: any, b: any) => b.sales_net - a.sales_net)[0] : null;
+                    const worstDay = days.length ? [...days].filter((d: any) => d.sales_net > 0).sort((a: any, b: any) => a.sales_net - b.sales_net)[0] : null;
+                    const wh = (geo?.byWarehouse || []);
+                    const offices = (geo?.byOffice || []);
+                    // структура расходов
+                    const costParts = [
+                      { label: 'Логистика', v: Number(s.logistics_sum || 0), c: 'bg-blue-500' },
+                      { label: 'Хранение', v: Number(s.storage_sum || 0), c: 'bg-cyan-500' },
+                      { label: 'Штрафы', v: Number(s.fine_sum || 0), c: 'bg-rose-500' },
+                      { label: 'Реклама WB', v: Number(s.withhold_sum || 0), c: 'bg-fuchsia-500' },
+                      { label: 'Эквайринг/комиссии', v: Number(s.acquiring_sum || 0), c: 'bg-amber-500' },
+                      { label: 'Налог', v: Number(getUploadedTaxValue(s) || 0), c: 'bg-slate-500' },
+                    ].filter((p) => p.v > 0);
+                    const costTotal = costParts.reduce((a, p) => a + p.v, 0);
+                    const profitNet = Number(getUploadedHeadlineProfitNet(s) || 0);
+                    const retPctTotal = (Number(s.sold_qty || 0) + Number(s.return_qty || 0)) > 0 ? Number(s.return_qty || 0) / (Number(s.sold_qty || 0) + Number(s.return_qty || 0)) * 100 : 0;
+                    const logPct = sales > 0 ? Number(s.logistics_sum || 0) / sales * 100 : 0;
+                    const buyoutPct = (Number(s.sold_qty || 0) + Number(s.return_qty || 0)) > 0 ? Number(s.sold_qty || 0) / (Number(s.sold_qty || 0) + Number(s.return_qty || 0)) * 100 : 0;
+                    const Bars = ({ rows, val, color, fmt }: any) => {
+                      const max = Math.max(1, ...rows.map((r: any) => Math.abs(val(r))));
+                      return (
+                        <div className="space-y-1.5">
+                          {rows.map((r: any, i: number) => (
+                            <div key={i} className="flex items-center gap-2 text-xs">
+                              <div className="w-32 truncate text-slate-600" title={r.name || r.key}>{r.name || r.key}</div>
+                              <div className="flex-1 h-4 bg-slate-100 rounded overflow-hidden"><div className={color(r)} style={{ width: `${Math.max(2, Math.abs(val(r)) / max * 100)}%`, height: '100%' }} /></div>
+                              <div className="w-24 text-right font-medium text-slate-700">{fmt(r)}</div>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    };
+                    const Card = ({ title, children }: any) => (
+                      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                        <h4 className="font-bold text-slate-800 text-sm mb-3">{title}</h4>
+                        {children}
+                      </div>
+                    );
+                    return (
+                      <div className="space-y-4 mb-2">
+                        {/* KPI плитки */}
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                          <div className="rounded-2xl p-4 bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow"><div className="text-[11px] opacity-80">Чистая прибыль</div><div className="text-xl font-extrabold">{rub(profitNet)}</div><div className="text-[11px] opacity-80 mt-0.5">маржа {sales > 0 ? pct(profitNet / sales * 100) : '—'}</div></div>
+                          <div className="rounded-2xl p-4 bg-white border border-slate-200 shadow-sm"><div className="text-[11px] text-slate-500">% возвратов</div><div className="text-xl font-extrabold text-rose-600">{pct(retPctTotal)}</div><div className="text-[11px] text-slate-400 mt-0.5">выкуп {pct(buyoutPct)}</div></div>
+                          <div className="rounded-2xl p-4 bg-white border border-slate-200 shadow-sm"><div className="text-[11px] text-slate-500">% логистики</div><div className="text-xl font-extrabold text-blue-600">{pct(logPct)}</div><div className="text-[11px] text-slate-400 mt-0.5">от выручки</div></div>
+                          <div className="rounded-2xl p-4 bg-white border border-slate-200 shadow-sm"><div className="text-[11px] text-slate-500">Расходы всего</div><div className="text-xl font-extrabold text-amber-600">{rub(costTotal)}</div><div className="text-[11px] text-slate-400 mt-0.5">{sales > 0 ? pct(costTotal / sales * 100) : '—'} от выручки</div></div>
+                        </div>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                          {/* Структура расходов */}
+                          <Card title="Структура расходов">
+                            <div className="flex h-4 w-full overflow-hidden rounded-full bg-slate-100 mb-3">
+                              {costParts.map((p) => costTotal > 0 && <div key={p.label} className={p.c} style={{ width: `${p.v / costTotal * 100}%` }} title={`${p.label}: ${rub(p.v)}`} />)}
+                            </div>
+                            <div className="space-y-1">
+                              {costParts.map((p) => (
+                                <div key={p.label} className="flex items-center justify-between text-xs"><span className="flex items-center gap-1.5 text-slate-600"><span className={`w-2.5 h-2.5 rounded-sm ${p.c}`} />{p.label}</span><span className="font-medium text-slate-800">{rub(p.v)} · {costTotal > 0 ? pct(p.v / costTotal * 100) : '—'}</span></div>
+                              ))}
+                            </div>
+                          </Card>
+
+                          {/* Динамика по дням */}
+                          <Card title="Продажи по дням">
+                            {days.length === 0 ? <div className="text-xs text-slate-400 py-6 text-center">Нет дат в отчёте</div> : (
+                              <>
+                                <div className="flex items-end gap-1 h-32">
+                                  {days.map((d: any, i: number) => (
+                                    <div key={i} className="flex-1 flex flex-col items-center justify-end group" title={`${d.key}: ${rub(d.sales_net)}`}>
+                                      <div className="w-full rounded-t bg-indigo-400 group-hover:bg-indigo-600 transition-colors" style={{ height: `${Math.max(2, d.sales_net / maxDaySales * 100)}%` }} />
+                                    </div>
+                                  ))}
+                                </div>
+                                <div className="flex items-center justify-between mt-2 text-[11px]">
+                                  {bestDay && <span className="text-emerald-700">↑ Лучший: {new Date(bestDay.key).toLocaleDateString('ru-RU')} · {rub(bestDay.sales_net)}</span>}
+                                  {worstDay && <span className="text-rose-700">↓ Худший: {new Date(worstDay.key).toLocaleDateString('ru-RU')} · {rub(worstDay.sales_net)}</span>}
+                                </div>
+                              </>
+                            )}
+                          </Card>
+
+                          {/* Топ товаров по прибыли */}
+                          <Card title="Топ-5 товаров по прибыли">
+                            <Bars rows={top} val={(r: any) => r.profit} color={() => 'bg-emerald-500'} fmt={(r: any) => rub(r.profit)} />
+                          </Card>
+
+                          {/* Антитоп */}
+                          <Card title="Антитоп-5 (минимальная прибыль)">
+                            <Bars rows={anti} val={(r: any) => Math.abs(r.profit)} color={(r: any) => r.profit < 0 ? 'bg-rose-500' : 'bg-amber-400'} fmt={(r: any) => rub(r.profit)} />
+                          </Card>
+
+                          {/* Доля в выручке */}
+                          <Card title="Доля в выручке (топ-5)">
+                            <Bars rows={[...prods].sort((a, b) => b.sales - a.sales).slice(0, 5)} val={(r: any) => r.share} color={() => 'bg-violet-500'} fmt={(r: any) => pct(r.share)} />
+                          </Card>
+
+                          {/* По складам */}
+                          <Card title="По складам отгрузки">
+                            {wh.length === 0 ? <div className="text-xs text-slate-400 py-6 text-center">Нет данных</div> : (
+                              <Bars rows={wh.slice(0, 6)} val={(r: any) => r.sales_net} color={() => 'bg-blue-500'} fmt={(r: any) => `${rub(r.sales_net)} · выкуп ${pct(r.buyout_pct)}`} />
+                            )}
+                          </Card>
+
+                          {/* Высокий % возвратов */}
+                          <Card title="Высокий % возвратов (товары)">
+                            <Bars rows={[...prods].filter((p) => p.ret > 0).sort((a, b) => b.retPct - a.retPct).slice(0, 6)} val={(r: any) => r.retPct} color={() => 'bg-rose-400'} fmt={(r: any) => `${pct(r.retPct)} (${r.ret} шт)`} />
+                          </Card>
+
+                          {/* Топ ПВЗ */}
+                          <Card title="Топ ПВЗ по выдаче">
+                            {offices.length === 0 ? <div className="text-xs text-slate-400 py-6 text-center">Нет данных</div> : (
+                              <Bars rows={offices.slice(0, 6)} val={(r: any) => r.sales_net} color={() => 'bg-cyan-500'} fmt={(r: any) => rub(r.sales_net)} />
+                            )}
+                          </Card>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                  </>
                   )}
 
                   {uploadedViewTab === 'table' && (
