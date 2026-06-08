@@ -24924,6 +24924,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           <button key={lbl} onClick={() => { setReportsSummaryRange({ start: sStr, end: eStr }); loadReportsSummary(sStr, eStr); }} className={`h-11 px-3 rounded-xl text-sm font-semibold border transition-colors ${active ? 'bg-violet-600 text-white border-violet-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>{lbl}</button>
                         );
                       })}
+                      {(() => {
+                        const allStart = '2020-01-01';
+                        const eStr = new Date().toISOString().slice(0, 10);
+                        const active = reportsSummaryRange.start === allStart;
+                        return (
+                          <button onClick={() => { setReportsSummaryRange({ start: allStart, end: eStr }); loadReportsSummary(allStart, eStr); setReportsBySupAllTime(true); }} className={`h-11 px-3 rounded-xl text-sm font-semibold border transition-colors ${active ? 'bg-violet-600 text-white border-violet-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>За всё время</button>
+                        );
+                      })()}
                       <div><label className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1">С</label><input type="date" value={reportsSummaryRange.start} onChange={(e) => setReportsSummaryRange((p) => ({ ...p, start: e.target.value }))} className="oc-input" /></div>
                       <div><label className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1">По</label><input type="date" value={reportsSummaryRange.end} onChange={(e) => setReportsSummaryRange((p) => ({ ...p, end: e.target.value }))} className="oc-input" /></div>
                       <button onClick={() => loadReportsSummary(reportsSummaryRange.start, reportsSummaryRange.end)} disabled={reportsSummaryLoading} className="h-11 px-4 rounded-xl bg-violet-600 text-white font-semibold hover:bg-violet-700 disabled:opacity-50">{reportsSummaryLoading ? '…' : 'Обновить'}</button>
