@@ -24382,7 +24382,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       const sNet = Number(x.sales_net || 0);
                       const salesGross = Number(x.sales_gross || 0);
                       const retSum = Number(x.returns_gross || 0);
-                      return { code: x.code, name: x.name, sales: sNet, profit, sold, cost, costSum: cost * sold, ret: Number(x.return_qty || 0), retSum, salesGross, sizes: x.size_breakdown_list || [], sizesStr: x.size_breakdown || '', margin: sNet > 0 ? profit / sNet * 100 : 0, retPct: salesGross > 0 ? retSum / salesGross * 100 : 0, share: sales > 0 ? sNet / sales * 100 : 0 };
+                      return { code: x.code, name: x.name, sales: sNet, profit, sold, cost, costSum: cost * sold, ret: Number(x.return_qty || 0), retSum, salesGross, logistics: Number(x.logistics_sum || 0), tax: Number(x.tax_sum || 0), sizes: x.size_breakdown_list || [], sizesStr: x.size_breakdown || '', margin: sNet > 0 ? profit / sNet * 100 : 0, retPct: salesGross > 0 ? retSum / salesGross * 100 : 0, share: sales > 0 ? sNet / sales * 100 : 0 };
                     });
                     const byProfitDesc = [...prods].sort((a, b) => b.profit - a.profit);
                     const top = byProfitDesc;
@@ -24512,31 +24512,42 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                     <tr className="bg-slate-50/70">
                                       <td colSpan={9} className="px-3 py-3">
                                         <div className="overflow-auto rounded-lg border border-slate-200 bg-white">
+                                          {(() => {
+                                            // Логистика в WB идёт отдельными строками без размера → распределяем
+                                            // её пропорционально проданным штукам по размерам.
+                                            const soldGrossTotal = p.sizes.reduce((a: number, z: any) => a + Number(z.sold_qty ?? z.sold ?? 0), 0) || 1;
+                                            const logSizeSum = p.sizes.reduce((a: number, z: any) => a + Number(z.logistics_sum ?? 0), 0);
+                                            const logToSpread = Math.max(0, Number(p.logistics || 0) - logSizeSum);
+                                            return (
                                           <table className="min-w-full text-[11px]">
                                             <thead className="bg-slate-100 text-slate-500">
                                               <tr>
-                                                {['Размер', 'Продажи', 'Возвраты ₽', 'Логистика', 'К перечисл.', 'Итого к оплате', 'Себест.', 'Ср. заработок', 'Заработок', 'Продано шт', 'Возвр. шт'].map((h, hi) => (
+                                                {['Размер', 'Продажи', 'Возвраты ₽', 'Логистика', 'К перечисл.', 'Итого к оплате', 'Себест.', 'Ср. заработок', 'Прибыль/шт', 'Заработок', 'Продано шт', 'Возвр. шт'].map((h, hi) => (
                                                   <th key={hi} className={`px-2 py-1.5 whitespace-nowrap ${hi === 0 ? 'text-left' : 'text-right'}`}>{h}</th>
                                                 ))}
                                               </tr>
                                             </thead>
                                             <tbody>
                                               {p.sizes.map((z: any, zi: number) => {
-                                                const zsold = Number(z.sold_net_qty ?? z.net ?? z.sold ?? 0);
+                                                const zsold = Number(z.sold_qty ?? z.sold ?? 0);          // валовое продано — сходится с «Продано»
                                                 const ztopay = Number(z.to_pay_total ?? 0);
+                                                const zlog = Number(z.logistics_sum ?? 0) + logToSpread * (zsold / soldGrossTotal);
+                                                const ztax = Number(z.tax_sum ?? 0);
                                                 const zavg = zsold > 0 ? ztopay / zsold - Number(p.cost || 0) : 0;
-                                                const zearn = zavg * zsold;
+                                                const zprofit = ztopay - Number(p.cost || 0) * zsold - ztax;
+                                                const zppu = zsold > 0 ? zprofit / zsold : 0;
                                                 return (
                                                   <tr key={zi} className="border-t border-slate-100">
                                                     <td className="px-2 py-1.5 text-left font-medium text-slate-700">{z.size}</td>
                                                     <td className="px-2 py-1.5 text-right">{rub(z.sales_net ?? 0)}</td>
                                                     <td className="px-2 py-1.5 text-right text-rose-500">{rub(z.returns_gross ?? 0)}</td>
-                                                    <td className="px-2 py-1.5 text-right">{rub(z.logistics_sum ?? 0)}</td>
+                                                    <td className="px-2 py-1.5 text-right">{rub(zlog)}</td>
                                                     <td className="px-2 py-1.5 text-right">{rub(z.payout_net ?? 0)}</td>
                                                     <td className="px-2 py-1.5 text-right text-indigo-600">{rub(ztopay)}</td>
                                                     <td className="px-2 py-1.5 text-right text-slate-400">{rub(p.cost || 0)}</td>
                                                     <td className="px-2 py-1.5 text-right">{rub(zavg)}</td>
-                                                    <td className={`px-2 py-1.5 text-right font-semibold ${zearn < 0 ? 'text-rose-600' : 'text-emerald-600'}`}>{rub(zearn)}</td>
+                                                    <td className={`px-2 py-1.5 text-right ${zppu < 0 ? 'text-rose-600' : 'text-slate-700'}`}>{rub(zppu)}</td>
+                                                    <td className={`px-2 py-1.5 text-right font-semibold ${zprofit < 0 ? 'text-rose-600' : 'text-emerald-600'}`}>{rub(zprofit)}</td>
                                                     <td className="px-2 py-1.5 text-right">{zsold.toLocaleString('ru-RU')}</td>
                                                     <td className="px-2 py-1.5 text-right">{Number(z.return_qty ?? z.ret ?? 0).toLocaleString('ru-RU')}</td>
                                                   </tr>
@@ -24544,6 +24555,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                               })}
                                             </tbody>
                                           </table>
+                                            );
+                                          })()}
                                         </div>
                                       </td>
                                     </tr>
