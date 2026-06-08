@@ -14542,6 +14542,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     const daily = new Map<string, any>();
     // Гео/время-агрегации (склад отгрузки, ПВЗ выдачи, страна, день — итоги по всем товарам).
     const geoBucket = () => ({ sales_net: 0, payout_net: 0, logistics_sum: 0, sold_qty: 0, return_qty: 0 });
+    // «Наименование офиса доставки» → главный регион/город (без улицы и дома).
+    const extractRegion = (s: string) => {
+      const t = String(s || '').trim();
+      if (!t) return '';
+      const m = t.match(/^(.*?(?:область|обл\.?|край|республика|респ\.?|округ|АО))/i);
+      if (m) return m[1].trim();
+      const cut = t.split(/\s+(?:улица|ул\.?|проспект|пр-?кт|пр\.?|переулок|пер\.?|шоссе|бульвар|б-р|набережная|наб\.?|площадь|пл\.?|проезд|тракт|микрорайон|мкр|д\.?\s*\d)/i)[0];
+      return cut.split(/\s+/).slice(0, 2).join(' ').trim() || t;
+    };
     const byWarehouse = new Map<string, any>();
     const byOffice = new Map<string, any>();
     const byCountry = new Map<string, any>();
@@ -14581,13 +14590,16 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       const sizeColumnEntry = Object.entries(row || {}).find(([k]) => normalizeKey(String(k)) === 'размер');
       const sizeRaw = String(sizeColumnEntry ? sizeColumnEntry[1] : (row?.['Размер'] ?? '')).trim();
       const sizeValue = sizeRaw || 'Без размера';
-      const acquiring = pickNum(row, ['Эквайринг/Комиссии за организацию платежей', 'Комиссии за организацию платежей', 'Эквайринг'])
+      const acquiring = pickNum(row, ['Компенсация платёжных услуг/Комиссия за интеграцию платёжных сервисов', 'Компенсация платежных услуг/Комиссия за интеграцию платежных сервисов', 'Эквайринг/Комиссии за организацию платежей', 'Комиссии за организацию платежей', 'Эквайринг'])
+        || pickNumByIncludes(row, ['компенсац', 'платеж'])
+        || pickNumByIncludes(row, ['комисс', 'интеграц'])
         || pickNumByIncludes(row, ['комисс', 'организац', 'платеж'])
         || pickNumByIncludes(row, ['эквайр']);
 
-      const acquiringPercent = pickNum(row, ['Размер комиссии за эквайринг/Комиссии за организацию платежей, %', 'Размер комиссии за эквайринг, %', 'Комиссия за организацию платежей, %'])
-        || pickNumByIncludes(row, ['комисс', 'эквайр', '%'])
-        || pickNumByIncludes(row, ['комисс', 'организац', 'платеж', '%']);
+      const acquiringPercent = pickNum(row, ['Размер компенсации платёжных услуг/Комиссии за интеграцию платёжных сервисов, %', 'Размер комиссии за эквайринг/Комиссии за организацию платежей, %', 'Размер комиссии за эквайринг, %'])
+        || pickNumByIncludes(row, ['компенсац', 'платеж', '%'])
+        || pickNumByIncludes(row, ['комисс', 'интеграц', '%'])
+        || pickNumByIncludes(row, ['комисс', 'эквайр', '%']);
 
       const isReturn = isReturnByText || qty < 0 || sales < 0 || payout < 0;
       const isSale = !isReturn && (docType.includes('продажа') || qty > 0 || sales > 0 || payout > 0);
@@ -14759,7 +14771,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       // Гео/время агрегации (только продуктовые операции)
       if (isSale || isReturn) {
         const wh = pickTextByIncludes(row, ['склад']) || String(row?.['Склад'] ?? '').trim() || '—';
-        const office = String(row?.['Наименование офиса доставки'] ?? '').trim() || pickTextByIncludes(row, ['офис', 'доставк']) || '—';
+        const officeRaw = String(row?.['Наименование офиса доставки'] ?? '').trim() || pickTextByIncludes(row, ['наименован', 'офис', 'доставк']);
+        const office = extractRegion(officeRaw) || '—';
         const country = String(row?.['Страна'] ?? '').trim() || '—';
         const addGeo = (m: Map<string, any>, k: string) => {
           if (!k || k === '—') return;
@@ -14914,7 +14927,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     })).sort((a, b) => b.sales_net - a.sales_net);
     setUploadedReportGeo({
       byWarehouse: finishGeo(byWarehouse),
-      byOffice: finishGeo(byOffice).slice(0, 30),
+      byOffice: finishGeo(byOffice),
       byCountry: finishGeo(byCountry),
       dailyTotals: [...dayTotals.values()].sort((a, b) => String(a.key).localeCompare(String(b.key))),
     });
@@ -24435,14 +24448,19 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       return { code: x.code, name: x.name, sales: sNet, profit, sold, ret: Number(x.return_qty || 0), margin: sNet > 0 ? profit / sNet * 100 : 0, retPct: (sold + Number(x.return_qty || 0)) > 0 ? Number(x.return_qty || 0) / (sold + Number(x.return_qty || 0)) * 100 : 0, share: sales > 0 ? sNet / sales * 100 : 0 };
                     });
                     const byProfitDesc = [...prods].sort((a, b) => b.profit - a.profit);
-                    const top = byProfitDesc.slice(0, 5);
-                    const anti = byProfitDesc.slice(-5).reverse();
+                    const top = byProfitDesc;
+                    const loss = byProfitDesc.filter((p) => p.profit < 0).reverse();
                     const days = (geo?.dailyTotals || []);
                     const maxDaySales = Math.max(1, ...days.map((d: any) => d.sales_net));
+                    const maxDayBuyout = Math.max(1, ...days.map((d: any) => d.sold_qty));
                     const bestDay = days.length ? [...days].sort((a: any, b: any) => b.sales_net - a.sales_net)[0] : null;
                     const worstDay = days.length ? [...days].filter((d: any) => d.sales_net > 0).sort((a: any, b: any) => a.sales_net - b.sales_net)[0] : null;
+                    const bestBuyDay = days.length ? [...days].sort((a: any, b: any) => b.sold_qty - a.sold_qty)[0] : null;
                     const wh = (geo?.byWarehouse || []);
                     const offices = (geo?.byOffice || []);
+                    // WB-фото по nmID
+                    const hostFor = (vol: number) => { const t = [143,287,431,719,1007,1061,1115,1169,1313,1601,1655,1919,2045,2189,2405,2621,2837,3053,3269,3485,3701]; let i = 0; while (i < t.length && vol > t[i]) i++; return `basket-${String(i + 1).padStart(2, '0')}.wbbasket.ru`; };
+                    const wbPhoto = (nm: any) => { const n = Number(nm); if (!n) return ''; const vol = Math.floor(n / 100000), part = Math.floor(n / 1000); return `https://${hostFor(vol)}/vol${vol}/part${part}/${n}/images/c246x328/1.jpg`; };
                     // структура расходов
                     const costParts = [
                       { label: 'Логистика', v: Number(s.logistics_sum || 0), c: 'bg-blue-500' },
@@ -24457,15 +24475,16 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     const retPctTotal = (Number(s.sold_qty || 0) + Number(s.return_qty || 0)) > 0 ? Number(s.return_qty || 0) / (Number(s.sold_qty || 0) + Number(s.return_qty || 0)) * 100 : 0;
                     const logPct = sales > 0 ? Number(s.logistics_sum || 0) / sales * 100 : 0;
                     const buyoutPct = (Number(s.sold_qty || 0) + Number(s.return_qty || 0)) > 0 ? Number(s.sold_qty || 0) / (Number(s.sold_qty || 0) + Number(s.return_qty || 0)) * 100 : 0;
-                    const Bars = ({ rows, val, color, fmt }: any) => {
+                    const Bars = ({ rows, val, color, fmt, photo }: any) => {
                       const max = Math.max(1, ...rows.map((r: any) => Math.abs(val(r))));
                       return (
-                        <div className="space-y-1.5">
-                          {rows.map((r: any, i: number) => (
+                        <div className="space-y-1.5 max-h-80 overflow-auto pr-1">
+                          {rows.length === 0 ? <div className="text-xs text-slate-400 py-4 text-center">Нет данных</div> : rows.map((r: any, i: number) => (
                             <div key={i} className="flex items-center gap-2 text-xs">
-                              <div className="w-32 truncate text-slate-600" title={r.name || r.key}>{r.name || r.key}</div>
+                              {photo && (r.code ? <img src={wbPhoto(r.code)} onError={(e: any) => { e.currentTarget.style.visibility = 'hidden'; }} className="w-7 h-9 rounded object-cover bg-slate-100 shrink-0" loading="lazy" /> : <div className="w-7 h-9 rounded bg-slate-100 shrink-0" />)}
+                              <div className="w-28 truncate text-slate-600" title={r.name || r.key}>{r.name || r.key}</div>
                               <div className="flex-1 h-4 bg-slate-100 rounded overflow-hidden"><div className={color(r)} style={{ width: `${Math.max(2, Math.abs(val(r)) / max * 100)}%`, height: '100%' }} /></div>
-                              <div className="w-24 text-right font-medium text-slate-700">{fmt(r)}</div>
+                              <div className="w-28 text-right font-medium text-slate-700">{fmt(r)}</div>
                             </div>
                           ))}
                         </div>
@@ -24488,15 +24507,16 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         </div>
 
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                          {/* Структура расходов */}
-                          <Card title="Структура расходов">
+                          {/* Структура расходов — % считается от продаж */}
+                          <Card title="Структура расходов (% от продаж)">
                             <div className="flex h-4 w-full overflow-hidden rounded-full bg-slate-100 mb-3">
                               {costParts.map((p) => costTotal > 0 && <div key={p.label} className={p.c} style={{ width: `${p.v / costTotal * 100}%` }} title={`${p.label}: ${rub(p.v)}`} />)}
                             </div>
                             <div className="space-y-1">
                               {costParts.map((p) => (
-                                <div key={p.label} className="flex items-center justify-between text-xs"><span className="flex items-center gap-1.5 text-slate-600"><span className={`w-2.5 h-2.5 rounded-sm ${p.c}`} />{p.label}</span><span className="font-medium text-slate-800">{rub(p.v)} · {costTotal > 0 ? pct(p.v / costTotal * 100) : '—'}</span></div>
+                                <div key={p.label} className="flex items-center justify-between text-xs"><span className="flex items-center gap-1.5 text-slate-600"><span className={`w-2.5 h-2.5 rounded-sm ${p.c}`} />{p.label}</span><span className="font-medium text-slate-800">{rub(p.v)} · {sales > 0 ? pct(p.v / sales * 100) : '—'}</span></div>
                               ))}
+                              <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-100 mt-1"><span className="font-semibold text-slate-700">Все расходы</span><span className="font-bold text-slate-900">{rub(costTotal)} · {sales > 0 ? pct(costTotal / sales * 100) : '—'}</span></div>
                             </div>
                           </Card>
 
@@ -24519,38 +24539,52 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             )}
                           </Card>
 
-                          {/* Топ товаров по прибыли */}
-                          <Card title="Топ-5 товаров по прибыли">
-                            <Bars rows={top} val={(r: any) => r.profit} color={() => 'bg-emerald-500'} fmt={(r: any) => rub(r.profit)} />
-                          </Card>
-
-                          {/* Антитоп */}
-                          <Card title="Антитоп-5 (минимальная прибыль)">
-                            <Bars rows={anti} val={(r: any) => Math.abs(r.profit)} color={(r: any) => r.profit < 0 ? 'bg-rose-500' : 'bg-amber-400'} fmt={(r: any) => rub(r.profit)} />
-                          </Card>
-
-                          {/* Доля в выручке */}
-                          <Card title="Доля в выручке (топ-5)">
-                            <Bars rows={[...prods].sort((a, b) => b.sales - a.sales).slice(0, 5)} val={(r: any) => r.share} color={() => 'bg-violet-500'} fmt={(r: any) => pct(r.share)} />
-                          </Card>
-
-                          {/* По складам */}
-                          <Card title="По складам отгрузки">
-                            {wh.length === 0 ? <div className="text-xs text-slate-400 py-6 text-center">Нет данных</div> : (
-                              <Bars rows={wh.slice(0, 6)} val={(r: any) => r.sales_net} color={() => 'bg-blue-500'} fmt={(r: any) => `${rub(r.sales_net)} · выкуп ${pct(r.buyout_pct)}`} />
+                          {/* Выкупы по дням */}
+                          <Card title="Выкупы по дням">
+                            {days.length === 0 ? <div className="text-xs text-slate-400 py-6 text-center">Нет дат в отчёте</div> : (
+                              <>
+                                <div className="flex items-end gap-1 h-32">
+                                  {days.map((d: any, i: number) => (
+                                    <div key={i} className="flex-1 flex flex-col items-center justify-end group" title={`${d.key}: ${d.sold_qty} выкупов`}>
+                                      <div className="w-full rounded-t bg-emerald-400 group-hover:bg-emerald-600 transition-colors" style={{ height: `${Math.max(2, d.sold_qty / maxDayBuyout * 100)}%` }} />
+                                    </div>
+                                  ))}
+                                </div>
+                                <div className="flex items-center justify-between mt-2 text-[11px]">
+                                  {bestBuyDay && <span className="text-emerald-700">↑ Больше всего выкупов: {new Date(bestBuyDay.key).toLocaleDateString('ru-RU')} · {bestBuyDay.sold_qty} шт</span>}
+                                </div>
+                              </>
                             )}
                           </Card>
 
-                          {/* Высокий % возвратов */}
-                          <Card title="Высокий % возвратов (товары)">
-                            <Bars rows={[...prods].filter((p) => p.ret > 0).sort((a, b) => b.retPct - a.retPct).slice(0, 6)} val={(r: any) => r.retPct} color={() => 'bg-rose-400'} fmt={(r: any) => `${pct(r.retPct)} (${r.ret} шт)`} />
+                          {/* Товары по прибыли — все */}
+                          <Card title={`Товары по прибыли (${top.length})`}>
+                            <Bars photo rows={top} val={(r: any) => r.profit} color={(r: any) => r.profit < 0 ? 'bg-rose-500' : 'bg-emerald-500'} fmt={(r: any) => rub(r.profit)} />
                           </Card>
 
-                          {/* Топ ПВЗ */}
-                          <Card title="Топ ПВЗ по выдаче">
-                            {offices.length === 0 ? <div className="text-xs text-slate-400 py-6 text-center">Нет данных</div> : (
-                              <Bars rows={offices.slice(0, 6)} val={(r: any) => r.sales_net} color={() => 'bg-cyan-500'} fmt={(r: any) => rub(r.sales_net)} />
-                            )}
+                          {/* Убыточные товары */}
+                          <Card title={`Убыточные товары (${loss.length})`}>
+                            <Bars photo rows={loss} val={(r: any) => Math.abs(r.profit)} color={() => 'bg-rose-500'} fmt={(r: any) => rub(r.profit)} />
+                          </Card>
+
+                          {/* Доля в выручке — все */}
+                          <Card title="Доля в выручке">
+                            <Bars photo rows={[...prods].sort((a, b) => b.sales - a.sales)} val={(r: any) => r.share} color={() => 'bg-violet-500'} fmt={(r: any) => `${pct(r.share)} · ${rub(r.sales)}`} />
+                          </Card>
+
+                          {/* Высокий % возвратов — все */}
+                          <Card title="Возвраты по товарам">
+                            <Bars photo rows={[...prods].filter((p) => p.ret > 0).sort((a, b) => b.retPct - a.retPct)} val={(r: any) => r.retPct} color={() => 'bg-rose-400'} fmt={(r: any) => `${pct(r.retPct)} (${r.ret} шт)`} />
+                          </Card>
+
+                          {/* Склады продаж */}
+                          <Card title="Склады продаж">
+                            <Bars rows={wh} val={(r: any) => r.sales_net} color={() => 'bg-blue-500'} fmt={(r: any) => `${rub(r.sales_net)} · выкуп ${pct(r.buyout_pct)}`} />
+                          </Card>
+
+                          {/* Города продаж */}
+                          <Card title={`Города продаж (${offices.length})`}>
+                            <Bars rows={offices} val={(r: any) => r.sales_net} color={() => 'bg-cyan-500'} fmt={(r: any) => `${rub(r.sales_net)} · выкуп ${pct(r.buyout_pct)}`} />
                           </Card>
                         </div>
                       </div>
