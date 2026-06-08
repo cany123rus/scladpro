@@ -15328,7 +15328,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const deleteUploadedRawHistoryItem = async (id: string, fileName?: string) => {
     if (!id) return;
     const label = String(fileName || 'этот WB отчёт');
-    const ok = await confirmDialog(`Удалить из истории WB: ${label}?`);
+    const ok = await confirmDialog({ title: 'Удалить отчёт?', message: `Будет удалён из истории WB:\n${label}\n\nДействие необратимо.`, tone: 'danger', confirmText: 'Удалить', cancelText: 'Отмена' });
     if (!ok) return;
     try {
       const { error } = await supabase.from('analytics_upload_reports_raw').delete().eq('id', id);
@@ -15713,7 +15713,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const deleteUploadedHistoryItem = async (id: string, fileName?: string) => {
     if (!id) return;
     const label = String(fileName || 'этот отчёт');
-    const ok = await confirmDialog(`Удалить из истории: ${label}?`);
+    const ok = await confirmDialog({ title: 'Удалить отчёт?', message: `Будет удалён из истории:\n${label}\n\nДействие необратимо.`, tone: 'danger', confirmText: 'Удалить', cancelText: 'Отмена' });
     if (!ok) return;
     try {
       const { error } = await supabase.from('analytics_upload_history').delete().eq('id', id);
@@ -15730,7 +15730,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const deleteUploadedHistoryMany = async (ids: string[]) => {
     const list = Array.from(new Set((ids || []).map(String).filter(Boolean)));
     if (!list.length) return;
-    const ok = await confirmDialog(`Удалить выбранные отчёты (${list.length})?`);
+    const ok = await confirmDialog({ title: 'Удалить выбранные?', message: `Будет удалено отчётов: ${list.length}.\nДействие необратимо.`, tone: 'danger', confirmText: 'Удалить', cancelText: 'Отмена' });
     if (!ok) return;
     try {
       const { error } = await supabase.from('analytics_upload_history').delete().in('id', list);
@@ -15748,7 +15748,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const deleteUploadedRawHistoryMany = async (ids: string[]) => {
     const list = Array.from(new Set((ids || []).map(String).filter(Boolean)));
     if (!list.length) return;
-    const ok = await confirmDialog(`Удалить выбранные WB-отчёты (${list.length})?`);
+    const ok = await confirmDialog({ title: 'Удалить выбранные?', message: `Будет удалено WB-отчётов: ${list.length}.\nДействие необратимо.`, tone: 'danger', confirmText: 'Удалить', cancelText: 'Отмена' });
     if (!ok) return;
     try {
       const { error } = await supabase.from('analytics_upload_reports_raw').delete().in('id', list);
