@@ -14770,7 +14770,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
       // Гео/время агрегации (только продуктовые операции)
       if (isSale || isReturn) {
-        const wh = pickTextByIncludes(row, ['склад']) || String(row?.['Склад'] ?? '').trim() || '—';
+        // Только точная колонка «Склад» (не «коэффициент склада» — там числа).
+        let wh = String(row?.['Склад'] ?? '').trim() || '—';
+        if (/^[\d.,]+$/.test(wh)) wh = '—';   // отбрасываем числовой мусор
         const officeRaw = String(row?.['Наименование офиса доставки'] ?? '').trim() || pickTextByIncludes(row, ['наименован', 'офис', 'доставк']);
         const office = extractRegion(officeRaw) || '—';
         const country = String(row?.['Страна'] ?? '').trim() || '—';
@@ -14920,11 +14922,16 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     setUploadedReportAnalytics(analytics);
     setUploadedReportSummary(summary);
     // Гео/время агрегации для инфографики
-    const finishGeo = (m: Map<string, any>) => [...m.values()].map((e) => ({
-      ...e,
-      buyout_pct: (e.sold_qty + e.return_qty) > 0 ? (e.sold_qty / (e.sold_qty + e.return_qty)) * 100 : 0,
-      logistics_pct: e.sales_net > 0 ? (e.logistics_sum / e.sales_net) * 100 : 0,
-    })).sort((a, b) => b.sales_net - a.sales_net);
+    const finishGeo = (m: Map<string, any>) => {
+      const arr = [...m.values()].filter((e) => e.sales_net > 0 || e.sold_qty > 0);
+      const tot = arr.reduce((s, e) => s + Math.max(0, e.sales_net), 0);
+      return arr.map((e) => ({
+        ...e,
+        buyout_pct: (e.sold_qty + e.return_qty) > 0 ? (e.sold_qty / (e.sold_qty + e.return_qty)) * 100 : 0,
+        logistics_pct: e.sales_net > 0 ? (e.logistics_sum / e.sales_net) * 100 : 0,
+        share_pct: tot > 0 ? (Math.max(0, e.sales_net) / tot) * 100 : 0,
+      })).sort((a, b) => b.sales_net - a.sales_net);
+    };
     setUploadedReportGeo({
       byWarehouse: finishGeo(byWarehouse),
       byOffice: finishGeo(byOffice),
@@ -24472,7 +24479,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       const cost = Number(uploadedPersistedCostByCode[String(x.code || '').trim()] || uploadedCostByKey[String(x.code || '').trim()] || 0);
                       const profit = (Number(x.to_pay_total || 0)) - cost * sold - Number(x.tax_sum || 0);
                       const sNet = Number(x.sales_net || 0);
-                      return { code: x.code, name: x.name, sales: sNet, profit, sold, ret: Number(x.return_qty || 0), margin: sNet > 0 ? profit / sNet * 100 : 0, retPct: (sold + Number(x.return_qty || 0)) > 0 ? Number(x.return_qty || 0) / (sold + Number(x.return_qty || 0)) * 100 : 0, share: sales > 0 ? sNet / sales * 100 : 0 };
+                      const salesGross = Number(x.sales_gross || 0);
+                      const retSum = Number(x.returns_gross || 0);
+                      return { code: x.code, name: x.name, sales: sNet, profit, sold, ret: Number(x.return_qty || 0), retSum, salesGross, margin: sNet > 0 ? profit / sNet * 100 : 0, retPct: salesGross > 0 ? retSum / salesGross * 100 : 0, share: sales > 0 ? sNet / sales * 100 : 0 };
                     });
                     const byProfitDesc = [...prods].sort((a, b) => b.profit - a.profit);
                     const top = byProfitDesc;
@@ -24487,7 +24496,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     const offices = (geo?.byOffice || []);
                     // WB-фото по nmID
                     const hostFor = (vol: number) => { const t = [143,287,431,719,1007,1061,1115,1169,1313,1601,1655,1919,2045,2189,2405,2621,2837,3053,3269,3485,3701]; let i = 0; while (i < t.length && vol > t[i]) i++; return `basket-${String(i + 1).padStart(2, '0')}.wbbasket.ru`; };
-                    const wbPhoto = (nm: any) => { const n = Number(nm); if (!n) return ''; const vol = Math.floor(n / 100000), part = Math.floor(n / 1000); return `https://${hostFor(vol)}/vol${vol}/part${part}/${n}/images/c246x328/1.jpg`; };
+                    const wbPhotoBase = (nm: any) => { const n = Number(nm); if (!n) return ''; const vol = Math.floor(n / 100000), part = Math.floor(n / 1000); return `https://${hostFor(vol)}/vol${vol}/part${part}/${n}/images/c246x328/1`; };
+                    const wbPhoto = (nm: any) => { const b = wbPhotoBase(nm); return b ? `${b}.webp` : ''; };
                     // структура расходов
                     const costParts = [
                       { label: 'Логистика', v: Number(s.logistics_sum || 0), c: 'bg-blue-500' },
@@ -24508,7 +24518,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <div className="space-y-1.5 max-h-80 overflow-auto pr-1">
                           {rows.length === 0 ? <div className="text-xs text-slate-400 py-4 text-center">Нет данных</div> : rows.map((r: any, i: number) => (
                             <div key={i} className="flex items-center gap-2 text-xs">
-                              {photo && (r.code ? <img src={wbPhoto(r.code)} onError={(e: any) => { e.currentTarget.style.visibility = 'hidden'; }} className="w-7 h-9 rounded object-cover bg-slate-100 shrink-0" loading="lazy" /> : <div className="w-7 h-9 rounded bg-slate-100 shrink-0" />)}
+                              {photo && (r.code ? <img src={wbPhoto(r.code)} data-fb="0" onError={(e: any) => { const el = e.currentTarget; if (el.dataset.fb === '0') { el.dataset.fb = '1'; el.src = wbPhotoBase(r.code) + '.jpg'; } else { el.style.visibility = 'hidden'; } }} className="w-8 h-10 rounded object-cover bg-slate-100 shrink-0" loading="lazy" /> : <div className="w-8 h-10 rounded bg-slate-100 shrink-0" />)}
                               <div className="w-28 truncate text-slate-600" title={r.name || r.key}>{photo ? (r.code || '—') : (r.name || r.key)}</div>
                               <div className="flex-1 h-4 bg-slate-100 rounded overflow-hidden"><div className={color(r)} style={{ width: `${Math.max(2, Math.abs(val(r)) / max * 100)}%`, height: '100%' }} /></div>
                               <div className="w-28 text-right font-medium text-slate-700">{fmt(r)}</div>
@@ -24560,7 +24570,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           <div className="rounded-2xl p-4 bg-white border border-slate-200 shadow-sm"><div className="text-[11px] text-slate-500">Расходы всего</div><div className="text-xl font-extrabold text-amber-600">{rub(costTotal)}</div><div className="text-[11px] text-slate-400 mt-0.5">{sales > 0 ? pct(costTotal / sales * 100) : '—'} от выручки</div></div>
                         </div>
 
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-4 auto-rows-fr">
                           {/* Структура расходов — % считается от продаж */}
                           <Card title="Структура расходов (% от продаж)">
                             <div className="flex h-4 w-full overflow-hidden rounded-full bg-slate-100 mb-3">
@@ -24626,19 +24636,19 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             <Bars photo rows={[...prods].sort((a, b) => b.sales - a.sales)} val={(r: any) => r.share} color={() => 'bg-violet-500'} fmt={(r: any) => `${pct(r.share)} · ${rub(r.sales)}`} />
                           </Card>
 
-                          {/* Высокий % возвратов — все */}
-                          <Card title="Возвраты по товарам">
-                            <Bars photo rows={[...prods].filter((p) => p.ret > 0).sort((a, b) => b.retPct - a.retPct)} val={(r: any) => r.retPct} color={() => 'bg-rose-400'} fmt={(r: any) => `${pct(r.retPct)} (${r.ret} шт)`} />
+                          {/* Возвраты по товарам — сумма возврата ÷ сумма продаж */}
+                          <Card title="Возвраты по товарам (₽ возврата ÷ продажи)">
+                            <Bars photo rows={[...prods].filter((p) => p.retSum > 0).sort((a, b) => b.retPct - a.retPct)} val={(r: any) => r.retPct} color={() => 'bg-rose-400'} fmt={(r: any) => `${pct(r.retPct)} · ${rub(r.retSum)}`} />
                           </Card>
 
-                          {/* Склады продаж — кол-во отправленных товаров */}
+                          {/* Склады продаж — кол-во отправленных + доля продаж */}
                           <Card title="Склады продаж">
-                            <Bars rows={[...wh].sort((a, b) => b.sold_qty - a.sold_qty)} val={(r: any) => r.sold_qty} color={() => 'bg-blue-500'} fmt={(r: any) => `${Number(r.sold_qty).toLocaleString('ru-RU')} шт · ${rub(r.sales_net)}`} />
+                            <Bars rows={[...wh].sort((a, b) => b.sold_qty - a.sold_qty)} val={(r: any) => r.sold_qty} color={() => 'bg-blue-500'} fmt={(r: any) => `${Number(r.sold_qty).toLocaleString('ru-RU')} шт · ${pct(r.share_pct)}`} />
                           </Card>
 
-                          {/* Города продаж */}
+                          {/* Города продаж — доля города в общих продажах */}
                           <Card title={`Города продаж (${offices.length})`}>
-                            <Bars rows={offices} val={(r: any) => r.sales_net} color={() => 'bg-cyan-500'} fmt={(r: any) => `${rub(r.sales_net)} · выкуп ${pct(r.buyout_pct)}`} />
+                            <Bars rows={offices} val={(r: any) => r.share_pct} color={() => 'bg-cyan-500'} fmt={(r: any) => `${pct(r.share_pct)} · ${rub(r.sales_net)}`} />
                           </Card>
                         </div>
                       </div>
