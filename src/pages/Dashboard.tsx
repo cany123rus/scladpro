@@ -23744,11 +23744,16 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       // Номер отчёта: из колонки, иначе вытаскиваем из имени файла
                       // (самая длинная цифровая группа ≥6 знаков) и сохраняем в БД.
                       if (!String(sm?.report_number || '').trim()) {
-                        // Номер из имени файла: убираем даты (дд.мм.гггг) и исключаем
-                        // длинные timestamp'ы (≥12 цифр). Берём первую группу 6–11 цифр.
-                        const cleaned = String(fileName || '').replace(/\d{1,2}[.\-/]\d{1,2}[.\-/]\d{2,4}/g, ' ');
-                        const groups = (cleaned.match(/\d{6,}/g) || []).filter((g) => g.length <= 11);
-                        const fromName = groups[0] || '';
+                        // Номер из имени файла. Формат WB: «...отчет №53756320260607_537563 - 1»
+                        // → берём цифры сразу после «№» (id+дата, уникальны за день).
+                        const fname = String(fileName || '');
+                        const afterNo = fname.match(/№\s*(\d{6,})/);
+                        let fromName = afterNo ? afterNo[1] : '';
+                        if (!fromName) {
+                          // запасной вариант: убираем даты дд.мм.гггг, берём первую группу 6–14 цифр
+                          const cleaned = fname.replace(/\d{1,2}[.\-/]\d{1,2}[.\-/]\d{2,4}/g, ' ');
+                          fromName = (cleaned.match(/\d{6,14}/g) || [])[0] || '';
+                        }
                         if (fromName) sm.report_number = fromName;
                       }
                       const dnum = String(sm?.report_number || '').trim();
