@@ -85,3 +85,16 @@
 - Бэкап БД при ручных правках через MCP: ключ-копия в `app_settings`
   (пример: `fbo_pallet_collection_v1__backup_20260605`).
 - Backend `scladstats/backend` — Express API: CORS ограничен `ALLOWED_ORIGINS`, есть rate-limit.
+
+## Оперативные заметки для агента (2026-06)
+- **Git — источник истины.** Репозиторий `github.com/cany123rus/scladpro`, ветка `master`.
+  Раньше деплоили мимо git (GitHub отставал); теперь всё закоммичено. **Перед любыми правками — `git pull origin master`**;
+  после изменений — `git add -A && git commit && git push`. Иначе ПК и Mac-агент разъедутся.
+- **Ритуал деплоя фронта (обязателен при каждом изменении UI):** бамп `public/sw.js` (`const CACHE = 'scladpro-shell-vN'` → N+1),
+  затем `npm run build` и `npx firebase-tools deploy --only hosting --non-interactive`. Без бампа sw юзеры не увидят обновление.
+- **Два Supabase-проекта на одном аккаунте.** ScladPro = `blygwkxjogmioebutiwn`. Есть отдельный комп-клуб CyberClub = `ykdvepjzhqufbldudbxq`.
+  Перед любыми SQL/миграциями через MCP сверяй `get_project_url` — не перепутать проекты. В ScladPro-проекте также живут таблицы `vpn_*` чужого VPN-бота (не трогать; закрыты RLS).
+- **Telegram → задачи:** edge-функция `dev-tasks-bot` кладёт задачи в таблицу `dev_tasks`; набор для always-on агента на Mac — в `mac-agent/`.
+  Этот же проект можно вести из Telegram через бот RichardAtCT/claude-code-telegram (запущен на Mac, рабочая папка = этот репозиторий).
+- **Анализ отчётов WB:** парсер вынесен в `src/utils/wbReportParser.ts` (НЕ инлайн в Dashboard). Период отчёта = по столбцу «Дата продажи»,
+  конец = последняя дата продажи, начало = конец − 6 дней (недельный отчёт). Колонки колонок резолвятся один раз по заголовку (скорость).
