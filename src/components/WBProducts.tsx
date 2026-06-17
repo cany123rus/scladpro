@@ -901,7 +901,7 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
     return value;
   };
 
-  const handlePrint = async (useCacheOnly = false) => {
+  const handlePrint = async (useCacheOnly = false, target: 'print' | 'pc' = 'print') => {
     const variantsToPrint = filteredVariants.flatMap(v => {
       const qty = Math.max(0, quantities[v.id] || 0);
       if (qty <= 0 || !v.barcode) return [] as ProductVariant[];
@@ -910,8 +910,9 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
 
     if (variantsToPrint.length === 0) return;
 
-    // Open preview window synchronously (important for mobile popup blockers)
-    const preview = window.open('', 'WBStickerPrintPreview', 'width=980,height=780');
+    // Open preview window synchronously (important for mobile popup blockers).
+    // Для отправки на ПК окно не открываем.
+    const preview = target === 'pc' ? null : window.open('', 'WBStickerPrintPreview', 'width=980,height=780');
     if (preview) {
       preview.document.write(`
         <html>
@@ -1246,6 +1247,43 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
             doc.text(`Поставщик: ${supplierName.slice(0, 18)}`, textX, y);
           }
         }
+      }
+
+      // Отправка на компьютер: грузим PDF в хранилище и создаём задание печати.
+      if (target === 'pc') {
+        try {
+          const pdfBlob: Blob = doc.output('blob');
+          const ts = Date.now();
+          const path = `print-jobs/wb-stickers-${ts}.pdf`;
+          const up = await supabase.storage.from('print_files').upload(path, pdfBlob, { contentType: 'application/pdf', upsert: true });
+          if (up.error) throw up.error;
+          const { data: pub } = supabase.storage.from('print_files').getPublicUrl(path);
+          const firstSupId = Object.keys(variantsBySupplier)[0] || selectedSupplierId || null;
+          const supName = items[0]?.supplierName || '';
+          const { error: jobErr } = await supabase.from('print_jobs').insert({
+            supplier_id: firstSupId || null,
+            file_name: `Стикеры WB ${supName} (${items.length} шт)`,
+            file_url: pub?.publicUrl || '',
+            file_path: path,
+            status: 'pending',
+            created_by: 'Планшет',
+          });
+          if (jobErr) throw jobErr;
+          setError(null);
+          alert('Файл отправлен на компьютер. Откройте раздел печати на ПК — он распечатается там.');
+        } catch (e: any) {
+          setError('Не удалось отправить на ПК: ' + (e?.message || 'ошибка'));
+        }
+        // отметим коды как напечатанные ниже по общему коду
+        const usedCodeValues = items.map(i => i.honestSignCode).filter(Boolean) as string[];
+        if (usedCodeValues.length > 0) {
+          try {
+            const { error } = await supabase.from('unified_honest_sign_codes').update({ file_name: 'Напечатанные QR' }).in('code', usedCodeValues);
+            if (error) queuePendingPrintedCodes(usedCodeValues);
+          } catch { queuePendingPrintedCodes(usedCodeValues); }
+        }
+        setIsPrinting(false);
+        return;
       }
 
       const blobUrl = doc.output('bloburl');
@@ -1740,6 +1778,15 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
                 >
                     <Printer className="h-4 w-4 shrink-0" />
                     Печать онлайн ({printCount})
+                </button>
+                <button
+                    onClick={() => handlePrint(false, 'pc')}
+                    disabled={printCount === 0}
+                    title="Отправить PDF на компьютер — распечатается там (для планшета без принтера)"
+                    className={`inline-flex min-w-0 items-center justify-center gap-1.5 min-h-[44px] rounded-xl px-3 py-2 text-xs sm:text-sm 2xl:text-base font-medium leading-tight text-center whitespace-normal text-white shadow-sm transition-all active:scale-[0.97] ${printCount > 0 ? 'bg-violet-600 hover:bg-violet-700 shadow-violet-600/20' : 'bg-slate-300 cursor-not-allowed'}`}
+                >
+                    <Printer className="h-4 w-4 shrink-0" />
+                    На компьютер ({printCount})
                 </button>
                 <button
                     onClick={() => { setQuantities({}); setPrintItems([]); }}

@@ -18,6 +18,7 @@ export const DASHBOARD_TAB_IDS = [
   'employees',
   'database',
   'admin',
+  'instruction',
 ] as const;
 
 export type DashboardTabId = typeof DASHBOARD_TAB_IDS[number];

@@ -143,29 +143,9 @@ const generateSupplyName = () => {
 const getWBImageUrls = (nmId: number) => {
   const vol = ~~(nmId / 100000);
   const part = ~~(nmId / 1000);
-  let host = 'basket-01.wbbasket.ru';
-  if (vol >= 0 && vol <= 143) host = 'basket-01.wbbasket.ru';
-  else if (vol >= 144 && vol <= 287) host = 'basket-02.wbbasket.ru';
-  else if (vol >= 288 && vol <= 431) host = 'basket-03.wbbasket.ru';
-  else if (vol >= 432 && vol <= 719) host = 'basket-04.wbbasket.ru';
-  else if (vol >= 720 && vol <= 1007) host = 'basket-05.wbbasket.ru';
-  else if (vol >= 1008 && vol <= 1061) host = 'basket-06.wbbasket.ru';
-  else if (vol >= 1062 && vol <= 1115) host = 'basket-07.wbbasket.ru';
-  else if (vol >= 1116 && vol <= 1169) host = 'basket-08.wbbasket.ru';
-  else if (vol >= 1170 && vol <= 1313) host = 'basket-09.wbbasket.ru';
-  else if (vol >= 1314 && vol <= 1601) host = 'basket-10.wbbasket.ru';
-  else if (vol >= 1602 && vol <= 1655) host = 'basket-11.wbbasket.ru';
-  else if (vol >= 1656 && vol <= 1919) host = 'basket-12.wbbasket.ru';
-  else if (vol >= 1920 && vol <= 2045) host = 'basket-13.wbbasket.ru';
-  else if (vol >= 2046 && vol <= 2189) host = 'basket-14.wbbasket.ru';
-  else if (vol >= 2190 && vol <= 2405) host = 'basket-15.wbbasket.ru';
-  else if (vol >= 2406 && vol <= 2621) host = 'basket-16.wbbasket.ru';
-  else if (vol >= 2622 && vol <= 2837) host = 'basket-17.wbbasket.ru';
-  else if (vol >= 2838 && vol <= 3053) host = 'basket-18.wbbasket.ru';
-  else if (vol >= 3054 && vol <= 3269) host = 'basket-19.wbbasket.ru';
-  else if (vol >= 3270 && vol <= 3485) host = 'basket-20.wbbasket.ru';
-  else if (vol >= 3486 && vol <= 3701) host = 'basket-21.wbbasket.ru';
-  else host = 'basket-22.wbbasket.ru';
+  const thresholds = [143,287,431,719,1007,1061,1115,1169,1313,1601,1655,1919,2045,2189,2405,2621,2837,3053,3269,3485,3701,3917,4133,4349,4565,4877,5189,5501,5813,6125,6437,6749,7061,7373,7685,7997,8309,8621,9244,9620,10380,11132,11900,12650,13400,14150,14900];
+  let bi = 0; while (bi < thresholds.length && vol > thresholds[bi]) bi++;
+  const host = `basket-${String(bi + 1).padStart(2, '0')}.wbbasket.ru`;
 
   const base = `https://${host}/vol${vol}/part${part}/${nmId}/images`;
   return [
@@ -505,6 +485,8 @@ export const WBSupplyManager = ({
   const [fbsPendingStickerRow, setFbsPendingStickerRow] = useState<FbsSupplyScanOrderRow | null>(null);
   const [fbsScanNotice, setFbsScanNotice] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
   const fbsScanInputRef = useRef<HTMLInputElement | null>(null);
+  // Очередь фоновой записи сканов: сериализует upsert карты, чтобы быстрые сканы не перетирали друг друга.
+  const fbsScanSaveQueueRef = useRef<Promise<any>>(Promise.resolve());
   const lastFbsFetchRef = useRef<{ supplierId: string; ts: number } | null>(null);
   const cachedPdfFontRef = useRef<string | null>(null);
   const groupedImageCacheRef = useRef<Map<string, string>>(new Map());
@@ -2638,7 +2620,7 @@ export const WBSupplyManager = ({
     setFbsScanModalOpen(true);
     setFbsScanLoading(true);
     setFbsScanMode('sticker');
-    setFbsScanInputValue('');
+    clearScanInput();
     setFbsPendingStickerRow(null);
     setFbsScanNotice(null);
     try {
@@ -2706,7 +2688,7 @@ export const WBSupplyManager = ({
       if (fbsPendingStickerRow?.storageKey === row.storageKey) {
         setFbsPendingStickerRow(null);
         setFbsScanMode('sticker');
-        setFbsScanInputValue('');
+        clearScanInput();
       }
       setFbsScanNotice({ type: 'success', text: `ЧЗ для заказа ${row.orderId} сброшен. Можно сканировать заново.` });
     } catch (e: any) {
@@ -2818,8 +2800,25 @@ export const WBSupplyManager = ({
     }
   };
 
+  // Авто-submit по окончании «пачки» символов сканера (если сканер не шлёт Enter).
+  const scanBurstRef = useRef<any>(null);
+  const onScanInputBurst = () => {
+    if (scanBurstRef.current) clearTimeout(scanBurstRef.current);
+    scanBurstRef.current = setTimeout(() => {
+      const v = String(fbsScanInputRef.current?.value || '').trim();
+      if (v.length >= 4) fbsScanInputRef.current?.form?.requestSubmit();
+    }, 140);
+  };
+
+  // Очистка поля скана: чистим uncontrolled-input через ref + сбрасываем легаси-состояние.
+  const clearScanInput = () => {
+    try { if (fbsScanInputRef.current) fbsScanInputRef.current.value = ''; } catch {}
+    setFbsScanInputValue('');
+  };
+
   const handleFbsScanSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (scanBurstRef.current) { clearTimeout(scanBurstRef.current); scanBurstRef.current = null; }
     const raw = String((fbsScanInputRef.current?.value ?? fbsScanInputValue) || '').trim();
     if (!raw) return;
 
@@ -2829,7 +2828,7 @@ export const WBSupplyManager = ({
       const completeness = getFbsScanCompletenessStats(fbsScanRows);
       if (!completeness.isFullyReady) {
         setFbsScanNotice({ type: 'error', text: `Сканирование временно заблокировано: поставка загружена не полностью. Сейчас есть стикеров ${completeness.rowsWithSticker}/${completeness.totalRows}, «Стикер при считывании» ${completeness.rowsWithScanText}/${completeness.totalRows}. Сначала добейся полной загрузки поставки.` });
-        setFbsScanInputValue('');
+        clearScanInput();
         return;
       }
 
@@ -2842,66 +2841,82 @@ export const WBSupplyManager = ({
       });
       if (!row) {
         setFbsScanNotice({ type: 'error', text: 'Стикер не найден в текущей поставке. Проверь файл поставки или сам скан.' });
-        setFbsScanInputValue('');
+        clearScanInput();
         return;
       }
       setFbsScanNotice({ type: 'success', text: `Найден заказ ${row.orderId}. Теперь сканируйте ЧЗ.` });
       setFbsPendingStickerRow(row);
       setFbsScanMode('honest_sign');
-      setFbsScanInputValue('');
+      clearScanInput();
       return;
     }
 
     if (!activeSupplyId || !fbsPendingStickerRow) {
       setFbsScanMode('sticker');
-      setFbsScanInputValue('');
+      clearScanInput();
       return;
     }
 
     const honestSignCode = normalizeDataMatrixText(raw);
     if (!honestSignCode) {
       setFbsScanNotice({ type: 'error', text: 'Не удалось распознать код Честного знака' });
-      setFbsScanInputValue('');
+      clearScanInput();
       return;
     }
 
-    try {
-      const existsInSupplierScannedBase = await isFbsCodeAlreadyScannedForSupplier(honestSignCode, selectedSupplierId);
-      if (existsInSupplierScannedBase) {
-        setFbsScanNotice({ type: 'error', text: 'Этот ЧЗ уже есть в базе отсканированных ЧЗ этого поставщика.' });
-        setFbsScanInputValue('');
-        return;
-      }
+    // Оптимистично: сразу обновляем UI и освобождаем поле для следующего скана,
+    // а запись в БД (dup-проверка + upsert карты + синк) делаем в фоне по очереди.
+    const pendingRow = fbsPendingStickerRow;
+    const supplyId = activeSupplyId;
+    const supplierId = selectedSupplierId;
+    const prevMap = fbsScansBySticker;
 
-      const next = { ...fbsScansBySticker };
-      for (const key of Object.keys(next)) {
-        const item = next[key];
-        const sameOrder = String(item?.orderId || '').trim() && String(item?.orderId || '').trim() === String(fbsPendingStickerRow.orderId || '').trim();
-        const sameSticker = normalizeStickerDigits(String(item?.stickerDigits || '')) && normalizeStickerDigits(String(item?.stickerDigits || '')) === normalizeStickerDigits(String(fbsPendingStickerRow.stickerDigits || ''));
-        const sameScan = normalizeScanStickerText(String(item?.stickerScanText || '')) && normalizeScanStickerText(String(item?.stickerScanText || '')) === normalizeScanStickerText(String(fbsPendingStickerRow.stickerScanText || ''));
-        if (sameOrder || sameSticker || sameScan) delete next[key];
-      }
-      next[fbsPendingStickerRow.storageKey] = {
-        storageKey: fbsPendingStickerRow.storageKey,
-        stickerDigits: fbsPendingStickerRow.stickerDigits,
-        stickerScanText: fbsPendingStickerRow.stickerScanText,
-        honestSignCode,
-        updatedAt: new Date().toISOString(),
-        orderId: fbsPendingStickerRow.orderId,
-        title: fbsPendingStickerRow.title,
-        article: fbsPendingStickerRow.article,
-        size: fbsPendingStickerRow.size,
-      };
-      const saved = await saveFbsSupplyScanMap(activeSupplyId, next, selectedSupplierId);
-      await syncFbsScannedCodesToUnifiedBase([honestSignCode], selectedSupplierId);
-      setFbsScansBySticker(saved);
-      setFbsScanNotice({ type: 'success', text: `ЧЗ сохранён для заказа ${fbsPendingStickerRow.orderId} и добавлен в базу ЧЗ.` });
-      setFbsPendingStickerRow(null);
-      setFbsScanMode('sticker');
-      setFbsScanInputValue('');
-    } catch (e: any) {
-      setFbsScanNotice({ type: 'error', text: e?.message || 'Ошибка сохранения ЧЗ' });
+    const next = { ...fbsScansBySticker };
+    for (const key of Object.keys(next)) {
+      const item = next[key];
+      const sameOrder = String(item?.orderId || '').trim() && String(item?.orderId || '').trim() === String(pendingRow.orderId || '').trim();
+      const sameSticker = normalizeStickerDigits(String(item?.stickerDigits || '')) && normalizeStickerDigits(String(item?.stickerDigits || '')) === normalizeStickerDigits(String(pendingRow.stickerDigits || ''));
+      const sameScan = normalizeScanStickerText(String(item?.stickerScanText || '')) && normalizeScanStickerText(String(item?.stickerScanText || '')) === normalizeScanStickerText(String(pendingRow.stickerScanText || ''));
+      if (sameOrder || sameSticker || sameScan) delete next[key];
     }
+    next[pendingRow.storageKey] = {
+      storageKey: pendingRow.storageKey,
+      stickerDigits: pendingRow.stickerDigits,
+      stickerScanText: pendingRow.stickerScanText,
+      honestSignCode,
+      updatedAt: new Date().toISOString(),
+      orderId: pendingRow.orderId,
+      title: pendingRow.title,
+      article: pendingRow.article,
+      size: pendingRow.size,
+    };
+
+    // мгновенный отклик
+    setFbsScansBySticker(next);
+    setFbsScanNotice({ type: 'success', text: `ЧЗ принят для заказа ${pendingRow.orderId}.` });
+    setFbsPendingStickerRow(null);
+    setFbsScanMode('sticker');
+    clearScanInput();
+    setTimeout(() => { try { fbsScanInputRef.current?.focus(); } catch {} }, 0);
+
+    // фоновая запись, сериализованная через очередь (быстрые сканы не перетирают карту)
+    fbsScanSaveQueueRef.current = fbsScanSaveQueueRef.current
+      .catch(() => {})
+      .then(async () => {
+        const existsInSupplierScannedBase = await isFbsCodeAlreadyScannedForSupplier(honestSignCode, supplierId);
+        if (existsInSupplierScannedBase) {
+          setFbsScansBySticker(prevMap);
+          setFbsScanNotice({ type: 'error', text: 'Этот ЧЗ уже есть в базе отсканированных ЧЗ этого поставщика. Скан отменён.' });
+          return;
+        }
+        const saved = await saveFbsSupplyScanMap(supplyId, next, supplierId);
+        await syncFbsScannedCodesToUnifiedBase([honestSignCode], supplierId);
+        setFbsScansBySticker(saved);
+      })
+      .catch((e: any) => {
+        setFbsScansBySticker(prevMap);
+        setFbsScanNotice({ type: 'error', text: e?.message || 'Ошибка сохранения ЧЗ (скан отменён)' });
+      });
   };
 
   const sortOrdersForPicking = (list: any[]) => {
@@ -5376,7 +5391,7 @@ export const WBSupplyManager = ({
       )}
 
       {fbsScanModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => { setFbsScanModalOpen(false); setFbsPendingStickerRow(null); setFbsScanMode('sticker'); setFbsScanInputValue(''); }}>
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => { setFbsScanModalOpen(false); setFbsPendingStickerRow(null); setFbsScanMode('sticker'); clearScanInput(); }}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
             <div className="px-5 py-4 border-b border-slate-200 flex items-start justify-between gap-4">
               <div>
@@ -5394,7 +5409,7 @@ export const WBSupplyManager = ({
                   })()}
                 </div>
               </div>
-              <button onClick={() => { setFbsScanModalOpen(false); setFbsPendingStickerRow(null); setFbsScanMode('sticker'); setFbsScanInputValue(''); }} className="p-2 rounded-lg hover:bg-slate-100 text-slate-500">
+              <button onClick={() => { setFbsScanModalOpen(false); setFbsPendingStickerRow(null); setFbsScanMode('sticker'); clearScanInput(); }} className="p-2 rounded-lg hover:bg-slate-100 text-slate-500">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -5455,15 +5470,20 @@ export const WBSupplyManager = ({
                 <input
                   ref={fbsScanInputRef}
                   type="text"
-                  value={fbsScanInputValue}
-                  onChange={(e) => setFbsScanInputValue(e.target.value)}
+                  defaultValue=""
+                  onInput={onScanInputBurst}
+                  inputMode="none"
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
                   placeholder={fbsScanMode === 'sticker' ? 'Сканируйте значение из колонки «Стикер при считывании»...' : 'Сканируйте код Честного знака...'}
                   className="flex-1 oc-input"
                   autoFocus
                 />
                 <button
                   type="submit"
-                  disabled={fbsScanLoading || !fbsScanInputValue.trim()}
+                  disabled={fbsScanLoading}
                   className="px-4 py-2 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
                 >
                   {fbsScanMode === 'sticker' ? 'Найти строку' : 'Сохранить ЧЗ'}
@@ -5471,7 +5491,7 @@ export const WBSupplyManager = ({
                 {fbsScanMode === 'honest_sign' && (
                   <button
                     type="button"
-                    onClick={() => { setFbsPendingStickerRow(null); setFbsScanMode('sticker'); setFbsScanInputValue(''); setFbsScanNotice({ type: 'info', text: 'Скан ЧЗ сброшен. Можно сканировать следующий стикер.' }); }}
+                    onClick={() => { setFbsPendingStickerRow(null); setFbsScanMode('sticker'); clearScanInput(); setFbsScanNotice({ type: 'info', text: 'Скан ЧЗ сброшен. Можно сканировать следующий стикер.' }); }}
                     className="px-4 py-2 rounded-xl border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
                   >
                     Сбросить

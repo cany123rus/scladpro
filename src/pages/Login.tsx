@@ -334,7 +334,7 @@ export default function Login() {
             await telegramService.sendMessage(token, '498924112', text, 'Markdown');
         }
 
-        await supabase.from('employees').update({ is_online: true }).eq('id', employee.id);
+        await supabase.from('employees').update({ is_online: true, last_seen: new Date().toISOString() }).eq('id', employee.id);
     } catch (e) {
         console.error('Login report failed', e);
     }

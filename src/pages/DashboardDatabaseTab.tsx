@@ -1,7 +1,7 @@
 // "База данных" tab extracted from Dashboard.tsx. Pure presentational —
 // all data/handlers are passed in as props.
 import React from 'react';
-import { Upload, History, Database, RefreshCw, Send, Download } from 'lucide-react';
+import { Upload, History, Database, RefreshCw, Send, Download, Trash2 } from 'lucide-react';
 
 type DatabaseLog = {
   version?: string | number;
@@ -10,6 +10,8 @@ type DatabaseLog = {
   source?: string;
   status?: string;
   file_name?: string;
+  file_path?: string;
+  bucket?: string;
   created_at?: string;
 };
 
@@ -25,6 +27,9 @@ type DashboardDatabaseTabProps = {
   databaseLogsLoading: boolean;
   databaseBackupLoading: boolean;
   databaseDownloadLoading: boolean;
+  handleDownloadBackupFromHistory: (log: DatabaseLog) => void;
+  handleClearDatabaseLogs: () => void;
+  databaseDownloadingPath: string | null;
 };
 
 export function DashboardDatabaseTab({
@@ -39,6 +44,9 @@ export function DashboardDatabaseTab({
   databaseLogsLoading,
   databaseBackupLoading,
   databaseDownloadLoading,
+  handleDownloadBackupFromHistory,
+  handleClearDatabaseLogs,
+  databaseDownloadingPath,
 }: DashboardDatabaseTabProps) {
   return (
     <div className="max-w-4xl mx-auto">
@@ -117,21 +125,31 @@ export function DashboardDatabaseTab({
       </div>
 
       <div ref={databaseHistoryRef} className="oc-card overflow-hidden">
-        <div className="px-6 py-4 border-b border-slate-100">
+        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between gap-3">
           <h3 className="font-bold text-slate-900">Лог версий базы данных</h3>
+          {databaseLogs.length > 0 && (
+            <button
+              onClick={handleClearDatabaseLogs}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-rose-600 border border-rose-200 rounded-lg hover:bg-rose-50"
+            >
+              <Trash2 className="h-3.5 w-3.5" /> Очистить историю
+            </button>
+          )}
         </div>
+        <div className="overflow-x-auto">
         <table className="w-full text-left">
           <thead>
             <tr className="bg-slate-50 border-b border-slate-100">
               <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase">Версия</th>
               <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase">Дата</th>
               <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase">Описание</th>
+              <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase text-right">Файл</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {databaseLogs.length === 0 ? (
               <tr>
-                <td colSpan={3} className="px-6 py-10 text-center text-slate-400">История бэкапов пока пустая</td>
+                <td colSpan={4} className="px-6 py-10 text-center text-slate-400">История бэкапов пока пустая</td>
               </tr>
             ) : databaseLogs.map((log, index) => (
               <tr key={`${log.created_at || log.date || 'log'}-${index}`} className="hover:bg-slate-50 align-top">
@@ -147,10 +165,24 @@ export function DashboardDatabaseTab({
                     </div>
                   )}
                 </td>
+                <td className="px-6 py-4 text-right whitespace-nowrap">
+                  {log.file_path ? (
+                    <button
+                      onClick={() => handleDownloadBackupFromHistory(log)}
+                      disabled={databaseDownloadingPath === log.file_path}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+                    >
+                      <Download className={`h-3.5 w-3.5 ${databaseDownloadingPath === log.file_path ? 'animate-pulse' : ''}`} /> Скачать
+                    </button>
+                  ) : (
+                    <span className="text-xs text-slate-300" title="Файл не сохранён в облаке (старая запись)">—</span>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   );

@@ -6,16 +6,44 @@ import {
   LayoutDashboard, Map as MapIcon, Package, Truck, ClipboardCheck, Users,
   ShieldCheck, Printer, Box, CheckSquare, Terminal, MessageSquare,
   Send, UserCog, LogOut, Plus, Search, Bell, Settings, ChevronRight, ChevronLeft, ChevronDown, ChevronUp, Calendar,
-  Pencil, Trash2, History, Save, X, Upload, ArrowLeft, Undo2, AlertCircle, CheckCircle2, QrCode, FileSpreadsheet, Lock, LockOpen, Camera, Download, FileText, File, FileClock, Clock, Menu, Database, Power, Link, RefreshCw, ShoppingCart, BarChart2, ShoppingBag, RotateCcw, Wallet, Megaphone, TrendingUp
+  Pencil, Trash2, History, Save, X, Upload, ArrowLeft, Undo2, AlertCircle, CheckCircle2, QrCode, FileSpreadsheet, Lock, LockOpen, Camera, Download, FileText, File, FileClock, Clock, Menu, Database, Power, Link, RefreshCw, ShoppingCart, BarChart2, ShoppingBag, RotateCcw, Wallet, Megaphone, TrendingUp, BookOpen
 } from 'lucide-react';
-const WBProducts = React.lazy(() => import('../components/WBProducts').then((m) => ({ default: m.WBProducts })));
-const WBSupplyManager = React.lazy(() => import('../components/WBSupplyManager').then((m) => ({ default: m.WBSupplyManager })));
-const Tasks = React.lazy(() => import('../components/Tasks').then((m) => ({ default: m.Tasks })));
-const WarehouseTab = React.lazy(() => import('../components/WarehouseTab').then((m) => ({ default: m.WarehouseTab })));
-const AdvertisingInsights = React.lazy(() => import('../components/AdvertisingInsights').then((m) => ({ default: m.AdvertisingInsights })));
-const CamerasTab = React.lazy(() => import('../components/CamerasTab').then((m) => ({ default: m.CamerasTab })));
-const AdminPanel = React.lazy(() => import('./AdminPanel').then((m) => ({ default: m.AdminPanel })));
+// Устойчивый ленивый импорт: если чанк не загрузился или экспорт отсутствует
+// (устаревший кэш после деплоя), один раз жёстко перезагружаем страницу за свежими чанками.
+function lazyNamed<T>(factory: () => Promise<any>, name: string, key: string) {
+  const flag = `chunk-reload-${key}`;
+  return React.lazy(() =>
+    factory()
+      .then((m: any) => {
+        if (m && m[name]) {
+          try { sessionStorage.removeItem(flag); } catch {}
+          return { default: m[name] as React.ComponentType<T> };
+        }
+        throw new Error('Missing export: ' + name);
+      })
+      .catch((err: any) => {
+        if (typeof sessionStorage !== 'undefined' && !sessionStorage.getItem(flag)) {
+          try { sessionStorage.setItem(flag, '1'); } catch {}
+          window.location.reload();
+          return new Promise<{ default: React.ComponentType<T> }>(() => {});
+        }
+        throw err;
+      })
+  );
+}
+const WBProducts = lazyNamed(() => import('../components/WBProducts'), 'WBProducts', 'wbproducts');
+const WBSupplyManager = lazyNamed(() => import('../components/WBSupplyManager'), 'WBSupplyManager', 'wbsupply');
+const Tasks = lazyNamed(() => import('../components/Tasks'), 'Tasks', 'tasks-cmp');
+const WarehouseTab = lazyNamed(() => import('../components/WarehouseTab'), 'WarehouseTab', 'warehouse');
+const AdvertisingInsights = lazyNamed(() => import('../components/AdvertisingInsights'), 'AdvertisingInsights', 'adv');
+const CamerasTab = lazyNamed(() => import('../components/CamerasTab'), 'CamerasTab', 'cameras');
+const AdminPanel = lazyNamed(() => import('./AdminPanel'), 'AdminPanel', 'adminpanel');
+const InstructionTab = lazyNamed(() => import('./InstructionTab'), 'InstructionTab', 'instruction');
+const SalesMap = React.lazy(() => import('../components/SalesMap'));
 import { SectionSkeleton } from '../components/Skeleton';
+import NightToggle from '../components/NightToggle';
+import PushToggle from '../components/PushToggle';
+import { findCoord as ruFindCoord } from '../utils/ruGeo';
 import { confirmDialog } from '../components/ConfirmDialog';
 import { storeCurrentEmployee } from '../utils/employeeStorage';
 import { createWorkbookBlob, downloadAoaWorkbook, downloadWorkbook } from '../utils/excelExport';
@@ -23,6 +51,7 @@ import { QRCodeSVG } from 'qrcode.react';
 import { telegramService } from '../services/telegram.service';
 import { useWarehousePersistence } from '../hooks/useWarehousePersistence';
 import { downloadJsonRowsAsExcel, ensureExcelFileSize, ensureExcelRowLimit, ensureRequiredColumns, readFirstSheetAsJson } from '../utils/safeExcel';
+import { readFirstSheetAsJsonFast } from '../utils/excelWorkerClient';
 import { mergeWarehouseUpdates, removeWarehouseShelfItem, upsertWarehouseShelfItem } from '../utils/warehouseActions';
 import { ensurePdfLibs, ensureExcel, ensureBwip, lazyLibs } from './dashboardLazyLibs';
 import { ExcelUploader, SuppliesFBOSection, WBProductsSection, ReportsSection, EmployeesSection, TelegramSettingsSection, DatamatrixCode } from './dashboardComponents';
@@ -60,6 +89,133 @@ import type {
 type DashboardProps = {
   forcedTab?: string;
 };
+
+// Реконсиляция размеров: распределяет суммы (логистику и т.п.) по размерам так,
+// чтобы они сходились с итогами товара. Используется И в таблице, И в сводке —
+// иначе детализация размеров расходится.
+function buildReconciledSizeRows(row: any): any[] {
+  const sizeRows = Array.isArray(row?.size_breakdown_list) ? row.size_breakdown_list : [];
+  const normalizedSizeRows = sizeRows.map((sz: any) => {
+    const soldQty = Number(sz?.sold_qty ?? sz?.sold ?? ((Number(sz?.sold_net_qty || sz?.net || 0) + Number(sz?.return_qty || sz?.ret || 0))));
+    const returnQty = Number(sz?.return_qty ?? sz?.ret ?? 0);
+    const soldNetQty = Number(sz?.sold_net_qty ?? sz?.net ?? Math.max(0, soldQty - returnQty));
+    return {
+      ...sz,
+      sold_qty: soldQty,
+      return_qty: returnQty,
+      sold_net_qty: soldNetQty,
+      logistics_sum: Number(sz?.logistics_sum ?? sz?.logistics ?? 0),
+      payout_net: Number(sz?.payout_net ?? sz?.payout ?? 0),
+      to_pay_total: Number(sz?.to_pay_total ?? sz?.to_pay ?? 0),
+    };
+  });
+
+  const reconcileMetric = (rowsIn: any[], metric: string, target: number, eps = 0.01) => {
+    const sum = rowsIn.reduce((s, x) => s + Number(x?.[metric] || 0), 0);
+    if (!Number.isFinite(target) || !Number.isFinite(sum) || Math.abs(sum) < 1e-9) return rowsIn;
+    if (Math.abs(sum - target) <= eps) return rowsIn;
+    const k = target / sum;
+    return rowsIn.map((x) => ({ ...x, [metric]: Number(x?.[metric] || 0) * k }));
+  };
+
+  let reconciledSizeRows = [...normalizedSizeRows];
+  const metricTargets: Array<[string, number]> = [
+    ['sales_net', Number(row?.sales_net || 0)],
+    ['returns_gross', Number(row?.returns_gross || 0)],
+    ['logistics_sum', Number(row?.logistics_sum || 0)],
+    ['payout_net', Number(row?.payout_net || 0)],
+    ['fine_sum', Number(row?.fine_sum || 0)],
+    ['storage_sum', Number(row?.storage_sum || 0)],
+    ['withhold_sum', Number(row?.withhold_sum || 0)],
+    ['to_pay_total', Number(row?.to_pay_total || 0)],
+    ['sold_qty', Number(row?.sold_qty || 0)],
+    ['return_qty', Number(row?.return_qty || 0)],
+    ['acquiring_sum', Number(row?.acquiring_sum || 0)],
+  ];
+  metricTargets.forEach(([m, t]) => { reconciledSizeRows = reconcileMetric(reconciledSizeRows, m, t, m.includes('qty') ? 0.5 : 0.01); });
+
+  // Если логистика «сидит» в одном размере — раскидываем по весу продаж.
+  const totalLogisticsTarget = Number(row?.logistics_sum || 0);
+  const nonZeroLogRows = reconciledSizeRows.filter((x: any) => Number(x?.logistics_sum || 0) > 0.0001).length;
+  if (reconciledSizeRows.length > 1 && totalLogisticsTarget > 0 && nonZeroLogRows <= 1) {
+    const weights = reconciledSizeRows.map((x: any) => {
+      const wSold = Number(x?.sold_qty || 0);
+      const wSales = Number(x?.sales_net || 0);
+      return wSold > 0 ? wSold : (wSales > 0 ? wSales : 1);
+    });
+    const wSum = weights.reduce((s: number, v: number) => s + v, 0) || 1;
+    let assigned = 0;
+    reconciledSizeRows = reconciledSizeRows.map((x: any, i: number) => {
+      if (i === reconciledSizeRows.length - 1) {
+        const last = Math.max(0, totalLogisticsTarget - assigned);
+        return { ...x, logistics_sum: last };
+      }
+      const part = (totalLogisticsTarget * weights[i]) / wSum;
+      assigned += part;
+      return { ...x, logistics_sum: part };
+    });
+  }
+
+  const apportionInteger = (rowsIn: any[], metric: 'sold_qty' | 'return_qty', targetNum: number) => {
+    const target = Math.max(0, Math.round(Number(targetNum || 0)));
+    if (!rowsIn.length) return rowsIn;
+    const prepared = rowsIn.map((r, i) => {
+      const raw = Math.max(0, Number(r?.[metric] || 0));
+      const base = Math.floor(raw);
+      const frac = raw - base;
+      return { i, base, frac };
+    });
+    let sumBase = prepared.reduce((s, x) => s + x.base, 0);
+    const next = rowsIn.map((r, i) => ({ ...r, [metric]: prepared[i].base }));
+    if (sumBase < target) {
+      const need = target - sumBase;
+      prepared.sort((a, b) => b.frac - a.frac);
+      for (let k = 0; k < need; k += 1) {
+        const idx = prepared[k % prepared.length]?.i;
+        if (idx == null) break;
+        next[idx][metric] = Number(next[idx][metric] || 0) + 1;
+      }
+    } else if (sumBase > target) {
+      let extra = sumBase - target;
+      const order = [...prepared].sort((a, b) => a.frac - b.frac);
+      for (const item of order) {
+        if (extra <= 0) break;
+        const canTake = Math.min(extra, Number(next[item.i][metric] || 0));
+        next[item.i][metric] = Number(next[item.i][metric] || 0) - canTake;
+        extra -= canTake;
+      }
+    }
+    return next;
+  };
+
+  reconciledSizeRows = apportionInteger(reconciledSizeRows, 'sold_qty', Number(row?.sold_qty || 0));
+  reconciledSizeRows = apportionInteger(reconciledSizeRows, 'return_qty', Number(row?.return_qty || 0));
+  reconciledSizeRows = reconciledSizeRows.map((x) => ({
+    ...x,
+    sold_qty: Math.max(0, Math.round(Number(x?.sold_qty || 0))),
+    return_qty: Math.max(0, Math.round(Number(x?.return_qty || 0))),
+    sold_net_qty: Math.max(0, Math.round(Number(x?.sold_qty || 0)) - Math.round(Number(x?.return_qty || 0))),
+  }));
+  return reconciledSizeRows;
+}
+
+// Живые часы в шапке. Отдельный компонент со своим таймером — чтобы тикать каждую
+// секунду, не перерисовывая весь Dashboard.
+function HeaderClock() {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const iv = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(iv);
+  }, []);
+  const hh = String(now.getHours()).padStart(2, '0');
+  const mm = String(now.getMinutes()).padStart(2, '0');
+  const ss = String(now.getSeconds()).padStart(2, '0');
+  return (
+    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-slate-200 bg-slate-50 text-slate-700 text-[11px] font-medium tabular-nums" title="Текущее время">
+      {hh}:{mm}<span className="text-slate-400">:{ss}</span>
+    </span>
+  );
+}
 
 export default function Dashboard({ forcedTab }: DashboardProps) {
   const { user, signOut } = useAuth();
@@ -217,7 +373,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
   // Orders State
   const isScanningRef = useRef(false);
-  const pendingScansRef = useRef<Array<{ boxId: string; productId: string; code: string }>>([]);
+  const pendingScansRef = useRef<Array<{ boxId: string; productId: string; code: string; scannedBy?: string | null }>>([]);
   const flushScansTimeoutRef = useRef<number | null>(null);
   const scanAudioCtxRef = useRef<any>(null);
   const wbSkuIndexRef = useRef<Record<string, Map<string, { card: any; size: any }>>>({});
@@ -277,12 +433,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [honestSignSupplierId, setHonestSignSupplierId] = useState('');
   const [honestSignCodes, setHonestSignCodes] = useState<any[]>([]);
   const [loadingHonestSign, setLoadingHonestSign] = useState(false);
-  const [honestSignTab, setHonestSignTab] = useState<'codes' | 'print' | 'base' | 'printed' | 'scanned'>('codes');
+  const [honestSignTab, setHonestSignTab] = useState<'codes' | 'print' | 'base' | 'printed'>('codes');
   const [honestSignBaseCategory, setHonestSignBaseCategory] = useState('');
   const [honestSignBaseGender, setHonestSignBaseGender] = useState<'male' | 'female' | ''>('');
   const [honestSignUploadHistory, setHonestSignUploadHistory] = useState<any[]>([]);
   const [honestSignPrintedHistory, setHonestSignPrintedHistory] = useState<any[]>([]);
-  const [honestSignScannedHistory, setHonestSignScannedHistory] = useState<any[]>([]);
   const [supplierCategories, setSupplierCategories] = useState<string[]>([]);
   const [honestSignCategoryStats, setHonestSignCategoryStats] = useState<Array<{ category: string; total: number; inBase: number; printed: number; scanned: number }>>([]);
   const [loadingCategories, setLoadingCategories] = useState(false);
@@ -509,44 +664,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     setHonestSignPrintedHistory(history);
   };
 
-  const fetchHonestSignScannedHistory = async () => {
-    if (!honestSignSupplierId) return;
-
-    const pageSize = 1000;
-    const allCodes: any[] = [];
-    let from = 0;
-
-    while (true) {
-      const { data, error } = await supabase
-        .from('unified_honest_sign_codes')
-        .select('file_name, created_at, category, gender')
-        .eq('supplier_id', honestSignSupplierId)
-        .eq('file_name', 'Отсканировано')
-        .order('created_at', { ascending: false })
-        .range(from, from + pageSize - 1);
-
-      if (error) {
-        console.error('Error loading scanned HS history:', error);
-        setHonestSignScannedHistory([]);
-        return;
-      }
-
-      const chunk = data || [];
-      allCodes.push(...chunk);
-      if (chunk.length < pageSize) break;
-      from += pageSize;
-    }
-
-    setHonestSignScannedHistory(
-      allCodes.map((code) => ({
-        file_name: code.file_name,
-        created_at: code.created_at,
-        category: normalizeHSCategory(code.category),
-        gender: normalizeHSGender(code.gender)
-      }))
-    );
-  };
-
   const fetchHonestSignCategoryStats = async () => {
     if (!honestSignSupplierId) return;
 
@@ -605,17 +722,21 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     if (honestSignSupplierId) {
         fetchSupplierCategories(honestSignSupplierId);
         fetchHonestSignUploadHistory();
-        fetchHonestSignPrintedHistory();
-        fetchHonestSignScannedHistory();
         fetchHonestSignCategoryStats();
     } else {
         setSupplierCategories([]);
         setHonestSignUploadHistory([]);
         setHonestSignPrintedHistory([]);
-        setHonestSignScannedHistory([]);
         setHonestSignCategoryStats([]);
     }
   }, [honestSignSupplierId]);
+
+  // Тяжёлые истории (десятки тысяч строк) грузим лениво — только при открытии
+  // соответствующей вкладки, иначе они тормозят «Базу кодов» при каждом выборе поставщика.
+  useEffect(() => {
+    if (!honestSignSupplierId) return;
+    if (honestSignTab === 'printed') fetchHonestSignPrintedHistory();
+  }, [honestSignSupplierId, honestSignTab]);
 
   useEffect(() => {
     if (!honestSignSupplierId && suppliers.length > 0) {
@@ -775,7 +896,16 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [reportTotals, setReportTotals] = useState({ items: 0, supplies: 0, avgPriceInStock: 0 });
   const [loadingReports, setLoadingReports] = useState(false);
   // Сводная статистика (раздел Отчёты) — за период
-  const reportsSummaryDefaultRange = () => { const e = new Date(); const s = new Date(); s.setDate(s.getDate() - 29); return { start: s.toISOString().slice(0, 10), end: e.toISOString().slice(0, 10) }; };
+  // Даты/периоды считаем по Москве (Europe/Moscow), независимо от часового пояса устройства.
+  const MSK_TZ = 'Europe/Moscow';
+  const mskYmd = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: MSK_TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+  const mskTodayYmd = () => mskYmd(new Date());
+  // Границы месяца (по Москве) для месяца, в который попадает d.
+  const mskMonthBounds = (d: Date) => { const ymd = mskYmd(d); const [y, m] = ymd.split('-').map(Number); const last = new Date(y, m, 0).getDate(); return { start: `${y}-${String(m).padStart(2, '0')}-01`, end: `${y}-${String(m).padStart(2, '0')}-${String(last).padStart(2, '0')}` }; };
+  // Перебор дней периода как строк YYYY-MM-DD без дрейфа часовых поясов.
+  const eachDayYmd = (startStr: string, endStr: string) => { const out: string[] = []; if (!startStr || !endStr) return out; let d = new Date(startStr + 'T00:00:00Z'); const e = new Date(endStr + 'T00:00:00Z'); let guard = 0; while (d <= e && guard < 4000) { out.push(d.toISOString().slice(0, 10)); d = new Date(d.getTime() + 86400000); guard++; } return out; };
+  const ymdLocalDate = (d: Date) => mskYmd(d);
+  const reportsSummaryDefaultRange = () => { const e = new Date(); const s = new Date(); s.setDate(s.getDate() - 29); return { start: ymdLocalDate(s), end: ymdLocalDate(e) }; };
   const [reportsSummaryRange, setReportsSummaryRange] = useState(reportsSummaryDefaultRange());
   const [reportsSummary, setReportsSummary] = useState<{ temp: number; staff: number; zpTemp: number; zpStaff: number; delivery: number; packaging: number; daily: Array<[string, { temp: number; staff: number }]>; maxDay: number } | null>(null);
   const [reportsSummaryLoading, setReportsSummaryLoading] = useState(false);
@@ -814,8 +944,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         supabase.from('packaging_purchase_log').select('quantity, price, delivery, kind, created_at').is('deleted_at', null).gte('created_at', `${startStr}T00:00:00`).lte('created_at', `${endStr}T23:59:59`),
       ]);
       const days = new Map<string, { temp: number; staff: number }>();
-      const sD = new Date(startStr + 'T00:00:00'); const eD = new Date(endStr + 'T00:00:00');
-      for (let d = new Date(sD); d <= eD; d.setDate(d.getDate() + 1)) days.set(d.toISOString().slice(0, 10), { temp: 0, staff: 0 });
+      // Ключи дней — строки YYYY-MM-DD без дрейфа TZ (совпадают с колонкой date).
+      eachDayYmd(startStr, endStr).forEach((k) => days.set(k, { temp: 0, staff: 0 }));
       let temp = 0, staff = 0, zpTemp = 0, zpStaff = 0;
       (tr.data || []).forEach((r: any) => { if (!isAssemblyTempType(r.work_comment)) return; const q = Number(r.quantity || 0); const dk = String(r.date).slice(0, 10); temp += q; zpTemp += Number(r.earnings || 0); if (days.has(dk)) days.get(dk)!.temp += q; });
       (sr.data || []).forEach((r: any) => { if (isAssemblyExcludedStaffRate(r.work_rates?.name)) return; const q = Number(r.quantity || 0); const dk = String(r.date).slice(0, 10); staff += q; zpStaff += q * Number(r.work_rates?.price || 0); if (days.has(dk)) days.get(dk)!.staff += q; });
@@ -871,12 +1001,59 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   // Доп. агрегации по отчёту: по складам / ПВЗ / стране / дням (для инфографики).
   const [uploadedReportGeo, setUploadedReportGeo] = useState<{ byWarehouse: any[]; byOffice: any[]; byCountry: any[]; dailyTotals: any[] } | null>(null);
   const [summaryProdSort, setSummaryProdSort] = useState<{ field: string; dir: 'asc' | 'desc' }>({ field: 'profit', dir: 'desc' });
+  const [summaryProfitFilter, setSummaryProfitFilter] = useState<'all' | 'pos' | 'neg'>('all');
+  const [geoView, setGeoView] = useState<'map' | 'list'>('map');
+  // Фильтр карточки «Логистика по товарам»: все / аномальная (дорогая) логистика / много отмен / много заказов.
+  const [logProductFilter, setLogProductFilter] = useState<'all' | 'anom' | 'cancel' | 'order'>('all');
+  // Сравнение текущей сводки с другим сохранённым периодом (бейджи ▲/▼ на карточках дашборда).
+  const [compareReportId, setCompareReportId] = useState<string>('');
+  const [compareSummary, setCompareSummary] = useState<any | null>(null);
+  // Погода по ГЛАВНЫМ регионам продаж (топ-3 города по выручке) для графика «Продажи по дням».
+  const [weatherRegions, setWeatherRegions] = useState<Array<{ name: string; share: number; temps: Record<string, number> }>>([]);
+  useEffect(() => {
+    const geo = uploadedReportGeo;
+    const dt = geo?.dailyTotals || [];
+    const keys = dt.map((d: any) => String(d?.key || '').slice(0, 10)).filter(Boolean).sort();
+    if (keys.length === 0) { setWeatherRegions([]); return; }
+    const start = keys[0], end = keys[keys.length - 1];
+    const offices = (geo?.byOffice || []) as any[];
+    const total = offices.reduce((a, o) => a + Number(o?.sales_net || 0), 0) || 1;
+    const tops = offices
+      .map((o) => { const nm = String(o?.key || o?.name || '').trim(); return { name: nm, sales: Number(o?.sales_net || 0), coord: ruFindCoord(nm) }; })
+      .filter((o) => o.coord && o.name)
+      .sort((a, b) => b.sales - a.sales)
+      .slice(0, 3);
+    if (tops.length === 0) tops.push({ name: 'Москва', sales: total, coord: [37.62, 55.75] });
+    let alive = true;
+    (async () => {
+      const parse = (j: any) => {
+        const t = j?.daily?.time, v = j?.daily?.temperature_2m_mean;
+        if (!Array.isArray(t) || !Array.isArray(v)) return null;
+        const m: Record<string, number> = {};
+        t.forEach((d: string, i: number) => { const x = v[i]; if (x != null) m[d] = Math.round(Number(x)); });
+        return Object.keys(m).length ? m : null;
+      };
+      const out: Array<{ name: string; share: number; temps: Record<string, number> }> = [];
+      for (const c of tops) {
+        const base = `latitude=${c.coord![1]}&longitude=${c.coord![0]}&start_date=${start}&end_date=${end}&daily=temperature_2m_mean&timezone=Europe%2FMoscow`;
+        let m: Record<string, number> | null = null;
+        try { const r = await fetch(`https://archive-api.open-meteo.com/v1/archive?${base}`); m = parse(await r.json()); } catch {}
+        if (!m) { try { const r = await fetch(`https://api.open-meteo.com/v1/forecast?${base}`); m = parse(await r.json()); } catch {} }
+        out.push({ name: c.name, share: c.sales / total * 100, temps: m || {} });
+      }
+      if (alive) setWeatherRegions(out);
+    })();
+    return () => { alive = false; };
+  }, [uploadedReportGeo]);
   const [summaryExpanded, setSummaryExpanded] = useState<Record<string, boolean>>({});
+  // Сортировка детализации размеров в сводке (по каждому товару отдельно).
+  const [summarySizeSort, setSummarySizeSort] = useState<Record<string, { key: string; dir: 'asc' | 'desc' }>>({});
+  const [summaryLogProblemOnly, setSummaryLogProblemOnly] = useState(false);
   const [uploadedCostByKey, setUploadedCostByKey] = useState<Record<string, string>>({});
   const [uploadedSelectedSupplierId, setUploadedSelectedSupplierId] = useState<string>('');
   const [uploadedPhotoMap, setUploadedPhotoMap] = useState<Record<string, string>>({});
   const [uploadedPhotoLoading, setUploadedPhotoLoading] = useState(false);
-  const MAX_UPLOAD_ROWS = 100000;
+  const MAX_UPLOAD_ROWS = 250000;
   const TURBO_MODE_ROWS = 10000;
   const UPLOAD_RAW_ROWS_DB_LIMIT = 0;
   const ANALYTICS_JSON_DB_LIMIT = 2500;
@@ -898,12 +1075,20 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [uploadedHistoryYear, setUploadedHistoryYear] = useState<number | null>(null);
   const [uploadedHistorySelectedIds, setUploadedHistorySelectedIds] = useState<Record<string, boolean>>({});
   const [uploadedHistoryCollapsedMonths, setUploadedHistoryCollapsedMonths] = useState<Record<number, boolean>>({});
+  // Ручной выбор недели для отчёта без столбца «Дата продажи».
+  const [manualWeekModal, setManualWeekModal] = useState<{ open: boolean; weekStart: string; pending: null | { fileName: string; rows: any[]; summary: any; analytics: any[]; sourceFile: File | null } }>({ open: false, weekStart: mskTodayYmd(), pending: null });
   const [uploadedRawHistoryPickerOpen, setUploadedRawHistoryPickerOpen] = useState(false);
   const [historySel, setHistorySel] = useState<Record<string, boolean>>({});
   const [rawSel, setRawSel] = useState<Record<string, boolean>>({});
   const [uploadedRawHistoryCollapsedMonths, setUploadedRawHistoryCollapsedMonths] = useState<Record<number, boolean>>({});
   const [uploadedRawReports, setUploadedRawReports] = useState<any[]>([]);
   const [uploadedRawHistoryYear, setUploadedRawHistoryYear] = useState<number | null>(null);
+  // WB API — отчёты о реализации (еженедельные, появляются каждый понедельник)
+  const [wbApiPickerOpen, setWbApiPickerOpen] = useState(false);
+  const [wbApiReports, setWbApiReports] = useState<any[]>([]);
+  const [wbApiBusy, setWbApiBusy] = useState<string>('');
+  const [wbApiCollapsed, setWbApiCollapsed] = useState<Record<string, boolean>>({});
+  const [wbApiYear, setWbApiYear] = useState<number | null>(null);
   const [uploadedPhotoPreview, setUploadedPhotoPreview] = useState<{ src: string; title?: string } | null>(null);
   const [uploadedSizeDetailsOpen, setUploadedSizeDetailsOpen] = useState<Record<string, boolean>>({});
   const [uploadedSizeSortByRow, setUploadedSizeSortByRow] = useState<Record<string, { key: string; dir: 'asc' | 'desc' }>>({});
@@ -977,8 +1162,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   // Employee Report Modal State
   const [isEmployeeReportModalOpen, setIsEmployeeReportModalOpen] = useState(false);
   const [employeeReportRange, setEmployeeReportRange] = useState({
-    start: new Date().toISOString().split('T')[0],
-    end: new Date().toISOString().split('T')[0]
+    start: mskTodayYmd(),
+    end: mskTodayYmd()
   });
 
   // Employees State
@@ -1022,17 +1207,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   };
 
   const getCwTimeRate = () => cwWorkRates.find((r: any) => String(r?.name || '').trim().toLowerCase() === CW_TIME_RATE_NAME.toLowerCase());
-  const getDatesInRange = (start: string, end: string) => {
-    if (!start || !end) return [] as string[];
-    const out: string[] = [];
-    const cur = new Date(`${start}T00:00:00`);
-    const finish = new Date(`${end}T00:00:00`);
-    while (cur <= finish) {
-      out.push(cur.toISOString().split('T')[0]);
-      cur.setDate(cur.getDate() + 1);
-    }
-    return out;
-  };
+  const getDatesInRange = (start: string, end: string) => eachDayYmd(start, end);
   const getCwTimeRatePrice = () => Number(getCwTimeRate()?.price ?? CW_TIME_RATE_PRICE);
   const getCwRateEmployeeConfig = (rateId: string) => {
     const raw = cwWorkRateEmployeePrices[String(rateId)] as any;
@@ -1212,7 +1387,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   };
   const [cwRateForm, setCwRateForm] = useState({ name: '', price: '' });
   const [cwRateHistoryModal, setCwRateHistoryModal] = useState<{ open: boolean; rateId: string; rateName: string }>({ open: false, rateId: '', rateName: '' });
-  const [cwRateBulkModal, setCwRateBulkModal] = useState<{ open: boolean; rateId: string; rateName: string; oldPrice: string; price: string; start: string; end: string }>({ open: false, rateId: '', rateName: '', oldPrice: '', price: '', start: new Date().toISOString().split('T')[0], end: new Date().toISOString().split('T')[0] });
+  const [cwRateBulkModal, setCwRateBulkModal] = useState<{ open: boolean; rateId: string; rateName: string; oldPrice: string; price: string; start: string; end: string }>({ open: false, rateId: '', rateName: '', oldPrice: '', price: '', start: mskTodayYmd(), end: mskTodayYmd() });
   const [cwPackagingRateForm, setCwPackagingRateForm] = useState({ name: '', price: '' });
   const [cwSelectedPeriod, setCwSelectedPeriod] = useState(new Date());
   const [cwReportModalOpen, setCwReportModalOpen] = useState(false);
@@ -1220,8 +1395,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [cwReportForm, setCwReportForm] = useState({
     employee_id: '',
     supplier_id: '',
-    start_date: new Date().toISOString().split('T')[0],
-    end_date: new Date().toISOString().split('T')[0]
+    start_date: mskTodayYmd(),
+    end_date: mskTodayYmd()
   });
   const [cwReportExcludedDates, setCwReportExcludedDates] = useState<string[]>([]);
   const [cwReportDatePickerOpen, setCwReportDatePickerOpen] = useState(false);
@@ -1282,18 +1457,18 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [showTempWorkerReportModal, setShowTempWorkerReportModal] = useState(false);
   const [tempWorkerReportForm, setTempWorkerReportForm] = useState(() => {
     const today = new Date();
-    const start = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
+    const start = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-01`;
     return { supplier_id: 'all', worker_name: 'all', paid_by_supplier_id: 'all', paid_status: 'all', start_date: start, end_date: today.toISOString().split('T')[0] };
   });
   const [generalReportForm, setGeneralReportForm] = useState(() => {
     const today = new Date();
-    const start = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
+    const start = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-01`;
     return { supplier_id: 'all', person_name: 'all', paid_by_supplier_id: 'all', paid_status: 'all', start_date: start, end_date: today.toISOString().split('T')[0] };
   });
   const [generalReportCwRows, setGeneralReportCwRows] = useState<any[]>([]);
   const [tempWorkerForm, setTempWorkerForm] = useState({
     supplier_id: '',
-    date: new Date().toISOString().split('T')[0],
+    date: mskTodayYmd(),
     worker_name: '',
     work_comment: '',
     quantity: '',
@@ -1308,13 +1483,16 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [tempWorkerEditForm, setTempWorkerEditForm] = useState({
     id: '',
     supplier_id: '',
-    date: new Date().toISOString().split('T')[0],
+    date: mskTodayYmd(),
     worker_name: '',
     work_comment: '',
+    isTime: false,
     quantity: '',
+    price: '',
     earnings: '',
     hours: ''
   });
+  const tempEditEarnings = (f: any) => f.isTime ? (Number(f.hours || 0) * Number(f.price || 0)) : (Number(f.quantity || 0) * Number(f.price || 0));
   const [tempWorkerPaymentModal, setTempWorkerPaymentModal] = useState<{ open: boolean; logId: string; mode: 'pay' | 'extra' | 'edit'; supplierId: string; amount: string; error?: string }>({ open: false, logId: '', mode: 'pay', supplierId: '', amount: '', error: '' });
   const [tempWorkerQuickPayWorkerFilter, setTempWorkerQuickPayWorkerFilter] = useState('all');
   const [tempWorkerQuickPayPayerSupplierId, setTempWorkerQuickPayPayerSupplierId] = useState('');
@@ -1329,7 +1507,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [deliverySupplyTypeNewName, setDeliverySupplyTypeNewName] = useState('');
   const [showDeliverySupplyTypeModal, setShowDeliverySupplyTypeModal] = useState(false);
   const [paymentReports, setPaymentReports] = useState<any[]>([]);
-  const [paymentReportsTab, setPaymentReportsTab] = useState<'delivery' | 'salary'>('delivery');
+  const [paymentReportsTab, setPaymentReportsTab] = useState<'delivery' | 'salary' | 'temp'>('delivery');
   const [paymentReportsLoading, setPaymentReportsLoading] = useState(false);
   const [paymentReportsSearch, setPaymentReportsSearch] = useState('');
   const [paymentReportsFrom, setPaymentReportsFrom] = useState('');
@@ -1342,7 +1520,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [deliveryDateStart, setDeliveryDateStart] = useState('');
   const [deliveryDateEnd, setDeliveryDateEnd] = useState('');
   const [deliveryForm, setDeliveryForm] = useState({
-    date: new Date().toISOString().split('T')[0],
+    date: mskTodayYmd(),
     courier: '',
     supply_type: '',
     amount: '',
@@ -1350,13 +1528,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   });
   const [deliveryReportForm, setDeliveryReportForm] = useState(() => {
     const today = new Date();
-    const start = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
+    const start = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-01`;
     return { supplier_id: 'all', courier: 'all', paid_by_supplier_id: 'all', paid_status: 'all', start_date: start, end_date: today.toISOString().split('T')[0] };
   });
   const [deliveryEditModal, setDeliveryEditModal] = useState<{ open: boolean; id: string; date: string; courier: string; supply_type: string; amount: string; rows: Array<{ supplier_id: string; boxes: string; pallets: string }> }>({
     open: false,
     id: '',
-    date: new Date().toISOString().split('T')[0],
+    date: mskTodayYmd(),
     courier: '',
     supply_type: '',
     amount: '',
@@ -1376,7 +1554,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   // Personal employee.permissions[tabId] overrides the role default.
   const [sectionRoleAccess, setSectionRoleAccess] = useState<Record<string, Record<string, 'allow' | 'deny'>>>({});
   const [sectionRoleAccessLoaded, setSectionRoleAccessLoaded] = useState(false);
-  const [adminPanelSection, setAdminPanelSection] = useState<'sections-emp' | 'sections-role' | 'buttons' | 'employees' | 'bots' | 'finance' | 'assembly'>('sections-emp');
+  const [adminPanelSection, setAdminPanelSection] = useState<'sections-emp' | 'sections-role' | 'buttons' | 'employees' | 'bots' | 'finance' | 'assembly' | 'push'>('sections-emp');
   const [selectedAccessEmployeeId, setSelectedAccessEmployeeId] = useState('');
 
   const fetchTempWorkerLogs = async () => {
@@ -1707,9 +1885,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const computeDeliveryInfographics = (list: any[]) => {
     const bySupplier = new Map<string, { supplierId: string; supplierName: string; boxes: number; pallets: number; amount: number; unpaidAmount: number; deliveries: number }>();
     (list || []).forEach((delivery: any) => {
-      // A pallet counts the same as a box for cost allocation.
-      const totalUnits = (delivery?.rows || []).reduce((sum: number, row: any) => sum + Number(row?.boxes || 0) + Number(row?.pallets || 0), 0) || 1;
-      (delivery?.rows || []).forEach((row: any) => {
+      // Стоимость доставки делим по КОРОБКАМ: цена коробки = сумма / всего коробок,
+      // затем у каждого поставщика = цена коробки × его коробки.
+      const rowsArr = (delivery?.rows || []);
+      // Коробки считаем как в карточках: паллета = BOXES_PER_PALLET коробок.
+      const effBoxesOf = (row: any) => Number(row?.boxes || 0) + Number(row?.pallets || 0) * BOXES_PER_PALLET;
+      const totalBoxes = rowsArr.reduce((sum: number, row: any) => sum + effBoxesOf(row), 0);
+      const totalUnits = rowsArr.reduce((sum: number, row: any) => sum + Number(row?.boxes || 0) + Number(row?.pallets || 0), 0) || 1;
+      const pricePerBox = totalBoxes > 0 ? Number(delivery?.amount || 0) / totalBoxes : 0;
+      rowsArr.forEach((row: any) => {
         const supplierId = String(row?.supplier_id || '');
         const boxes = Number(row?.boxes || 0);
         const pallets = Number(row?.pallets || 0);
@@ -1717,7 +1901,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         if (!supplierId || units <= 0) return;
         const supplierName = suppliers.find((s: any) => String(s.id) === supplierId)?.name || 'Без поставщика';
         const item = bySupplier.get(supplierId) || { supplierId, supplierName, boxes: 0, pallets: 0, amount: 0, unpaidAmount: 0, deliveries: 0 };
-        const allocatedAmount = Number(delivery?.amount || 0) * (units / totalUnits);
+        // делим по эффективным коробкам (как в карточках); резерв — по units
+        const allocatedAmount = totalBoxes > 0 ? pricePerBox * effBoxesOf(row) : Number(delivery?.amount || 0) * (units / totalUnits);
         item.boxes += boxes + pallets * BOXES_PER_PALLET; // 1 паллета = 16 коробок (для отображения)
         item.pallets += pallets;
         item.amount += allocatedAmount;
@@ -1858,7 +2043,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     const supplyType = String(deliveryForm.supply_type || '').trim();
     const newDelivery = {
       id: getSafeId(),
-      date: deliveryForm.date || new Date().toISOString().split('T')[0],
+      date: deliveryForm.date || mskTodayYmd(),
       courier,
       supply_type: supplyType,
       amount,
@@ -1905,7 +2090,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       }
 
       await saveDeliveryPersons([...(deliveryPersons || []), courier]);
-      setDeliveryForm({ date: new Date().toISOString().split('T')[0], courier: '', supply_type: '', amount: '', rows: [{ supplier_id: '', boxes: '', pallets: '' }] });
+      setDeliveryForm({ date: mskTodayYmd(), courier: '', supply_type: '', amount: '', rows: [{ supplier_id: '', boxes: '', pallets: '' }] });
       await loadDeliveryData();
       showToast('Доставка добавлена', 'success');
     } catch (error: any) {
@@ -1956,7 +2141,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     }
   };
 
-  const savePaymentReport = async (report: { kind: 'delivery' | 'salary'; title: string; amount: number; period_start?: string | null; period_end?: string | null; payload: any }) => {
+  const savePaymentReport = async (report: { kind: 'delivery' | 'salary' | 'temp'; title: string; amount: number; period_start?: string | null; period_end?: string | null; payload: any }) => {
     try {
       const createdBy = String(user?.id || currentEmployee?.id || '').trim();
       const row: any = {
@@ -2046,9 +2231,18 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     }
   };
 
+  // chat_id может прийти с мусором ("TG: 498924112", пробелы) — оставляем только цифры и ведущий минус.
+  const normalizeTgChatId = (raw: any): string => {
+    let s = String(raw ?? '').trim();
+    if (!s) return '';
+    const neg = s.startsWith('-');
+    s = s.replace(/\D/g, '');
+    return s ? (neg ? '-' + s : s) : '';
+  };
+
   // Auto write-off the paid amount from the payer's "Деньги на складе" balance.
   // Send a writeoff notification to the admin via the dedicated writeoff bot.
-  const notifyWriteoff = async (params: { amount: number; ownerTitle?: string; owner?: string; comment?: string; by?: string }) => {
+  const notifyWriteoff = async (params: { amount: number; ownerTitle?: string; owner?: string; comment?: string; by?: string; balanceAfter?: number }) => {
     try {
       const token = String(writeoffBotToken || '').trim();
       if (!token) return;
@@ -2057,24 +2251,88 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         `Сумма: ${Math.abs(Number(params.amount || 0)).toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽`,
         params.ownerTitle ? `Счёт: ${params.ownerTitle}` : '',
         params.comment ? `Назначение: ${params.comment}` : '',
+        typeof params.balanceAfter === 'number' ? `Остаток на складе: ${Number(params.balanceAfter).toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽` : '',
         params.by ? `Кто провёл: ${params.by}` : '',
         `Время: ${new Date().toLocaleString('ru-RU')}`,
       ].filter(Boolean);
       const msg = lines.join('\n');
       // Recipients: admin chat + the supplier bound to this money account (if any).
       const chats = new Set<string>();
-      const admin = String(writeoffAdminChatId || '').trim();
+      const admin = normalizeTgChatId(writeoffAdminChatId);
       if (admin) chats.add(admin);
+      let boundName = '';
       if (params.owner) {
         const boundSupplier = suppliers.find((s: any) => s.warehouse_money_owner === params.owner);
-        const supChat = String(boundSupplier?.telegram_chat_id || '').trim();
+        boundName = boundSupplier?.name || '';
+        const supChat = normalizeTgChatId(boundSupplier?.telegram_chat_id);
         if (supChat) chats.add(supChat);
       }
+      if (chats.size === 0) {
+        showToast('Уведомление о списании не отправлено: нет chat_id (привяжите поставщика с Telegram).', 'warning');
+        return;
+      }
+      const failed: string[] = [];
       for (const chat of chats) {
-        try { await telegramService.sendMessage(token, chat, msg); } catch (e) { console.warn('writeoff notify to', chat, 'failed', e); }
+        try {
+          await telegramService.sendMessage(token, chat, msg);
+        } catch (e: any) {
+          console.warn('writeoff notify to', chat, 'failed', e);
+          const raw = String(e?.message || '');
+          const reason = /chat not found/i.test(raw)
+            ? 'чат не найден — получатель должен открыть бота списаний и нажать Старт'
+            : raw.replace(/Telegram API \d+:\s*/, '').slice(0, 120) || 'ошибка отправки';
+          failed.push(`${chat}: ${reason}`);
+        }
+      }
+      if (failed.length > 0) {
+        showToast(`Списание проведено, но уведомление не доставлено${boundName ? ` (${boundName})` : ''}: ${failed.join('; ')}`, 'error');
       }
     } catch (e) {
       console.warn('writeoff notify failed', e);
+    }
+  };
+
+  // Отправить всю историю денег на складе (по владельцу) привязанному поставщику в Telegram.
+  const [sendingMoneyHistoryOwner, setSendingMoneyHistoryOwner] = useState<string | null>(null);
+  const handleSendWarehouseMoneyHistory = async (owner: WarehouseMoneyOwner, ownerTitle: string) => {
+    const token = String(writeoffBotToken || '').trim();
+    if (!token) { showToast('Не задан токен бота списаний', 'error'); return; }
+    const boundSupplier = suppliers.find((s: any) => s.warehouse_money_owner === owner);
+    const chatId = normalizeTgChatId(boundSupplier?.telegram_chat_id);
+    if (!boundSupplier) { showToast('К этому счёту не привязан поставщик («Деньги на складе»)', 'error'); return; }
+    if (!chatId) { showToast(`У поставщика «${boundSupplier?.name || ''}» не указан Telegram chat_id`, 'error'); return; }
+    const rows = [...(cwWarehouseMoneyRowsByOwner[owner] || [])].sort((a: any, b: any) =>
+      String(b.created_at || b.date || '').localeCompare(String(a.created_at || a.date || '')));
+    if (rows.length === 0) { showToast('История пуста', 'error'); return; }
+    const balance = cwWarehouseMoneyBalanceByOwner[owner] || 0;
+    const header = `💼 История «${ownerTitle}»\nБаланс: ${Math.round(balance).toLocaleString('ru-RU')} ₽\nОпераций: ${rows.length}\n`;
+    const lineFor = (r: any) => {
+      const amt = Number(r.amount || 0);
+      const when = new Date(r.created_at || r.date || Date.now()).toLocaleDateString('ru-RU');
+      const cmt = getWarehouseMoneyDisplayComment(r.comment) || '';
+      return `${amt >= 0 ? '➕' : '➖'} ${Math.abs(amt).toLocaleString('ru-RU')} ₽ · ${when}${cmt ? ` · ${cmt}` : ''}`;
+    };
+    // Разбиваем на сообщения по ~3500 символов (лимит Telegram 4096).
+    const chunks: string[] = [];
+    let buf = header;
+    for (const r of rows) {
+      const line = lineFor(r) + '\n';
+      if ((buf + line).length > 3500) { chunks.push(buf); buf = ''; }
+      buf += line;
+    }
+    if (buf.trim()) chunks.push(buf);
+    setSendingMoneyHistoryOwner(owner);
+    try {
+      for (const c of chunks) { await telegramService.sendMessage(token, chatId, c); }
+      showToast(`История отправлена поставщику «${boundSupplier?.name || ''}»`, 'success');
+    } catch (e: any) {
+      const raw = String(e?.message || 'ошибка');
+      const reason = /chat not found/i.test(raw)
+        ? `чат не найден — «${boundSupplier?.name || ''}» должен открыть бота списаний и нажать Старт`
+        : raw;
+      showToast('Не удалось отправить историю: ' + reason, 'error');
+    } finally {
+      setSendingMoneyHistoryOwner(null);
     }
   };
 
@@ -2090,7 +2348,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       }]);
       if (error) throw error;
       await fetchCwWarehouseMoneyHistory();
-      notifyWriteoff({ amount: total, owner, ownerTitle: getSupplierNameForOwner(owner), comment, by: currentEmployee?.full_name || currentEmployee?.login });
+      notifyWriteoff({ amount: total, owner, ownerTitle: getSupplierNameForOwner(owner), comment, by: currentEmployee?.full_name || currentEmployee?.login, balanceAfter: (cwWarehouseMoneyBalanceByOwner[owner as WarehouseMoneyOwner] || 0) - total });
     } catch (e: any) {
       console.warn('warehouse money writeoff failed', e);
       showToast('Оплата прошла, но списание со склада не удалось: ' + (e?.message || 'неизвестно'), 'warning');
@@ -2246,7 +2504,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     setDeliveryEditModal({
       open: true,
       id: String(delivery?.id || ''),
-      date: String(delivery?.date || new Date().toISOString().split('T')[0]).slice(0, 10),
+      date: String(delivery?.date || mskTodayYmd()).slice(0, 10),
       courier: String(delivery?.courier || ''),
       supply_type: String(delivery?.supply_type || ''),
       amount: String(delivery?.amount ?? ''),
@@ -2258,7 +2516,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     setDeliveryEditModal({
       open: false,
       id: '',
-      date: new Date().toISOString().split('T')[0],
+      date: mskTodayYmd(),
       courier: '',
       supply_type: '',
       amount: '',
@@ -2278,14 +2536,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
     const supplyType = String(deliveryEditModal.supply_type || '').trim();
     const next = (deliveryHistory || []).map((delivery: any) => String(delivery?.id) === deliveryId
-      ? { ...delivery, date: deliveryEditModal.date || new Date().toISOString().split('T')[0], courier, supply_type: supplyType, amount, rows }
+      ? { ...delivery, date: deliveryEditModal.date || mskTodayYmd(), courier, supply_type: supplyType, amount, rows }
       : delivery);
 
     try {
       const { error: logError } = await supabase
         .from('delivery_logs')
         .update({
-          date: deliveryEditModal.date || new Date().toISOString().split('T')[0],
+          date: deliveryEditModal.date || mskTodayYmd(),
           courier_name: courier,
           supply_type: supplyType || null,
           amount,
@@ -2538,6 +2796,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     }
     const payerSupplier = suppliers.find((s: any) => String(s.id) === String(tempWorkerQuickPayPayerSupplierId));
     const total = rows.reduce((sum: number, log: any) => sum + getTempWorkerRemainingAmount(log), 0);
+    // Состав отчёта фиксируем ДО оплаты (после остаток станет 0).
+    const reportItems = rows
+      .map((log: any) => ({ worker: String(log?.worker_name || log?.worker || ''), comment: String(log?.work_comment || log?.comment || ''), date: log?.date || null, amount: getTempWorkerRemainingAmount(log) }))
+      .filter((it: any) => it.amount > 0);
     if (!(await confirmDialog({ title: 'Подтверждение оплаты', tone: 'primary', confirmText: 'Оплатить', message: `Подтвердить оплату выбранных смен?\nКто оплатит: ${payerSupplier?.name || 'Поставщик'}\nСмен: ${rows.length}\nСумма: ${total.toFixed(2)} ₽` }))) return;
 
     setTempWorkerQuickPaySaving(true);
@@ -2572,6 +2834,19 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         total,
         `Оплата временным сотрудникам: ${workerNames.join(', ') || 'смены'} — ${rows.length} шт.`
       );
+
+      // Отчёт об оплате временных сотрудников → раздел «Отчёты об оплатах» (вкладка «Временные»).
+      await savePaymentReport({
+        kind: 'temp',
+        title: `Оплата временным: ${workerNames.join(', ') || 'смены'} (${reportItems.length})`,
+        amount: total,
+        payload: {
+          paid_by: payerSupplier?.name || '',
+          employee_name: workerNames.join(', '),
+          count: reportItems.length,
+          items: reportItems,
+        },
+      });
 
       showToast(`Оплачено смен: ${rows.length}`, 'success');
     } catch (error: any) {
@@ -2666,7 +2941,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const loadAssemblyDaily = async (startStr?: string, endStr?: string) => {
     try {
       const since = new Date(); since.setDate(since.getDate() - 29);
-      const sinceStr = startStr || since.toISOString().slice(0, 10);
+      const sinceStr = startStr || mskYmd(since);
       let tq = supabase.from('temporary_workers_logs').select('date, quantity, work_comment, worker_name, supplier_id, earnings').is('deleted_at', null).gte('date', sinceStr);
       let sq = supabase.from('work_logs').select('date, quantity, employee_id, supplier_id, work_rates(name, price)').is('deleted_at', null).gte('date', sinceStr);
       if (endStr) { tq = tq.lte('date', endStr); sq = sq.lte('date', endStr); }
@@ -2693,10 +2968,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
   const assemblyDaily = useMemo(() => {
     const days = new Map<string, { temp: number; staff: number; people: Record<string, number> }>();
-    for (let i = 29; i >= 0; i--) {
-      const d = new Date(); d.setDate(d.getDate() - i);
-      days.set(d.toISOString().slice(0, 10), { temp: 0, staff: 0, people: {} });
-    }
+    eachDayYmd(mskYmd(new Date(Date.now() - 29 * 86400000)), mskTodayYmd()).forEach((k) => days.set(k, { temp: 0, staff: 0, people: {} }));
     (assemblyTempRows || []).forEach((r: any) => {
       const dk = String(r.date || '').slice(0, 10);
       if (!days.has(dk) || !isAssemblyTempType(r.work_comment)) return;
@@ -2743,8 +3015,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     const inRange = (dk: string) => (!start || dk >= start) && (!end || dk <= end);
     const days = new Map<string, { temp: number; staff: number; people: Record<string, number> }>();
     if (start && end) {
-      const sD = new Date(start + 'T00:00:00'); const eD = new Date(end + 'T00:00:00');
-      for (let d = new Date(sD); d <= eD; d.setDate(d.getDate() + 1)) days.set(d.toISOString().slice(0, 10), { temp: 0, staff: 0, people: {} });
+      eachDayYmd(start, end).forEach((k) => days.set(k, { temp: 0, staff: 0, people: {} }));
     }
     const ensure = (dk: string) => { if (!days.has(dk)) days.set(dk, { temp: 0, staff: 0, people: {} }); return days.get(dk)!; };
     const sup = new Map<string, { temp: number; staff: number; earn: number }>();
@@ -3033,9 +3304,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
   // Fetch + aggregate assembled quantities per day (temp ФБО/ФБС + staff non-time/Пик).
   const buildAssemblyDailyForPdf = async (startStr?: string, endStr?: string, opts?: { supplierId?: string; personName?: string }) => {
-    const end = String(endStr || new Date().toISOString().slice(0, 10));
+    const end = String(endStr || mskTodayYmd());
     const startDef = new Date(); startDef.setDate(startDef.getDate() - 29);
-    const start = String(startStr || startDef.toISOString().slice(0, 10));
+    const start = String(startStr || mskYmd(startDef));
     const fSup = String(opts?.supplierId || 'all');
     const fPerson = String(opts?.personName || 'all');
     let tempData: any[] = []; let staffData: any[] = [];
@@ -3052,8 +3323,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     const days = new Map<string, { temp: number; staff: number }>();
     const sup = new Map<string, { temp: number; staff: number; earn: number }>();
     let earnTemp = 0; let earnStaff = 0;
-    const sD = new Date(start + 'T00:00:00'); const eD = new Date(end + 'T00:00:00');
-    for (let d = new Date(sD); d <= eD; d.setDate(d.getDate() + 1)) days.set(d.toISOString().slice(0, 10), { temp: 0, staff: 0 });
+    eachDayYmd(start, end).forEach((k) => days.set(k, { temp: 0, staff: 0 }));
     tempData.forEach((r: any) => { const dk = String(r.date || '').slice(0, 10); if (days.has(dk) && isAssemblyTempType(r.work_comment) && passSup(r) && passTempPerson(r)) { const q = Number(r.quantity || 0); const earn = Number(r.earnings || 0); days.get(dk)!.temp += q; earnTemp += earn; const sk = String(r.supplier_id || ''); const e = sup.get(sk) || { temp: 0, staff: 0, earn: 0 }; e.temp += q; e.earn += earn; sup.set(sk, e); } });
     staffData.forEach((r: any) => { const dk = String(r.date || '').slice(0, 10); if (!days.has(dk) || isAssemblyExcludedStaffRate(r.work_rates?.name) || !passSup(r) || !passStaffPerson(r)) return; const q = Number(r.quantity || 0); const earn = q * Number(r.work_rates?.price || 0); days.get(dk)!.staff += q; earnStaff += earn; const sk = String(r.supplier_id || ''); const e = sup.get(sk) || { temp: 0, staff: 0, earn: 0 }; e.staff += q; e.earn += earn; sup.set(sk, e); });
     const aList = Array.from(days.entries());
@@ -3146,9 +3416,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
   // Build "Сборка по поставщикам" Excel rows for a date range.
   const buildAssemblySupplierExcelRows = async (startStr?: string, endStr?: string) => {
-    const end = String(endStr || new Date().toISOString().slice(0, 10));
+    const end = String(endStr || mskTodayYmd());
     const startDef = new Date(); startDef.setDate(startDef.getDate() - 29);
-    const start = String(startStr || startDef.toISOString().slice(0, 10));
+    const start = String(startStr || mskYmd(startDef));
     try {
       const [tr, sr] = await Promise.all([
         supabase.from('temporary_workers_logs').select('quantity, work_comment, supplier_id, earnings').is('deleted_at', null).gte('date', start).lte('date', end),
@@ -3197,9 +3467,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       let asmRows: any[] = [];
       let asmSupRows: any[] = [];
       try {
-        const end = String(generalReportForm.end_date || new Date().toISOString().slice(0, 10));
+        const end = String(generalReportForm.end_date || mskTodayYmd());
         const startDef = new Date(); startDef.setDate(startDef.getDate() - 29);
-        const start = String(generalReportForm.start_date || startDef.toISOString().slice(0, 10));
+        const start = String(generalReportForm.start_date || mskYmd(startDef));
         const [tr, sr] = await Promise.all([
           supabase.from('temporary_workers_logs').select('date, quantity, work_comment, worker_name, supplier_id, earnings').is('deleted_at', null).gte('date', start).lte('date', end),
           supabase.from('work_logs').select('date, quantity, employee_id, supplier_id, work_rates(name, price)').is('deleted_at', null).gte('date', start).lte('date', end),
@@ -3883,7 +4153,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       if (error) throw error;
       showToast(`Добавлено смен: ${payloads.length}`, 'success');
       setShowTempWorkerModal(false);
-      setTempWorkerForm({ supplier_id: '', date: new Date().toISOString().split('T')[0], worker_name: '', work_comment: '', quantity: '', earnings: '', hours: '' });
+      setTempWorkerForm({ supplier_id: '', date: mskTodayYmd(), worker_name: '', work_comment: '', quantity: '', earnings: '', hours: '' });
       setTempWorkerLines([makeTempLine()]);
       if (showTempWorkerHistory) fetchTempWorkerLogs();
     } catch (error: any) {
@@ -3893,15 +4163,23 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   };
 
   const handleOpenEditTempWorkerLog = (log: any) => {
+    const hours = Number(log.hours || 0);
+    const quantity = Number(log.quantity || 0);
+    const earnings = Number(log.earnings || 0);
+    const isTime = hours > 0;
+    // Восстанавливаем цену из заработка: почасовая = заработок/часы, сборка = заработок/кол-во.
+    const price = isTime ? (hours > 0 ? earnings / hours : 0) : (quantity > 0 ? earnings / quantity : 0);
     setTempWorkerEditForm({
       id: log.id,
       supplier_id: log.supplier_id || '',
-      date: log.date || new Date().toISOString().split('T')[0],
+      date: log.date || mskTodayYmd(),
       worker_name: log.worker_name || log.worker || '',
       work_comment: log.work_comment || log.comment || '',
-      quantity: String(log.quantity ?? ''),
-      earnings: String(log.earnings ?? ''),
-      hours: String(log.hours ?? ''),
+      isTime,
+      quantity: quantity ? String(quantity) : '',
+      price: price ? String(Number(price.toFixed(2))) : '',
+      earnings: earnings ? String(earnings) : '',
+      hours: hours ? String(hours) : '',
     });
     setShowTempWorkerEditModal(true);
   };
@@ -3909,7 +4187,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const handleUpdateTempWorkerLog = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!tempWorkerEditForm.id) return;
-    if (!tempWorkerEditForm.supplier_id || !tempWorkerEditForm.worker_name.trim() || !tempWorkerEditForm.earnings || !tempWorkerEditForm.hours) {
+    const earningsCalc = tempEditEarnings(tempWorkerEditForm);
+    const okQty = tempWorkerEditForm.isTime ? Number(tempWorkerEditForm.hours || 0) > 0 : Number(tempWorkerEditForm.quantity || 0) > 0;
+    if (!tempWorkerEditForm.supplier_id || !tempWorkerEditForm.worker_name.trim() || !okQty || earningsCalc <= 0) {
       showToast('Заполните все обязательные поля', 'error');
       return;
     }
@@ -3920,9 +4200,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         date: tempWorkerEditForm.date,
         worker_name: tempWorkerEditForm.worker_name.trim(),
         work_comment: tempWorkerEditForm.work_comment.trim(),
-        quantity: Number(tempWorkerEditForm.quantity || 0),
-        earnings: parseFloat(tempWorkerEditForm.earnings),
-        hours: parseFloat(tempWorkerEditForm.hours),
+        quantity: tempWorkerEditForm.isTime ? 0 : Number(tempWorkerEditForm.quantity || 0),
+        earnings: earningsCalc,
+        hours: tempWorkerEditForm.isTime ? Number(tempWorkerEditForm.hours || 0) : 0,
       };
 
       let { error } = await supabase
@@ -4019,8 +4299,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   // Reports Section Report State
   const [reportsReportModalOpen, setReportsReportModalOpen] = useState(false);
   const [reportsReportForm, setReportsReportForm] = useState({
-    start: new Date().toISOString().split('T')[0],
-    end: new Date().toISOString().split('T')[0],
+    start: mskTodayYmd(),
+    end: mskTodayYmd(),
     supplier_id: '',
   });
   const [reportsReportResult, setReportsReportResult] = useState<any>(null);
@@ -4134,7 +4414,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   });
 
   // Purchase Packaging State
-  const [cwPurchaseForm, setCwPurchaseForm] = useState<{ purchase_date: string; supplier_ids: string[] }>({ purchase_date: new Date().toISOString().slice(0, 10), supplier_ids: [] });
+  const [cwPurchaseForm, setCwPurchaseForm] = useState<{ purchase_date: string; supplier_ids: string[] }>({ purchase_date: mskTodayYmd(), supplier_ids: [] });
   const [cwPurchaseRows, setCwPurchaseRows] = useState<Array<{ id: string; quantity: string; size: string; price: string; delivery: string; newPrice?: boolean }>>([{ id: getSafeId(), quantity: '', size: '', price: '', delivery: '', newPrice: false }]);
   const [cwPurchaseOtherRows, setCwPurchaseOtherRows] = useState<Array<{ id: string; item_name: string; price: string }>>([{ id: getSafeId(), item_name: '', price: '' }]);
   const [cwPurchaseHistory, setCwPurchaseHistory] = useState<any[]>([]);
@@ -4252,8 +4532,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     setCwWorkRates(data || []);
     await loadCwWorkRateEmployeePrices(data || []);
     if (cwSelectedEmployee?.id) {
-      const startOfMonth = new Date(cwSelectedPeriod.getFullYear(), cwSelectedPeriod.getMonth(), 1).toISOString().split('T')[0];
-      const endOfMonth = new Date(cwSelectedPeriod.getFullYear(), cwSelectedPeriod.getMonth() + 1, 0).toISOString().split('T')[0];
+      const startOfMonth = `${cwSelectedPeriod.getFullYear()}-${String(cwSelectedPeriod.getMonth() + 1).padStart(2, '0')}-01`;
+      const endOfMonth = `${cwSelectedPeriod.getFullYear()}-${String(cwSelectedPeriod.getMonth() + 1).padStart(2, '0')}-${String(new Date(cwSelectedPeriod.getFullYear(), cwSelectedPeriod.getMonth() + 1, 0).getDate()).padStart(2, '0')}`;
       const { data: refreshedLogs } = await supabase.from('work_logs').select('*').eq('employee_id', cwSelectedEmployee.id).gte('date', startOfMonth).lte('date', endOfMonth).is('deleted_at', null);
       setCwWorkLogs(refreshedLogs || []);
     }
@@ -4383,7 +4663,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       isOpen: true,
       id: String(log.id || ''),
       type: String(log.type || 'PURCHASE'),
-      date: new Date(log.created_at).toISOString().split('T')[0],
+      date: mskYmd(new Date(log.created_at)),
       quantity: String(log.quantity ?? 0),
       items_quantity: String(log.items_quantity ?? 0),
       delivery_price: String(log.delivery_price ?? 0),
@@ -4702,7 +4982,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
     if (mode === 'writeoff') {
       const ownerTitle = WAREHOUSE_MONEY_OWNERS.find((o) => o.id === owner)?.title || owner;
-      notifyWriteoff({ amount, owner, ownerTitle, comment: form.comment, by: currentEmployee?.full_name || currentEmployee?.login });
+      notifyWriteoff({ amount, owner, ownerTitle, comment: form.comment, by: currentEmployee?.full_name || currentEmployee?.login, balanceAfter: (cwWarehouseMoneyBalanceByOwner[owner] || 0) - amount });
     }
 
     setCwWarehouseMoneyForms((prev) => ({
@@ -4733,10 +5013,21 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
               <div className="text-xs text-slate-500">Баланс и история операций</div>
             </div>
           </div>
-          <div className="shrink-0 text-right">
-            <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Баланс</div>
-            <div className={'text-lg font-extrabold leading-tight ' + ownerConfig.balanceClass}>
-              {Math.floor(balance).toLocaleString('ru-RU')} ₽
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={() => handleSendWarehouseMoneyHistory(owner, ownerConfig.title)}
+              disabled={sendingMoneyHistoryOwner === owner}
+              title="Отправить всю историю денег привязанному поставщику в Telegram"
+              className="flex h-9 w-9 items-center justify-center rounded-xl bg-sky-50 text-sky-600 ring-1 ring-sky-100 hover:bg-sky-100 disabled:opacity-50"
+            >
+              {sendingMoneyHistoryOwner === owner ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            </button>
+            <div className="text-right">
+              <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Баланс</div>
+              <div className={'text-lg font-extrabold leading-tight ' + ownerConfig.balanceClass}>
+                {Math.floor(balance).toLocaleString('ru-RU')} ₽
+              </div>
             </div>
           </div>
         </div>
@@ -4942,8 +5233,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
   useEffect(() => {
     if (cwSelectedEmployee) {
-      const startOfMonth = new Date(cwSelectedPeriod.getFullYear(), cwSelectedPeriod.getMonth(), 1).toISOString().split('T')[0];
-      const endOfMonth = new Date(cwSelectedPeriod.getFullYear(), cwSelectedPeriod.getMonth() + 1, 0).toISOString().split('T')[0];
+      const startOfMonth = `${cwSelectedPeriod.getFullYear()}-${String(cwSelectedPeriod.getMonth() + 1).padStart(2, '0')}-01`;
+      const endOfMonth = `${cwSelectedPeriod.getFullYear()}-${String(cwSelectedPeriod.getMonth() + 1).padStart(2, '0')}-${String(new Date(cwSelectedPeriod.getFullYear(), cwSelectedPeriod.getMonth() + 1, 0).getDate()).padStart(2, '0')}`;
 
       supabase.from('work_logs')
         .select('*')
@@ -5139,6 +5430,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         ownerTitle,
         comment: `Оплата ЗП${period ? ` (${period.label})` : ''}: ${selected.map((r) => r.employee_name).join(', ')}${finesTotal > 0 ? ` | штрафы −${finesTotal.toLocaleString('ru-RU')}₽` : ''}`,
         by: currentEmployee?.full_name || currentEmployee?.login,
+        balanceAfter: (cwWarehouseMoneyBalanceByOwner[salaryPayOwner] || 0) - netTotal,
       });
       setSalaryPayFines([]);
       showToast(`Оплачено ЗП: ${selected.length}${finesTotal > 0 ? ` (с учётом штрафов)` : ''}`, 'success');
@@ -5282,7 +5574,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       }
 
       const blob = new Blob([JSON.stringify(dbData, null, 2)], { type: 'application/json' });
-      const fileName = `backup_${new Date().toISOString().split('T')[0]}_${new Date().getHours()}h.json`;
+      const fileName = `backup_${mskTodayYmd()}_${new Date().getHours()}h.json`;
 
       const formData = new FormData();
       formData.append('chat_id', backupChatId);
@@ -5447,6 +5739,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           .is('deleted_at', null)
           .not('honest_sign_code', 'is', null)
           .neq('honest_sign_code', '')
+          .order('id', { ascending: true })
           .range(from, from + pageSize - 1);
 
         if (error) throw error;
@@ -5495,10 +5788,19 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       }, {});
 
       const allBoxIds = (allBoxes || []).map((b: any) => b.id);
-      const countItems = await fetchSupplyItemsWithHonestSign(allBoxIds, 'box_id');
+      // Одна выборка строк ЧЗ для всех целей (счётчик + пол). Дедуп по id —
+      // страховка от возможных дублей строк на границах страниц пагинации.
+      const itemsRaw = await fetchSupplyItemsWithHonestSign(allBoxIds, 'id, box_id, honest_sign_code');
+      const seenItemIds = new Set<string>();
+      const itemsWithCodes = itemsRaw.filter((item: any) => {
+        const id = String(item?.id || '');
+        if (!id || seenItemIds.has(id)) return false;
+        seenItemIds.add(id);
+        return true;
+      });
 
       const boxCounts: Record<string, number> = {};
-      countItems.forEach((item: any) => {
+      itemsWithCodes.forEach((item: any) => {
         const boxId = String(item?.box_id || '');
         if (!boxId) return;
         boxCounts[boxId] = (boxCounts[boxId] || 0) + 1;
@@ -5511,7 +5813,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       });
 
       try {
-        const itemsWithCodes = await fetchSupplyItemsWithHonestSign(allBoxIds, 'box_id, honest_sign_code');
         const uniqueCodes = Array.from(new Set(itemsWithCodes.map((item: any) => String(item?.honest_sign_code || '').trim()).filter(Boolean)));
         const codeGenderMap = new Map<string, string>();
         const hsChunkSize = 1000;
@@ -5616,7 +5917,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       setShowReturnCodesModal(false);
       fetchHonestSignUploadHistory();
       fetchHonestSignPrintedHistory();
-      fetchHonestSignScannedHistory();
       fetchHonestSignCategoryStats();
     } catch (e: any) {
       console.error('Return codes error:', e);
@@ -5851,6 +6151,43 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           headers: ['Баркод товара', 'Честный знак', 'Номер поставки'],
           widths: [20, 50, 30],
         },
+      ]);
+    } catch (error: any) {
+      console.error('Export error:', error);
+      showToast('Ошибка экспорта: ' + error.message, 'error');
+    }
+  };
+
+  const handleDownloadHonestSignSupply = async (supply: any) => {
+    try {
+      const { data: boxes, error: boxesError } = await supabase
+        .from('boxes')
+        .select('id')
+        .eq('supply_id', supply.id)
+        .is('deleted_at', null);
+
+      if (boxesError) throw boxesError;
+      const boxIds = (boxes || []).map((b: any) => b.id);
+      if (!boxIds.length) { showToast('Коробки не найдены', 'error'); return; }
+
+      const itemsRaw = await fetchSupplyItemsWithHonestSign(boxIds, 'id, honest_sign_code, product:products(barcode)');
+      const seen = new Set<string>();
+      const items = itemsRaw.filter((it: any) => {
+        const id = String(it?.id || '');
+        if (!id || seen.has(id)) return false;
+        seen.add(id); return true;
+      });
+      if (!items.length) { showToast('Коды не найдены', 'error'); return; }
+
+      const rows = items.map((item: any) => ({
+        'Баркод товара': (item.product as any)?.barcode || '',
+        'Честный знак': item.honest_sign_code,
+        'Номер поставки': supply.name || '',
+      }));
+
+      const safe = String(supply.name || 'supply').replace(/[\\/:*?"<>|]/g, '_');
+      await downloadWorkbook(`ЧЗ_${safe}.xlsx`, [
+        { name: 'Честный Знак', rows, headers: ['Баркод товара', 'Честный знак', 'Номер поставки'], widths: [20, 50, 30] },
       ]);
     } catch (error: any) {
       console.error('Export error:', error);
@@ -6288,6 +6625,25 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
   // Supplies State
   const [supplyStep, setSupplyStep] = useState<'LIST' | 'SUPPLY' | 'BOX' | 'HONEST_SIGN'>('LIST');
+  // Активный сборщик (для учёта выработки по сканам). Сбрасывается ежедневно.
+  const [activeScannerEmployee, setActiveScannerEmployeeState] = useState<{ id: string; name: string } | null>(() => {
+    try {
+      const raw = localStorage.getItem('scladpro_active_scanner');
+      if (!raw) return null;
+      const o = JSON.parse(raw);
+      if (o && o.id && o.date === mskTodayYmd()) return { id: o.id, name: o.name };
+    } catch {}
+    return null;
+  });
+  const setActiveScannerEmployee = useCallback((emp: { id: string; name: string } | null) => {
+    setActiveScannerEmployeeState(emp);
+    try {
+      if (emp) localStorage.setItem('scladpro_active_scanner', JSON.stringify({ ...emp, date: mskTodayYmd() }));
+      else localStorage.removeItem('scladpro_active_scanner');
+    } catch {}
+  }, []);
+  // Кто пишется в скан: активный бейдж > залогиненный сотрудник.
+  const resolveScannerId = useCallback(() => activeScannerEmployee?.id || (currentEmployee as any)?.id || null, [activeScannerEmployee, currentEmployee]);
   const [currentSupply, setCurrentSupply] = useState<Supply | null>(null);
   const [currentBox, setCurrentBox] = useState<SupplyBox | null>(null);
   const [scannedItem, setScannedItem] = useState<Product | null>(null);
@@ -7186,7 +7542,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         doc.text(footerLabel, layout.fboBoxes.footerX, layout.fboBoxes.footerY, { align: 'center' });
       }
 
-      doc.save(`fbo_boxes_${supplierName.replace(/\s+/g, '_')}_${total}_${new Date().toISOString().slice(0, 10)}.pdf`);
+      doc.save(`fbo_boxes_${supplierName.replace(/\s+/g, '_')}_${total}_${mskTodayYmd()}.pdf`);
       showToast(`Сформировано этикеток: ${total}`, 'success');
     } catch (e: any) {
       showToast('Ошибка генерации этикеток коробов: ' + (e?.message || 'неизвестно'), 'error');
@@ -7517,8 +7873,17 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
        showToast('Раскладка исправлена', 'info');
     }
 
+    if (tryHandleWorkerBadge(input)) { setBoxInput(''); return; }
+
     const normalized = String(input || '').trim();
-    if (normalized === 'ACTION:GENERATE_BOX' || normalized === 'action:generate_box') {
+    // Сканер иногда присылает ';' вместо ':' — ловим оба варианта по подстроке,
+    // иначе создаётся мусорная коробка с именем 'ACTION;GENERATE_BOX'.
+    const normUpper = normalized.toUpperCase();
+    if (normUpper.includes('NEW_BOX')) {
+      finishCurrentBoxAndReturn();
+      return;
+    }
+    if (normUpper.includes('GENERATE_BOX')) {
       await createNextBoxInCurrentSupply();
       return;
     }
@@ -7666,8 +8031,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       return;
     }
 
-    const { data: existingBoxes } = await supabase.from('boxes').select('name').eq('supply_id', currentSupply.id).is('deleted_at', null);
-    const used = new Set((existingBoxes || []).map((b: any) => parseInt(String(b?.name || '').trim(), 10)).filter((n: number) => Number.isFinite(n) && n > 0));
+    const { data: existingBoxes } = await supabase.from('boxes').select('id, name').eq('supply_id', currentSupply.id).is('deleted_at', null);
+    const boxesArr = (existingBoxes || []) as any[];
+    const numOf = (b: any) => { const n = parseInt(String(b?.name || '').trim(), 10); return Number.isFinite(n) ? n : Infinity; };
+
+    const used = new Set(boxesArr.map((b) => numOf(b)).filter((n: number) => Number.isFinite(n) && n > 0));
     let nextNumber = 1;
     while (used.has(nextNumber)) nextNumber += 1;
     const nextName = String(nextNumber);
@@ -8153,6 +8521,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       setFboPalletSelectedWarehouseId(warehouse.id);
       setFboPalletSelectedSupplyId('');
       setFboPalletWarehouseName('');
+      logAction('ФБО: создание склада поставки', `Склад «${name}» · поставщик ${suppliers.find((s:any)=>String(s.id)===supplierId)?.name || supplierId}`, currentEmployee?.id);
       showToast('Склад поставки добавлен: ' + name, 'success');
     } catch (e: any) {
       showToast('Ошибка добавления склада поставки: ' + (e?.message || 'неизвестно'), 'error');
@@ -8210,6 +8579,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       setFboPalletSelectedSupplyId(supply.id);
       setFboPalletSupplyName('');
       setFboPalletSupplyDate('');
+      logAction('ФБО: создание поставки', `Поставка «${name}»${fboPalletSupplyDate ? ` от ${fboPalletSupplyDate}` : ''} · поставщик ${suppliers.find((s:any)=>String(s.id)===supplierId)?.name || supplierId}`, currentEmployee?.id);
       showToast('Поставка добавлена: ' + name, 'success');
     } catch (e: any) {
       showToast('Ошибка добавления поставки: ' + (e?.message || 'неизвестно'), 'error');
@@ -8242,6 +8612,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       });
       setFboPalletSelectedSupplyId((current) => String(current) === id ? '' : current);
       await fetchFboPalletData(fboPalletSupplierId);
+      logAction('ФБО: удаление поставки', `Поставка «${supply?.name || id}»${activePallets > 0 ? ` (паллет: ${activePallets})` : ''}`, currentEmployee?.id);
       showToast('Поставка удалена', 'success');
     } catch (e: any) {
       showToast('Ошибка удаления поставки: ' + (e?.message || 'неизвестно'), 'error');
@@ -8268,6 +8639,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       });
       setFboPalletWarehouseEdit(null);
       await fetchFboPalletData(fboPalletSupplierId);
+      logAction('ФБО: изменение склада поставки', `Новое название: «${name}»`, currentEmployee?.id);
       showToast('Склад переименован', 'success');
     } catch (e: any) {
       showToast('Ошибка редактирования склада: ' + (e?.message || 'неизвестно'), 'error');
@@ -8296,6 +8668,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       });
       setFboPalletSupplyEdit(null);
       await fetchFboPalletData(fboPalletSupplierId);
+      logAction('ФБО: изменение поставки', `Поставка «${name}»${edit.date ? ` от ${edit.date}` : ''}`, currentEmployee?.id);
       showToast('Поставка обновлена', 'success');
     } catch (e: any) {
       showToast('Ошибка редактирования поставки: ' + (e?.message || 'неизвестно'), 'error');
@@ -8322,6 +8695,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       });
       setFboPalletItemQtyEdit(null);
       await fetchFboPalletData(fboPalletSupplierId);
+      logAction('ФБО: изменение количества', `Товар «${edit.title || edit.id}» → ${qty} шт`, currentEmployee?.id);
       showToast('Количество обновлено', 'success');
     } catch (e: any) {
       showToast('Ошибка изменения количества: ' + (e?.message || 'неизвестно'), 'error');
@@ -8362,6 +8736,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       };
       await saveFboPalletSnapshot({ ...snapshot, pallets: [...snapshot.pallets, pallet] });
       await fetchFboPalletData(supplierId);
+      logAction('ФБО: создание паллеты', `Паллета №${nextNumber} · поставщик ${suppliers.find((s:any)=>String(s.id)===supplierId)?.name || supplierId}`, currentEmployee?.id);
       showToast('Паллета №' + nextNumber + ' добавлена', 'success');
     } catch (e: any) {
       showToast('Ошибка добавления паллеты: ' + (e?.message || 'неизвестно'), 'error');
@@ -8446,6 +8821,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       await saveFboPalletSnapshot({ ...snapshot, items: [...items, ...snapshot.items] });
 
       await fetchFboPalletData(supplierId);
+      const totalQty = items.reduce((a, it: any) => a + Number(it.qty || 0), 0);
+      logAction('ФБО: товары в паллету', `Добавлено позиций: ${items.length} (${totalQty} шт): ${items.slice(0,5).map((it:any)=>it.title).join(', ')}${items.length>5?'…':''}`, currentEmployee?.id);
       closeFboPalletProductPicker();
       showToast('Товары добавлены в паллету: ' + items.length, 'success');
     } catch (e: any) {
@@ -8457,11 +8834,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     try {
       const snapshot = await loadFboPalletSnapshot();
       const deletedAt = new Date().toISOString();
+      const delItem = snapshot.items.find((it) => String(it.id) === String(itemId));
       await saveFboPalletSnapshot({
         ...snapshot,
         items: snapshot.items.map((item) => String(item.id) === String(itemId) ? { ...item, deleted_at: deletedAt } : item),
       });
       await fetchFboPalletData(fboPalletSupplierId);
+      logAction('ФБО: удаление товара из паллеты', `Товар «${delItem?.title || itemId}»${delItem?.qty ? ` (${delItem.qty} шт)` : ''}`, currentEmployee?.id);
     } catch (e: any) {
       showToast('Ошибка удаления товара из паллеты: ' + (e?.message || 'неизвестно'), 'error');
     }
@@ -8471,12 +8850,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     try {
       const snapshot = await loadFboPalletSnapshot();
       const deletedAt = new Date().toISOString();
+      const delPallet = snapshot.pallets.find((p) => String(p.id) === String(palletId));
       await saveFboPalletSnapshot({
         ...snapshot,
         pallets: snapshot.pallets.map((pallet) => String(pallet.id) === String(palletId) ? { ...pallet, deleted_at: deletedAt } : pallet),
         items: snapshot.items.map((item) => String(item.pallet_id) === String(palletId) ? { ...item, deleted_at: deletedAt } : item),
       });
       await fetchFboPalletData(fboPalletSupplierId);
+      logAction('ФБО: удаление паллеты', `Паллета №${delPallet?.pallet_number ?? palletId}`, currentEmployee?.id);
     } catch (e: any) {
       showToast('Ошибка удаления паллеты: ' + (e?.message || 'неизвестно'), 'error');
     }
@@ -8517,6 +8898,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         setFboPalletSelectedSupplyId('');
       }
       await fetchFboPalletData(fboPalletSupplierId);
+      logAction('ФБО: удаление склада поставки', `Склад «${warehouse?.name || id}»${activePallets > 0 ? ` (паллет: ${activePallets})` : ''}`, currentEmployee?.id);
       showToast('Склад удалён', 'success');
     } catch (e: any) {
       showToast('Ошибка удаления склада: ' + (e?.message || 'неизвестно'), 'error');
@@ -8717,7 +9099,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       setWarehouseOfflineSnapshot(snapshot);
       for (const card of (snapshot.wbProducts || []) as any[]) {
         const cardSupplierId = String(card?.supplierId || card?.supplier_id || card?.supplierID || '');
-        if (cardSupplierId && String(cardSupplierId) !== String(supplierId)) continue;
+        // Строго: товар должен явно принадлежать текущему поставщику.
+        // Карточки без supplier_id НЕ индексируем — иначе чужой ШК попадает в чужую поставку.
+        if (String(cardSupplierId) !== String(supplierId)) continue;
         addSkuToIndex(card?.barcode, card);
         const cardSkus = [
           ...(Array.isArray(card?.skus) ? card.skus : []),
@@ -8851,6 +9235,23 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentSupply?.supplier_id]);
 
+  // Бейдж сборщика: WRK:<employeeId>. Возвращает true, если код распознан как бейдж.
+  const tryHandleWorkerBadge = (raw: string): boolean => {
+    const m = String(raw || '').trim().match(/^WRK[:;]\s*([0-9a-fA-F-]{6,})$/);
+    if (!m) return false;
+    const id = m[1];
+    const emp = (employees || []).find((e: any) => String(e.id) === id);
+    if (!emp) {
+      playScanTone('error');
+      showToast('Бейдж сборщика не распознан (сотрудник не найден)', 'error');
+      return true;
+    }
+    setActiveScannerEmployee({ id: String(emp.id), name: emp.full_name || 'Сотрудник' });
+    playScanTone('success');
+    showToast(`Сканирует: ${emp.full_name || 'Сотрудник'}`, 'success');
+    return true;
+  };
+
   const handleItemScan = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentSupply) return;
@@ -8863,6 +9264,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
        input = fixLayout(input);
        showToast('Раскладка исправлена', 'info');
     }
+
+    if (tryHandleWorkerBadge(input)) return;
 
     if (input.trim() === 'ACTION:NEW_BOX' || input.trim() === 'NEW_BOX' || input.includes('NEW_BOX') || input.includes('ACTION;NEW_BOX')) {
       finishCurrentBoxAndReturn();
@@ -8897,6 +9300,18 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       if (hit) {
         matchedCard = hit.card;
         matchedSize = hit.size;
+      }
+
+      // Защита: ШК должен принадлежать поставщику текущей поставки.
+      // Если в карточке указан другой supplier_id — товар чужой, не заносим.
+      if (matchedCard) {
+        const cardSup = String(matchedCard?.supplierId || matchedCard?.supplier_id || matchedCard?.supplierID || '').trim();
+        if (cardSup && cardSup !== String(currentSupply.supplier_id)) {
+          const otherName = suppliers.find((s: any) => String(s.id) === cardSup)?.name || 'другой поставщик';
+          showToast(`Этот ШК принадлежит другому поставщику (${otherName}). Товар не добавлен.`, 'error');
+          playScanTone('error');
+          return;
+        }
       }
 
       if (matchedCard && matchedSize) {
@@ -9073,7 +9488,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     pendingScansRef.current = [];
 
     const { error } = await supabase.from('supply_items').insert(
-      batch.map((x) => ({ box_id: x.boxId, product_id: x.productId, honest_sign_code: x.code }))
+      batch.map((x) => ({ box_id: x.boxId, product_id: x.productId, honest_sign_code: x.code, scanned_by: x.scannedBy || null }))
     );
 
     if (error) {
@@ -9109,6 +9524,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
            code = fixLayout(code);
            showToast('Раскладка исправлена', 'info');
         }
+
+        if (tryHandleWorkerBadge(code)) return;
 
         if (code.trim() === 'ACTION:NEW_BOX' || code.trim() === 'NEW_BOX' || code.includes('NEW_BOX') || code.includes('ACTION;NEW_BOX')) {
           finishCurrentBoxAndReturn();
@@ -9182,6 +9599,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           return;
         }
 
+        // Дубль проверяем по всей истории: и в базе ЧЗ поставщика, и глобально по supply_items.
         const existsInSupplierScannedBase = await isCodeAlreadyScannedForSupplier(code, currentSupply?.supplier_id);
         if (existsInSupplierScannedBase) {
           playScanTone('error');
@@ -9196,7 +9614,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           return;
         }
 
-        pendingScansRef.current.push({ boxId: currentBox.id, productId: scannedItem.id, code });
+        pendingScansRef.current.push({ boxId: currentBox.id, productId: scannedItem.id, code, scannedBy: resolveScannerId() });
         playScanTone('success');
         setBoxItems((prev) => ([{ id: `pending-${Date.now()}-${Math.random()}`, box_id: currentBox.id, product_id: scannedItem.id, honest_sign_code: code, created_at: new Date().toISOString(), deleted_at: null, product: scannedItem } as any, ...(prev || [])]));
         setSupplyStats((prev) => ({ ...prev, items: Number(prev.items || 0) + 1 }));
@@ -9255,11 +9673,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           await fetchBoxesList(currentSupply.id);
           await fetchSupplyStats(currentSupply.id);
         }
+        logAction('Удаление коробки', `Удалена коробка (offline): ${box?.name || boxId}`, currentEmployee?.id);
         showToast('Offline-коробка удалена' + (box?.name ? `: ${box.name}` : ''), 'success');
         return;
       }
 
       if (fboOfflineMode && currentSupply) {
+        const offBox = (offlineFboSessionRef.current?.boxes || []).find((b: any) => b.id === boxId);
         updateOfflineFboSession((session) => ({
           ...session,
           boxes: (session.boxes || []).filter((box) => box.id !== boxId),
@@ -9270,6 +9690,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           setSupplyStep('SUPPLY');
           setBoxItems([]);
         }
+        logAction('Удаление коробки', `Удалена коробка (offline): ${offBox?.name || boxId}`, currentEmployee?.id);
         showToast('Оффлайн-коробка удалена', 'success');
         return;
       }
@@ -9545,6 +9966,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       showToast('Ошибка обновления статуса: ' + error.message, 'error');
     } else {
       setCurrentSupply({ ...currentSupply, status: newStatus });
+      logAction(newStatus === 'closed' ? 'Блокировка поставки' : 'Разблокировка поставки', `Поставка «${currentSupply.name}»`, currentEmployee?.id);
       showToast(newStatus === 'closed' ? 'Поставка заблокирована' : 'Поставка разблокирована', 'success');
     }
   };
@@ -10124,6 +10546,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           if (currentSupply && currentSupply.id === supply.id) {
             setCurrentSupply({ ...currentSupply, status: 'closed' });
           }
+          logAction('Блокировка поставки', `Поставка «${supply.name}»`, currentEmployee?.id);
           showToast('Поставка заблокирована', 'success');
         }
     }
@@ -10160,7 +10583,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [receptionMetaMap, setReceptionMetaMap] = useState<Record<string, { count: number; quantity: number; preview?: string }>>({});
   const [receptionMetaRefreshing, setReceptionMetaRefreshing] = useState(false);
   const [currentReception, setCurrentReception] = useState<any | null>(null);
-  const [receptionDate, setReceptionDate] = useState(new Date().toISOString().split('T')[0]);
+  const [receptionDate, setReceptionDate] = useState(mskTodayYmd());
   const fileInputRefReception = useRef<HTMLInputElement>(null);
 
   // Telegram Reception Token
@@ -10371,7 +10794,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
     setCurrentReception(data);
     setReceptionPhotos([]);
-    setReceptionDate(data?.created_at ? new Date(data.created_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]);
+    setReceptionDate(data?.created_at ? mskYmd(new Date(data.created_at)) : mskTodayYmd());
     setReceptionStep('EDIT');
     updateReceptionMetaByPhotos(data.id, [] as any);
     await logAssemblyChange('receptions', 'create', null, data);
@@ -10381,7 +10804,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     // Open immediately with whatever is already in list (including photos when supplier selected)
     setCurrentReception(reception);
     setReceptionSupplierId(reception.supplier_id);
-    setReceptionDate(reception?.created_at ? new Date(reception.created_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]);
+    setReceptionDate(reception?.created_at ? mskYmd(new Date(reception.created_at)) : mskTodayYmd());
     setReceptionPhotos(Array.isArray(reception?.photos) ? reception.photos : []);
     setReceptionStep('EDIT');
 
@@ -10395,7 +10818,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     if (data) {
       setCurrentReception(data);
       setReceptionPhotos(data.photos || []);
-      setReceptionDate(data?.created_at ? new Date(data.created_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]);
+      setReceptionDate(data?.created_at ? mskYmd(new Date(data.created_at)) : mskTodayYmd());
       updateReceptionMetaByPhotos(String(data.id), Array.isArray(data.photos) ? data.photos : []);
     }
   };
@@ -10586,7 +11009,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       setReceptionPhotos([]);
       setReceptionSupplierId('');
       setCurrentReception(null);
-      setReceptionDate(new Date().toISOString().split('T')[0]);
+      setReceptionDate(mskTodayYmd());
       setReceptionStep('LIST');
       fetchReceptions();
     } catch (error: any) {
@@ -10966,6 +11389,57 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   }, [user]);
 
   const [showAddEmployeeModal, setShowAddEmployeeModal] = useState(false);
+  // Дашборд смены + KPI (выработка/скорость по реальной смене 10 ч)
+  const SHIFT_HOURS = 10;
+  const [shiftKpiRange, setShiftKpiRange] = useState<{ start: string; end: string }>(() => mskMonthBounds(new Date()));
+  const [shiftKpi, setShiftKpi] = useState<{ loading: boolean; rows: any[]; rangeScans: number; totalQty: number; totalShifts: number }>({ loading: false, rows: [], rangeScans: 0, totalQty: 0, totalShifts: 0 });
+  const loadShiftKpi = useCallback(async () => {
+    setShiftKpi((p) => ({ ...p, loading: true }));
+    try {
+      const { start, end } = shiftKpiRange;
+      const today = mskTodayYmd();
+      const [tempRes, workRes, scansRes] = await Promise.all([
+        supabase.from('temporary_workers_logs').select('worker_name, date, quantity, earnings, supplier_id').is('deleted_at', null).gte('date', start).lte('date', end),
+        supabase.from('work_logs').select('employee_id, date, quantity, work_rates(name, price)').is('deleted_at', null).gte('date', start).lte('date', end),
+        supabase.from('supply_items').select('id', { count: 'exact', head: true }).is('deleted_at', null).gte('created_at', `${start}T00:00:00+03:00`).lte('created_at', `${end}T23:59:59+03:00`),
+      ]);
+      const isPikRate = (name?: string | null) => String(name || '').toLowerCase().includes('пик');
+      const empById = new Map((employees || []).map((e: any) => [String(e.id), e]));
+      const agg = new Map<string, { name: string; kind: 'temp' | 'perm'; qty: number; days: Set<string>; earnings: number; pikQty: number; pikEarn: number }>();
+      (tempRes.data || []).forEach((r: any) => {
+        const key = `temp:${String(r.worker_name || '').trim().toLowerCase()}`;
+        const cur = agg.get(key) || { name: String(r.worker_name || 'Без имени'), kind: 'temp' as const, qty: 0, days: new Set<string>(), earnings: 0, pikQty: 0, pikEarn: 0 };
+        cur.qty += Number(r.quantity || 0); cur.earnings += Number(r.earnings || 0); if (r.date) cur.days.add(String(r.date));
+        agg.set(key, cur);
+      });
+      (workRes.data || []).forEach((r: any) => {
+        const emp = empById.get(String(r.employee_id));
+        const key = `perm:${String(r.employee_id)}`;
+        const cur = agg.get(key) || { name: emp?.full_name || 'Сотрудник', kind: 'perm' as const, qty: 0, days: new Set<string>(), earnings: 0, pikQty: 0, pikEarn: 0 };
+        const price = Number((r as any).work_rates?.price || 0);
+        const q = Number(r.quantity || 0);
+        // Пик не считаем в выработку/единицы — отдельный столбец и своя ср. цена.
+        if (isPikRate((r as any).work_rates?.name)) { cur.pikQty += q; cur.pikEarn += q * price; }
+        else { cur.qty += q; cur.earnings += q * price; }
+        if (r.date) cur.days.add(String(r.date));
+        agg.set(key, cur);
+      });
+      const rows = Array.from(agg.values()).map((v) => {
+        const shifts = v.days.size || 0;
+        const speed = shifts > 0 ? v.qty / (shifts * SHIFT_HOURS) : 0;
+        return { name: v.name, kind: v.kind, qty: v.qty, shifts, speed, perShift: shifts > 0 ? v.qty / shifts : 0, earnings: v.earnings, pikQty: v.pikQty, pikEarn: v.pikEarn, todayQty: v.days.has(today) ? null : 0 };
+      }).sort((a, b) => b.qty - a.qty);
+      const totalQty = rows.reduce((a, r) => a + r.qty, 0);
+      const totalShifts = rows.reduce((a, r) => a + r.shifts, 0);
+      setShiftKpi({ loading: false, rows, rangeScans: Number(scansRes.count || 0), totalQty, totalShifts });
+    } catch (e) {
+      console.error('loadShiftKpi failed', e);
+      setShiftKpi((p) => ({ ...p, loading: false }));
+    }
+  }, [shiftKpiRange, employees]);
+  useEffect(() => {
+    if (activeTab === 'employees') loadShiftKpi();
+  }, [activeTab, loadShiftKpi]);
   const [newEmployee, setNewEmployee] = useState({
     fullName: '',
     login: '',
@@ -11041,6 +11515,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     }
   ];
   const [showSendQRModal, setShowSendQRModal] = useState<any | null>(null);
+  const [showScannerBadgePicker, setShowScannerBadgePicker] = useState(false);
   const [sendingQR, setSendingQR] = useState(false);
 
   // Activity Logs
@@ -11148,6 +11623,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [sessionStartTime] = useState(new Date());
   const [rollingBackLogId, setRollingBackLogId] = useState<string | null>(null);
   const [activityLogsUsefulOnly, setActivityLogsUsefulOnly] = useState(true);
+  const [activityLogSearch, setActivityLogSearch] = useState('');
+  const [activityLogTypeFilter, setActivityLogTypeFilter] = useState<'all' | 'create' | 'update' | 'delete' | 'auth' | 'payment' | 'other'>('all');
   const [blockedEmployeeIds, setBlockedEmployeeIds] = useState<string[]>([]);
 
   const logAction = async (action: string, details: string, employeeId?: string) => {
@@ -11239,46 +11716,97 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     }
   };
 
+  // Классификация записи лога → тип/иконка/цвет/заголовок (для современного вида).
+  const classifyActivityLog = (log: any, change: any, assemblyChange: any) => {
+    const action = String(log?.action || '');
+    const a = action.toLowerCase();
+    const op = assemblyChange?.op || change?.op || '';
+    if (change) {
+      const t = op === 'create' ? 'create' : op === 'delete' ? 'delete' : 'update';
+      return { type: t, icon: UserCog, badge: 'Сотрудник', tone: 'indigo' };
+    }
+    if (assemblyChange) {
+      if (op === 'create') return { type: 'create', icon: Plus, badge: 'Создание', tone: 'emerald' };
+      if (op === 'delete') return { type: 'delete', icon: Trash2, badge: 'Удаление', tone: 'rose' };
+      return { type: 'update', icon: Pencil, badge: 'Изменение', tone: 'amber' };
+    }
+    if (a.includes('вход') || a.includes('login') || a.includes('выход') || a.includes('logout') || a.includes('устройств')) return { type: 'auth', icon: LogOut, badge: 'Вход', tone: 'sky' };
+    if (a.includes('оплат') || a.includes('списан') || a.includes('зп') || a.includes('деньг')) return { type: 'payment', icon: Wallet, badge: 'Оплата', tone: 'emerald' };
+    if (a.includes('откат')) return { type: 'update', icon: Undo2, badge: 'Откат', tone: 'violet' };
+    if (a.includes('печат') || a.includes('скан') || a.includes('qr') || a.includes('чз')) return { type: 'other', icon: QrCode, badge: 'Скан/печать', tone: 'slate' };
+    if (a.includes('создан') || a.includes('создание') || a.includes('добавл')) return { type: 'create', icon: Plus, badge: 'Создание', tone: 'emerald' };
+    if (a.includes('удал')) return { type: 'delete', icon: Trash2, badge: 'Удаление', tone: 'rose' };
+    if (a.includes('измен') || a.includes('редакт') || a.includes('обновл')) return { type: 'update', icon: Pencil, badge: 'Изменение', tone: 'amber' };
+    return { type: 'other', icon: FileClock, badge: 'Действие', tone: 'slate' };
+  };
+
+  const assemblyEntityLabel = (entity: string) => {
+    switch (String(entity || '').toLowerCase()) {
+      case 'work_logs': return 'Выполненная работа';
+      case 'work_rates': return 'Расценка работы';
+      case 'packaging_rates': return 'Расценка упаковки';
+      case 'receptions': return 'Приёмка';
+      case 'employee_requisites': return 'Реквизиты сотрудника';
+      default: return entity || 'Запись';
+    }
+  };
+
   const getAssemblyChangeDetails = (meta: any) => {
-    const row = meta?.after || meta?.before || {};
+    const before = meta?.before || {};
+    const after = meta?.after || {};
+    const op = String(meta?.op || '');
     const entity = String(meta?.entity || '').toLowerCase();
+    const row = (after && Object.keys(after).length) ? after : before;
+
+    const supplierName = (id: any) => suppliers.find((s: any) => String(s.id) === String(id))?.name || (id ? '—' : '-');
+    const rateName = (id: any, snap?: any) => cwWorkRates.find((r: any) => String(r.id) === String(id))?.name || snap?.work_name || snap?.rate_name || snap?.work_rate_name || (id ? '—' : '-');
+    const empName = (id: any) => employees.find((e: any) => String(e.id) === String(id))?.full_name || (id ? '—' : '-');
+    const fmtDate = (d: any) => { if (!d) return '-'; const s = String(d); const dt = new Date(s.length <= 10 ? s + 'T12:00:00' : s); return isNaN(dt.getTime()) ? s : dt.toLocaleDateString('ru-RU'); };
+    // Для update показываем «было → стало», иначе просто значение.
+    const diff = (label: string, b: any, a: any) => {
+      const bs = (b ?? '') === '' ? '—' : String(b);
+      const as = (a ?? '') === '' ? '—' : String(a);
+      if (op === 'update' && bs !== as) return `${label}: ${bs} → ${as}`;
+      return `${label}: ${op === 'delete' ? bs : as}`;
+    };
 
     if (entity === 'work_logs') {
-      const workRateName = cwWorkRates.find((r: any) => String(r.id) === String(row?.work_rate_id))?.name;
-      const supplierName = suppliers.find((s: any) => String(s.id) === String(row?.supplier_id))?.name;
-      return [
-        `Кол-во: ${row?.quantity ?? '-'}`,
-        `Операция: ${workRateName || row?.work_rate_id || '-'}`,
-        `Поставщик: ${supplierName || row?.supplier_id || '-'}`,
-      ];
+      const lines: string[] = [];
+      lines.push(diff('Кол-во', before?.quantity, after?.quantity));
+      const rb = rateName(before?.work_rate_id, before), ra = rateName(after?.work_rate_id, after);
+      lines.push(op === 'update' && rb !== ra ? `Операция: ${rb} → ${ra}` : `Операция: ${op === 'delete' ? rb : ra}`);
+      lines.push(`Поставщик: ${supplierName(row?.supplier_id)}`);
+      if (row?.date) lines.push(`Дата: ${fmtDate(row?.date)}`);
+      return lines;
     }
 
     if (entity === 'work_rates' || entity === 'packaging_rates') {
       return [
-        `Название: ${row?.name || '-'}`,
-        `Цена: ${row?.price ?? '-'}`,
+        diff('Название', before?.name, after?.name),
+        diff('Цена', before?.price, after?.price),
       ];
     }
 
     if (entity === 'employee_requisites') {
       return [
-        `ФИО: ${row?.name || '-'}`,
-        `Телефон: ${row?.phone || '-'}`,
-        `Банк: ${row?.bank || '-'}`,
+        diff('ФИО', before?.name, after?.name),
+        diff('Телефон', before?.phone, after?.phone),
+        diff('Банк', before?.bank, after?.bank),
       ];
     }
 
     if (entity === 'receptions') {
-      const supplierName = suppliers.find((s: any) => String(s.id) === String(row?.supplier_id))?.name || row?.supplier_name;
+      const photosOf = (r: any) => r?.photos_count ?? (Array.isArray(r?.photos) ? r.photos.length : undefined);
       return [
-        `Поставщик: ${supplierName || row?.supplier_id || '-'}`,
-        `Статус: ${row?.status || '-'}`,
-        `Фото: ${row?.photos_count ?? (Array.isArray(row?.photos) ? row.photos.length : '-')}`,
-        `Товаров: ${row?.items_quantity ?? '-'}`,
+        `Поставщик: ${supplierName(row?.supplier_id) !== '—' ? supplierName(row?.supplier_id) : (row?.supplier_name || '-')}`,
+        diff('Статус', before?.status, after?.status),
+        diff('Фото', photosOf(before), photosOf(after)),
+        diff('Товаров', before?.items_quantity, after?.items_quantity),
+        ...(row?.date ? [`Дата: ${fmtDate(row?.date)}`] : []),
       ];
     }
 
-    return [`ID: ${row?.id || '-'}`];
+    return [`Запись: ${row?.id || '-'}`];
   };
 
   const rollbackEmployeeChange = async (log: any) => {
@@ -11321,14 +11849,30 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     const meta = parseAssemblyChange(log?.details || '');
     if (!meta) return;
 
+    const emp = showActivityLogModal || null;
+    const row = meta?.after || meta?.before || {};
+    const entity = String(meta.entity || '').toLowerCase();
+
     setShowActivityLogModal(null);
     setActiveTab('completed');
-    setCwSelectedEmployee(showActivityLogModal || null);
+    if (emp) setCwSelectedEmployee(emp);
 
-    const entity = String(meta.entity || '').toLowerCase();
-    if (entity === 'work_logs') setCompletedWorkStep('CALENDAR');
-    else if (entity === 'receptions') setCompletedWorkStep('RECEPTION');
-    else if (entity === 'work_rates' || entity === 'packaging_rates') setCompletedWorkStep('RATES');
+    if (entity === 'work_logs') {
+      const raw = row?.date ? String(row.date) : '';
+      const d = raw ? new Date(raw.length <= 10 ? raw + 'T12:00:00' : raw) : null;
+      if (d && !isNaN(d.getTime())) {
+        // Открываем нужный месяц и день — данные подгрузятся эффектом по cwSelectedPeriod.
+        setCwSelectedPeriod(new Date(d.getFullYear(), d.getMonth(), 1));
+        setCwSelectedDate(d);
+        setCompletedWorkStep('FORM');
+      } else {
+        setCompletedWorkStep('CALENDAR');
+      }
+    } else if (entity === 'work_rates' || entity === 'packaging_rates') {
+      setCompletedWorkStep('RATES');
+    } else {
+      setCompletedWorkStep('CALENDAR');
+    }
   };
 
   const rollbackAssemblyChange = async (log: any) => {
@@ -11513,9 +12057,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     if (!(await confirmDialog({ title: 'Отключение сотрудника', tone: 'warning', confirmText: 'Отключить', message: 'Отключить сотрудника?' }))) return;
 
     // Optimistic update
-    setEmployees(prev => prev.map(emp => emp.id === employeeId ? { ...emp, is_online: false } : emp));
+    setEmployees(prev => prev.map(emp => emp.id === employeeId ? { ...emp, is_online: false, last_seen: null } : emp));
 
-    const { error } = await supabase.from('employees').update({ is_online: false }).eq('id', employeeId);
+    const { error } = await supabase.from('employees').update({ is_online: false, last_seen: null }).eq('id', employeeId);
     if (error) {
         showToast('Ошибка отключения: ' + error.message, 'error');
         fetchEmployees(); // Revert on error
@@ -11576,6 +12120,32 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       showToast('Ошибка при сохранении токена', 'error');
     }
   };
+
+  // Presence: «онлайн» считаем по свежести last_seen (heartbeat), а не по липкому флагу is_online.
+  const ONLINE_WINDOW_MS = 150000; // 2.5 минуты
+  const [presenceTick, setPresenceTick] = useState(0);
+  const isEmployeeOnline = (emp: any) => {
+    const ls = emp?.last_seen ? new Date(emp.last_seen).getTime() : 0;
+    return ls > 0 && (Date.now() - ls) < ONLINE_WINDOW_MS;
+  };
+  // Heartbeat текущего сотрудника: обновляем last_seen при загрузке, каждые 45с и при возврате во вкладку.
+  useEffect(() => {
+    const empId = currentEmployee?.id;
+    if (!empId) return;
+    let alive = true;
+    const beat = () => { supabase.from('employees').update({ last_seen: new Date().toISOString(), is_online: true }).eq('id', empId).then(() => {}, () => {}); };
+    beat();
+    const iv = setInterval(() => { if (alive && document.visibilityState === 'visible') beat(); }, 45000);
+    const onVis = () => { if (document.visibilityState === 'visible') beat(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { alive = false; clearInterval(iv); document.removeEventListener('visibilitychange', onVis); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentEmployee?.id]);
+  // Тик для пересчёта «онлайн» (чтобы чужие записи уходили в офлайн по таймауту).
+  useEffect(() => {
+    const iv = setInterval(() => setPresenceTick((t) => t + 1), 30000);
+    return () => clearInterval(iv);
+  }, []);
 
   // Global Realtime Subscription for Disconnect
   useEffect(() => {
@@ -11938,6 +12508,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
             code = fixLayout(code);
         }
 
+        if (tryHandleWorkerBadge(code)) { buffer = ''; return; }
+
         // Check for Supplier QR
         const supplierId = code.startsWith('SUPPLIER:') ? code.split(':')[1] : code;
         const supplier = suppliers.find(s => s.id === supplierId);
@@ -11972,7 +12544,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
     window.addEventListener('keydown', handleGlobalScan);
     return () => window.removeEventListener('keydown', handleGlobalScan);
-  }, [suppliers]);
+  }, [suppliers, employees, activeScannerEmployee]);
 
   useEffect(() => {
     if (activeTab !== 'completed' || employees.length === 0) return;
@@ -12736,6 +13308,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       }
 
       setBarterMoneyForm({ amount: '', comment: '' });
+      logAction(mode === 'add' ? 'Бартер: пополнение баланса' : 'Бартер: списание', `${suppliers.find((s:any)=>String(s.id)===barterSelectedSupplierId)?.name || barterSelectedSupplierId} · ${amount.toLocaleString('ru-RU')} ₽${payload.comment ? ` · ${payload.comment}` : ''}`, currentEmployee?.id);
       showToast(mode === 'add' ? 'Баланс пополнен' : 'Списание сохранено', 'success');
     } catch (e: any) {
       showToast('Ошибка сохранения операции: ' + (e?.message || 'неизвестно'), 'error');
@@ -12765,6 +13338,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
             await fetchBarterMoneyHistory(barterSelectedSupplierId);
           }
 
+          logAction('Бартер: удаление операции', `${suppliers.find((s:any)=>String(s.id)===barterSelectedSupplierId)?.name || barterSelectedSupplierId} · удалена запись баланса`, currentEmployee?.id);
           showToast('Операция удалена', 'success');
         } finally {
           setConfirmModal(prev => ({ ...prev, isOpen: false }));
@@ -13174,6 +13748,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         removedIds: nextRemovedIds,
         successMessage: 'Карточка удалена',
       });
+      logAction('Бартер: удаление карточки', `${suppliers.find((s:any)=>String(s.id)===currentSupplierId)?.name || currentSupplierId} · «${row?.product_name || row?.product_group_name || row?.id}» · месяц ${row?.month || barterMonth}`, currentEmployee?.id);
     } catch (e: any) {
       setBarterRows(prevRows as any);
       setBarterExplicitlyRemovedIds(prevRemovedIds);
@@ -13357,6 +13932,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       await persistBarterRowsForSupplier(nextRows, currentSupplierId, {
         successMessage: 'Карточка создана',
       });
+      logAction('Бартер: создание карточек', `${supplier?.name || currentSupplierId} · месяц ${barterMonth} · товаров: ${append.length}${mergedCreated ? ' (объединённая)' : ''}: ${append.slice(0,5).map((r:any)=>r.product_name).join(', ')}${append.length>5?'…':''}`, currentEmployee?.id);
     } catch (e: any) {
       setBarterRows(nextRows as any);
       showToast('Карточки добавлены локально, но автосохранение не удалось: ' + (e?.message || 'неизвестно'), 'error');
@@ -13398,6 +13974,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         setLoadingLogs(false);
       };
       fetchLogs();
+      // Подтягиваем справочник операций, чтобы в логе показывать названия, а не UUID.
+      if (!cwWorkRates.length) {
+        supabase.from('work_rates').select('*').is('deleted_at', null).then(({ data }) => { if (data) setCwWorkRates(data); });
+      }
     }
   }, [showActivityLogModal]);
 
@@ -13894,28 +14474,75 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     };
   };
 
+  // Загружаем бэкап в приватный бакет db-backups, чтобы его можно было скачать из истории.
+  const DB_BACKUP_BUCKET = 'db-backups';
+  const uploadDatabaseBackupToStorage = async (payload: any, fileName: string) => {
+    const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+    const path = `backups/${fileName}`;
+    const { error } = await supabase.storage.from(DB_BACKUP_BUCKET).upload(path, blob, { contentType: 'application/json', upsert: true });
+    if (error) throw error;
+    return path;
+  };
+
   const handleCreateDatabaseBackup = async () => {
     setDatabaseBackupLoading(true);
     try {
       const payload = await createFullDatabaseBackupSnapshot();
       const fileName = buildDatabaseBackupFileName('database_backup_manual');
+      // Сохраняем в облако (для скачивания из истории) и сразу отдаём локально.
+      let storedPath = '';
+      try { storedPath = await uploadDatabaseBackupToStorage(payload, fileName); }
+      catch (e: any) { showToast('Бэкап создан, но не загрузился в облако: ' + (e?.message || ''), 'warning'); }
       downloadDatabaseBackupBlob(payload, fileName);
 
       await appendDatabaseBackupLog({
         version: `Backup ${new Date().toLocaleString('ru-RU')}`,
         date: new Date().toLocaleDateString('ru-RU'),
-        details: `Ручной полный бэкап БД. Таблиц: ${payload.total_tables}, строк: ${payload.total_rows}, файл: ${fileName}`,
+        details: `Ручной полный бэкап БД. Таблиц: ${payload.total_tables}, строк: ${payload.total_rows}`,
         created_at: new Date().toISOString(),
         status: 'success',
         source: 'dashboard_manual',
         file_name: fileName,
-      });
+        ...(storedPath ? { file_path: storedPath, bucket: DB_BACKUP_BUCKET } : {}),
+      } as any);
 
       showToast(`Полный бэкап создан, таблиц: ${payload.total_tables}, строк: ${payload.total_rows}`, 'success');
     } catch (e: any) {
       showToast('Ошибка создания бэкапа: ' + (e?.message || 'неизвестно'), 'error');
     } finally {
       setDatabaseBackupLoading(false);
+    }
+  };
+
+  const [databaseDownloadingPath, setDatabaseDownloadingPath] = useState<string | null>(null);
+  const handleDownloadBackupFromHistory = async (log: any) => {
+    const path = String(log?.file_path || '').trim();
+    const bucket = String(log?.bucket || DB_BACKUP_BUCKET).trim();
+    if (!path) { showToast('Для этого бэкапа нет сохранённого файла (старая запись)', 'error'); return; }
+    setDatabaseDownloadingPath(path);
+    try {
+      const { data, error } = await supabase.storage.from(bucket).createSignedUrl(path, 120, { download: log?.file_name || true });
+      if (error || !data?.signedUrl) throw error || new Error('Не удалось получить ссылку');
+      const a = document.createElement('a');
+      a.href = data.signedUrl;
+      a.download = log?.file_name || 'backup.json';
+      document.body.appendChild(a); a.click(); a.remove();
+    } catch (e: any) {
+      showToast('Не удалось скачать бэкап: ' + (e?.message || 'неизвестно'), 'error');
+    } finally {
+      setDatabaseDownloadingPath(null);
+    }
+  };
+
+  const handleClearDatabaseLogs = async () => {
+    if (!await confirmDialog('Очистить всю историю бэкапов? Файлы в облаке не удаляются.')) return;
+    try {
+      const { error } = await supabase.from('app_settings').upsert({ key: 'database_backup_logs', value: '[]' });
+      if (error) throw error;
+      setDatabaseLogs([]);
+      showToast('История бэкапов очищена', 'success');
+    } catch (e: any) {
+      showToast('Ошибка очистки истории: ' + (e?.message || 'неизвестно'), 'error');
     }
   };
 
@@ -14154,37 +14781,24 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
   const validateUploadedReportSupplier = async (rows: any[], supplierId: string) => {
     try {
-      const reportCodes = new Set(
+      const reportCodes = Array.from(new Set(
         (rows || [])
           .map((r: any) => String(r?.['Код номенклатуры'] ?? '').trim())
           .filter((x: string) => !!x)
-      );
-      if (!reportCodes.size) return true;
+      )).slice(0, 1000);
+      if (!reportCodes.length) return true;
 
-      const { data, error } = await supabase
-        .from('products')
-        .select('wb_sku, article, name')
-        .eq('supplier_id', supplierId)
-        .is('deleted_at', null)
-        .limit(20000);
-      if (error) throw error;
-
-      const supplierCodes = new Set<string>();
-      (data || []).forEach((p: any) => {
-        const sku = String(p?.wb_sku ?? '').trim();
-        const art = String(p?.article ?? '').trim();
-        if (sku) supplierCodes.add(sku);
-        if (art) supplierCodes.add(art);
-      });
-
-      if (!supplierCodes.size) return true;
-
-      let overlap = 0;
-      reportCodes.forEach((c) => { if (supplierCodes.has(c)) overlap += 1; });
-      return overlap > 0;
+      // Раньше выкачивали ДО 20 000 товаров поставщика и сверяли множества — медленно.
+      // Теперь два лёгких индексных count по кодам отчёта (wb_sku / article), без переноса строк.
+      const [r1, r2] = await Promise.all([
+        supabase.from('products').select('id', { count: 'exact', head: true }).eq('supplier_id', supplierId).is('deleted_at', null).in('wb_sku', reportCodes),
+        supabase.from('products').select('id', { count: 'exact', head: true }).eq('supplier_id', supplierId).is('deleted_at', null).in('article', reportCodes),
+      ]);
+      if (r1.error && r2.error) throw (r1.error || r2.error);
+      return Number(r1.count || 0) > 0 || Number(r2.count || 0) > 0;
     } catch (e) {
       console.error('validateUploadedReportSupplier error', e);
-      return true;
+      return true; // при ошибке проверки не блокируем загрузку
     }
   };
 
@@ -14264,6 +14878,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       });
       await persistUploadedCostsByCode(nextByCode);
       setUploadedPersistedCostByCode(nextByCode);
+      logAction('Аналитика: изменение себестоимости', `Поставщик ${suppliers.find((s:any)=>String(s.id)===uploadedSelectedSupplierId)?.name || uploadedSelectedSupplierId} · позиций: ${Object.keys(nextByCode).length}`, currentEmployee?.id);
       showToast('Себестоимость сохранена', 'success');
     } catch (e: any) {
       console.error('saveUploadedCosts error', e);
@@ -14417,7 +15032,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const processUploadedWbReport = (rows: any[], opts?: { turbo?: boolean }) => {
     const turbo = Boolean(opts?.turbo);
     const toNum = (v: any) => {
-      const n = Number(String(v ?? '').replace(/\s+/g, '').replace(',', '.'));
+      // Быстрый путь: xlsx-воркер часто отдаёт числовые ячейки уже как number —
+      // не гоняем String()+regex на каждой из сотен тысяч ячеек.
+      if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
+      if (v == null || v === '') return 0;
+      const n = Number(String(v).replace(/\s+/g, '').replace(',', '.'));
       return Number.isFinite(n) ? n : 0;
     };
 
@@ -14474,18 +15093,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       return null;
     };
 
-    const pickDateByNormalizedKey = (row: any, keyName: string) => {
-      const target = String(keyName || '').toLowerCase().replace(/\s+/g, ' ').trim();
-      for (const [rk, rv] of Object.entries(row || {})) {
-        const norm = String(rk || '').toLowerCase().replace(/\s+/g, ' ').trim();
-        if (norm === target || norm.includes(target)) {
-          const dt = parseAnyDate(rv);
-          if (dt) return dt;
-        }
-      }
-      return null;
-    };
-
     const normalizeKey = (k: string) => String(k || '').toLowerCase().replace(/\s+/g, ' ').trim();
     const compareSizesAsc = (aSize: string, bSize: string) => {
       const prep = (v: string) => String(v || '').trim().toUpperCase();
@@ -14523,50 +15130,32 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       if (ra !== rb) return ra - rb;
       return a.localeCompare(b, 'ru', { numeric: true });
     };
-    const pickNumByIncludes = (row: any, includes: string[]) => {
-      const entries = Object.entries(row || {});
-      for (const [rawKey, rawVal] of entries) {
-        const nk = normalizeKey(rawKey);
-        const ok = includes.every((part) => nk.includes(part));
-        if (!ok) continue;
-        if (rawVal === undefined || rawVal === null || String(rawVal).trim() === '') continue;
-        return toNum(rawVal);
-      }
-      return 0;
-    };
-
-    const pickTextByIncludes = (row: any, includes: string[], excludes: string[] = []) => {
-      const entries = Object.entries(row || {});
-      for (const [rawKey, rawVal] of entries) {
-        const nk = normalizeKey(rawKey);
-        const ok = includes.every((part) => nk.includes(part));
-        const bad = excludes.some((part) => nk.includes(part));
-        if (!ok || bad) continue;
-        if (rawVal === undefined || rawVal === null) continue;
-        const txt = String(rawVal).trim();
-        if (!txt) continue;
-        return txt;
-      }
-      return '';
-    };
-
     const grouped = new Map<string, any>();
     const daily = new Map<string, any>();
     // Гео/время-агрегации (склад отгрузки, ПВЗ выдачи, страна, день — итоги по всем товарам).
     const geoBucket = () => ({ sales_net: 0, payout_net: 0, logistics_sum: 0, sold_qty: 0, return_qty: 0 });
     // «Наименование офиса доставки» → главный регион/город (без улицы и дома).
+    // Сводим разные написания одного региона к одному названию (Москва/МО, СПб/ЛО и т.п.).
+    const canonRegion = (r: string) => {
+      const low = String(r || '').toLowerCase();
+      if (!low) return r;
+      if (low.includes('москов') || /^москва\b/.test(low) || low === 'москва') return 'Москва и область';
+      if (low.includes('санкт-петербург') || low.includes('санкт петербург') || /\bспб\b/.test(low) || low.includes('ленинградск') || /^питер\b/.test(low)) return 'Санкт-Петербург и область';
+      if (low.includes('севастополь')) return 'Севастополь';
+      return r;
+    };
     const extractRegion = (s: string) => {
       const t = String(s || '').trim();
       if (!t) return '';
       // «Республика Татарстan», «Респ. Коми» — название идёт ПОСЛЕ слова.
       let m = t.match(/^(респ(?:ублика)?\.?\s+[А-Яа-яЁё-]+)/i);
-      if (m) return m[1].replace(/\s+/g, ' ').trim();
+      if (m) return canonRegion(m[1].replace(/\s+/g, ' ').trim());
       // «Томская область», «Краснодарский край», «ХМАО» — название ПЕРЕД ключевым словом.
       m = t.match(/^(.*?\b(?:область|обл\.?|край|округ|АО))/i);
-      if (m) return m[1].trim();
+      if (m) return canonRegion(m[1].trim());
       // Города фед. значения / прочее — до уличных маркеров, 1–2 слова.
       const cut = t.split(/\s+(?:улица|ул\.?|проспект|пр-?кт|пр\.?|переулок|пер\.?|шоссе|бульвар|б-р|набережная|наб\.?|площадь|пл\.?|проезд|тракт|микрорайон|мкр|д\.?\s*\d)/i)[0];
-      return cut.split(/\s+/).slice(0, 2).join(' ').trim() || t;
+      return canonRegion(cut.split(/\s+/).slice(0, 2).join(' ').trim() || t);
     };
     const byWarehouse = new Map<string, any>();
     const byOffice = new Map<string, any>();
@@ -14577,8 +15166,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     //   «От клиента при возврате» = возврат от клиента.
     let orderedLegs = 0;
     let returnLegs = 0;
+    let orderedRetailSum = 0;   // сумма «Цена розничная» по заказам (К клиенту при продаже)
     let periodStart: Date | null = null;
     let periodEnd: Date | null = null;
+    let anyDateStart: Date | null = null;   // min/max любой даты продажи (запасной период)
+    let anyDateEnd: Date | null = null;
 
     const reportNumberKeys = ['Номер отчета', 'Номер отчёта', '№ отчета', '№ отчёта', 'Номер документа', 'Отчет №', 'Отчёт №'];
     let reportNumber = '';
@@ -14593,17 +15185,55 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       if (reportNumber) break;
     }
 
+    // Имена колонок определяем ОДИН раз по заголовку (а не Object.entries на каждую строку —
+    // критично для отчётов на 100k+ строк).
+    const headerKeys = Object.keys((rows && rows[0]) || {});
+    // Период определяем ТОЛЬКО по столбцу «Дата продажи». Если столбца нет —
+    // фронт предложит ручной выбор недели (флаг has_sale_date_column).
+    const hasSaleDateColumn = headerKeys.some((k) => { const n = normalizeKey(String(k)); return n === 'дата продажи' || n.includes('дата продажи'); });
+    // Резолвим «дорогие» колонки ОДИН раз по заголовку — на 50k+ строк сканирование всех
+    // колонок строки (Object.entries) по каждой строке было главным тормозом (15–20 c).
+    const matchHeader = (n: string, sets: string[][], opts?: { excludePct?: boolean; requirePct?: boolean }) => {
+      if (opts?.excludePct && n.includes('%')) return false;
+      if (opts?.requirePct && !n.includes('%')) return false;
+      return sets.some((set) => set.every((p) => n.includes(p)));
+    };
+    const saleDateKeys = [
+      ...headerKeys.filter((k) => normalizeKey(String(k)) === 'дата продажи'),
+      ...headerKeys.filter((k) => { const n = normalizeKey(String(k)); return n !== 'дата продажи' && n.includes('дата продажи'); }),
+    ];
+    const acqKeys = headerKeys.filter((k) => matchHeader(normalizeKey(String(k)), [['компенсац', 'платеж'], ['комисс', 'интеграц'], ['комисс', 'организац', 'платеж'], ['эквайр']], { excludePct: true }));
+    const acqPctKeys = headerKeys.filter((k) => matchHeader(normalizeKey(String(k)), [['компенсац', 'платеж'], ['комисс', 'интеграц'], ['комисс', 'эквайр']], { requirePct: true }));
+    const officeKeys = headerKeys.filter((k) => matchHeader(normalizeKey(String(k)), [['наименован', 'офис', 'доставк']]));
+    const pickTextKeys = (r: any, keys: string[]) => { for (const k of keys) { const t = String(r?.[k] ?? '').trim(); if (t) return t; } return ''; };
+    // Налог по году — кешируем (годов в отчёте 1–2), не дёргаем getTaxRateByYear на каждой строке.
+    const taxRateCache = new Map<number, number>();
+    const taxRateFor = (y: number) => { let r = taxRateCache.get(y); if (r === undefined) { r = getTaxRateByYear(y); taxRateCache.set(y, r); } return r; };
+    const sizeKey = headerKeys.find((k) => normalizeKey(String(k)) === 'размер') || 'Размер';
+    const barcodeKey = headerKeys.find((k) => { const nk = normalizeKey(String(k)); return nk === 'баркод' || nk === 'штрихкод' || nk === 'barcode'; }) || 'Баркод';
+    // Карта Баркод → Размер: у строк логистики размер часто пуст, но есть баркод.
+    const getBarcode = (r: any) => String(r?.[barcodeKey] ?? r?.['Баркод'] ?? r?.['Штрихкод'] ?? '').trim();
+    const getSizeRaw = (r: any) => String(r?.[sizeKey] ?? r?.['Размер'] ?? '').trim();
+    const barcodeToSize = new Map<string, string>();
+    (rows || []).forEach((r: any) => {
+      const bc = getBarcode(r);
+      const sz = getSizeRaw(r);
+      if (bc && sz && !barcodeToSize.has(bc)) barcodeToSize.set(bc, sz);
+    });
+
     (rows || []).forEach((row: any) => {
       const code = String(row?.['Код номенклатуры'] ?? row?.['nmID'] ?? '').trim();
       const name = String(row?.['Название'] ?? row?.['Предмет'] ?? row?.['Артикул поставщика'] ?? row?.['Бренд'] ?? '').trim() || 'Без названия';
       const key = `${code}|${name}`;
 
-      const logKind = String(row?.['Виды логистики, штрафов и корректировок ВВ'] ?? '').toLowerCase();
+      const logKindRaw = String(row?.['Виды логистики, штрафов и корректировок ВВ'] ?? '').trim();
+      const logKind = logKindRaw.toLowerCase();
       if (logKind.includes('к клиенту при продаже')) orderedLegs += 1;
       if (logKind.includes('от клиента при возврате')) returnLegs += 1;
 
       const docType = String(row?.['Тип документа'] ?? '').toLowerCase();
-      const reason = String(row?.['Обоснование для оплаты'] ?? '').toLowerCase();
+      const reasonRaw = String(row?.['Обоснование для оплаты'] ?? '').trim();
+      const reason = reasonRaw.toLowerCase();
       const isReturnByText = docType.includes('возврат') || reason.includes('возврат');
 
       const sales = pickNum(row, salesKeys);
@@ -14613,19 +15243,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       const storage = pickNum(row, storageKeys);
       const withhold = pickNum(row, withholdKeys);
       const qty = pickNum(row, ['Кол-во', 'Количество', 'Колво', 'Кол-во товаров', 'quantity']);
-      const sizeColumnEntry = Object.entries(row || {}).find(([k]) => normalizeKey(String(k)) === 'размер');
-      const sizeRaw = String(sizeColumnEntry ? sizeColumnEntry[1] : (row?.['Размер'] ?? '')).trim();
+      let sizeRaw = String(row?.[sizeKey] ?? row?.['Размер'] ?? '').trim();
+      // Нет размера, но есть баркод → подставляем размер по карте Баркод→Размер.
+      if (!sizeRaw) { const bc = getBarcode(row); if (bc && barcodeToSize.has(bc)) sizeRaw = String(barcodeToSize.get(bc) || '').trim(); }
       const sizeValue = sizeRaw || 'Без размера';
-      const acquiring = pickNum(row, ['Компенсация платёжных услуг/Комиссия за интеграцию платёжных сервисов', 'Компенсация платежных услуг/Комиссия за интеграцию платежных сервисов', 'Эквайринг/Комиссии за организацию платежей', 'Комиссии за организацию платежей', 'Эквайринг'])
-        || pickNumByIncludes(row, ['компенсац', 'платеж'])
-        || pickNumByIncludes(row, ['комисс', 'интеграц'])
-        || pickNumByIncludes(row, ['комисс', 'организац', 'платеж'])
-        || pickNumByIncludes(row, ['эквайр']);
-
-      const acquiringPercent = pickNum(row, ['Размер компенсации платёжных услуг/Комиссии за интеграцию платёжных сервисов, %', 'Размер комиссии за эквайринг/Комиссии за организацию платежей, %', 'Размер комиссии за эквайринг, %'])
-        || pickNumByIncludes(row, ['компенсац', 'платеж', '%'])
-        || pickNumByIncludes(row, ['комисс', 'интеграц', '%'])
-        || pickNumByIncludes(row, ['комисс', 'эквайр', '%']);
+      const acquiring = pickNum(row, acqKeys);
+      const acquiringPercent = pickNum(row, acqPctKeys);
 
       const isReturn = isReturnByText || qty < 0 || sales < 0 || payout < 0;
       const isSale = !isReturn && (docType.includes('продажа') || qty > 0 || sales > 0 || payout > 0);
@@ -14648,22 +15271,32 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
       const hasCodeForPeriod = String(row?.['Код номенклатуры'] ?? '').trim() !== '';
       const isProductOperationForPeriod = hasCodeForPeriod && (isSale || isReturn);
-      const opDate = pickDate(row, ['Дата продажи']) || pickDateByNormalizedKey(row, 'Дата продажи');
-      const opTaxRate = opDate && !Number.isNaN(opDate.getTime()) ? getTaxRateByYear(opDate.getFullYear()) : 0;
+      const opDate = pickDate(row, saleDateKeys);
+      const opTaxRate = opDate && !Number.isNaN(opDate.getTime()) ? taxRateFor(opDate.getFullYear()) : 0;
       const signedSalesForTax = isReturn ? -Math.abs(sales) : (isSale ? Math.max(0, sales) : 0);
       const taxDelta = signedSalesForTax * opTaxRate;
       if (isProductOperationForPeriod && opDate) {
         if (!periodStart || opDate < periodStart) periodStart = opDate;
         if (!periodEnd || opDate > periodEnd) periodEnd = opDate;
       }
+      if (opDate && !Number.isNaN(opDate.getTime())) {
+        if (!anyDateStart || opDate < anyDateStart) anyDateStart = opDate;
+        if (!anyDateEnd || opDate > anyDateEnd) anyDateEnd = opDate;
+      }
 
       const item = grouped.get(key) || {
         code,
         name,
+        vendor_code: String(row?.['Артикул поставщика'] ?? '').trim(),
+        ordered_qty: 0,
+        ordered_retail_sum: 0,
         sales_gross: 0,
         returns_gross: 0,
         sales_net: 0,
         logistics_sum: 0,
+        logistics_forward: 0,
+        logistics_logi: 0,
+        logistics_return: 0,
         payout_sum: 0,
         payout_sales_sum: 0,
         payout_returns_sum: 0,
@@ -14676,6 +15309,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         tax_sum: 0,
         acquiring_percent_sum: 0,
         acquiring_percent_count: 0,
+        log_kinds: {} as Record<string, { sum: number; qty: number }>,
         size_stats: {},
       };
 
@@ -14687,7 +15321,42 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         item.payout_sales_sum += payout;
       }
 
+      // Заказы по товару: шт — по легам «К клиенту при продаже»;
+      // сумма заказа — «Цена розничная» со строк продажи (где «Виды логистики…» пусто и «Обоснование» = Продажа).
+      if (logKind.includes('к клиенту при продаже')) item.ordered_qty += 1;
+      if (logKindRaw === '' && reason.includes('продажа')) {
+        const retail = pickNum(row, ['Цена розничная']);
+        item.ordered_retail_sum += retail;
+        orderedRetailSum += retail;
+      }
+
       item.logistics_sum += logistics;
+      // Три вида логистики. Сумма доставки лежит на строках «Логистика», а конкретный вид —
+      // в столбце «Виды логистики, штрафов и корректировок ВВ»:
+      //   «К клиенту при продаже»  → Продажа (доставка выкупленного товара)
+      //   «...при отмене» (к/от)   → Логистика (доставка/возврат невыкупа — заказал, но не выкупил)
+      //   «От клиента при возврате»→ Возврат
+      if (logKind.includes('при продаже')) {
+        item.logistics_forward += logistics;
+      } else if (logKind.includes('при возврате')) {
+        item.logistics_return += logistics;
+      } else if (logKind.includes('отмен')) {
+        item.logistics_logi += logistics;
+      } else if (reason.includes('возврат')) {
+        item.logistics_return += logistics;
+      } else if (reason.includes('продажа')) {
+        item.logistics_forward += logistics;
+      } else {
+        item.logistics_logi += logistics;
+      }
+      // Разбивка логистики по ВСЕМ видам из «Виды логистики…» (для детализации) + кол-во штук.
+      if (logistics) {
+        const lk = logKindRaw || reasonRaw || 'Прочее';
+        const cur = item.log_kinds[lk] || { sum: 0, qty: 0 };
+        cur.sum += logistics;
+        cur.qty += Math.abs(qty) > 0 ? Math.abs(qty) : 1;
+        item.log_kinds[lk] = cur;
+      }
       item.payout_sum += payout;
       item.fine_sum += fine;
       item.storage_sum += storage;
@@ -14719,11 +15388,19 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
             tax_sum: 0,
             acquiring_percent_sum: 0,
             acquiring_percent_count: 0,
+            log_kinds: {} as Record<string, { sum: number; qty: number }>,
           };
         }
 
         const sizeStat = item.size_stats[sizeValue];
         sizeStat.logistics_sum += logistics;
+        if (logistics) {
+          const lk = logKindRaw || reasonRaw || 'Прочее';
+          const cur = sizeStat.log_kinds[lk] || { sum: 0, qty: 0 };
+          cur.sum += logistics;
+          cur.qty += Math.abs(qty) > 0 ? Math.abs(qty) : 1;
+          sizeStat.log_kinds[lk] = cur;
+        }
         sizeStat.fine_sum += fine;
         sizeStat.storage_sum += storage;
         sizeStat.withhold_sum += withhold;
@@ -14755,7 +15432,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         }
       }
 
-      const hasDateForDaily = opDate && !Number.isNaN(opDate.getTime());
+      // Per-product дневная серия нужна только для НЕ-turbo (легаси-график). На больших
+      // отчётах (turbo) не строим её — экономим память/время.
+      const hasDateForDaily = !turbo && opDate && !Number.isNaN(opDate.getTime());
       if (hasDateForDaily) {
         const d = opDate as Date;
         const dKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -14802,7 +15481,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         // Только точная колонка «Склад» (не «коэффициент склада» — там числа).
         let wh = String(row?.['Склад'] ?? '').trim() || '—';
         if (/^[\d.,]+$/.test(wh)) wh = '—';   // отбрасываем числовой мусор
-        const officeRaw = String(row?.['Наименование офиса доставки'] ?? '').trim() || pickTextByIncludes(row, ['наименован', 'офис', 'доставк']);
+        const officeRaw = pickTextKeys(row, officeKeys);
         const office = extractRegion(officeRaw) || '—';
         const country = String(row?.['Страна'] ?? '').trim() || '—';
         const addGeo = (m: Map<string, any>, k: string) => {
@@ -14822,6 +15501,21 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           if (isSale) { e.sales_net += Math.max(0, sales); e.payout_net += Math.max(0, payout); if (isQtyEligibleSale) e.sold_qty += Math.abs(qty) > 0 ? Math.abs(qty) : 1; }
           else { e.sales_net -= Math.abs(sales); e.payout_net -= Math.abs(payout); if (isQtyEligibleReturn) e.return_qty += Math.abs(qty) > 0 ? Math.abs(qty) : 1; }
           e.logistics_sum += logistics;
+          dayTotals.set(dKey, e);
+        }
+      }
+
+      // Заказы по дню — СЧИТАЕМ ОТДЕЛЬНО (не под гейтом isSale||isReturn), т.к. леги
+      // «к клиенту при продаже» приходят строками «Логистика», а не «Продажа»:
+      //   кол-во = леги «к клиенту при продаже»; сумма = Σ «Цена розничная» по строкам продажи.
+      if (opDate && !Number.isNaN(opDate.getTime())) {
+        const isOrderLeg = logKind.includes('к клиенту при продаже');
+        const isSaleRow = logKindRaw === '' && reason.includes('продажа');
+        if (isOrderLeg || isSaleRow) {
+          const dKey = `${opDate.getFullYear()}-${String(opDate.getMonth() + 1).padStart(2, '0')}-${String(opDate.getDate()).padStart(2, '0')}`;
+          const e = dayTotals.get(dKey) || { key: dKey, ...geoBucket() };
+          if (isOrderLeg) e.ordered_qty = (e.ordered_qty || 0) + (Math.abs(qty) > 0 ? Math.abs(qty) : 1);
+          if (isSaleRow) e.ordered_retail_sum = (e.ordered_retail_sum || 0) + pickNum(row, ['Цена розничная']);
           dayTotals.set(dKey, e);
         }
       }
@@ -14870,6 +15564,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
             acquiring_sum: acquiringBySize,
             tax_sum: taxBySize,
             acquiring_percent: acquiringPercentBySize,
+            log_kinds: { ...((st as any)?.log_kinds || {}) },
           };
         })
         .filter((z: any) => {
@@ -14903,14 +15598,28 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
     // Локальная дата YYYY-MM-DD без UTC-сдвига (toISOString уводил период на день назад).
     const localISO = (d: Date | null) => d ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` : null;
+    // Период по «Дата продажи». WB-отчёт недельный: конец = ПОСЛЕДНЯЯ дата продажи,
+    // начало = конец − 6 дней. Так единичные старые строки (возвраты/корректировки за
+    // прошлые месяцы) не растягивают период — отчёт остаётся неделей.
+    const finalPeriodEnd = periodEnd || anyDateEnd;
+    let finalPeriodStart = periodStart || anyDateStart;
+    if (finalPeriodEnd) {
+      const s = new Date(finalPeriodEnd.getTime());
+      s.setDate(s.getDate() - 6);
+      finalPeriodStart = s;
+    }
     const summary = {
       report_number: reportNumber || null,
-      period_start: localISO(periodStart),
-      period_end: localISO(periodEnd),
+      period_start: localISO(finalPeriodStart),
+      period_end: localISO(finalPeriodEnd),
+      has_sale_date_column: hasSaleDateColumn,
       items: analytics.length,
       sales_net: analytics.reduce((s, x) => s + Number(x.sales_net || 0), 0),
       returns_gross: analytics.reduce((s, x) => s + Number(x.returns_gross || 0), 0),
       logistics_sum: analytics.reduce((s, x) => s + Number(x.logistics_sum || 0), 0),
+      logistics_forward: analytics.reduce((s, x) => s + Number(x.logistics_forward || 0), 0),
+      logistics_logi: analytics.reduce((s, x) => s + Number(x.logistics_logi || 0), 0),
+      logistics_return: analytics.reduce((s, x) => s + Number(x.logistics_return || 0), 0),
       payout_sum: analytics.reduce((s, x) => s + Number(x.payout_sum || 0), 0),
       payout_net: analytics.reduce((s, x) => s + Number(x.payout_net || 0), 0),
       fine_sum: analytics.reduce((s, x) => s + Number(x.fine_sum || 0), 0),
@@ -14920,6 +15629,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       sold_qty: analytics.reduce((s, x) => s + Number(x.sold_qty || 0), 0),
       return_qty: analytics.reduce((s, x) => s + Number(x.return_qty || 0), 0),
       ordered_qty: orderedLegs,
+      ordered_retail_sum: orderedRetailSum,
       return_legs_qty: returnLegs,
       acquiring_sum: analytics.reduce((s, x) => s + Number(x.acquiring_sum || 0), 0),
       acquiring_percent: (analytics.reduce((s, x) => s + Number(x.acquiring_sum || 0), 0) > 0 && analytics.reduce((s, x) => s + Number(x.sales_net || 0), 0) > 0)
@@ -14965,12 +15675,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         share_pct: tot > 0 ? (Math.max(0, e.sales_net) / tot) * 100 : 0,
       })).sort((a, b) => b.sales_net - a.sales_net);
     };
-    setUploadedReportGeo({
+    const geoObj = {
       byWarehouse: finishGeo(byWarehouse),
       byOffice: finishGeo(byOffice),
       byCountry: finishGeo(byCountry),
       dailyTotals: [...dayTotals.values()].sort((a, b) => String(a.key).localeCompare(String(b.key))),
-    });
+    };
+    setUploadedReportGeo(geoObj);
+    // Сохраняем гео-снимок в summary, чтобы новая «Сводка» восстанавливалась из истории без исходного файла.
+    try { (summary as any).geo_snapshot = geoObj; } catch {}
     const seededCosts: Record<string, string> = {};
     const missingCostValues: Record<string, string> = {};
     let missingCount = 0;
@@ -15070,15 +15783,21 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       return;
     }
     try {
+      // Лёгкий список: без тяжёлых rows_json/summary_json — только метаданные.
       const { data, error } = await supabase
         .from('analytics_upload_reports_raw')
-        .select('id, supplier_id, supplier_name, file_name, period_start, period_end, summary_json, created_at')
+        .select('id, supplier_id, supplier_name, file_name, period_start, period_end, report_number, created_at, rn:summary_json->>report_number, src_bucket:summary_json->>source_file_bucket, src_path:summary_json->>source_file_path')
         .eq('supplier_id', supplierId)
         .order('period_start', { ascending: true, nullsFirst: false })
         .order('created_at', { ascending: true })
         .limit(300);
       if (error) throw error;
-      setUploadedRawReports(Array.isArray(data) ? data : []);
+      const light = (Array.isArray(data) ? data : []).map((r: any) => ({
+        ...r,
+        report_number: r.report_number || r.rn || null,
+        summary_json: { report_number: r.report_number || r.rn || null, period_start: r.period_start, period_end: r.period_end, source_file_bucket: r.src_bucket || null, source_file_path: r.src_path || null },
+      }));
+      setUploadedRawReports(light);
     } catch (e) {
       console.error('loadUploadedRawReportHistory error', e);
       setUploadedRawReports([]);
@@ -15238,19 +15957,39 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     return cleanIds.flatMap((id) => byId.get(id) || []);
   };
 
+  // Достаёт строки отчёта в порядке: 1) встроенные rows_json, 2) rows_json в БД,
+  // 3) ПЕРЕ-ПАРСИНГ исходного xlsx из Storage. Третий путь и решает проблему:
+  // когда добавлен новый расчёт, не нужно вручную грузить файл заново — берём
+  // уже сохранённый исходник и пересчитываем актуальным кодом.
+  const getRowsForRawItem = async (item: any): Promise<any[]> => {
+    let rows = Array.isArray(item?.rows_json) ? item.rows_json : [];
+    if (rows.length) return rows;
+    if (item?.id) {
+      try { rows = await fetchRawRowsByIds([String(item.id)]); } catch { /* ignore */ }
+      if (rows.length) return rows;
+    }
+    const bucket = String(item?.summary_json?.source_file_bucket || '').trim();
+    const path = String(item?.summary_json?.source_file_path || '').trim();
+    if (bucket && path) {
+      try {
+        const { data, error } = await supabase.storage.from(bucket).download(path);
+        if (!error && data) return await readFirstSheetAsJsonFast(data as any);
+      } catch (e) { console.error('getRowsForRawItem reparse error', e); }
+    }
+    return [];
+  };
+
   const openUploadedRawHistoryItem = async (item: any) => {
     try {
-      let rows = Array.isArray(item?.rows_json) ? item.rows_json : [];
-      if (!rows.length && item?.id) {
-        rows = await fetchRawRowsByIds([String(item.id)]);
-      }
+      const rows = await getRowsForRawItem(item);
       if (!rows.length) {
-        showToast('В сохранённом WB отчёте нет строк', 'error');
+        showToast('Нет данных и исходного файла — загрузите этот отчёт заново один раз', 'error');
         return;
       }
-      processUploadedWbReport(rows);
+      const turbo = rows.length >= TURBO_MODE_ROWS;
+      processUploadedWbReport(rows, { turbo });
       setUploadedRawHistoryPickerOpen(false);
-      showToast('WB отчёт открыт из отдельной истории', 'success');
+      showToast('WB отчёт открыт (пересчитан актуальным кодом)', 'success');
     } catch (e) {
       console.error('openUploadedRawHistoryItem error', e);
       showToast('Не удалось открыть WB отчёт из истории', 'error');
@@ -15259,22 +15998,220 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
   const openUploadedRawHistoryMonth = async (items: any[]) => {
     try {
-      let rows = (Array.isArray(items) ? items : []).flatMap((x: any) => (Array.isArray(x?.rows_json) ? x.rows_json : []));
+      const list = Array.isArray(items) ? items : [];
+      let rows: any[] = [];
+      for (const it of list) rows = rows.concat(await getRowsForRawItem(it));
       if (!rows.length) {
-        const ids = (Array.isArray(items) ? items : []).map((x: any) => String(x?.id || '')).filter(Boolean);
-        rows = await fetchRawRowsByIds(ids);
-      }
-      if (!rows.length) {
-        showToast('Нет данных WB отчётов за выбранный месяц', 'error');
+        showToast('Нет данных WB отчётов за выбранный месяц (нет исходников)', 'error');
         return;
       }
-      processUploadedWbReport(rows);
+      const turbo = rows.length >= TURBO_MODE_ROWS;
+      processUploadedWbReport(rows, { turbo });
       setUploadedRawHistoryPickerOpen(false);
       showToast('Открыт объединённый WB отчёт за месяц', 'success');
     } catch (e) {
       console.error('openUploadedRawHistoryMonth error', e);
       showToast('Не удалось открыть отчёт за месяц', 'error');
     }
+  };
+
+  // Пересчёт отчёта из исходника + перезапись снапшота в «Отчёты» (precomputed
+  // история), чтобы новые показатели сохранились и подтянулись без перезагрузки файла.
+  const recomputeRawHistoryItem = async (item: any, opts?: { silent?: boolean }) => {
+    const rows = await getRowsForRawItem(item);
+    if (!rows.length) {
+      if (!opts?.silent) showToast('Нет исходного файла для пересчёта — загрузите отчёт заново один раз', 'error');
+      return false;
+    }
+    const turbo = rows.length >= TURBO_MODE_ROWS;
+    const result = processUploadedWbReport(rows, { turbo });
+    if (result?.summary) {
+      const sm: any = { ...(result.summary || {}) };
+      if (!String(sm.report_number || '').trim() && item?.summary_json?.report_number) sm.report_number = item.summary_json.report_number;
+      await saveUploadedReportHistory(item?.file_name || 'recomputed.xlsx', sm, result.analytics);
+    }
+    return true;
+  };
+
+  const [rawRecomputeBusy, setRawRecomputeBusy] = useState<string | null>(null);
+  const recomputeAllRawHistory = async () => {
+    const items = (uploadedRawReports || []).filter((h: any) => {
+      const b = String(h?.summary_json?.source_file_path || '').trim();
+      const inDb = Array.isArray(h?.rows_json) && h.rows_json.length > 0;
+      return !!b || inDb;
+    });
+    if (!items.length) { showToast('Нет отчётов с доступным исходником для пересчёта', 'error'); return; }
+    const ok = await confirmDialog({ title: 'Пересчитать все отчёты?', message: `Будут пересчитаны из исходников и обновлены в «Отчётах»: ${items.length} шт.\nЭто применит все новые показатели без ручной перезагрузки файлов.`, tone: 'primary', confirmText: 'Пересчитать', cancelText: 'Отмена' });
+    if (!ok) return;
+    let done = 0, fail = 0;
+    for (let i = 0; i < items.length; i += 1) {
+      setRawRecomputeBusy(`Пересчёт ${i + 1} из ${items.length}…`);
+      try { (await recomputeRawHistoryItem(items[i], { silent: true })) ? (done += 1) : (fail += 1); }
+      catch (e) { console.error('recomputeAll item error', e); fail += 1; }
+      await new Promise((r) => setTimeout(r, 60));
+    }
+    setRawRecomputeBusy(null);
+    showToast(`Пересчитано: ${done}${fail ? `, пропущено: ${fail}` : ''}`, fail ? 'warning' : 'success');
+    await loadUploadedReportHistory(uploadedSelectedSupplierId);
+  };
+
+  // ===== WB API: еженедельные отчёты о реализации (тот же файл, что грузили вручную) =====
+  // Маппинг строки API (reportDetailByPeriod) → колонки WB-отчёта (русские заголовки,
+  // которые читает processUploadedWbReport). Парсер сопоставляет по подстрокам, поэтому
+  // достаточно канонических названий колонок отчёта о реализации.
+  const mapWbApiRowToReportRow = (r: any) => ({
+    'Номер отчета': r?.realizationreport_id ?? '',
+    'Номер поставки': r?.gi_id ?? '',
+    'Предмет': r?.subject_name ?? '',
+    'Код номенклатуры': r?.nm_id ?? '',
+    'Бренд': r?.brand_name ?? '',
+    'Артикул поставщика': r?.sa_name ?? '',
+    'Размер': r?.ts_name ?? '',
+    'Баркод': r?.barcode ?? '',
+    'Тип документа': r?.doc_type_name ?? '',
+    'Обоснование для оплаты': r?.supplier_oper_name ?? '',
+    'Дата заказа покупателем': r?.order_dt ?? '',
+    'Дата продажи': r?.sale_dt ?? '',
+    'Кол-во': r?.quantity ?? 0,
+    'Цена розничная': r?.retail_price ?? 0,
+    'Вайлдберриз реализовал Товар (Пр)': r?.retail_amount ?? 0,
+    'Согласованный продуктовый дисконт, %': r?.product_discount_for_report ?? 0,
+    'Промокод, %': r?.supplier_promo ?? 0,
+    'Цена розничная с учетом согласованной скидки': r?.retail_price_withdisc_rub ?? 0,
+    'Скидка постоянного покупателя (СПП), %': r?.ppvz_spp_prc ?? 0,
+    'Размер кВВ без НДС, % базовый': r?.ppvz_kvw_prc_base ?? 0,
+    'Итоговый кВВ без НДС, %': r?.ppvz_kvw_prc ?? 0,
+    'Вознаграждение с продаж до вычета комиссий (ВВ), без НДС': r?.ppvz_sales_commission ?? 0,
+    'К перечислению Продавцу за реализованный Товар': r?.ppvz_for_pay ?? 0,
+    'Возмещение за выдачу и хранение товара на ПВЗ': r?.ppvz_reward ?? 0,
+    'Количество доставок': r?.delivery_amount ?? 0,
+    'Количество возврата': r?.return_amount ?? 0,
+    'Услуги по доставке товара покупателю': r?.delivery_rub ?? 0,
+    'Общая сумма штрафов': r?.penalty ?? 0,
+    'Доплаты': r?.additional_payment ?? 0,
+    'Хранение': r?.storage_fee ?? 0,
+    'Удержания': r?.deduction ?? 0,
+    'Платная приемка': r?.acceptance ?? 0,
+    'Возмещение издержек по эквайрингу/Комиссии за организацию платежей': r?.acquiring_fee ?? 0,
+    'Размер комиссии за эквайринг/Комиссии за организацию платежей, %': r?.acquiring_percent ?? 0,
+    'Наименование банка-эквайера': r?.acquiring_bank ?? '',
+    'Виды логистики, штрафов и корректировок ВВ': r?.bonus_type_name ?? '',
+    'Стикер МП': r?.sticker_id ?? '',
+    // В API два РАЗНЫХ поля: ppvz_office_name = адрес доставки покупателю (→ «Города»),
+    // office_name = склад отгрузки (→ «Склады»). Раньше путались и дублировались.
+    'Наименование офиса доставки': r?.ppvz_office_name ?? '',
+    'Склад': r?.office_name ?? '',
+    'Страна': r?.site_country ?? '',
+    'Тип коробов': r?.gi_box_type_name ?? '',
+    'Номер таможенной декларации': r?.declaration_number ?? '',
+    'Код маркировки': r?.kiz ?? '',
+    'ШК': r?.shk_id ?? '',
+    'Srid': r?.srid ?? '',
+  });
+
+  const invokeWbReports = async (payload: any): Promise<any> => {
+    const { data, error } = await supabase.functions.invoke('wb-reports', { body: { supplier_id: uploadedSelectedSupplierId, ...payload } });
+    if (error) throw new Error(error?.message || 'Ошибка вызова WB API');
+    if (data && !Array.isArray(data) && data.error) throw new Error(String(data.error));
+    return data;
+  };
+
+  const loadWbApiReports = async (supplierId: string) => {
+    if (!supplierId) { setWbApiReports([]); return; }
+    const { data, error } = await supabase.from('wb_api_reports').select('*').eq('supplier_id', supplierId).order('date_from', { ascending: false });
+    if (error) { console.error('loadWbApiReports', error); return; }
+    setWbApiReports(Array.isArray(data) ? data : []);
+  };
+
+  // Завершённые недели WB (пн–вс), пересекающиеся с указанным месяцем.
+  const wbWeeksOfMonth = (year: number, month: number) => {
+    const out: Array<{ from: string; to: string; label: string }> = [];
+    const ymd = (d: Date) => d.toISOString().slice(0, 10);
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const last = new Date(year, month + 1, 0);                 // последний день месяца
+    const d = new Date(year, month, 1);
+    const dow = (d.getDay() + 6) % 7; d.setDate(d.getDate() - dow);  // понедельник недели с 1-м числом
+    while (d <= last) {
+      const start = new Date(d);
+      const end = new Date(d); end.setDate(d.getDate() + 6);
+      if (end < today) out.push({ from: ymd(start), to: ymd(end), label: `${ymd(start)}…${ymd(end)}` }); // только завершённые
+      d.setDate(d.getDate() + 7);
+    }
+    return out;
+  };
+
+  // Группировка строк WB → агрегаты по отчётам + upsert в историю (дата загрузки = сейчас).
+  const upsertWbApiReportsFromRows = async (rows: any[]) => {
+    const byId = new Map<string, any>();
+    for (const r of (rows || [])) {
+      const id = String(r?.realizationreport_id || ''); if (!id) continue;
+      let g = byId.get(id);
+      if (!g) { g = { supplier_id: uploadedSelectedSupplierId, realizationreport_id: id, date_from: r?.date_from || null, date_to: r?.date_to || null, create_dt: r?.create_dt || null, rows_count: 0, retail_amount_sum: 0, ppvz_for_pay_sum: 0 }; byId.set(id, g); }
+      g.rows_count += 1; g.retail_amount_sum += Number(r?.retail_amount || 0); g.ppvz_for_pay_sum += Number(r?.ppvz_for_pay || 0);
+    }
+    const list = Array.from(byId.values());
+    if (!list.length) return 0;
+    const { error } = await supabase.from('wb_api_reports').upsert(list.map((x) => ({ ...x, updated_at: new Date().toISOString() })), { onConflict: 'supplier_id,realizationreport_id' });
+    if (error) throw error;
+    return list.length;
+  };
+
+  // Сканируем несколько недель подряд (каждая — отдельный безопасный запрос) и сохраняем найденные.
+  const scanWbApiWeeks = async (weeks: Array<{ from: string; to: string; label: string }>) => {
+    if (!uploadedSelectedSupplierId) { showToast('Сначала выберите поставщика', 'error'); return; }
+    let found = 0;
+    try {
+      for (let i = 0; i < weeks.length; i += 1) {
+        setWbApiBusy(`Проверка недели ${i + 1}/${weeks.length} (${weeks[i].from})…`);
+        try {
+          const rows = await invokeWbReports({ dateFrom: weeks[i].from, dateTo: weeks[i].to });
+          if (Array.isArray(rows)) found += await upsertWbApiReportsFromRows(rows);
+        } catch (e) { console.error('scanWbApiWeeks week error', e); }
+      }
+      await loadWbApiReports(uploadedSelectedSupplierId);
+      showToast(found > 0 ? `Загружено/обновлено отчётов: ${found}` : 'Новых отчётов не найдено', found > 0 ? 'success' : 'info');
+    } catch (e: any) { console.error('scanWbApiWeeks', e); showToast(`Ошибка: ${e?.message || 'не удалось получить отчёты'}`, 'error'); }
+    finally { setWbApiBusy(''); }
+  };
+
+  const fetchWbApiReportRows = async (report: any) => {
+    const rows = await invokeWbReports({ dateFrom: report?.date_from, dateTo: report?.date_to });
+    if (!Array.isArray(rows)) throw new Error('Неверный ответ WB');
+    const rid = String(report?.realizationreport_id || '');
+    return rows.filter((r: any) => String(r?.realizationreport_id || '') === rid);
+  };
+
+  const downloadWbApiReport = async (report: any) => {
+    setWbApiBusy(`Скачиваю отчёт №${report?.realizationreport_id}…`);
+    try {
+      const rows = await fetchWbApiReportRows(report);
+      if (!rows.length) { showToast('В отчёте нет строк', 'error'); return; }
+      const mapped = rows.map(mapWbApiRowToReportRow);
+      const ps = report?.date_from ? new Date(report.date_from).toLocaleDateString('ru-RU').replace(/\./g, '-') : '';
+      const pe = report?.date_to ? new Date(report.date_to).toLocaleDateString('ru-RU').replace(/\./g, '-') : '';
+      await downloadWorkbook(`Отчет_WB_${report?.realizationreport_id}_${ps}_${pe}.xlsx`, [{ name: 'Отчёт о реализации', rows: mapped }]);
+      showToast('Отчёт скачан', 'success');
+    } catch (e: any) { console.error('downloadWbApiReport', e); showToast(`Ошибка: ${e?.message || 'не удалось скачать'}`, 'error'); }
+    finally { setWbApiBusy(''); }
+  };
+
+  const importWbApiReport = async (report: any) => {
+    setWbApiBusy(`Загружаю в систему №${report?.realizationreport_id}…`);
+    try {
+      const rows = await fetchWbApiReportRows(report);
+      if (!rows.length) { showToast('В отчёте нет строк', 'error'); return; }
+      const mapped = rows.map(mapWbApiRowToReportRow);
+      const turbo = mapped.length >= TURBO_MODE_ROWS;
+      const result = processUploadedWbReport(mapped, { turbo });
+      if (result?.summary) {
+        const sm: any = { ...(result.summary || {}) };
+        if (!String(sm.report_number || '').trim()) sm.report_number = String(report?.realizationreport_id || '');
+        await saveUploadedReportHistory(`Отчет WB ${report?.realizationreport_id}`, sm, result.analytics);
+      }
+      showToast('Отчёт загружен в систему и сохранён в «Отчётах»', 'success');
+      setWbApiPickerOpen(false);
+    } catch (e: any) { console.error('importWbApiReport', e); showToast(`Ошибка: ${e?.message || 'не удалось загрузить'}`, 'error'); }
+    finally { setWbApiBusy(''); }
   };
 
 
@@ -15337,6 +16274,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       const { error } = await supabase.from('analytics_upload_reports_raw').delete().eq('id', id);
       if (error) throw error;
       await loadUploadedRawReportHistory(uploadedSelectedSupplierId);
+      logAction('Аналитика: удаление отчёта', `Удалён WB-отчёт из истории: ${label}`, currentEmployee?.id);
       showToast('WB отчёт удалён из отдельной истории', 'success');
     } catch (e) {
       console.error('deleteUploadedRawHistoryItem error', e);
@@ -15344,18 +16282,39 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     }
   };
 
+  // Загрузка полной сводки выбранного периода для сравнения.
+  const loadCompareSummary = async (id: string) => {
+    setCompareReportId(id);
+    if (!id) { setCompareSummary(null); return; }
+    try {
+      const { data, error } = await supabase.from('analytics_upload_history').select('summary_json').eq('id', id).single();
+      if (error) throw error;
+      setCompareSummary(data?.summary_json || null);
+    } catch (e) { console.error('loadCompareSummary', e); setCompareSummary(null); showToast('Не удалось загрузить период для сравнения', 'error'); }
+  };
+
   const loadUploadedReportHistory = async (supplierId: string) => {
     if (!supplierId) return;
     try {
       setUploadedHistoryLoading(true);
+      // Лёгкий список: вытаскиваем только нужные поля из summary_json (без geo_snapshot/аналитики),
+      // полные данные подгружаются при открытии конкретного отчёта.
       const { data, error } = await supabase
         .from('analytics_upload_history')
-        .select('id, supplier_id, supplier_name, file_name, summary_json, created_at')
+        .select('id, supplier_id, supplier_name, file_name, created_at, rn:summary_json->>report_number, ps:summary_json->>period_start, pe:summary_json->>period_end')
         .eq('supplier_id', supplierId)
         .order('created_at', { ascending: false })
         .limit(200);
       if (error) throw error;
-      const sorted = (Array.isArray(data) ? data : []).sort((a: any, b: any) => {
+      const light = (Array.isArray(data) ? data : []).map((row: any) => ({
+        id: row.id,
+        supplier_id: row.supplier_id,
+        supplier_name: row.supplier_name,
+        file_name: row.file_name,
+        created_at: row.created_at,
+        summary_json: { report_number: row.rn || null, period_start: row.ps || null, period_end: row.pe || null },
+      }));
+      const sorted = light.sort((a: any, b: any) => {
         const da = new Date(a?.summary_json?.period_start || a?.created_at || 0).getTime();
         const db = new Date(b?.summary_json?.period_start || b?.created_at || 0).getTime();
         return da - db;
@@ -15417,6 +16376,51 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     }
   };
 
+  // Пересчёт из СЫРЫХ строк отчёта (analytics_upload_reports_raw) — там полные данные,
+  // поэтому новый парсер строит размеры/штуки/виды логистики заново.
+  const reparseHistoryFromRaw = async (sumObj: any, supplierId?: string): Promise<boolean> => {
+    try {
+      const supId = String(supplierId || uploadedSelectedSupplierId || '').trim();
+      if (!supId) return false;
+      const rn = String((sumObj as any)?.report_number || '').trim();
+      const ps = (sumObj as any)?.period_start ? new Date((sumObj as any).period_start) : null;
+      const pe = (sumObj as any)?.period_end ? new Date((sumObj as any).period_end) : null;
+      const iso = (d: Date | null) => d && !Number.isNaN(d.getTime()) ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` : '';
+      // Шаг 1: только метаданные (без тяжёлого rows_json), чтобы найти нужный отчёт.
+      const { data: metaRows, error: metaErr } = await supabase
+        .from('analytics_upload_reports_raw')
+        .select('id, report_number, period_start, period_end')
+        .eq('supplier_id', supId)
+        .order('created_at', { ascending: false })
+        .limit(50);
+      if (metaErr || !Array.isArray(metaRows) || metaRows.length === 0) return false;
+      const psIso = iso(ps), peIso = iso(pe);
+      const match = metaRows.find((r: any) => {
+        if (rn && String(r?.report_number || '').trim() === rn) return true;
+        const rps = r?.period_start ? String(r.period_start).slice(0, 10) : '';
+        const rpe = r?.period_end ? String(r.period_end).slice(0, 10) : '';
+        return !!psIso && !!peIso && rps === psIso && rpe === peIso;
+      }) || null;
+      if (!match?.id) return false;
+      // Шаг 2: тянем rows_json ТОЛЬКО для найденного отчёта.
+      const { data: oneRow, error: rowErr } = await supabase
+        .from('analytics_upload_reports_raw')
+        .select('rows_json')
+        .eq('id', match.id)
+        .maybeSingle();
+      const rows = oneRow && Array.isArray(oneRow.rows_json) ? oneRow.rows_json : null;
+      if (rowErr || !rows || rows.length === 0) return false;
+      showToast('Пересчитываю отчёт из сохранённых строк…', 'info');
+      processUploadedWbReport(rows);
+      setUploadedViewTab('summary');
+      showToast('Отчёт пересчитан (полные размеры и виды логистики)', 'success');
+      return true;
+    } catch (e) {
+      console.warn('reparseHistoryFromRaw failed', e);
+      return false;
+    }
+  };
+
   const openUploadedHistoryItem = async (item: any) => {
     try {
       let analytics = Array.isArray(item?.analytics_json) ? item.analytics_json : [];
@@ -15431,8 +16435,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       }
       // Пробуем пересчитать из исходного файла (полная инфографика + эквайринг).
       if (await reparseHistoryFromFile(summary)) return;
-      // Файла нет — показываем сохранённую сводку; гео-графики недоступны.
-      setUploadedReportGeo(null);
+      // Иначе — из сохранённых сырых строк отчёта (полные размеры/штуки/виды логистики).
+      if (await reparseHistoryFromRaw(summary, item?.supplier_id)) return;
+      // Файла нет — восстанавливаем гео-снимок из сохранённой сводки (если он есть).
+      const geoSnap = (summary as any)?.geo_snapshot || null;
+      setUploadedReportGeo(geoSnap && (geoSnap.byWarehouse || geoSnap.byOffice || geoSnap.dailyTotals) ? geoSnap : null);
       if (!Array.isArray(analytics) || analytics.length === 0) {
         showToast('В этом отчёте нет сохранённых данных аналитики', 'error');
         return;
@@ -15469,7 +16476,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       setUploadedReportSummary(normalizedSummary);
       setUploadedDailySeries({});
       setUploadedChartKey('');
-      setUploadedViewTab('table');
+      setUploadedViewTab('summary');
 
       if (item?.id) {
         try {
@@ -15807,9 +16814,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         return {
           code: row?.code || '',
           name: row?.name || '',
+          vendor_code: row?.vendor_code || '',
+          ordered_qty: Number(row?.ordered_qty || 0),
+          ordered_retail_sum: Number(row?.ordered_retail_sum || 0),
           sales_net: Number(row?.sales_net || 0),
           returns_gross: Number(row?.returns_gross || 0),
           logistics_sum: Number(row?.logistics_sum || 0),
+          logistics_forward: Number(row?.logistics_forward || 0),
+          logistics_logi: Number(row?.logistics_logi || 0),
+          logistics_return: Number(row?.logistics_return || 0),
           payout_sum: Number(row?.payout_sum || 0),
           payout_net: Number(row?.payout_net || 0),
           fine_sum: Number(row?.fine_sum || 0),
@@ -15821,6 +16834,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           acquiring_sum: Number(row?.acquiring_sum || 0),
           acquiring_percent: Number(row?.acquiring_percent || 0),
           tax_sum: Number(row?.tax_sum || 0),
+          log_kinds: { ...(row?.log_kinds || {}) },
           size_breakdown: row?.size_breakdown || '',
           size_breakdown_list: sizeRows.map((sz: any) => ({
             size: sz?.size || '',
@@ -15835,12 +16849,26 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
             withhold_sum: Number(sz?.withhold_sum || 0),
             to_pay_total: Number(sz?.to_pay_total || 0),
             acquiring_sum: Number(sz?.acquiring_sum || 0),
+            log_kinds: { ...(sz?.log_kinds || {}) },
           })),
         };
       };
       const analyticsSafe = Array.isArray(analyticsToSave) ? analyticsToSave.slice(0, ANALYTICS_JSON_DB_LIMIT).map(compactAnalyticsRow) : [];
       const analyticsTruncated = Array.isArray(analyticsToSave) && analyticsToSave.length > analyticsSafe.length;
-      const summarySafe = { ...(summaryToSave || {}), analytics_truncated: analyticsTruncated, analytics_rows_saved: analyticsSafe.length, analytics_rows_original: Array.isArray(analyticsToSave) ? analyticsToSave.length : 0 } as any;
+      // Компактный гео-снимок для восстановления «Сводки» из истории (топ-150 точек).
+      const geoSrc = (summaryToSave as any)?.geo_snapshot || uploadedReportGeo || null;
+      const compactGeoArr = (arr: any[]) => (Array.isArray(arr) ? arr : []).slice(0, 150).map((e: any) => ({
+        key: e?.key, name: e?.name, sales_net: Number(e?.sales_net || 0), sold_qty: Number(e?.sold_qty || 0),
+        return_qty: Number(e?.return_qty || 0), logistics_sum: Number(e?.logistics_sum || 0),
+        buyout_pct: Number(e?.buyout_pct || 0), logistics_pct: Number(e?.logistics_pct || 0), share_pct: Number(e?.share_pct || 0),
+      }));
+      const geoSafe = geoSrc ? {
+        byWarehouse: compactGeoArr(geoSrc.byWarehouse),
+        byOffice: compactGeoArr(geoSrc.byOffice),
+        byCountry: compactGeoArr(geoSrc.byCountry),
+        dailyTotals: (Array.isArray(geoSrc.dailyTotals) ? geoSrc.dailyTotals : []).map((d: any) => ({ key: d?.key, sales_net: Number(d?.sales_net || 0), sold_qty: Number(d?.sold_qty || 0), ordered_qty: Number(d?.ordered_qty || 0), ordered_retail_sum: Number(d?.ordered_retail_sum || 0) })),
+      } : null;
+      const summarySafe = { ...(summaryToSave || {}), geo_snapshot: geoSafe, analytics_truncated: analyticsTruncated, analytics_rows_saved: analyticsSafe.length, analytics_rows_original: Array.isArray(analyticsToSave) ? analyticsToSave.length : 0 } as any;
 
       const payload = {
         supplier_id: uploadedSelectedSupplierId,
@@ -15863,10 +16891,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           .update(payload)
           .eq('id', duplicateId);
         if (error) throw error;
+        logAction('Аналитика: обновление отчёта', `${supplierName} · период ${ps}–${pe}${reportNumber ? ` · №${reportNumber}` : ''} · позиций ${analyticsSafe.length}`, currentEmployee?.id);
         showToast(`Отчёт №${reportNumber} обновлён`, 'success');
       } else {
         const { error } = await supabase.from('analytics_upload_history').insert(payload);
         if (error) throw error;
+        logAction('Аналитика: загрузка отчёта', `${supplierName} · период ${ps}–${pe}${reportNumber ? ` · №${reportNumber}` : ''} · позиций ${analyticsSafe.length}`, currentEmployee?.id);
       }
 
       if (analyticsTruncated) {
@@ -15882,7 +16912,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
   const normalizeNmId = (v: any) => String(v ?? '').replace(/\D+/g, '').replace(/^0+/, '');
   // Синтез WB-CDN URL фото по nmID (фолбэк, когда в БД фото нет).
-  const wbBasketHost = (vol: number) => { const t = [143,287,431,719,1007,1061,1115,1169,1313,1601,1655,1919,2045,2189,2405,2621,2837,3053,3269,3485,3701,3917,4133,4349,4565,4877,5189,5501,5813,6125,6437,6749,7061,7373,7685,7997,8309,8621]; let i = 0; while (i < t.length && vol > t[i]) i++; return `basket-${String(i + 1).padStart(2, '0')}.wbbasket.ru`; };
+  const wbBasketHost = (vol: number) => { const t = [143,287,431,719,1007,1061,1115,1169,1313,1601,1655,1919,2045,2189,2405,2621,2837,3053,3269,3485,3701,3917,4133,4349,4565,4877,5189,5501,5813,6125,6437,6749,7061,7373,7685,7997,8309,8621,9244,9620,10380,11132,11900,12650,13400,14150,14900]; let i = 0; while (i < t.length && vol > t[i]) i++; return `basket-${String(i + 1).padStart(2, '0')}.wbbasket.ru`; };
   const wbSynthPhotos = (code: string) => {
     const n = Number(normalizeNmId(code)); if (!n) return [] as string[];
     const vol = Math.floor(n / 100000), part = Math.floor(n / 1000);
@@ -16024,7 +17054,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         }]
       : [];
 
-    await downloadWorkbook(`analytics_uploaded_report_${new Date().toISOString().slice(0, 10)}.xlsx`, [
+    await downloadWorkbook(`analytics_uploaded_report_${mskTodayYmd()}.xlsx`, [
       {
         name: 'Сводка',
         rows: summaryRows,
@@ -17724,6 +18754,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   };
 
   const menuItems = useMemo(() => [
+    { id: 'instruction', icon: BookOpen, label: 'Инструкция' },
     { id: 'tasks', icon: CheckSquare, label: 'Задачи' },
     { id: 'warehouse', icon: Box, label: 'Склад' },
     { id: 'cameras', icon: Camera, label: 'Камеры' },
@@ -18055,7 +19086,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `warehouse_positions_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      a.download = `warehouse_positions_${mskTodayYmd()}.xlsx`;
       a.click();
       URL.revokeObjectURL(url);
     } finally {
@@ -18091,7 +19122,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       const formData = new FormData();
       formData.append('chat_id', employee.telegram_chat_id);
       formData.append('caption', `Найденные позиции на складе (${Math.min(warehouseSearchResults.length, 5000)} шт.)`);
-      formData.append('document', blob, `warehouse_positions_${new Date().toISOString().slice(0, 10)}.xlsx`);
+      formData.append('document', blob, `warehouse_positions_${mskTodayYmd()}.xlsx`);
 
       const response = await fetch(`https://api.telegram.org/bot${token}/sendDocument`, {
         method: 'POST',
@@ -18257,9 +19288,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     }
 
     // Default to current month
-    const now = new Date();
-    const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
-    const end = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
+    const bounds = mskMonthBounds(new Date());
+    const start = bounds.start;
+    const end = bounds.end;
 
     setEmployeeReportRange({ start, end });
     setIsEmployeeReportModalOpen(true);
@@ -18503,17 +19534,22 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
             <div className="text-sm font-semibold text-slate-900">Операционная система SkladPro</div>
             <div className="text-xs text-slate-500">Единый рабочий контур: сборка, FBS/FBO, задачи и аналитика</div>
           </div>
-          <div className="hidden md:flex items-center gap-2 text-[11px] text-slate-500">
-            <span className="px-2 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">Онлайн</span>
-            <span className="px-2 py-1 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">Этап 1 UI</span>
+          <div className="flex items-center gap-2 flex-wrap justify-end">
+            <PushToggle />
+            <NightToggle />
+            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-medium ${supabaseConnectionIssue ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`} title={supabaseConnectionIssue || 'Соединение с базой данных активно'}>
+              <span className={`h-1.5 w-1.5 rounded-full ${supabaseConnectionIssue ? 'bg-rose-500' : 'bg-emerald-500'}`} />
+              {supabaseConnectionIssue ? 'Нет связи с БД' : 'БД подключена'}
+            </span>
+            <HeaderClock />
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-indigo-200 bg-indigo-50 text-indigo-700 text-[11px] font-medium" title="Сотрудников онлайн на сайте">
+              <span className="h-1.5 w-1.5 rounded-full bg-indigo-500" />
+              В сети: {employees.filter((e: any) => isEmployeeOnline(e)).length}
+            </span>
           </div>
         </div>
         <div className={`${activeTab === 'wb_products' || activeTab === 'analytics' || activeTab === 'advertising' ? 'max-w-none' : 'max-w-7xl'} mx-auto w-full`}>
-          {supabaseConnectionIssue && (
-            <div className="mb-3 px-3 py-2 rounded-lg border border-amber-300 bg-amber-50 text-amber-800 text-sm">
-              {supabaseConnectionIssue}
-            </div>
-          )}
+          {/* Статус подключения к БД перенесён в шапку (бейдж сверху справа). */}
 
           {/* WB section removed */}
 
@@ -18711,6 +19747,55 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           {/* SUPPLIES TAB */}
           {activeTab === 'supplies' && (
             <>
+              {/* Активный сборщик — учёт выработки по сканам. Видно админу/тем, у кого включено право кнопки. */}
+              {hasAssemblyButtonAccess('supply_scanner_picker') && (
+              <div className={`mx-auto max-w-6xl mb-3 flex flex-wrap items-center justify-between gap-2 rounded-2xl border px-4 py-2.5 text-sm ${activeScannerEmployee ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}>
+                <div className="flex items-center gap-2 min-w-0">
+                  <UserCog className={`h-4 w-4 shrink-0 ${activeScannerEmployee ? 'text-emerald-600' : 'text-amber-600'}`} />
+                  {activeScannerEmployee ? (
+                    <span className="truncate"><span className="text-slate-500">Сканирует:</span> <b className="text-emerald-800">{activeScannerEmployee.name}</b></span>
+                  ) : (
+                    <span className="text-amber-800">Сборщик не выбран — отсканируйте бейдж (или скан пишется на залогиненного: {(currentEmployee as any)?.full_name || '—'})</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button onClick={() => setShowScannerBadgePicker(true)} className="px-2.5 py-1 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 text-xs">Сменить сборщика</button>
+                  {activeScannerEmployee && <button onClick={() => { setActiveScannerEmployee(null); showToast('Сборщик сброшен', 'info'); }} className="px-2.5 py-1 rounded-lg border border-rose-200 bg-white text-rose-600 hover:bg-rose-50 text-xs">Сбросить</button>}
+                </div>
+              </div>
+              )}
+
+              {showScannerBadgePicker && hasAssemblyButtonAccess('supply_scanner_picker') && (
+                <div className="fixed inset-0 z-[9995] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4" onClick={() => setShowScannerBadgePicker(false)}>
+                  <div className="w-full max-w-lg max-h-[85vh] overflow-y-auto rounded-3xl bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+                      <div>
+                        <h3 className="font-bold text-slate-900">Выбор сборщика</h3>
+                        <p className="text-xs text-slate-500 mt-0.5">Нажмите на сотрудника или отсканируйте его бейдж. Учёт выработки — по сканам.</p>
+                      </div>
+                      <button onClick={() => setShowScannerBadgePicker(false)} className="text-slate-400 hover:text-slate-600"><X className="h-5 w-5" /></button>
+                    </div>
+                    <div className="p-4 space-y-2">
+                      {employees.length === 0 ? (
+                        <div className="py-8 text-center text-slate-400 text-sm">Нет сотрудников</div>
+                      ) : employees.map((emp: any) => (
+                        <div key={emp.id} className={`flex items-center gap-3 rounded-2xl border p-3 ${activeScannerEmployee?.id === String(emp.id) ? 'border-emerald-300 bg-emerald-50' : 'border-slate-200'}`}>
+                          <div className="shrink-0 rounded-lg bg-white p-1 ring-1 ring-slate-200" data-no-invert>
+                            <QRCodeSVG value={`WRK:${emp.id}`} size={56} />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="font-medium text-slate-800 truncate">{emp.full_name || 'Сотрудник'}</div>
+                            <div className="text-[11px] text-slate-400">{emp.role || 'Сборщик'} · бейдж: WRK:{String(emp.id).slice(0, 8)}…</div>
+                          </div>
+                          <button onClick={() => { setActiveScannerEmployee({ id: String(emp.id), name: emp.full_name || 'Сотрудник' }); showToast(`Сканирует: ${emp.full_name || 'Сотрудник'}`, 'success'); setShowScannerBadgePicker(false); }} className="shrink-0 px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700">Выбрать</button>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="px-4 pb-4 text-[11px] text-slate-400">QR можно распечатать как бейдж: сотрудник сканирует его в начале смены, и все его сборки засчитываются ему.</div>
+                  </div>
+                </div>
+              )}
+
               {supplyStep === 'LIST' && (
                 <SuppliesFBOSection>
                 <div className="mx-auto max-w-6xl">
@@ -20543,7 +21628,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 <>
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4">
                     <div className="flex items-center">
-                      <button onClick={() => { setReceptionStep('LIST'); setCurrentReception(null); setReceptionDate(new Date().toISOString().split('T')[0]); }} className="mr-4 text-slate-400 hover:text-slate-600"><ArrowLeft className="h-6 w-6" /></button>
+                      <button onClick={() => { setReceptionStep('LIST'); setCurrentReception(null); setReceptionDate(mskTodayYmd()); }} className="mr-4 text-slate-400 hover:text-slate-600"><ArrowLeft className="h-6 w-6" /></button>
                       <div>
                         <h2 className="text-xl font-bold">Приемка товара</h2>
                         <p className="text-sm text-slate-500 mb-2">
@@ -20972,6 +22057,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 currentEmployee={currentEmployee}
                 showToast={showToast}
               />
+            </React.Suspense>
+          )}
+
+          {/* INSTRUCTION TAB */}
+          {activeTab === 'instruction' && (
+            <React.Suspense fallback={<SectionSkeleton />}>
+              <InstructionTab />
             </React.Suspense>
           )}
 
@@ -21748,6 +22840,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           setAdGlobalExtra(nextExtra.adExtra);
                           setBarterRows(refreshedRows as any);
                           setBarterMonth(barterDuplicateModal.targetMonth);
+                          logAction('Бартер: дублирование карточек', `${suppliers.find((s:any)=>String(s.id)===barterTopSupplierId)?.name || barterTopSupplierId} · в месяц ${barterDuplicateModal.targetMonth} · карточек: ${duplicated.length}`, currentEmployee?.id);
                           setBarterDuplicateModal({ open: false, targetMonth: barterDuplicateModal.targetMonth });
                           showToast('Карточки продублированы', 'success');
                         }}
@@ -22445,12 +23538,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   Напечатанные
                 </button>
                 <button
-                  onClick={() => setHonestSignTab('scanned')}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${honestSignTab === 'scanned' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                >
-                  Отсканировано
-                </button>
-                <button
                   onClick={() => setHonestSignTab('print')}
                   className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${honestSignTab === 'print' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                 >
@@ -22506,10 +23593,17 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                 <span className="font-sans text-slate-600">Пол: <span className="font-medium text-slate-800">{item.gender_label || '-'}</span></span>
                               </div>
                             </div>
-                            <div className="flex items-center gap-4 shrink-0">
+                            <div className="flex items-center gap-3 shrink-0">
                               <div className="text-xs text-slate-400">
                                 {new Date(item.created_at).toLocaleDateString()}
                               </div>
+                              <button
+                                onClick={() => handleDownloadHonestSignSupply(item)}
+                                className="px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center text-xs font-medium"
+                                title="Скачать Excel этой поставки"
+                              >
+                                <Download className="h-3.5 w-3.5 mr-1.5" /> Excel
+                              </button>
                               <button
                                 onClick={() => handleDeleteHonestSign(item.id)}
                                 className="p-1 text-slate-400 hover:text-red-600 rounded"
@@ -22588,67 +23682,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 </div>
               )}
 
-              {honestSignTab === 'scanned' && (
-                <div className="oc-card p-6 mb-6">
-                    <h2 className="text-lg font-bold text-slate-900 mb-4">История отсканированных кодов</h2>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-2">Выберите поставщика</label>
-                            <select
-                              value={honestSignSupplierId}
-                              onChange={(e) => setHonestSignSupplierId(e.target.value)}
-                              className="w-full p-3 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
-                            >
-                              <option value="">-- Выберите поставщика --</option>
-                              {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                            </select>
-                        </div>
-                    </div>
-
-                    {honestSignScannedHistory.length > 0 ? (
-                        <div>
-                            <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
-                                <table className="w-full text-left text-sm">
-                                    <thead className="bg-slate-50 border-b border-slate-200">
-                                        <tr>
-                                            <th className="p-3 font-medium text-slate-500">Дата сканирования</th>
-                                            <th className="p-3 font-medium text-slate-500">Файл</th>
-                                            <th className="p-3 font-medium text-slate-500">Категория</th>
-                                            <th className="p-3 font-medium text-slate-500">Пол</th>
-                                            <th className="p-3 font-medium text-slate-500 text-right">Действия</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-slate-100">
-                                        {honestSignScannedHistory.map((item, idx) => (
-                                            <tr key={idx} className="hover:bg-slate-50">
-                                                <td className="p-3">{new Date(item.created_at).toLocaleString('ru-RU')}</td>
-                                                <td className="p-3">{item.file_name}</td>
-                                                <td className="p-3">{item.category || '-'}</td>
-                                                <td className="p-3">{getHSGenderLabel(item.gender)}</td>
-                                                <td className="p-3 text-right flex gap-2 justify-end">
-                                                    <button
-                                                        onClick={() => handleDownloadHonestSignHistory(item.file_name, item.created_at)}
-                                                        className="text-green-600 hover:text-green-800 font-medium p-1 hover:bg-green-50 rounded"
-                                                        title="Скачать Excel"
-                                                    >
-                                                        <Download className="h-4 w-4" />
-                                                    </button>
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    ) : (
-                        <div className="text-center py-12 text-slate-400 bg-white rounded-xl border border-slate-100 border-dashed">
-                            <ShieldCheck className="h-12 w-12 mx-auto text-slate-300 mb-4" />
-                            <p>Нет отсканированных кодов</p>
-                        </div>
-                    )}
-                </div>
-              )}
 
               {honestSignTab === 'base' && (
                 <div className="oc-card p-6 mb-6">
@@ -23714,6 +24747,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     >
                       История отчётов WB
                     </button>
+                    <button
+                      onClick={() => { setWbApiPickerOpen(true); if (uploadedSelectedSupplierId) loadWbApiReports(uploadedSelectedSupplierId); }}
+                      disabled={!uploadedSelectedSupplierId}
+                      className="px-4 py-2 text-sm font-semibold rounded-xl border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                      title="Еженедельные отчёты о реализации напрямую из WB — посмотреть и скачать без ручного захода в кабинет"
+                    >
+                      Отчёты API
+                    </button>
                   </div>
 
                   <ExcelUploader
@@ -23759,6 +24800,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         }
                         if (fromName) sm.report_number = fromName;
                       }
+                      // Период строго по «Дата продажи». Если столбца/дат нет — ручной выбор недели.
+                      if (!sm?.period_start) {
+                        showToast('В отчёте нет столбца «Дата продажи» — выберите неделю вручную', 'info');
+                        const d = new Date(); const dow = (d.getDay() + 6) % 7; d.setDate(d.getDate() - dow - 7);
+                        const guess = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+                        setManualWeekModal({ open: true, weekStart: guess, pending: { fileName: fileName || 'uploaded_report.xlsx', rows, summary: sm, analytics: Array.isArray(result?.analytics) ? result.analytics : [], sourceFile } });
+                        return;
+                      }
                       const dnum = String(sm?.report_number || '').trim();
                       const norm = (v: any) => v ? String(new Date(v).toISOString()).slice(0, 10) : '';
                       const dps = norm(sm?.period_start), dpe = norm(sm?.period_end);
@@ -23798,6 +24847,45 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 </div>
               </div>
 
+
+              {manualWeekModal.open && (
+                <div className="fixed inset-0 z-[130] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setManualWeekModal({ open: false, weekStart: mskTodayYmd(), pending: null })}>
+                  <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-200 p-5" onClick={(e) => e.stopPropagation()}>
+                    <div className="text-base font-bold text-slate-900 mb-1">Выберите неделю отчёта</div>
+                    <div className="text-xs text-slate-500 mb-4">В отчёте нет столбца «Дата продажи». Укажите начало недели (понедельник) — период будет неделя (пн–вс).</div>
+                    {(() => {
+                      const ws = manualWeekModal.weekStart;
+                      const we = (() => { const d = new Date(`${ws}T00:00:00`); if (Number.isNaN(d.getTime())) return ''; d.setDate(d.getDate() + 6); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
+                      return (
+                        <>
+                          <label className="block text-xs font-medium text-slate-600 mb-1">Начало недели</label>
+                          <input type="date" value={ws} onChange={(e) => setManualWeekModal((p) => ({ ...p, weekStart: e.target.value }))} className="oc-input mb-2" />
+                          <div className="text-xs text-slate-500 mb-4">Период: <b>{ws ? new Date(`${ws}T00:00:00`).toLocaleDateString('ru-RU') : '—'}</b> — <b>{we ? new Date(`${we}T00:00:00`).toLocaleDateString('ru-RU') : '—'}</b></div>
+                          <div className="flex justify-end gap-2">
+                            <button onClick={() => setManualWeekModal({ open: false, weekStart: mskTodayYmd(), pending: null })} className="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-50 text-sm">Отмена</button>
+                            <button
+                              disabled={!ws || !we}
+                              onClick={async () => {
+                                const p = manualWeekModal.pending; if (!p || !ws || !we) return;
+                                const sm = { ...(p.summary || {}), period_start: ws, period_end: we };
+                                setUploadedReportSummary((prev: any) => prev ? { ...prev, period_start: ws, period_end: we } : prev);
+                                try {
+                                  await saveUploadedRawReportHistory(p.rows, p.fileName, sm, p.sourceFile || undefined);
+                                  if (Array.isArray(p.analytics) && p.analytics.length > 0) await saveUploadedReportHistory(p.fileName, sm, p.analytics);
+                                  showToast(`Неделя задана, отчёт сохранён в историю`, 'success');
+                                  loadUploadedReportHistory(uploadedSelectedSupplierId);
+                                } catch (err: any) { showToast('Ошибка сохранения: ' + (err?.message || 'неизвестно'), 'error'); }
+                                setManualWeekModal({ open: false, weekStart: mskTodayYmd(), pending: null });
+                              }}
+                              className="px-4 py-2 rounded-lg btn-primary text-sm disabled:opacity-50"
+                            >Применить</button>
+                          </div>
+                        </>
+                      );
+                    })()}
+                  </div>
+                </div>
+              )}
 
               {uploadedShareHistoryOpen && (
                 <div className="fixed inset-0 z-[122] bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
@@ -23844,6 +24932,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     <div className="flex items-center justify-between mb-3 gap-2">
                       <div className="text-base font-semibold text-slate-900">История отчётов WB</div>
                       <div className="flex items-center gap-2">
+                        {rawRecomputeBusy && <span className="text-[11px] text-indigo-600 font-medium animate-pulse">{rawRecomputeBusy}</span>}
+                        <button type="button" disabled={!!rawRecomputeBusy} onClick={recomputeAllRawHistory} className="px-3 py-1.5 text-xs font-semibold rounded-xl border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 shadow-sm disabled:opacity-50" title="Заново пересчитать все отчёты из сохранённых исходников и применить новые показатели">Пересчитать все</button>
                         {Object.values(rawSel).filter(Boolean).length > 0 && (
                           <button type="button" onClick={() => deleteUploadedRawHistoryMany(Object.keys(rawSel).filter((k) => rawSel[k]))} className="px-3 py-1.5 text-xs font-semibold rounded-xl border border-red-300 bg-red-50 text-red-700 hover:bg-red-100 shadow-sm">Удалить выбранные ({Object.values(rawSel).filter(Boolean).length})</button>
                         )}
@@ -23900,6 +24990,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                 </div>
                                 <div className="flex items-center gap-2">
                                   <button onClick={() => openUploadedRawHistoryItem(h)} className="px-3 py-1.5 text-xs font-medium rounded-xl border border-slate-200 bg-white hover:bg-slate-50 shadow-sm">Открыть</button>
+                                  <button disabled={!!rawRecomputeBusy} onClick={async () => { setRawRecomputeBusy('Пересчёт…'); try { const ok = await recomputeRawHistoryItem(h); if (ok) showToast('Отчёт пересчитан с новыми показателями', 'success'); } finally { setRawRecomputeBusy(null); } }} className="px-3 py-1.5 text-xs font-medium rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 shadow-sm disabled:opacity-50" title="Пересчитать этот отчёт из исходника и обновить в «Отчётах»">Пересчитать</button>
                                   <button onClick={() => downloadUploadedRawSourceFile(h)} className="px-3 py-1.5 text-xs font-medium rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 shadow-sm">Исходный файл</button>
                                   <button onClick={() => deleteUploadedRawHistoryItem(String(h.id), h.file_name)} className="p-2 rounded-xl border border-red-200 bg-red-50 text-red-700 hover:bg-red-100 shadow-sm" title="Удалить"><Trash2 className="h-4 w-4" /></button>
                                 </div>
@@ -23913,6 +25004,93 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <div className="text-xs text-slate-500">История WB-отчётов пуста для выбранного продавца/года</div>
                       )}
                     </div>
+                  </div>
+                </div>
+              )}
+
+              {wbApiPickerOpen && (
+                <div className="fixed inset-0 z-[122] bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
+                  <div className="w-full max-w-2xl bg-white rounded-2xl shadow-2xl border border-slate-200 p-4">
+                    <div className="flex items-center justify-between mb-3 gap-2">
+                      <div>
+                        <div className="text-base font-semibold text-slate-900">Отчёты API (еженедельные)</div>
+                        <div className="text-[11px] text-slate-500">Отчёты о реализации напрямую из Wildberries — те же файлы, что вы качали вручную</div>
+                      </div>
+                      <button type="button" onClick={() => setWbApiPickerOpen(false)} className="px-3 py-1.5 text-xs font-medium rounded-xl border border-slate-200 bg-white hover:bg-slate-50 shadow-sm">Закрыть</button>
+                    </div>
+
+                    {(() => {
+                      const MN = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
+                      const now = new Date();
+                      const curY = now.getFullYear(), curM = now.getMonth();
+                      const years = Array.from(new Set<number>([2024, 2025, curY, ...(wbApiReports || []).map((r: any) => { const d = new Date(r?.date_from || r?.created_at || ''); return Number.isNaN(d.getTime()) ? null : d.getFullYear(); }).filter((x): x is number => x != null)])).sort((a, b) => b - a);
+                      const year = wbApiYear ?? curY;
+                      const maxM = year === curY ? curM : 11;
+                      const months: number[] = [];
+                      for (let m = maxM; m >= 0; m -= 1) months.push(m);
+                      const byMonth = (m: number) => (wbApiReports || []).filter((h: any) => { const d = new Date(h?.date_from || ''); return !Number.isNaN(d.getTime()) && d.getFullYear() === year && d.getMonth() === m; }).sort((x: any, y: any) => String(y?.date_from || '').localeCompare(String(x?.date_from || '')));
+                      return (
+                        <>
+                          <div className="mb-3 flex flex-wrap items-center gap-2">
+                            {years.map((y) => (
+                              <button key={y} type="button" onClick={() => setWbApiYear(y)} className={`px-2.5 py-1 text-xs rounded-lg border ${year === y ? 'bg-indigo-600 text-white border-indigo-600' : 'border-slate-300 hover:bg-slate-50'}`}>{y}</button>
+                            ))}
+                            {wbApiBusy && <span className="text-[11px] text-emerald-600 font-medium animate-pulse">{wbApiBusy}</span>}
+                            <span className="ml-auto text-[11px] text-slate-500">Сохранено: {wbApiReports.length}</span>
+                          </div>
+
+                          <div className="max-h-[62vh] overflow-auto space-y-3 pr-1">
+                            {months.map((m) => {
+                              const k = `${year}-${m}`;
+                              const collapsed = !!wbApiCollapsed[k];
+                              const items = byMonth(m);
+                              const weeks = wbWeeksOfMonth(year, m);
+                              return (
+                                <div key={k} className="border border-slate-200 rounded-xl bg-slate-50">
+                                  <div className="flex items-center justify-between px-3 py-2 gap-2">
+                                    <button type="button" onClick={() => setWbApiCollapsed((p) => ({ ...p, [k]: !p[k] }))} className="flex items-center gap-2 text-sm font-semibold text-slate-800 min-w-0">
+                                      <span>{MN[m]} {year}</span>
+                                      <span className="text-slate-400 font-normal">· {items.length} отч.</span>
+                                    </button>
+                                    <div className="flex items-center gap-2 shrink-0">
+                                      {weeks.length > 0 && (
+                                        <button type="button" disabled={!!wbApiBusy} onClick={() => scanWbApiWeeks(weeks)} className="px-3 py-1.5 text-xs font-semibold rounded-xl border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 shadow-sm disabled:opacity-50" title="Запросить недельные отчёты этого месяца из WB">Проверить</button>
+                                      )}
+                                      <button type="button" onClick={() => setWbApiCollapsed((p) => ({ ...p, [k]: !p[k] }))} className="px-2 py-0.5 text-[11px] rounded-lg border border-slate-200 bg-white hover:bg-slate-50">{collapsed ? 'Показать' : 'Скрыть'}</button>
+                                    </div>
+                                  </div>
+                                  {!collapsed && (
+                                    <div className="px-2 pb-2 space-y-2">
+                                      {items.length === 0 ? (
+                                        <div className="text-[11px] text-slate-400 px-2 py-2">Нет загруженных отчётов. Нажмите «Проверить».</div>
+                                      ) : items.map((h: any) => {
+                                        const ps = h?.date_from ? new Date(h.date_from).toLocaleDateString('ru-RU') : '—';
+                                        const pe = h?.date_to ? new Date(h.date_to).toLocaleDateString('ru-RU') : '—';
+                                        const ld = h?.updated_at || h?.created_at;
+                                        const ldStr = ld ? new Date(ld).toLocaleString('ru-RU') : '—';
+                                        return (
+                                          <div key={h.id || h.realizationreport_id} className="flex items-center justify-between bg-white border border-slate-200 rounded-lg px-3 py-2 gap-2">
+                                            <div className="min-w-0">
+                                              <div className="text-xs font-semibold text-slate-800 truncate">Период {ps} — {pe}</div>
+                                              <div className="text-[11px] text-slate-500">№ {h.realizationreport_id} · строк {Number(h.rows_count || 0).toLocaleString('ru-RU')}</div>
+                                              <div className="text-[11px] text-slate-400">загружен {ldStr}</div>
+                                            </div>
+                                            <div className="flex items-center gap-2 shrink-0">
+                                              <button disabled={!!wbApiBusy} onClick={() => downloadWbApiReport(h)} className="px-3 py-1.5 text-xs font-semibold rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 shadow-sm disabled:opacity-50" title="Скачать xlsx (тот же формат, что в кабинете WB)">Скачать</button>
+                                              <button disabled={!!wbApiBusy} onClick={() => importWbApiReport(h)} className="px-3 py-1.5 text-xs font-medium rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 shadow-sm disabled:opacity-50" title="Сразу разобрать и сохранить в «Отчёты» без скачивания файла">Загрузить в систему</button>
+                                            </div>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </>
+                      );
+                    })()}
                   </div>
                 </div>
               )}
@@ -24349,48 +25527,69 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                   {uploadedViewTab === 'summary' && (
                   <>
-                  <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
-                    <div className="bg-slate-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-slate-500">Номенклатур</div><div className="font-bold">{uploadedSummaryForView.items}</div></div>
-                    <div className="bg-slate-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-slate-500">Продажи</div><div className="font-bold">{Number(uploadedSummaryForView.sales_net || 0).toLocaleString('ru-RU')}</div></div>
-                    <div className="bg-slate-50 rounded-lg p-2 min-w-[170px] shrink-0"><div className="flex items-center justify-between gap-2"><div className="text-xs text-slate-500">Налоги</div><button type="button" onClick={() => setUploadedTaxRateOverride((prev) => prev === 0.01 ? 0.06 : 0.01)} className="text-[11px] px-2 py-0.5 rounded-full border border-indigo-200 text-indigo-700 bg-white hover:bg-indigo-50">{Math.round(getCurrentUploadedTaxRate() * 100)}%</button></div><div className="font-bold">{Number(getUploadedTaxValue(uploadedSummaryForView)).toLocaleString('ru-RU', { maximumFractionDigits: 2 })}</div></div>
-                    <div className="bg-slate-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-slate-500">Возвраты</div><div className="font-bold">{Number(uploadedSummaryForView.returns_gross || 0).toLocaleString('ru-RU')}</div></div>
-                    <div className="bg-slate-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-slate-500">Логистика</div><div className="font-bold">{Number(uploadedSummaryForView.logistics_sum || 0).toLocaleString('ru-RU')}</div></div>
-                    <div className="bg-slate-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-slate-500">К перечислению</div><div className="font-bold">{Number(uploadedSummaryForView.payout_net || 0).toLocaleString('ru-RU')}</div></div>
-                    <div className="bg-slate-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-slate-500">Итого к оплате (WB)</div><div className="font-bold">{Number(uploadedSummaryForView.to_pay_total || 0).toLocaleString('ru-RU')}</div></div>
-                    <div className="bg-slate-50 rounded-lg p-2 min-w-[180px] shrink-0">
-                      <div className="text-xs text-slate-500">Доп траты</div>
-                      <input type="number" min="0" step="0.01" value={uploadedExtraCosts} onChange={(e) => setUploadedExtraCosts(Number(e.target.value || 0))} className="mt-1 w-full px-2 py-1 text-sm border border-slate-300 rounded" />
-                    </div>
-                    <div className="bg-slate-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-slate-500">Заработок</div><div className="font-bold">{Number(getUploadedHeadlineProfitNet(uploadedSummaryForView)).toLocaleString('ru-RU', { maximumFractionDigits: 2 })}</div></div>
-                    <div className="bg-slate-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-slate-500">Штрафы</div><div className="font-bold">{Number(uploadedSummaryForView.fine_sum || 0).toLocaleString('ru-RU')}</div></div>
-                    <div className="bg-slate-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-slate-500">Хранение</div><div className="font-bold">{Number(uploadedSummaryForView.storage_sum || 0).toLocaleString('ru-RU')}</div></div>
-                    <div className="bg-slate-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-slate-500">Реклама WB</div><div className="font-bold">{Number(uploadedSummaryForView.withhold_sum || 0).toLocaleString('ru-RU')}</div></div>
-                    <div className="bg-slate-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-slate-500">Кол-во проданных</div><div className="font-bold">{Number(uploadedSummaryForView.sold_qty || 0).toLocaleString('ru-RU')}</div></div>
-                    <div className="bg-slate-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-slate-500">Кол-во возвратов</div><div className="font-bold">{Number(uploadedSummaryForView.return_qty || 0).toLocaleString('ru-RU')}</div></div>
-                    <div className="bg-slate-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-slate-500">Эквайринг/Комиссии</div><div className="font-bold">{Number(uploadedSummaryForView.acquiring_sum || 0).toLocaleString('ru-RU')}</div></div>
-                    <div className="bg-slate-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-slate-500">Комиссия эквайринга, %</div><div className="font-bold">{Number(uploadedSummaryForView.acquiring_percent || 0).toLocaleString('ru-RU', { maximumFractionDigits: 2 })}</div></div>
-                  </div>
 
                   {(() => {
                     const s = uploadedSummaryForView; if (!s) return null;
                     const rub = (v: number) => Math.round(Number(v || 0)).toLocaleString('ru-RU') + ' ₽';
                     const pct = (v: number) => (Number(v || 0)).toFixed(1) + '%';
+                    // Служебная строка WB (арт. 0/пусто) — общие удержания без привязки к товару.
+                    const isSvc = (code: any) => { const c = String(code || '').trim(); return c === '' || c === '0'; };
+                    const svcLabel = 'Удержания WB';
                     const sales = Number(s.sales_net || 0);
                     const geo = uploadedReportGeo;
-                    // прибыль по товару
-                    const prods = (uploadedReportAnalytics || []).map((x: any) => {
+                    // Кол-во дней в периоде отчёта (для скорости продаж ед/день).
+                    const _ps = s.period_start ? new Date(s.period_start) : null;
+                    const _pe = s.period_end ? new Date(s.period_end) : null;
+                    const periodDays = (_ps && _pe && !isNaN(_ps.getTime()) && !isNaN(_pe.getTime()))
+                      ? Math.max(1, Math.round((_pe.getTime() - _ps.getTime()) / 86400000) + 1)
+                      : 1;
+                    // прибыль по товару — из ОТФИЛЬТРОВАННЫХ строк (фильтр применяется ко всем карточкам/инфографике)
+                    const prodsAll = (sortedFilteredUploadedAnalytics || []).map((x: any) => {
                       const sold = Number(x.sold_qty || 0);
                       const cost = Number(getUploadedCostValue(x) || 0);
                       const profit = (Number(x.to_pay_total || 0)) - cost * sold - Number(x.tax_sum || 0);
                       const sNet = Number(x.sales_net || 0);
                       const salesGross = Number(x.sales_gross || 0);
                       const retSum = Number(x.returns_gross || 0);
-                      return { code: x.code, name: x.name, sales: sNet, profit, sold, cost, costSum: cost * sold, ret: Number(x.return_qty || 0), retSum, salesGross, logistics: Number(x.logistics_sum || 0), tax: Number(x.tax_sum || 0), sizes: x.size_breakdown_list || [], sizesStr: x.size_breakdown || '', margin: sNet > 0 ? profit / sNet * 100 : 0, retPct: salesGross > 0 ? retSum / salesGross * 100 : 0, share: sales > 0 ? sNet / sales * 100 : 0 };
+                      const costSum = cost * sold;
+                      return { code: x.code, name: x.name, vendorCode: x.vendor_code || '', ordered: Number(x.ordered_qty || 0), orderedSum: Number(x.ordered_retail_sum || 0), sales: sNet, profit, sold, cost, costSum, ret: Number(x.return_qty || 0), retSum, salesGross, logistics: Number(x.logistics_sum || 0), logisticsFwd: Number(x.logistics_forward || 0), logisticsLogi: Number(x.logistics_logi || 0), logisticsRet: Number(x.logistics_return || 0), payoutNet: Number(x.payout_net || 0), toPay: Number(x.to_pay_total || 0), storage: Number(x.storage_sum || 0), withhold: Number(x.withhold_sum || 0), fine: Number(x.fine_sum || 0), acquiring: Number(x.acquiring_sum || 0), logKinds: (x.log_kinds || {}), tax: Number(x.tax_sum || 0), sizes: buildReconciledSizeRows(x), sizesStr: x.size_breakdown || '', margin: sNet > 0 ? profit / sNet * 100 : 0, roi: costSum > 0 ? profit / costSum * 100 : 0, perDay: sold / periodDays, retPct: sold > 0 ? Number(x.return_qty || 0) / sold * 100 : 0, share: sales > 0 ? sNet / sales * 100 : 0, abc: 'C', abcOrd: 3 };
                     });
+                    // Фильтр прибыльности (+/−) применяется ко ВСЕЙ сводке: товары, инфографика и дашборд.
+                    const profitFilterActive = summaryProfitFilter !== 'all';
+                    const prods = profitFilterActive
+                      ? prodsAll.filter((p: any) => summaryProfitFilter === 'pos' ? Number(p.profit) >= 0 : Number(p.profit) < 0)
+                      : prodsAll;
+                    // Эффективная сводка: при активном фильтре пересчитываем суммы из отфильтрованных товаров.
+                    const sumP = (k: string) => prods.reduce((a: number, p: any) => a + Number(p[k] || 0), 0);
+                    // Хранение и реклама WB часто НЕ привязаны к товару (сидят в «Удержаниях», арт. 0).
+                    // При фильтре +/− распределяем ОБЩИЕ хранение/рекламу пропорционально доле выручки
+                    // отфильтрованных товаров (а не теряем в «+» и не сваливаем целиком в «−»).
+                    const allSalesAbs = prodsAll.reduce((a: number, p: any) => a + Math.abs(Number(p.sales || 0)), 0);
+                    const filtSalesAbs = prods.reduce((a: number, p: any) => a + Math.abs(Number(p.sales || 0)), 0);
+                    const allocShare = (profitFilterActive && allSalesAbs > 0) ? filtSalesAbs / allSalesAbs : 1;
+                    const storageAlloc = Number(s.storage_sum || 0) * allocShare;
+                    const withholdAlloc = Number(s.withhold_sum || 0) * allocShare;
+                    const sx: any = profitFilterActive ? {
+                      ...s,
+                      sales_net: sumP('sales'), returns_gross: sumP('retSum'), logistics_sum: sumP('logistics'),
+                      payout_net: sumP('payoutNet'), to_pay_total: sumP('toPay'), fine_sum: sumP('fine'),
+                      storage_sum: storageAlloc, withhold_sum: withholdAlloc, acquiring_sum: sumP('acquiring'),
+                      sold_qty: sumP('sold'), return_qty: sumP('ret'), return_legs_qty: sumP('ret'),
+                      ordered_qty: sumP('ordered'), ordered_retail_sum: sumP('orderedSum'), tax_sum: sumP('tax'),
+                    } : s;
+                    const salesX = Number(sx.sales_net || 0);
+                    const totalSoldAll = prods.reduce((a: number, p: any) => a + Number(p.sold || 0), 0);
+                    // ABC-анализ по доле в выручке: A до 80% накопл., B до 95%, остальное C.
+                    const abcSalesTotal = prods.reduce((a: number, p: any) => a + Math.max(0, Number(p.sales || 0)), 0);
+                    { let cum = 0; [...prods].sort((a: any, b: any) => b.sales - a.sales).forEach((p: any) => { cum += Math.max(0, Number(p.sales || 0)); const c = abcSalesTotal > 0 ? cum / abcSalesTotal * 100 : 100; p.abc = c <= 80 ? 'A' : c <= 95 ? 'B' : 'C'; p.abcOrd = p.abc === 'A' ? 1 : p.abc === 'B' ? 2 : 3; }); }
+                    const abcGroups = ['A', 'B', 'C'].map((g) => { const items = prods.filter((p: any) => p.abc === g); const gsales = items.reduce((a: number, p: any) => a + Number(p.sales || 0), 0); const gprofit = items.reduce((a: number, p: any) => a + Number(p.profit || 0), 0); return { g, count: items.length, sales: gsales, profit: gprofit, shareSales: abcSalesTotal > 0 ? gsales / abcSalesTotal * 100 : 0 }; });
+                    // Неликвид — товары без продаж за период.
+                    const deadStock = prods.filter((p: any) => Number(p.sold || 0) <= 0);
                     const byProfitDesc = [...prods].sort((a, b) => b.profit - a.profit);
                     const top = byProfitDesc;
                     const loss = byProfitDesc.filter((p) => p.profit < 0).reverse();
-                    const days = (geo?.dailyTotals || []);
+                    // Только дни с продажами/выкупами (без пустых/служебных дат).
+                    const days = (geo?.dailyTotals || []).filter((d: any) => Number(d?.sales_net || 0) > 0 || Number(d?.sold_qty || 0) > 0);
                     const maxDaySales = Math.max(1, ...days.map((d: any) => d.sales_net));
                     const maxDayBuyout = Math.max(1, ...days.map((d: any) => d.sold_qty));
                     const bestDay = days.length ? [...days].sort((a: any, b: any) => b.sales_net - a.sales_net)[0] : null;
@@ -24399,7 +25598,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     const wh = (geo?.byWarehouse || []);
                     const offices = (geo?.byOffice || []);
                     // WB-фото по nmID
-                    const hostFor = (vol: number) => { const t = [143,287,431,719,1007,1061,1115,1169,1313,1601,1655,1919,2045,2189,2405,2621,2837,3053,3269,3485,3701,3917,4133,4349,4565,4877,5189,5501,5813,6125,6437,6749,7061,7373,7685,7997,8309,8621]; let i = 0; while (i < t.length && vol > t[i]) i++; return `basket-${String(i + 1).padStart(2, '0')}.wbbasket.ru`; };
+                    const hostFor = (vol: number) => { const t = [143,287,431,719,1007,1061,1115,1169,1313,1601,1655,1919,2045,2189,2405,2621,2837,3053,3269,3485,3701,3917,4133,4349,4565,4877,5189,5501,5813,6125,6437,6749,7061,7373,7685,7997,8309,8621,9244,9620,10380,11132,11900,12650,13400,14150,14900]; let i = 0; while (i < t.length && vol > t[i]) i++; return `basket-${String(i + 1).padStart(2, '0')}.wbbasket.ru`; };
                     const wbPhotoBase = (nm: any) => { const n = Number(nm); if (!n) return ''; const vol = Math.floor(n / 100000), part = Math.floor(n / 1000); return `https://${hostFor(vol)}/vol${vol}/part${part}/${n}/images/c246x328/1`; };
                     const wbPhoto = (nm: any) => { const b = wbPhotoBase(nm); return b ? `${b}.webp` : ''; };
                     const wbPhotoBig = (nm: any) => { const n = Number(nm); if (!n) return ''; const vol = Math.floor(n / 100000), part = Math.floor(n / 1000); return `https://${hostFor(vol)}/vol${vol}/part${part}/${n}/images/big/1.webp`; };
@@ -24409,18 +25608,71 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     const costSumTotal = prods.reduce((a: number, p: any) => a + Number(p.costSum || 0), 0);
                     const costParts = [
                       { label: 'Себестоимость', v: costSumTotal, c: 'bg-orange-500' },
-                      { label: 'Логистика', v: Number(s.logistics_sum || 0), c: 'bg-blue-500' },
-                      { label: 'Хранение', v: Number(s.storage_sum || 0), c: 'bg-cyan-500' },
-                      { label: 'Штрафы', v: Number(s.fine_sum || 0), c: 'bg-rose-500' },
-                      { label: 'Реклама WB', v: Number(s.withhold_sum || 0), c: 'bg-fuchsia-500' },
-                      { label: 'Эквайринг/комиссии', v: Number(s.acquiring_sum || 0), c: 'bg-amber-500' },
-                      { label: 'Налог', v: Number(getUploadedTaxValue(s) || 0), c: 'bg-slate-500' },
+                      { label: 'Комиссия WB', v: Math.max(0, salesX - Number(sx.payout_net || 0)), c: 'bg-violet-500' },
+                      { label: 'Логистика', v: Number(sx.logistics_sum || 0), c: 'bg-blue-500' },
+                      { label: 'Хранение', v: Number(sx.storage_sum || 0), c: 'bg-cyan-500' },
+                      { label: 'Штрафы', v: Number(sx.fine_sum || 0), c: 'bg-rose-500' },
+                      { label: 'Реклама WB', v: Number(sx.withhold_sum || 0), c: 'bg-fuchsia-500' },
+                      { label: 'Эквайринг/комиссии', v: Number(sx.acquiring_sum || 0), c: 'bg-amber-500' },
+                      { label: 'Налог', v: Number(getUploadedTaxValue(sx) || 0), c: 'bg-slate-500' },
                     ].filter((p) => p.v > 0);
                     const costTotal = costParts.reduce((a, p) => a + p.v, 0);
-                    const profitNet = Number(getUploadedHeadlineProfitNet(s) || 0);
-                    const retPctTotal = (Number(s.sold_qty || 0) + Number(s.return_qty || 0)) > 0 ? Number(s.return_qty || 0) / (Number(s.sold_qty || 0) + Number(s.return_qty || 0)) * 100 : 0;
-                    const logPct = sales > 0 ? Number(s.logistics_sum || 0) / sales * 100 : 0;
-                    const buyoutPct = (Number(s.sold_qty || 0) + Number(s.return_qty || 0)) > 0 ? Number(s.sold_qty || 0) / (Number(s.sold_qty || 0) + Number(s.return_qty || 0)) * 100 : 0;
+                    // Детализация логистики по всем видам (из «Виды логистики…») по всем товарам отчёта.
+                    const logKindsDetail = (() => {
+                      const m = new Map<string, { sum: number; qty: number }>();
+                      (prods || []).forEach((p: any) => {
+                        const lk = p?.logKinds || p?.log_kinds || {};
+                        Object.entries(lk).forEach(([k, v]: any) => {
+                          const key = String(k || 'Прочее').trim() || 'Прочее';
+                          const cur = m.get(key) || { sum: 0, qty: 0 };
+                          cur.sum += Number(v?.sum || 0); cur.qty += Number(v?.qty || 0);
+                          m.set(key, cur);
+                        });
+                      });
+                      const arr = [...m.entries()].map(([kind, v]) => ({ kind, sum: v.sum, qty: v.qty }));
+                      const total = arr.reduce((a, x) => a + x.sum, 0);
+                      arr.forEach((x: any) => { x.pct = total !== 0 ? (x.sum / total) * 100 : 0; });
+                      return { arr: arr.sort((a, b) => Math.abs(b.sum) - Math.abs(a.sum)), total };
+                    })();
+                    // Логистика по каждому товару (фото, артикул, виды логистики + метрики аномалий).
+                    const logTotalAll = (prods || []).reduce((a: number, p: any) => a + Math.abs(Number(p.logistics || 0)), 0);
+                    const logByProductAll = (prods || [])
+                      .map((p: any) => {
+                        const kinds = Object.entries(p?.logKinds || {})
+                          .map(([k, v]: any) => ({ kind: String(k || 'Прочее').trim() || 'Прочее', sum: Number(v?.sum || 0), qty: Number(v?.qty || 0) }))
+                          .filter((x: any) => Math.abs(x.sum) > 0.001 || x.qty > 0)
+                          .sort((a: any, b: any) => Math.abs(b.sum) - Math.abs(a.sum));
+                        const sumQty = (m: string) => kinds.filter((k: any) => k.kind.toLowerCase().includes(m)).reduce((a: number, k: any) => a + k.qty, 0);
+                        const logistics = Number(p.logistics || 0);
+                        const salesP = Number(p.sales || 0);
+                        const cancelQty = sumQty('отмен');                 // заказал, но не выкупил
+                        const orderQty = sumQty('к клиенту при продаже');   // доставлено клиенту (заказы)
+                        const returnQty = sumQty('от клиента при возврате');
+                        const logShare = salesP > 0 ? Math.abs(logistics) / salesP * 100 : (Math.abs(logistics) > 0 ? 9999 : 0);
+                        return { code: p.code, name: p.name, logistics, sales: salesP, kinds, cancelQty, orderQty, returnQty, logShare };
+                      })
+                      .filter((p: any) => Math.abs(p.logistics) > 0.001 || p.kinds.length);
+                    const logByProduct = (() => {
+                      let arr = [...logByProductAll];
+                      if (logProductFilter === 'anom') arr = arr.filter((p: any) => p.logShare >= 25).sort((a: any, b: any) => b.logShare - a.logShare);
+                      else if (logProductFilter === 'cancel') arr = arr.filter((p: any) => p.cancelQty > 0).sort((a: any, b: any) => b.cancelQty - a.cancelQty);
+                      else if (logProductFilter === 'order') arr = arr.filter((p: any) => p.orderQty > 0).sort((a: any, b: any) => b.orderQty - a.orderQty);
+                      else arr = arr.sort((a: any, b: any) => Math.abs(b.logistics) - Math.abs(a.logistics));
+                      return arr;
+                    })();
+                    // Прибыль отфильтрованных = их прибыль БЕЗ собственного хранения/рекламы
+                    // + распределённые пропорционально общие хранение и реклама.
+                    const profitNet = profitFilterActive
+                      ? (sumP('profit') + sumP('storage') + sumP('withhold') - storageAlloc - withholdAlloc - Number(uploadedExtraCosts || 0))
+                      : Number(getUploadedHeadlineProfitNet(s) || 0);
+                    // Сравнение с выбранным периодом: дельта в % (для бейджей ▲/▼ на карточках).
+                    const cmp = compareSummary;
+                    const cmpDeltaOf = (cur: number, key: string): number | undefined => { if (!cmp) return undefined; const prev = Number(cmp[key] || 0); if (!prev) return undefined; return (cur - prev) / Math.abs(prev) * 100; };
+                    const cmpProfit = cmp ? Number(getUploadedHeadlineProfitNet(cmp) || 0) : 0;
+                    const cmpProfitDelta = (cmp && cmpProfit) ? (profitNet - cmpProfit) / Math.abs(cmpProfit) * 100 : undefined;
+                    const retPctTotal = (Number(sx.sold_qty || 0) + Number(sx.return_qty || 0)) > 0 ? Number(sx.return_qty || 0) / (Number(sx.sold_qty || 0) + Number(sx.return_qty || 0)) * 100 : 0;
+                    const logPct = salesX > 0 ? Number(sx.logistics_sum || 0) / salesX * 100 : 0;
+                    const buyoutPct = (Number(sx.sold_qty || 0) + Number(sx.return_qty || 0)) > 0 ? Number(sx.sold_qty || 0) / (Number(sx.sold_qty || 0) + Number(sx.return_qty || 0)) * 100 : 0;
                     const Bars = ({ rows, val, color, fmt, photo }: any) => {
                       const max = Math.max(1, ...rows.map((r: any) => Math.abs(val(r))));
                       return (
@@ -24442,101 +25694,329 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         {children}
                       </div>
                     );
-                    const payoutHero = Number(s.payout_net || 0);
-                    const payoutPct = sales > 0 ? Math.round(payoutHero / sales * 100) : 0;
-                    const avgCheck = Number(s.sold_qty || 0) > 0 ? sales / Number(s.sold_qty || 0) : 0;
-                    const orderedQty = Number(s.ordered_qty || 0);
-                    const soldQty = Number(s.sold_qty || 0);
-                    const retQtyHero = Number(s.return_legs_qty || s.return_qty || 0);
+
+                    const tHeat = (t: number | undefined) => t == null ? 'text-slate-300' : t <= 5 ? 'text-sky-600' : t >= 22 ? 'text-rose-600' : t >= 14 ? 'text-amber-600' : 'text-emerald-600';
+                    // График по дням: одна-две сглаженные кривые (каждая в своём масштабе) + выровненная таблица.
+                    const DayTrend = ({ title, getVal, fmt, color, gradId, label, getVal2, fmt2, color2, gradId2, label2, maxLabels: maxLabelsProp, extraRows = [] as Array<{ label: string; cell: (d: any) => React.ReactNode }> }: any) => {
+                      if (!days.length) return <Card title={title}><div className="text-xs text-slate-400 py-8 text-center">Нет дат в отчёте</div></Card>;
+                      const n = days.length, VW = 1000, VH = 150, padT = 18, padB = 8;
+                      const has2 = typeof getVal2 === 'function';
+                      const xs = (i: number) => n <= 1 ? VW / 2 : ((i + 0.5) / n) * VW;
+                      // Каждая серия масштабируется по своему максимуму, чтобы обе формы были видны.
+                      const buildLine = (gv: (d: any) => number) => {
+                        const maxV = Math.max(1, ...days.map((d: any) => Number(gv(d) || 0)));
+                        const ys = (v: number) => padT + (1 - Math.max(0, v) / maxV) * (VH - padT - padB);
+                        const pts = days.map((d: any, i: number) => [xs(i), ys(Number(gv(d) || 0))]);
+                        let line = '';
+                        pts.forEach((p: number[], i: number) => { if (i === 0) line = `M ${p[0].toFixed(1)},${p[1].toFixed(1)}`; else { const pr = pts[i - 1]; const cx = (pr[0] + p[0]) / 2; line += ` C ${cx.toFixed(1)},${pr[1].toFixed(1)} ${cx.toFixed(1)},${p[1].toFixed(1)} ${p[0].toFixed(1)},${p[1].toFixed(1)}`; } });
+                        const area = pts.length ? `${line} L ${pts[pts.length - 1][0].toFixed(1)},${VH} L ${pts[0][0].toFixed(1)},${VH} Z` : '';
+                        return { ys, line, area };
+                      };
+                      const s1 = buildLine(getVal);
+                      const s2 = has2 ? buildLine(getVal2) : null;
+                      const cell = 'flex-1 text-center whitespace-nowrap';
+                      // Прорежывание под длинные периоды (30/60/90/180 дней): кривая рисуется по ВСЕМ дням,
+                      // а точки-подписи и таблица (шт/дата/t°) показываются только на ~13 опорных днях,
+                      // иначе подписи накладываются, а колонки таблицы становятся нечитаемо узкими.
+                      const maxLabels = Math.max(3, Number(maxLabelsProp) || 13);
+                      const step = Math.max(1, Math.ceil(n / maxLabels));
+                      const sampled = days.map((d: any, i: number) => ({ d, i })).filter(({ i }: any) => i % step === 0 || i === n - 1);
+                      const dmShort = (k: any) => { const dt = new Date(k); return `${String(dt.getDate()).padStart(2, '0')}.${String(dt.getMonth() + 1).padStart(2, '0')}`; };
+                      return (
+                        <Card title={title}>
+                          {(label || label2) && (
+                            <div className="flex items-center gap-4 mb-2 text-[11px] font-medium">
+                              {label && <span className="flex items-center gap-1.5 text-slate-600"><span className="inline-block w-3 h-1.5 rounded-full" style={{ background: color }} />{label}</span>}
+                              {has2 && label2 && <span className="flex items-center gap-1.5 text-slate-600"><span className="inline-block w-3 h-1.5 rounded-full" style={{ background: color2 }} />{label2}</span>}
+                            </div>
+                          )}
+                          <div className="flex">
+                            <div className="w-24 shrink-0" />
+                            <div className="flex-1 relative">
+                              <svg viewBox={`0 0 ${VW} ${VH}`} preserveAspectRatio="none" className="w-full" style={{ height: 240 }}>
+                                <defs>
+                                  <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={color} stopOpacity="0.35" /><stop offset="100%" stopColor={color} stopOpacity="0" /></linearGradient>
+                                  {has2 && <linearGradient id={gradId2} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={color2} stopOpacity="0.18" /><stop offset="100%" stopColor={color2} stopOpacity="0" /></linearGradient>}
+                                </defs>
+                                {s1.area && <path d={s1.area} fill={`url(#${gradId})`} />}
+                                {s2 && s2.line && <path d={s2.line} fill="none" stroke={color2} strokeWidth={2} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" strokeDasharray="5 4" opacity={0.9} />}
+                                {s1.line && <path d={s1.line} fill="none" stroke={color} strokeWidth={2.5} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />}
+                              </svg>
+                              {sampled.map(({ d, i }: any) => {
+                                const leftPct = (n <= 1 ? 0.5 : (i + 0.5) / n) * 100;
+                                const topPct = (s1.ys(Number(getVal(d) || 0)) / VH) * 100;
+                                return (
+                                  <div key={i} className="absolute -translate-x-1/2 -translate-y-1/2" style={{ left: `${leftPct}%`, top: `${topPct}%` }} title={`${new Date(d.key).toLocaleDateString('ru-RU')}: ${fmt(Number(getVal(d) || 0))}${has2 ? ` · ${fmt2(Number(getVal2(d) || 0))}` : ''}`}>
+                                    <div className="h-2.5 w-2.5 rounded-full bg-white" style={{ boxShadow: `0 0 0 2px ${color}` }} />
+                                    <div className="absolute left-1/2 -translate-x-1/2 -top-4 text-[10px] font-semibold whitespace-nowrap" style={{ color }}>{fmt(Number(getVal(d) || 0))}</div>
+                                  </div>
+                                );
+                              })}
+                              {has2 && sampled.map(({ d, i }: any) => {
+                                const leftPct = (n <= 1 ? 0.5 : (i + 0.5) / n) * 100;
+                                const topPct = (s2!.ys(Number(getVal2(d) || 0)) / VH) * 100;
+                                return (
+                                  <div key={`b${i}`} className="absolute -translate-x-1/2 -translate-y-1/2" style={{ left: `${leftPct}%`, top: `${topPct}%` }} title={`${new Date(d.key).toLocaleDateString('ru-RU')}: ${fmt2(Number(getVal2(d) || 0))}`}>
+                                    <div className="h-2 w-2 rounded-full bg-white" style={{ boxShadow: `0 0 0 2px ${color2}` }} />
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                          <div className="mt-3 space-y-1 text-[11px]">
+                            {extraRows.map((er: any, ri: number) => (
+                              <div key={ri} className="flex items-center gap-1">
+                                <div className="w-24 shrink-0 text-slate-400">{er.label}</div>
+                                <div className="flex-1 flex gap-1">{sampled.map(({ d, i }: any) => <div key={i} className={`${cell} font-medium text-slate-700`}>{er.cell(d)}</div>)}</div>
+                              </div>
+                            ))}
+                            <div className="flex items-center gap-1">
+                              <div className="w-24 shrink-0 text-slate-400">Дата</div>
+                              <div className="flex-1 flex gap-1">{sampled.map(({ d, i }: any) => <div key={i} className={`${cell} text-slate-500`}>{dmShort(d.key)}</div>)}</div>
+                            </div>
+                            {weatherRegions.map((rg) => (
+                              <div key={rg.name} className="flex items-center gap-1">
+                                <div className="w-24 shrink-0 text-slate-500 truncate" title={`${rg.name} · ${rg.share.toFixed(0)}% продаж`}>🌡 {rg.name}</div>
+                                <div className="flex-1 flex gap-1">{sampled.map(({ d, i }: any) => { const t = rg.temps[String(d.key || '').slice(0, 10)]; return <div key={i} className={`${cell} font-bold ${tHeat(t)}`} title={`${rg.name}, ${new Date(d.key).toLocaleDateString('ru-RU')}: ${t != null ? `${t > 0 ? '+' : ''}${t}°C` : 'нет данных'}`}>{t == null ? '—' : `${t > 0 ? '+' : ''}${t}°`}</div>; })}</div>
+                              </div>
+                            ))}
+                          </div>
+                          {step > 1 && <div className="mt-2 text-[10px] text-slate-400 text-right">Кривая — по всем {n} дн. Подписи и таблица прорежены: каждый {step}-й день. Наведи на точку для точного значения.</div>}
+                        </Card>
+                      );
+                    };
+
+                    // Дневные ряды для спарклайнов (последние дни периода).
+                    const salesDays = days.map((d: any) => Number(d.sales_net || 0));
+                    const soldDays = days.map((d: any) => Number(d.sold_qty || 0));
+                    const deltaOf = (arr: number[]): number | null => {
+                      if (!arr || arr.length < 2) return null;
+                      const a = arr[arr.length - 1], b = arr[arr.length - 2];
+                      if (!b) return null;
+                      return (a - b) / Math.abs(b) * 100;
+                    };
+
+                    // Спарклайн: плавная линия + градиентная заливка, оживает при наведении.
+                    const Spark = ({ data, color, id }: { data: number[]; color: string; id: string }) => {
+                      if (!data || data.length < 2) return null;
+                      const W = 120, H = 34;
+                      const max = Math.max(...data), min = Math.min(...data);
+                      const range = max - min || 1;
+                      const pts = data.map((v, i) => {
+                        const x = (i / (data.length - 1)) * W;
+                        const y = H - 4 - ((v - min) / range) * (H - 8);
+                        return [x, y];
+                      });
+                      const line = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
+                      const area = `${line} L${W},${H} L0,${H} Z`;
+                      const last = pts[pts.length - 1];
+                      return (
+                        <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="w-full h-9" data-no-invert>
+                          <defs>
+                            <linearGradient id={`sp-${id}`} x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="0%" stopColor={color} stopOpacity="0.35" />
+                              <stop offset="100%" stopColor={color} stopOpacity="0" />
+                            </linearGradient>
+                          </defs>
+                          <path d={area} fill={`url(#sp-${id})`} className="opacity-60 group-hover:opacity-100 transition-opacity" />
+                          <path d={line} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-all group-hover:[stroke-width:2.5]" />
+                          <circle cx={last[0]} cy={last[1]} r="2.5" fill={color} className="opacity-0 group-hover:opacity-100 transition-opacity" />
+                        </svg>
+                      );
+                    };
+
+                    // Тёмная KPI-карточка как на дашбордах: число, %-бейдж, спарклайн, hover-анимация.
+                    const StatCard = ({ label, value, sub, series, delta, color = '#34d399', accent, right, signOf }: any) => {
+                      // Если задан signOf — красим карточку по знаку: минус → красная, плюс → зелёная.
+                      const signed = typeof signOf === 'number' && Number.isFinite(signOf);
+                      const neg = signed && signOf < 0;
+                      const ring = !signed ? 'ring-white/10' : neg ? 'ring-rose-500/40' : 'ring-emerald-500/40';
+                      const bg = !signed ? 'bg-slate-900' : neg ? 'bg-gradient-to-br from-rose-950/80 to-slate-900' : 'bg-gradient-to-br from-emerald-950/80 to-slate-900';
+                      const valColor = !signed ? 'text-white' : neg ? 'text-rose-300' : 'text-emerald-300';
+                      const glow = signed ? (neg ? '#fb7185' : '#34d399') : color;
+                      return (
+                      <div className={`group relative overflow-hidden rounded-2xl ${bg} p-3.5 ring-1 ${ring} shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-xl hover:shadow-black/30`} data-no-invert>
+                        <div className="pointer-events-none absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity" style={{ background: `radial-gradient(120px 80px at 80% 0%, ${glow}22, transparent 70%)` }} />
+                        <div className="relative flex items-start justify-between gap-2">
+                          <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">{label}</div>
+                          {right ? right : (delta != null && (
+                            <span className={`shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${delta >= 0 ? 'bg-emerald-500/15 text-emerald-400' : 'bg-rose-500/15 text-rose-400'}`}>{delta >= 0 ? '▲' : '▼'} {Math.abs(delta).toFixed(0)}%</span>
+                          ))}
+                        </div>
+                        <div className={`relative mt-1 text-2xl font-extrabold ${valColor} tabular-nums leading-tight`}>{value}</div>
+                        {sub && <div className="relative text-[10px] text-slate-500 mt-0.5">{sub}</div>}
+                        {series && series.length > 1 && <div className="relative mt-1.5"><Spark data={series} color={glow} id={label} /></div>}
+                      </div>
+                      );
+                    };
+                    const payoutHero = Number(sx.payout_net || 0);
+                    const payoutPct = salesX > 0 ? Math.round(payoutHero / salesX * 100) : 0;
+                    const avgCheck = Number(sx.sold_qty || 0) > 0 ? salesX / Number(sx.sold_qty || 0) : 0;
+                    const orderedQty = Number(sx.ordered_qty || 0);
+                    const soldQty = Number(sx.sold_qty || 0);
+                    const retQtyHero = Number(sx.return_legs_qty || sx.return_qty || 0);
                     const buyoutRate = orderedQty > 0 ? soldQty / orderedQty * 100 : 0;
                     const retRate = orderedQty > 0 ? retQtyHero / orderedQty * 100 : 0;
+                    const returnsSumHero = Number(sx.returns_gross || 0);
+                    const soldSumHero = salesX;                         // выкуплено = чистые продажи
+                    const orderedSumHero = Number(sx.ordered_retail_sum || 0) || (salesX + returnsSumHero);  // заказано = Σ «Цена розничная» по заказам
+                    const taxValHero = Number(getUploadedTaxValue(sx) || 0);
+                    const commissionWB = salesX - payoutHero;           // комиссия WB = продажи − к перечислению
                     const R = 52, C = 2 * Math.PI * R, dash = C * Math.min(1, Math.max(0, payoutPct / 100));
                     return (
                       <div className="space-y-4 mb-2">
-                        {/* Hero: кольцо % к перечислению + ключевые цифры */}
-                        <div className="rounded-3xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-6 shadow-sm">
-                          <div className="flex flex-col sm:flex-row items-center gap-8">
-                            <div className="relative shrink-0" style={{ width: 160, height: 160 }}>
-                              <svg width="160" height="160" viewBox="0 0 160 160" className="-rotate-90">
-                                <defs><linearGradient id="ringGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stopColor="#34d399" /><stop offset="100%" stopColor="#059669" /></linearGradient></defs>
-                                <circle cx="80" cy="80" r={R} fill="none" stroke="#eef2f6" strokeWidth="11" />
-                                <circle cx="80" cy="80" r={R} fill="none" stroke="url(#ringGrad)" strokeWidth="11" strokeLinecap="round" strokeDasharray={`${dash} ${C}`} />
-                              </svg>
-                              <div className="absolute inset-0 flex flex-col items-center justify-center text-center leading-none">
-                                <div className="text-2xl font-extrabold text-slate-900">{payoutPct}%</div>
-                                <div className="text-[9px] text-slate-400 mt-1 w-[88px]">к перечислению</div>
-                              </div>
+                        {/* Hero: тёмные KPI-карточки со спарклайнами и hover-анимацией */}
+                        <div className="rounded-3xl bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800 p-4 sm:p-5 shadow-lg" data-no-invert>
+                          <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3">
+                            <StatCard label="Продажи" value={rub(salesX)} sub={profitFilterActive ? 'фильтр активен' : 'за период'} series={profitFilterActive ? undefined : salesDays} delta={cmpDeltaOf(salesX, 'sales_net')} color="#34d399" />
+                            <StatCard label="К перечислению" value={rub(payoutHero)} sub={`${payoutPct}% от продаж`} delta={cmpDeltaOf(payoutHero, 'payout_net')} color="#2dd4bf" />
+                            <StatCard label="Выкуплено" value={`${soldQty.toLocaleString('ru-RU')} шт`} sub={rub(soldSumHero)} series={profitFilterActive ? undefined : soldDays} delta={cmpDeltaOf(soldQty, 'sold_qty')} color="#38bdf8" />
+                            <StatCard label="Заказано" value={`${orderedQty.toLocaleString('ru-RU')} шт`} sub={rub(orderedSumHero)} color="#818cf8" />
+                            <StatCard label="Возвраты" value={`${retQtyHero.toLocaleString('ru-RU')} шт`} sub={rub(returnsSumHero)} color="#fb7185" />
+                            <StatCard label="Комиссия WB" value={rub(commissionWB)} sub={salesX > 0 ? `${pct(commissionWB / salesX * 100)} от продаж` : '—'} color="#22d3ee" />
+                            <StatCard label="Налог" value={rub(taxValHero)} sub="ставка" color="#94a3b8" right={<button type="button" onClick={() => setUploadedTaxRateOverride((prev) => prev === 0.01 ? 0.06 : 0.01)} className="shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full bg-white/10 text-indigo-300 hover:bg-white/20">{Math.round(getCurrentUploadedTaxRate() * 100)}%</button>} />
+                            <StatCard label="Себестоимость" value={rub(costSumTotal)} sub={salesX > 0 ? `${pct(costSumTotal / salesX * 100)} от продаж` : '—'} color="#fb923c" />
+                            <StatCard label="Средний чек" value={`${avgCheck.toLocaleString('ru-RU', { maximumFractionDigits: 1 })} ₽`} color="#a78bfa" />
+                            <StatCard label="Логистика" value={rub(Number(sx.logistics_sum || 0))} sub={salesX > 0 ? `${pct(Number(sx.logistics_sum || 0) / salesX * 100)} от продаж` : '—'} color="#60a5fa" />
+                            <StatCard label="Реклама WB" value={rub(Number(sx.withhold_sum || 0))} sub={salesX > 0 ? `${pct(Number(sx.withhold_sum || 0) / salesX * 100)} от продаж` : '—'} color="#e879f9" />
+                            <StatCard label="Хранение" value={rub(Number(sx.storage_sum || 0))} sub={salesX > 0 ? `${pct(Number(sx.storage_sum || 0) / salesX * 100)} от продаж` : '—'} color="#22d3ee" />
+                            <StatCard label="Чистая прибыль" value={rub(profitNet)} sub={salesX > 0 ? `маржа ${pct(profitNet / salesX * 100)}` : '—'} signOf={profitNet} delta={cmpProfitDelta} />
+                            <StatCard label="Рентабельность (ROI)" value={costSumTotal > 0 ? pct(profitNet / costSumTotal * 100) : '—'} sub="прибыль / себест." signOf={profitNet} />
+                            <StatCard label="Расходы всего" value={rub(costTotal)} sub={salesX > 0 ? `${pct(costTotal / salesX * 100)} от продаж` : '—'} color="#fbbf24" />
+                            <StatCard label="% к перечислению" value={`${payoutPct}%`} sub="доля выплаты" color="#34d399" />
+                          </div>
+                          <div className="mt-3 flex flex-wrap items-center gap-3 text-sm border-t border-white/10 pt-3">
+                            <div className="flex items-center gap-2">
+                              <span className="text-slate-400">Доп. траты:</span>
+                              <input type="number" min="0" step="0.01" value={uploadedExtraCosts} onChange={(e) => setUploadedExtraCosts(Number(e.target.value || 0))} className="w-36 px-2 py-1 text-sm rounded-lg bg-white/10 border border-white/15 text-white placeholder-slate-500" />
                             </div>
-                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 flex-1 w-full">
-                              <div className="rounded-2xl bg-emerald-50 p-3.5"><div className="text-base sm:text-lg font-extrabold text-emerald-700">{rub(payoutHero)}</div><div className="text-[11px] text-emerald-600/70 mt-0.5">К перечислению</div></div>
-                              <div className="rounded-2xl bg-indigo-50 p-3.5"><div className="text-base sm:text-lg font-extrabold text-indigo-700">{rub(sales)}</div><div className="text-[11px] text-indigo-600/70 mt-0.5">Выручка</div></div>
-                              <div className="rounded-2xl bg-slate-100 p-3.5"><div className="text-base sm:text-lg font-extrabold text-slate-700">{orderedQty.toLocaleString('ru-RU')} шт</div><div className="text-[11px] text-slate-500 mt-0.5">Заказано</div></div>
-                              <div className="rounded-2xl bg-sky-50 p-3.5"><div className="text-base sm:text-lg font-extrabold text-sky-700">{soldQty.toLocaleString('ru-RU')} шт</div><div className="text-[11px] text-sky-600/70 mt-0.5">Выкуплено</div></div>
-                              <div className="rounded-2xl bg-rose-50 p-3.5"><div className="text-base sm:text-lg font-extrabold text-rose-600">{retQtyHero.toLocaleString('ru-RU')} шт</div><div className="text-[11px] text-rose-500/70 mt-0.5">Возвраты</div></div>
-                              <div className="rounded-2xl bg-orange-50 p-3.5"><div className="text-base sm:text-lg font-extrabold text-orange-700">{rub(costSumTotal)}</div><div className="text-[11px] text-orange-600/70 mt-0.5">Себестоимость · {sales > 0 ? pct(costSumTotal / sales * 100) : '—'}</div></div>
-                              <div className="rounded-2xl bg-violet-50 p-3.5"><div className="text-base sm:text-lg font-extrabold text-violet-700">{avgCheck.toLocaleString('ru-RU', { maximumFractionDigits: 1 })} ₽</div><div className="text-[11px] text-violet-600/70 mt-0.5">Средний чек</div></div>
-                              <div className="rounded-2xl bg-blue-50 p-3.5"><div className="text-base sm:text-lg font-extrabold text-blue-700">{sales > 0 ? pct(Number(s.logistics_sum || 0) / sales * 100) : '—'}</div><div className="text-[11px] text-blue-600/70 mt-0.5">Логистика</div></div>
-                              <div className="rounded-2xl bg-fuchsia-50 p-3.5"><div className="text-base sm:text-lg font-extrabold text-fuchsia-700">{sales > 0 ? pct(Number(s.withhold_sum || 0) / sales * 100) : '—'}</div><div className="text-[11px] text-fuchsia-600/70 mt-0.5">Реклама WB</div></div>
-                              <div className="rounded-2xl bg-cyan-50 p-3.5"><div className="text-base sm:text-lg font-extrabold text-cyan-700">{sales > 0 ? pct(Number(s.storage_sum || 0) / sales * 100) : '—'}</div><div className="text-[11px] text-cyan-600/70 mt-0.5">Хранение</div></div>
-                              <div className={`rounded-2xl p-3.5 ${profitNet < 0 ? 'bg-rose-100' : 'bg-emerald-100'}`}><div className={`text-base sm:text-lg font-extrabold ${profitNet < 0 ? 'text-rose-700' : 'text-emerald-700'}`}>{rub(profitNet)}</div><div className={`text-[11px] mt-0.5 ${profitNet < 0 ? 'text-rose-600/70' : 'text-emerald-600/70'}`}>Чистая прибыль · {sales > 0 ? pct(profitNet / sales * 100) : '—'}</div></div>
-                              <div className="rounded-2xl bg-amber-50 p-3.5"><div className="text-base sm:text-lg font-extrabold text-amber-700">{rub(costTotal)}</div><div className="text-[11px] text-amber-600/70 mt-0.5">Расходы всего · {sales > 0 ? pct(costTotal / sales * 100) : '—'}</div></div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-slate-400">Сравнить с:</span>
+                              <select value={compareReportId} onChange={(e) => loadCompareSummary(e.target.value)} className="px-2 py-1 text-xs rounded-lg bg-white/10 border border-white/15 text-white max-w-[230px]">
+                                <option value="" className="text-slate-800">— не сравнивать —</option>
+                                {[...(uploadedHistory || [])].reverse().map((h: any) => {
+                                  const ps = h?.summary_json?.period_start ? new Date(h.summary_json.period_start).toLocaleDateString('ru-RU') : '';
+                                  const pe = h?.summary_json?.period_end ? new Date(h.summary_json.period_end).toLocaleDateString('ru-RU') : '';
+                                  return <option key={h.id} value={h.id} className="text-slate-800">{ps}–{pe}{h?.summary_json?.report_number ? ` · №${h.summary_json.report_number}` : ''}</option>;
+                                })}
+                              </select>
+                              {compareSummary && <span className="text-[11px] text-indigo-300">▲/▼ к выбранному периоду</span>}
+                            </div>
+                            <div className="flex items-center gap-1.5 sm:ml-auto">
+                              <span className="text-slate-400 text-xs mr-1">Фильтр товаров:</span>
+                              <button type="button" onClick={() => setSummaryProfitFilter((f) => f === 'pos' ? 'all' : 'pos')} title="Только прибыльные" className={`flex h-8 w-8 items-center justify-center rounded-lg text-lg font-bold transition-colors ${summaryProfitFilter === 'pos' ? 'bg-emerald-500 text-white' : 'bg-white/10 text-emerald-300 hover:bg-white/20'}`}>+</button>
+                              <button type="button" onClick={() => setSummaryProfitFilter((f) => f === 'neg' ? 'all' : 'neg')} title="Только минусовые" className={`flex h-8 w-8 items-center justify-center rounded-lg text-lg font-bold transition-colors ${summaryProfitFilter === 'neg' ? 'bg-rose-500 text-white' : 'bg-white/10 text-rose-300 hover:bg-white/20'}`}>−</button>
+                              {summaryProfitFilter !== 'all' && (
+                                <button type="button" onClick={() => setSummaryProfitFilter('all')} className="ml-1 px-2 py-1 text-xs rounded-lg bg-white/10 text-slate-300 hover:bg-white/20">Сбросить</button>
+                              )}
                             </div>
                           </div>
                         </div>
 
                         {/* Крупная таблица товаров с фото и сортировкой */}
-                        <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+                        <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden w-full">
                           <div className="px-4 py-3 border-b border-slate-100 font-bold text-slate-800 text-sm">Товары ({prods.length})</div>
                           <div className="overflow-auto max-h-[70vh]">
-                            <table className="min-w-full text-xs">
+                            <table className="w-full min-w-[1100px] text-xs">
                               <thead className="bg-slate-50 sticky top-0 z-10">
                                 <tr className="select-none">
-                                  {([['photo', 'Фото'], ['code', 'Артикул'], ['sold', 'Продано'], ['sales', 'Выручка'], ['margin', 'Маржа %'], ['profit', 'Прибыль'], ['ppu', 'Приб/шт'], ['retPct', 'Возврат %'], ['share', 'Доля %']] as [string, string][]).map(([f, l]) => (
-                                    <th key={f} className={`px-2.5 py-2 whitespace-nowrap ${f === 'photo' ? '' : 'cursor-pointer hover:text-indigo-600'} ${['code', 'photo'].includes(f) ? 'text-left' : 'text-right'}`} onClick={() => f !== 'photo' && setSummaryProdSort((p) => ({ field: f, dir: p.field === f && p.dir === 'desc' ? 'asc' : 'desc' }))}>{l}{summaryProdSort.field === f ? (summaryProdSort.dir === 'asc' ? ' ▲' : ' ▼') : ''}</th>
+                                  {([['photo', 'Фото'], ['code', 'Артикул'], ['ordered', 'Заказано'], ['sold', 'Продано'], ['perDay', 'Ед/день'], ['sales', 'Продажи'], ['margin', 'Маржа %'], ['roi', 'Рентаб. %'], ['profit', 'Прибыль'], ['ppu', 'Приб/шт'], ['retPct', 'Возврат % / общ.'], ['share', 'Доля %'], ['abcOrd', 'ABC']] as [string, string][]).map(([f, l]) => (
+                                    <th key={f} style={f === 'photo' ? { width: 176 } : f === 'code' ? { width: 240 } : undefined} className={`px-2.5 py-2 whitespace-nowrap ${f === 'photo' ? '' : 'cursor-pointer hover:text-indigo-600'} ${['code', 'photo'].includes(f) ? 'text-left' : f === 'abcOrd' ? 'text-center' : 'text-right'}`} onClick={() => f !== 'photo' && setSummaryProdSort((p) => ({ field: f, dir: p.field === f && p.dir === 'desc' ? 'asc' : 'desc' }))}>{l}{summaryProdSort.field === f ? (summaryProdSort.dir === 'asc' ? ' ▲' : ' ▼') : ''}</th>
                                   ))}
                                 </tr>
                               </thead>
                               <tbody>
-                                {[...prods].map((p) => ({ ...p, ppu: p.sold > 0 ? p.profit / p.sold : 0 })).sort((a: any, b: any) => { const f = summaryProdSort.field; const m = summaryProdSort.dir === 'asc' ? 1 : -1; return ((a[f] || 0) - (b[f] || 0)) * m; }).map((p: any, i: number) => {
+                                {[...prods].map((p) => ({ ...p, ppu: p.sold > 0 ? p.profit / p.sold : 0 })).filter((p: any) => summaryProfitFilter === 'all' ? true : summaryProfitFilter === 'pos' ? Number(p.profit) >= 0 : Number(p.profit) < 0).sort((a: any, b: any) => { const f = summaryProdSort.field; const m = summaryProdSort.dir === 'asc' ? 1 : -1; return ((a[f] || 0) - (b[f] || 0)) * m; }).map((p: any, i: number) => {
                                   const exp = !!summaryExpanded[String(p.code)];
                                   return (
                                   <React.Fragment key={i}>
                                   <tr className={`border-t border-slate-100 hover:bg-slate-50 ${p.profit < 0 ? 'bg-rose-50/40' : ''}`}>
-                                    <td className="px-2.5 py-1.5">{p.code ? <img src={wbPhoto(p.code)} data-fb="0" onError={(e: any) => { const el = e.currentTarget; if (el.dataset.fb === '0') { el.dataset.fb = '1'; el.src = wbPhotoBase(p.code) + '.jpg'; } else { el.style.visibility = 'hidden'; } }} onClick={() => setUploadedPhotoPreview({ src: wbPhotoBig(p.code), title: `${p.code} ${p.name || ''}` })} className="w-20 h-24 rounded-lg object-cover bg-slate-100 cursor-zoom-in" loading="lazy" /> : <div className="w-20 h-24 rounded-lg bg-slate-100" />}</td>
-                                    <td className="px-2.5 py-1.5 text-left font-medium whitespace-nowrap">{p.code ? <a href={`https://www.wildberries.ru/catalog/${p.code}/detail.aspx`} target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline">{p.code}</a> : '—'}{(p.sizes && p.sizes.length > 0) && <button onClick={() => setSummaryExpanded((prev) => ({ ...prev, [String(p.code)]: !prev[String(p.code)] }))} className="ml-2 text-[10px] px-1.5 py-0.5 rounded border border-slate-200 text-slate-500 hover:bg-slate-100">{exp ? '▲ размеры' : '▾ размеры'}</button>}</td>
+                                    <td className="px-2.5 py-1.5">{(p.code && !isSvc(p.code)) ? <img src={wbPhoto(p.code)} data-fb="0" onError={(e: any) => { const el = e.currentTarget; if (el.dataset.fb === '0') { el.dataset.fb = '1'; el.src = wbPhotoBase(p.code) + '.jpg'; } else { el.style.visibility = 'hidden'; } }} onClick={() => setUploadedPhotoPreview({ src: wbPhotoBig(p.code), title: `${p.code} ${p.name || ''}` })} className="w-40 h-48 rounded-lg object-cover bg-slate-100 cursor-zoom-in" loading="lazy" /> : <div className="w-40 h-48 rounded-lg bg-slate-100 flex items-center justify-center text-[10px] text-slate-400 text-center px-1">{isSvc(p.code) ? svcLabel : ''}</div>}</td>
+                                    <td className="px-2.5 py-1.5 text-left font-medium whitespace-nowrap">{isSvc(p.code) ? <span className="text-slate-700 font-semibold">{svcLabel}</span> : <a href={`https://www.wildberries.ru/catalog/${p.code}/detail.aspx`} target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline">{p.code}</a>}{(p.sizes && p.sizes.length > 0) && <button onClick={() => setSummaryExpanded((prev) => ({ ...prev, [String(p.code)]: !prev[String(p.code)] }))} className="ml-2 text-[10px] px-1.5 py-0.5 rounded border border-slate-200 text-slate-500 hover:bg-slate-100">{exp ? '▲ размеры' : '▾ размеры'}</button>}{p.vendorCode ? <div className="text-[11px] text-slate-400 font-normal mt-0.5" title="Артикул продавца">{p.vendorCode}</div> : null}</td>
+                                    <td className="px-2.5 py-1.5 text-right whitespace-nowrap"><div className="font-medium text-slate-700">{Number(p.ordered).toLocaleString('ru-RU')} шт</div><div className="text-[11px] text-slate-400">{rub(p.orderedSum)}</div></td>
                                     <td className="px-2.5 py-1.5 text-right">{Number(p.sold).toLocaleString('ru-RU')}</td>
+                                    <td className="px-2.5 py-1.5 text-right text-slate-600">{p.perDay.toLocaleString('ru-RU', { maximumFractionDigits: 1 })}</td>
                                     <td className="px-2.5 py-1.5 text-right">{rub(p.sales)}</td>
                                     <td className={`px-2.5 py-1.5 text-right font-medium ${p.margin < 0 ? 'text-rose-600' : 'text-emerald-600'}`}>{pct(p.margin)}</td>
+                                    <td className={`px-2.5 py-1.5 text-right font-medium ${p.roi < 0 ? 'text-rose-600' : 'text-teal-600'}`}>{p.costSum > 0 ? pct(p.roi) : '—'}</td>
                                     <td className={`px-2.5 py-1.5 text-right font-bold ${p.profit < 0 ? 'text-rose-600' : 'text-slate-800'}`}>{rub(p.profit)}</td>
                                     <td className="px-2.5 py-1.5 text-right">{rub(p.ppu)}</td>
-                                    <td className={`px-2.5 py-1.5 text-right ${p.retPct > 20 ? 'text-rose-600 font-medium' : 'text-slate-600'}`}>{pct(p.retPct)}</td>
+                                    <td className={`px-2.5 py-1.5 text-right ${p.retPct > 20 ? 'text-rose-600 font-medium' : 'text-slate-600'}`}>{pct(p.retPct)} <span className="text-slate-400" title="Доля возвратов этого товара во всех продажах (шт)">/ {pct(totalSoldAll > 0 ? p.ret / totalSoldAll * 100 : 0)}</span></td>
                                     <td className="px-2.5 py-1.5 text-right text-violet-700">{pct(p.share)}</td>
+                                    <td className="px-2.5 py-1.5 text-center"><span className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-bold ${p.abc === 'A' ? 'bg-emerald-100 text-emerald-700' : p.abc === 'B' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500'}`}>{p.abc}</span></td>
                                   </tr>
                                   {exp && p.sizes && p.sizes.length > 0 && (
                                     <tr className="bg-slate-50/70">
-                                      <td colSpan={9} className="px-3 py-3">
+                                      <td colSpan={13} className="px-3 py-3">
                                         <div className="overflow-auto rounded-lg border border-slate-200 bg-white">
                                           {(() => {
-                                            // Логистика в WB идёт отдельными строками без размера → распределяем
-                                            // её пропорционально проданным штукам по размерам.
-                                            const soldGrossTotal = p.sizes.reduce((a: number, z: any) => a + Number(z.sold_qty ?? z.sold ?? 0), 0) || 1;
-                                            const logSizeSum = p.sizes.reduce((a: number, z: any) => a + Number(z.logistics_sum ?? 0), 0);
-                                            const logToSpread = Math.max(0, Number(p.logistics || 0) - logSizeSum);
+                                            // Логистика берётся точно из строк с размером (без распределения).
+                                            const lkNorm = (v: any) => (v && typeof v === 'object') ? { sum: Number(v.sum || 0), qty: Number(v.qty || 0) } : { sum: Number(v || 0), qty: 0 };
+                                            const lkEntries = Object.entries(p.logKinds || {}).map(([k, v]: any) => [k, lkNorm(v)] as [string, { sum: number; qty: number }]).filter(([, v]) => Math.abs(v.sum) > 0.001).sort((a, b) => Math.abs(b[1].sum) - Math.abs(a[1].sum));
+                                            const lkTotal = lkEntries.reduce((s: number, [, v]) => s + v.sum, 0);
+                                            const lkQtyTotal = lkEntries.reduce((s: number, [, v]) => s + v.qty, 0);
                                             return (
+                                          <>
                                           <table className="min-w-full text-[11px]">
                                             <thead className="bg-slate-100 text-slate-500">
                                               <tr>
-                                                {['Размер', 'Продажи', 'Возвраты ₽', 'Логистика', 'К перечисл.', 'Итого к оплате', 'Себест.', 'Прибыль/шт', 'Заработок', 'Продано шт', 'Возвр. шт'].map((h, hi) => (
-                                                  <th key={hi} className={`px-2 py-1.5 whitespace-nowrap ${hi === 0 ? 'text-left' : 'text-right'}`}>{h}</th>
-                                                ))}
+                                                {([['size', 'Размер'], ['sales_net', 'Продажи'], ['returns_gross', 'Возвраты ₽'], ['logistics_sum', 'Логистика'], ['payout_net', 'К перечисл.'], ['to_pay_total', 'Итого к оплате'], ['__cost', 'Себест.'], ['__ppu', 'Прибыль/шт'], ['__profit', 'Заработок'], ['sold_qty', 'Продано шт'], ['return_qty', 'Возвр. шт']] as [string, string][]).map(([key, h], hi) => {
+                                                  const sortable = key !== '__cost';
+                                                  const cur = summarySizeSort[String(p.code)];
+                                                  return (
+                                                    <th key={hi} onClick={() => { if (!sortable) return; setSummarySizeSort((prev) => { const c = prev[String(p.code)]; const dir = c && c.key === key && c.dir === 'desc' ? 'asc' : 'desc'; return { ...prev, [String(p.code)]: { key, dir } }; }); }} className={`px-2 py-1.5 whitespace-nowrap ${sortable ? 'cursor-pointer hover:text-indigo-600 select-none' : ''} ${hi === 0 ? 'text-left' : 'text-right'}`}>{h}{cur && cur.key === key ? (cur.dir === 'asc' ? ' ▲' : ' ▼') : ''}</th>
+                                                  );
+                                                })}
                                               </tr>
                                             </thead>
                                             <tbody>
-                                              {p.sizes.map((z: any, zi: number) => {
+                                              {(() => {
+                                                // ИТОГО по товару — над разбивкой по размерам.
+                                                const tProfit = Number(p.profit || 0);
+                                                const tPpu = Number(p.sold || 0) > 0 ? tProfit / Number(p.sold) : 0;
+                                                return (
+                                                  <tr className="border-b-2 border-indigo-200 bg-indigo-50 font-semibold">
+                                                    <td className="px-2 py-1.5 text-left text-indigo-800">ИТОГО</td>
+                                                    <td className="px-2 py-1.5 text-right">{rub(p.sales)}</td>
+                                                    <td className="px-2 py-1.5 text-right text-rose-600">{rub(p.retSum)}</td>
+                                                    <td className="px-2 py-1.5 text-right">{rub(p.logistics)}</td>
+                                                    <td className="px-2 py-1.5 text-right">{rub(p.payoutNet)}</td>
+                                                    <td className="px-2 py-1.5 text-right text-indigo-700">{rub(p.toPay)}</td>
+                                                    <td className="px-2 py-1.5 text-right text-slate-500">{rub(p.costSum)}</td>
+                                                    <td className={`px-2 py-1.5 text-right ${tPpu < 0 ? 'text-rose-600' : 'text-slate-700'}`}>{rub(tPpu)}</td>
+                                                    <td className={`px-2 py-1.5 text-right ${tProfit < 0 ? 'text-rose-600' : 'text-emerald-700'}`}>{rub(tProfit)}</td>
+                                                    <td className="px-2 py-1.5 text-right">{Number(p.sold || 0).toLocaleString('ru-RU')}</td>
+                                                    <td className="px-2 py-1.5 text-right">{Number(p.ret || 0).toLocaleString('ru-RU')}</td>
+                                                  </tr>
+                                                );
+                                              })()}
+                                              {(() => {
+                                                // Применяем сортировку детализации размеров.
+                                                const rate = getCurrentUploadedTaxRate();
+                                                const cost = Number(p.cost || 0);
+                                                const metric = (z: any, key: string) => {
+                                                  const zs = Number(z.sold_qty ?? z.sold ?? 0);
+                                                  const tp = Number(z.to_pay_total ?? 0);
+                                                  const pr = tp - cost * zs - Number(z.sales_net || 0) * rate;
+                                                  if (key === '__profit') return pr;
+                                                  if (key === '__ppu') return zs > 0 ? pr / zs : 0;
+                                                  if (key === 'size') return null;
+                                                  return Number(z[key] || 0);
+                                                };
+                                                const srt = summarySizeSort[String(p.code)];
+                                                let arr = [...p.sizes];
+                                                if (srt) {
+                                                  const m = srt.dir === 'asc' ? 1 : -1;
+                                                  if (srt.key === 'size') arr.sort((a: any, b: any) => compareSizesAsc(String(a?.size || ''), String(b?.size || '')) * m);
+                                                  else arr.sort((a: any, b: any) => ((Number(metric(a, srt.key)) - Number(metric(b, srt.key))) * m));
+                                                }
+                                                return arr;
+                                              })().map((z: any, zi: number) => {
                                                 const zsold = Number(z.sold_qty ?? z.sold ?? 0);          // валовое продано — сходится с «Продано»
                                                 const ztopay = Number(z.to_pay_total ?? 0);
-                                                const zlog = Number(z.logistics_sum ?? 0) + logToSpread * (zsold / soldGrossTotal);
-                                                const ztax = Number(z.tax_sum ?? 0);
+                                                const zlog = Number(z.logistics_sum ?? 0);
+                                                // Налог считаем как в таблице: продажи нетто × текущая ставка (а не сохранённый tax_sum).
+                                                const ztax = Number(z.sales_net || 0) * getCurrentUploadedTaxRate();
                                                 const zprofit = ztopay - Number(p.cost || 0) * zsold - ztax;
                                                 const zppu = zsold > 0 ? zprofit / zsold : 0;
                                                 return (
@@ -24557,6 +26037,20 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                               })}
                                             </tbody>
                                           </table>
+                                          {lkEntries.length > 0 && (
+                                            <div className="px-3 py-3 border-t border-slate-200 bg-slate-50/60">
+                                              <div className="text-[11px] font-semibold text-slate-600 mb-2">Логистика по видам · {rub(lkTotal)} · {lkQtyTotal.toLocaleString('ru-RU')} шт</div>
+                                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                                                {lkEntries.map(([k, v], i: number) => (
+                                                  <div key={i} className="flex items-center justify-between gap-2 text-[11px] bg-white rounded-md border border-slate-200 px-2.5 py-1.5">
+                                                    <span className="text-slate-600 truncate" title={k}>{k}</span>
+                                                    <span className="font-medium text-slate-800 whitespace-nowrap">{rub(v.sum)} · {v.qty.toLocaleString('ru-RU')} шт{lkTotal !== 0 ? ` · ${pct(v.sum / lkTotal * 100)}` : ''}</span>
+                                                  </div>
+                                                ))}
+                                              </div>
+                                            </div>
+                                          )}
+                                          </>
                                             );
                                           })()}
                                         </div>
@@ -24569,6 +26063,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               </tbody>
                             </table>
                           </div>
+                        </div>
+
+                        {/* Динамика по дням — крупно, во всю ширину */}
+                        <div className="grid grid-cols-1 2xl:grid-cols-2 gap-4 mb-4">
+                          <DayTrend title="Заказы по дням" color="#6366f1" gradId="trendSales" maxLabels={8} getVal={(d: any) => Number(d.ordered_retail_sum || 0) || Number(d.sales_net || 0)} fmt={(v: number) => rubK(v)} extraRows={[{ label: 'Сумма, ₽', cell: (d: any) => rub(Number(d.ordered_retail_sum || 0) || Number(d.sales_net || 0)) }, { label: 'Кол-во', cell: (d: any) => `${(Number(d.ordered_qty || 0) || Number(d.sold_qty || 0)).toLocaleString('ru-RU')} шт` }]} />
+                          <DayTrend title="Выкупы по дням" color="#10b981" gradId="trendBuy" maxLabels={8} getVal={(d: any) => d.sold_qty} fmt={(v: number) => `${Number(v || 0).toLocaleString('ru-RU')} шт`} extraRows={[{ label: 'Кол-во', cell: (d: any) => `${Number(d.sold_qty || 0).toLocaleString('ru-RU')} шт` }, { label: 'Сумма, ₽', cell: (d: any) => rub(Number(d.sales_net || 0)) }]} />
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-4 auto-rows-fr">
@@ -24591,41 +26091,73 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             </div>
                           </Card>
 
-                          {/* Динамика по дням */}
-                          <Card title="Продажи по дням">
-                            {days.length === 0 ? <div className="text-xs text-slate-400 py-6 text-center">Нет дат в отчёте</div> : (
+                          {/* Детализация логистики по видам (по всем товарам отчёта) */}
+                          <Card title="Логистика по видам">
+                            {logKindsDetail.arr.length === 0 ? (
+                              <div className="text-xs text-slate-400 py-6 text-center">Нет данных по логистике</div>
+                            ) : (
                               <>
-                                <div className="flex items-end gap-1 h-32">
-                                  {days.map((d: any, i: number) => (
-                                    <div key={i} className="flex-1 flex flex-col items-center justify-end group h-full" title={`${new Date(d.key).toLocaleDateString('ru-RU')}: ${rub(d.sales_net)}`}>
-                                      <div className="w-full rounded-t bg-indigo-400 group-hover:bg-indigo-600 transition-colors" style={{ height: `${Math.max(2, d.sales_net / maxDaySales * 100)}%` }} />
+                                <div className="space-y-2 max-h-80 overflow-auto pr-1">
+                                  {logKindsDetail.arr.map((r: any, i: number) => (
+                                    <div key={i}>
+                                      <div className="flex items-center justify-between gap-2 text-xs mb-1">
+                                        <span className="text-slate-600 truncate" title={r.kind}>{r.kind}</span>
+                                        <span className="font-semibold text-slate-800 whitespace-nowrap">{rub(r.sum)}</span>
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                        <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden"><div className="bg-blue-500 h-full rounded-full" style={{ width: `${Math.min(100, Math.abs(r.pct))}%` }} /></div>
+                                        <span className="w-32 shrink-0 text-right text-[11px] text-slate-400 whitespace-nowrap">{r.qty.toLocaleString('ru-RU')} шт · {pct(r.pct)}</span>
+                                      </div>
                                     </div>
                                   ))}
                                 </div>
-                                <div className="flex items-center justify-between mt-2 text-[11px]">
-                                  {bestDay && <span className="text-emerald-700">↑ Лучший: {new Date(bestDay.key).toLocaleDateString('ru-RU')} · {rub(bestDay.sales_net)}</span>}
-                                  {worstDay && <span className="text-rose-700">↓ Худший: {new Date(worstDay.key).toLocaleDateString('ru-RU')} · {rub(worstDay.sales_net)}</span>}
+                                <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between text-xs font-bold">
+                                  <span className="text-slate-600">Вся логистика</span>
+                                  <span className="text-slate-800">{rub(logKindsDetail.total)} · 100%</span>
                                 </div>
                               </>
                             )}
                           </Card>
 
-                          {/* Выкупы по дням */}
-                          <Card title="Выкупы по дням">
-                            {days.length === 0 ? <div className="text-xs text-slate-400 py-6 text-center">Нет дат в отчёте</div> : (
-                              <>
-                                <div className="flex items-end gap-1 h-32">
-                                  {days.map((d: any, i: number) => (
-                                    <div key={i} className="flex-1 flex flex-col items-center justify-end group h-full" title={`${new Date(d.key).toLocaleDateString('ru-RU')}: ${d.sold_qty} выкупов`}>
-                                      <div className="w-full rounded-t bg-emerald-400 group-hover:bg-emerald-600 transition-colors" style={{ height: `${Math.max(2, d.sold_qty / maxDayBuyout * 100)}%` }} />
+                          {/* ABC-анализ по доле в выручке */}
+                          <Card title="ABC-анализ (по доле в выручке)">
+                            <div className="flex h-5 w-full overflow-hidden rounded-full bg-slate-100 mb-4">
+                              {abcGroups.map((a) => a.shareSales > 0 && <div key={a.g} className={a.g === 'A' ? 'bg-emerald-500' : a.g === 'B' ? 'bg-amber-500' : 'bg-slate-400'} style={{ width: `${a.shareSales}%` }} title={`${a.g}: ${pct(a.shareSales)}`} />)}
+                            </div>
+                            <div className="space-y-2">
+                              {abcGroups.map((a) => (
+                                <div key={a.g} className="flex items-center justify-between gap-2 text-xs rounded-xl border border-slate-100 px-3 py-2">
+                                  <span className="flex items-center gap-2"><span className={`w-6 h-6 rounded-lg flex items-center justify-center font-bold text-white ${a.g === 'A' ? 'bg-emerald-500' : a.g === 'B' ? 'bg-amber-500' : 'bg-slate-400'}`}>{a.g}</span><span className="text-slate-600">{a.count} тов.</span></span>
+                                  <span className="text-right"><span className="font-bold text-slate-800">{rub(a.sales)}</span> <span className="text-slate-400">· {pct(a.shareSales)}</span><div className={`text-[11px] ${a.profit < 0 ? 'text-rose-500' : 'text-emerald-600/80'}`}>приб. {rub(a.profit)}</div></span>
+                                </div>
+                              ))}
+                            </div>
+                            <div className="mt-3 text-[11px] text-slate-400">A — ключевые (до 80% выручки), B — средние (до 95%), C — хвост.</div>
+                          </Card>
+
+                          {/* Неликвид — нет продаж за период */}
+                          <Card title={`Неликвид · нет продаж (${deadStock.length})`}>
+                            {deadStock.length === 0 ? (
+                              <div className="text-xs text-slate-400 py-6 text-center">Все товары с продажами 👍</div>
+                            ) : (
+                              <div className="space-y-1.5 max-h-80 overflow-auto pr-1">
+                                {deadStock.map((p: any, i: number) => (
+                                  <div key={i} className="flex items-center gap-2 text-xs rounded-lg border border-slate-100 px-2 py-1.5">
+                                    {(p.code && !isSvc(p.code)) ? <img src={wbPhoto(p.code)} data-fb="0" onError={(e: any) => { const el = e.currentTarget; if (el.dataset.fb === '0') { el.dataset.fb = '1'; el.src = wbPhotoBase(p.code) + '.jpg'; } else { el.style.visibility = 'hidden'; } }} onClick={() => setUploadedPhotoPreview({ src: wbPhotoBig(p.code), title: `${p.code} ${p.name || ''}` })} className="w-10 h-12 rounded object-cover bg-slate-100 shrink-0 cursor-zoom-in" loading="lazy" /> : <div className="w-10 h-12 rounded bg-slate-100 shrink-0" />}
+                                    <div className="min-w-0 flex-1">
+                                      <div className="font-medium text-slate-700">{isSvc(p.code) ? svcLabel : <a href={`https://www.wildberries.ru/catalog/${p.code}/detail.aspx`} target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline">{p.code}</a>}</div>
+                                      <div className="text-slate-400 truncate" title={p.name}>{p.name || ''}</div>
                                     </div>
-                                  ))}
-                                </div>
-                                <div className="flex items-center justify-between mt-2 text-[11px]">
-                                  {bestBuyDay && <span className="text-emerald-700">↑ Больше всего выкупов: {new Date(bestBuyDay.key).toLocaleDateString('ru-RU')} · {bestBuyDay.sold_qty} шт</span>}
-                                </div>
-                              </>
+                                    <div className="text-right text-slate-400 whitespace-nowrap">зак. {Number(p.ordered).toLocaleString('ru-RU')}{p.ret > 0 ? <div className="text-rose-500">возвр. {Number(p.ret).toLocaleString('ru-RU')}</div> : null}</div>
+                                  </div>
+                                ))}
+                              </div>
                             )}
+                          </Card>
+
+                          {/* Логистика по товарам */}
+                          <Card title="Логистика по товарам">
+                            <Bars photo rows={[...prods].filter((p: any) => Math.abs(p.logistics) > 0).sort((a: any, b: any) => Math.abs(b.logistics) - Math.abs(a.logistics)).slice(0, 15)} val={(r: any) => Math.abs(r.logistics)} color={() => 'bg-blue-500'} fmt={(r: any) => `${rub(r.logistics)}${r.sales > 0 ? ` · ${pct(Math.abs(r.logistics) / r.sales * 100)}` : ''}`} />
                           </Card>
 
                           {/* Топ-5 товаров по прибыли (только с артикулами) */}
@@ -24633,21 +26165,92 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             <Bars photo rows={top.filter(hasArticle).slice(0, 5)} val={(r: any) => r.profit} color={() => 'bg-emerald-500'} fmt={(r: any) => rub(r.profit)} />
                           </Card>
 
-                          {/* Антитоп-5 товаров (только с артикулами; без рекламы/хранения) */}
+                          {/* Антитоп-5 товаров (только с артикулами) */}
                           <Card title="Антитоп-5 (минимальная прибыль)">
                             <Bars photo rows={[...byProfitDesc].filter(hasArticle).slice(-5).reverse()} val={(r: any) => Math.abs(r.profit)} color={(r: any) => r.profit < 0 ? 'bg-rose-500' : 'bg-amber-400'} fmt={(r: any) => rub(r.profit)} />
                           </Card>
 
-                          {/* Склады продаж — шт + сумма + доля */}
-                          <Card title="Склады продаж">
-                            <Bars rows={[...wh].sort((a, b) => b.sales_net - a.sales_net)} val={(r: any) => r.sales_net} color={() => 'bg-blue-500'} fmt={(r: any) => `${Number(r.sold_qty).toLocaleString('ru-RU')} шт · ${rub(r.sales_net)} · ${pct(r.share_pct)}`} />
-                          </Card>
+                        </div>
 
-                          {/* Города продаж — доля города в общих продажах */}
+                        {/* Гео-блок: склады и города продаж — карта/список */}
+                        <div className="flex items-center justify-between gap-2">
+                          <h4 className="font-bold text-slate-800 text-sm">География продаж</h4>
+                          <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden text-xs">
+                            <button onClick={() => setGeoView('map')} className={`px-3 py-1.5 font-medium ${geoView === 'map' ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>Карта</button>
+                            <button onClick={() => setGeoView('list')} className={`px-3 py-1.5 font-medium ${geoView === 'list' ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>Список</button>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-1 2xl:grid-cols-2 gap-4">
+                          <Card title="Склады продаж">
+                            {wh.length === 0
+                              ? <div className="h-48 flex items-center justify-center text-center text-slate-400 text-xs px-4">Нет данных о складе отгрузки.<br />WB API (отчёт о реализации) не передаёт колонку «Склад» — она есть только в файле из кабинета.</div>
+                              : geoView === 'map'
+                              ? <React.Suspense fallback={<div className="h-48 flex items-center justify-center text-slate-400 text-xs">Карта…</div>}><SalesMap rows={[...wh].sort((a, b) => b.sales_net - a.sales_net)} accent="#60a5fa" /></React.Suspense>
+                              : <Bars rows={[...wh].sort((a, b) => b.sales_net - a.sales_net)} val={(r: any) => r.sales_net} color={() => 'bg-blue-500'} fmt={(r: any) => `${Number(r.sold_qty).toLocaleString('ru-RU')} шт · ${rub(r.sales_net)} · ${pct(r.share_pct)}`} />}
+                          </Card>
                           <Card title={`Города продаж (${offices.length})`}>
-                            <Bars rows={offices} val={(r: any) => r.share_pct} color={() => 'bg-cyan-500'} fmt={(r: any) => `${Number(r.sold_qty).toLocaleString('ru-RU')} шт · ${rub(r.sales_net)} · ${pct(r.share_pct)}`} />
+                            {geoView === 'map'
+                              ? <React.Suspense fallback={<div className="h-48 flex items-center justify-center text-slate-400 text-xs">Карта…</div>}><SalesMap rows={offices} accent="#22d3ee" /></React.Suspense>
+                              : <Bars rows={offices} val={(r: any) => r.share_pct} color={() => 'bg-cyan-500'} fmt={(r: any) => `${Number(r.sold_qty).toLocaleString('ru-RU')} шт · ${rub(r.sales_net)} · ${pct(r.share_pct)}`} />}
                           </Card>
                         </div>
+
+                        {/* Логистика по каждому товару: фото, артикул, полная детализация видов логистики */}
+                        <div className="mt-4">
+                          <Card title={`Логистика по товарам (${logByProduct.length})`}>
+                            <div className="flex flex-wrap gap-1.5 mb-3">
+                              {([
+                                ['all', 'Все'],
+                                ['anom', 'Аномальная логистика'],
+                                ['cancel', 'Много отмен'],
+                                ['order', 'Много заказов'],
+                              ] as Array<[any, string]>).map(([k, lbl]) => (
+                                <button key={k} type="button" onClick={() => setLogProductFilter(k)} className={`px-2.5 py-1 text-[11px] font-medium rounded-lg border shadow-sm ${logProductFilter === k ? 'bg-indigo-600 text-white border-indigo-600' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}>{lbl}</button>
+                              ))}
+                            </div>
+                            {logProductFilter !== 'all' && (
+                              <div className="text-[11px] text-slate-400 mb-2">
+                                {logProductFilter === 'anom' && 'Товары, где логистика ≥ 25% выручки — съедает прибыль.'}
+                                {logProductFilter === 'cancel' && 'Товары с отменами (заказал, но не выкупил) — лишняя логистика без продажи.'}
+                                {logProductFilter === 'order' && 'Товары с наибольшим числом доставок к клиенту.'}
+                              </div>
+                            )}
+                            {logByProduct.length === 0 ? (
+                              <div className="text-xs text-slate-400 py-6 text-center">Нет данных по этому фильтру</div>
+                            ) : (
+                              <div className="space-y-2 max-h-[520px] overflow-auto pr-1">
+                                {logByProduct.map((p: any, i: number) => (
+                                  <div key={i} className="flex gap-3 border border-slate-100 rounded-xl p-2">
+                                    {(p.code && !isSvc(p.code))
+                                      ? <img src={wbPhoto(p.code)} data-fb="0" onError={(e: any) => { const el = e.currentTarget; if (el.dataset.fb === '0') { el.dataset.fb = '1'; el.src = wbPhotoBase(p.code) + '.jpg'; } else { el.style.visibility = 'hidden'; } }} onClick={() => setUploadedPhotoPreview({ src: wbPhotoBig(p.code), title: `${p.code} ${p.name || ''}` })} className="w-16 h-20 rounded-lg object-cover bg-slate-100 shrink-0 cursor-zoom-in" loading="lazy" />
+                                      : <div className="w-16 h-20 rounded-lg bg-slate-100 shrink-0" />}
+                                    <div className="flex-1 min-w-0">
+                                      <div className="flex items-center justify-between gap-2">
+                                        {isSvc(p.code)
+                                          ? <span className="text-slate-700 font-semibold text-sm">{svcLabel}</span>
+                                          : <a href={`https://www.wildberries.ru/catalog/${p.code}/detail.aspx`} target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline font-semibold text-sm">{p.code}</a>}
+                                        <span className="font-bold text-slate-800 text-sm whitespace-nowrap">{rub(p.logistics)}{p.sales > 0 ? <span className="ml-1 text-[11px] font-normal text-slate-400">({pct(p.logShare)} выручки)</span> : null}</span>
+                                      </div>
+                                      <div className="text-[11px] text-slate-500 truncate mb-1" title={p.name}>{p.name}</div>
+                                      <div className="flex flex-wrap gap-1">
+                                        {p.kinds.length === 0 ? <span className="text-[11px] text-slate-400">—</span> : p.kinds.map((k: any, ki: number) => (
+                                          <span key={ki} className="inline-flex items-center gap-1 text-[10.5px] bg-slate-50 border border-slate-200 rounded-md px-1.5 py-0.5" title={k.kind}>
+                                            <span className="text-slate-500 max-w-[180px] truncate">{k.kind}</span>
+                                            <span className="font-semibold text-slate-700">{rub(k.sum)}</span>
+                                            <span className="text-slate-400">· {k.qty.toLocaleString('ru-RU')} шт</span>
+                                            <span className="text-blue-500">· {p.logistics !== 0 ? pct(k.sum / p.logistics * 100) : '—'} тов</span>
+                                            <span className="text-fuchsia-500">· {logTotalAll !== 0 ? pct(k.sum / logTotalAll * 100) : '—'} общ</span>
+                                          </span>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </Card>
+                        </div>
+
                       </div>
                     );
                   })()}
@@ -24710,114 +26313,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         {renderedUploadedAnalyticsRows.map((row, idx) => {
                           const rowKey = `${row.code || ''}|${row.name || ''}`;
                           const rowOpen = !!uploadedSizeDetailsOpen[rowKey];
-                          const sizeRows = Array.isArray((row as any).size_breakdown_list) ? (row as any).size_breakdown_list : [];
-                          const normalizedSizeRows = sizeRows.map((sz: any) => {
-                            const soldQty = Number(
-                              sz?.sold_qty ?? sz?.sold ?? ((Number(sz?.sold_net_qty || sz?.net || 0) + Number(sz?.return_qty || sz?.ret || 0)))
-                            );
-                            const returnQty = Number(sz?.return_qty ?? sz?.ret ?? 0);
-                            const soldNetQty = Number(sz?.sold_net_qty ?? sz?.net ?? Math.max(0, soldQty - returnQty));
-                            return {
-                              ...sz,
-                              sold_qty: soldQty,
-                              return_qty: returnQty,
-                              sold_net_qty: soldNetQty,
-                              logistics_sum: Number(sz?.logistics_sum ?? sz?.logistics ?? 0),
-                              payout_net: Number(sz?.payout_net ?? sz?.payout ?? 0),
-                              to_pay_total: Number(sz?.to_pay_total ?? sz?.to_pay ?? 0),
-                            };
-                          });
-
-                          // Reconcile size totals with parent row totals to avoid drift on legacy history payloads
-                          const reconcileMetric = (rowsIn: any[], metric: string, target: number, eps = 0.01) => {
-                            const sum = rowsIn.reduce((s, x) => s + Number(x?.[metric] || 0), 0);
-                            if (!Number.isFinite(target) || !Number.isFinite(sum) || Math.abs(sum) < 1e-9) return rowsIn;
-                            if (Math.abs(sum - target) <= eps) return rowsIn;
-                            const k = target / sum;
-                            return rowsIn.map((x) => ({ ...x, [metric]: Number(x?.[metric] || 0) * k }));
-                          };
-
-                          let reconciledSizeRows = [...normalizedSizeRows];
-                          const metricTargets: Array<[string, number]> = [
-                            ['sales_net', Number(row?.sales_net || 0)],
-                            ['returns_gross', Number(row?.returns_gross || 0)],
-                            ['logistics_sum', Number(row?.logistics_sum || 0)],
-                            ['payout_net', Number(row?.payout_net || 0)],
-                            ['fine_sum', Number(row?.fine_sum || 0)],
-                            ['storage_sum', Number(row?.storage_sum || 0)],
-                            ['withhold_sum', Number(row?.withhold_sum || 0)],
-                            ['to_pay_total', Number(row?.to_pay_total || 0)],
-                            ['sold_qty', Number(row?.sold_qty || 0)],
-                            ['return_qty', Number(row?.return_qty || 0)],
-                            ['acquiring_sum', Number(row?.acquiring_sum || 0)],
-                          ];
-                          metricTargets.forEach(([m, t]) => { reconciledSizeRows = reconcileMetric(reconciledSizeRows, m, t, m.includes('qty') ? 0.5 : 0.01); });
-
-                          // If logistics is concentrated in one size (legacy/dirty rows), spread by sold qty weight
-                          const totalLogisticsTarget = Number(row?.logistics_sum || 0);
-                          const nonZeroLogRows = reconciledSizeRows.filter((x: any) => Number(x?.logistics_sum || 0) > 0.0001).length;
-                          if (reconciledSizeRows.length > 1 && totalLogisticsTarget > 0 && nonZeroLogRows <= 1) {
-                            const weights = reconciledSizeRows.map((x: any) => {
-                              const wSold = Number(x?.sold_qty || 0);
-                              const wSales = Number(x?.sales_net || 0);
-                              return wSold > 0 ? wSold : (wSales > 0 ? wSales : 1);
-                            });
-                            const wSum = weights.reduce((s: number, v: number) => s + v, 0) || 1;
-                            let assigned = 0;
-                            reconciledSizeRows = reconciledSizeRows.map((x: any, i: number) => {
-                              if (i === reconciledSizeRows.length - 1) {
-                                const last = Math.max(0, totalLogisticsTarget - assigned);
-                                return { ...x, logistics_sum: last };
-                              }
-                              const part = (totalLogisticsTarget * weights[i]) / wSum;
-                              assigned += part;
-                              return { ...x, logistics_sum: part };
-                            });
-                          }
-
-                          // Qty in size rows must be whole numbers
-                          const apportionInteger = (rowsIn: any[], metric: 'sold_qty' | 'return_qty', targetNum: number) => {
-                            const target = Math.max(0, Math.round(Number(targetNum || 0)));
-                            if (!rowsIn.length) return rowsIn;
-                            const prepared = rowsIn.map((r, i) => {
-                              const raw = Math.max(0, Number(r?.[metric] || 0));
-                              const base = Math.floor(raw);
-                              const frac = raw - base;
-                              return { i, base, frac };
-                            });
-                            let sumBase = prepared.reduce((s, x) => s + x.base, 0);
-                            const next = rowsIn.map((r, i) => ({ ...r, [metric]: prepared[i].base }));
-
-                            if (sumBase < target) {
-                              const need = target - sumBase;
-                              prepared.sort((a, b) => b.frac - a.frac);
-                              for (let k = 0; k < need; k += 1) {
-                                const idx = prepared[k % prepared.length]?.i;
-                                if (idx == null) break;
-                                next[idx][metric] = Number(next[idx][metric] || 0) + 1;
-                              }
-                            } else if (sumBase > target) {
-                              let extra = sumBase - target;
-                              const order = [...prepared].sort((a, b) => a.frac - b.frac);
-                              for (const item of order) {
-                                if (extra <= 0) break;
-                                const canTake = Math.min(extra, Number(next[item.i][metric] || 0));
-                                next[item.i][metric] = Number(next[item.i][metric] || 0) - canTake;
-                                extra -= canTake;
-                              }
-                            }
-                            return next;
-                          };
-
-                          reconciledSizeRows = apportionInteger(reconciledSizeRows, 'sold_qty', Number(row?.sold_qty || 0));
-                          reconciledSizeRows = apportionInteger(reconciledSizeRows, 'return_qty', Number(row?.return_qty || 0));
-
-                          reconciledSizeRows = reconciledSizeRows.map((x) => ({
-                            ...x,
-                            sold_qty: Math.max(0, Math.round(Number(x?.sold_qty || 0))),
-                            return_qty: Math.max(0, Math.round(Number(x?.return_qty || 0))),
-                            sold_net_qty: Math.max(0, Math.round(Number(x?.sold_qty || 0)) - Math.round(Number(x?.return_qty || 0))),
-                          }));
+                          let reconciledSizeRows = buildReconciledSizeRows(row);
 
                           const visibleSizeRowsBase = reconciledSizeRows.filter((sz: any) => {
                             const sizeName = String(sz?.size || '').trim();
@@ -25207,7 +26703,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     <div className="flex flex-wrap items-end gap-2">
                       {([['7 дней', 7], ['30 дней', 30], ['90 дней', 90]] as [string, number][]).map(([lbl, days]) => {
                         const end = new Date(); const st = new Date(); st.setDate(st.getDate() - (days - 1));
-                        const sStr = st.toISOString().slice(0, 10); const eStr = end.toISOString().slice(0, 10);
+                        const sStr = ymdLocalDate(st); const eStr = ymdLocalDate(end);
                         const active = reportsSummaryRange.start === sStr && reportsSummaryRange.end === eStr;
                         return (
                           <button key={lbl} onClick={() => { setReportsSummaryRange({ start: sStr, end: eStr }); loadReportsSummary(sStr, eStr); }} className={`h-11 px-3 rounded-xl text-sm font-semibold border transition-colors ${active ? 'bg-violet-600 text-white border-violet-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>{lbl}</button>
@@ -25215,7 +26711,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       })}
                       {(() => {
                         const allStart = '2020-01-01';
-                        const eStr = new Date().toISOString().slice(0, 10);
+                        const eStr = ymdLocalDate(new Date());
                         const active = reportsSummaryRange.start === allStart;
                         return (
                           <button onClick={() => { setReportsSummaryRange({ start: allStart, end: eStr }); loadReportsSummary(allStart, eStr); setReportsBySupAllTime(true); }} className={`h-11 px-3 rounded-xl text-sm font-semibold border transition-colors ${active ? 'bg-violet-600 text-white border-violet-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>За всё время</button>
@@ -25830,7 +27326,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           <Users className="h-3.5 w-3.5" /> Всего: {employees.length}
                         </span>
                         <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/20 px-2.5 py-0.5 font-medium text-emerald-200">
-                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> Онлайн: {employees.filter((e: any) => e.is_online).length}
+                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> Онлайн: {employees.filter((e: any) => isEmployeeOnline(e)).length}
                         </span>
                       </div>
                     </div>
@@ -25841,6 +27337,86 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   >
                     <Plus className="h-4 w-4" /> Добавить сотрудника
                   </button>
+                </div>
+              </div>
+
+              {/* Дашборд смены + KPI */}
+              <div className="mb-6 oc-card overflow-hidden">
+                <div className="px-5 py-4 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h3 className="font-bold text-slate-900">Дашборд смены и KPI</h3>
+                    <p className="text-xs text-slate-500 mt-0.5">Выработка и скорость · реальная смена {SHIFT_HOURS} ч (часы в сменах условны)</p>
+                  </div>
+                  <div className="flex items-center gap-2 text-xs">
+                    <input type="date" value={shiftKpiRange.start} onChange={(e) => setShiftKpiRange((p) => ({ ...p, start: e.target.value }))} className="px-2 py-1.5 border border-slate-300 rounded-lg" />
+                    <span className="text-slate-400">—</span>
+                    <input type="date" value={shiftKpiRange.end} onChange={(e) => setShiftKpiRange((p) => ({ ...p, end: e.target.value }))} className="px-2 py-1.5 border border-slate-300 rounded-lg" />
+                    {(() => { const t = mskTodayYmd(); const isToday = shiftKpiRange.start === t && shiftKpiRange.end === t; return (
+                      <button onClick={() => setShiftKpiRange(isToday ? mskMonthBounds(new Date()) : { start: t, end: t })} className={`px-2.5 py-1.5 rounded-lg border ${isToday ? 'border-indigo-300 bg-indigo-50 text-indigo-700 font-semibold' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>Сегодня</button>
+                    ); })()}
+                    <button onClick={() => setShiftKpiRange(mskMonthBounds(new Date()))} className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">Месяц</button>
+                  </div>
+                </div>
+                <div className="p-5">
+                  {/* Сводка за выбранный период */}
+                  {(() => { const t = mskTodayYmd(); const suffix = (shiftKpiRange.start === t && shiftKpiRange.end === t) ? 'сегодня' : 'за период'; return (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+                    <div className="rounded-2xl bg-indigo-50 p-3.5"><div className="text-lg font-extrabold text-indigo-700">{shiftKpi.rangeScans.toLocaleString('ru-RU')}</div><div className="text-[11px] text-indigo-600/70 mt-0.5">Отсканировано {suffix} (ШК)</div></div>
+                    <div className="rounded-2xl bg-emerald-50 p-3.5"><div className="text-lg font-extrabold text-emerald-700">{shiftKpi.totalQty.toLocaleString('ru-RU')}</div><div className="text-[11px] text-emerald-600/70 mt-0.5">Собрано {suffix} (учтено)</div></div>
+                    <div className="rounded-2xl bg-slate-100 p-3.5"><div className="text-lg font-extrabold text-slate-700">{shiftKpi.totalShifts.toLocaleString('ru-RU')}</div><div className="text-[11px] text-slate-500 mt-0.5">Смен {suffix}</div></div>
+                    <div className="rounded-2xl bg-violet-50 p-3.5"><div className="text-lg font-extrabold text-violet-700">{shiftKpi.totalShifts > 0 ? (shiftKpi.totalQty / (shiftKpi.totalShifts * SHIFT_HOURS)).toLocaleString('ru-RU', { maximumFractionDigits: 1 }) : '—'}</div><div className="text-[11px] text-violet-600/70 mt-0.5">Ср. скорость, ед/ч</div></div>
+                  </div>
+                  ); })()}
+                  {/* Рейтинг сотрудников. Спиннер только при ПЕРВОЙ загрузке (rows пуст) —
+                      при фоновом обновлении не мигаем: оставляем прошлую таблицу. */}
+                  {shiftKpi.loading && shiftKpi.rows.length === 0 ? (
+                    <div className="py-8 text-center text-slate-400 text-sm">Загрузка…</div>
+                  ) : !shiftKpi.loading && shiftKpi.rows.length === 0 ? (
+                    <div className="py-8 text-center text-slate-400 text-sm">Нет данных о сменах за период</div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full text-sm">
+                        <thead className="bg-slate-50 text-slate-500 text-xs">
+                          <tr>
+                            <th className="px-3 py-2 text-left">#</th>
+                            <th className="px-3 py-2 text-left">Сотрудник</th>
+                            <th className="px-3 py-2 text-right">Выработка</th>
+                            <th className="px-3 py-2 text-right">Смен</th>
+                            <th className="px-3 py-2 text-right">Ед/смена</th>
+                            <th className="px-3 py-2 text-right">Скорость ед/ч</th>
+                            <th className="px-3 py-2 text-right">Пик</th>
+                            <th className="px-3 py-2 text-right">Ср. цена пика</th>
+                            <th className="px-3 py-2 text-right">Заработок</th>
+                            <th className="px-3 py-2 text-right">Ср. цена сборки</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {shiftKpi.rows.map((r, i) => {
+                            const maxSpeed = Math.max(1, ...shiftKpi.rows.map((x) => x.speed));
+                            return (
+                              <tr key={i} className="border-t border-slate-100 hover:bg-slate-50">
+                                <td className="px-3 py-2 text-left text-slate-400 font-semibold">{i + 1}</td>
+                                <td className="px-3 py-2 text-left"><span className="font-medium text-slate-800">{r.name}</span> <span className={`ml-1 text-[10px] px-1.5 py-0.5 rounded-full ${r.kind === 'temp' ? 'bg-amber-100 text-amber-700' : 'bg-indigo-100 text-indigo-700'}`}>{r.kind === 'temp' ? 'врем.' : 'штат'}</span></td>
+                                <td className="px-3 py-2 text-right font-semibold text-slate-800">{r.qty.toLocaleString('ru-RU')}</td>
+                                <td className="px-3 py-2 text-right text-slate-600">{r.shifts}</td>
+                                <td className="px-3 py-2 text-right text-slate-600">{r.perShift.toLocaleString('ru-RU', { maximumFractionDigits: 0 })}</td>
+                                <td className="px-3 py-2 text-right">
+                                  <div className="flex items-center justify-end gap-2">
+                                    <div className="hidden sm:block w-20 h-1.5 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-violet-500 rounded-full" style={{ width: `${r.speed / maxSpeed * 100}%` }} /></div>
+                                    <span className="font-medium text-violet-700 tabular-nums">{r.speed.toLocaleString('ru-RU', { maximumFractionDigits: 1 })}</span>
+                                  </div>
+                                </td>
+                                <td className="px-3 py-2 text-right text-amber-700 font-medium">{r.pikQty > 0 ? r.pikQty.toLocaleString('ru-RU') : '—'}</td>
+                                <td className="px-3 py-2 text-right text-amber-700">{r.pikQty > 0 && r.pikEarn > 0 ? (r.pikEarn / r.pikQty).toLocaleString('ru-RU', { maximumFractionDigits: 2 }) + ' ₽' : '—'}</td>
+                                <td className="px-3 py-2 text-right text-slate-600">{(r.earnings + r.pikEarn) > 0 ? Math.round(r.earnings + r.pikEarn).toLocaleString('ru-RU') + ' ₽' : '—'}</td>
+                                <td className="px-3 py-2 text-right text-slate-700 font-medium">{r.earnings > 0 && r.qty > 0 ? (r.earnings / r.qty).toLocaleString('ru-RU', { maximumFractionDigits: 2 }) + ' ₽' : '—'}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -25857,7 +27433,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               <div className={`flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br ${getEmpAvatarColor(emp.id || emp.full_name)} text-sm font-bold text-white shadow-sm`}>
                                 {getEmpInitials(emp.full_name)}
                               </div>
-                              <span className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full ring-2 ring-white ${emp.is_online ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                              <span className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full ring-2 ring-white ${isEmployeeOnline(emp) ? 'bg-emerald-500' : 'bg-slate-300'}`} />
                             </div>
                             <div className="min-w-0">
                               <div className="font-semibold text-slate-900 truncate">{emp.full_name}</div>
@@ -25922,7 +27498,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                   <div className={`flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br ${getEmpAvatarColor(emp.id || emp.full_name)} text-sm font-bold text-white shadow-sm`}>
                                     {getEmpInitials(emp.full_name)}
                                   </div>
-                                  <span className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full ring-2 ring-white ${emp.is_online ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                                  <span className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full ring-2 ring-white ${isEmployeeOnline(emp) ? 'bg-emerald-500' : 'bg-slate-300'}`} />
                                 </div>
                                 <span className="truncate">{emp.full_name}</span>
                             </div>
@@ -26032,6 +27608,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   <div className="inline-flex rounded-xl bg-slate-100 p-1">
                     <button onClick={() => setPaymentReportsTab('delivery')} className={`rounded-lg px-4 py-1.5 text-sm font-semibold transition-all ${paymentReportsTab === 'delivery' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Доставка</button>
                     <button onClick={() => setPaymentReportsTab('salary')} className={`rounded-lg px-4 py-1.5 text-sm font-semibold transition-all ${paymentReportsTab === 'salary' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>ЗП</button>
+                    <button onClick={() => setPaymentReportsTab('temp')} className={`rounded-lg px-4 py-1.5 text-sm font-semibold transition-all ${paymentReportsTab === 'temp' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Временные</button>
                   </div>
                 </div>
                 <div className="p-4 space-y-2">
@@ -26120,6 +27697,30 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               <button onClick={() => handleDownloadSalaryReportPdf(r)} className="inline-flex items-center gap-1.5 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100">
                                 <Download className="h-3.5 w-3.5" /> Скачать PDF
                               </button>
+                            </div>
+                          )}
+                          {paymentReportsTab === 'temp' && items.length > 0 && (
+                            <div className="mt-3 overflow-x-auto">
+                              <table className="w-full text-left text-xs">
+                                <thead>
+                                  <tr className="text-slate-400">
+                                    <th className="py-1 pr-3 font-medium">Сотрудник</th>
+                                    <th className="py-1 pr-3 font-medium">Работа</th>
+                                    <th className="py-1 pr-3 font-medium">Дата</th>
+                                    <th className="py-1 font-medium text-right">Сумма</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100">
+                                  {items.map((it: any, idx: number) => (
+                                    <tr key={'pr-temp-' + r.id + '-' + idx}>
+                                      <td className="py-1.5 pr-3 text-slate-700">{it?.worker || '—'}</td>
+                                      <td className="py-1.5 pr-3 text-slate-500">{it?.comment || '—'}</td>
+                                      <td className="py-1.5 pr-3 text-slate-500">{it?.date ? new Date(String(it.date) + 'T12:00:00').toLocaleDateString('ru-RU') : '—'}</td>
+                                      <td className="py-1.5 text-right font-semibold text-slate-900">{Number(it?.amount || 0).toLocaleString('ru-RU')} ₽</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
                             </div>
                           )}
                         </div>
@@ -26397,110 +27998,127 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           )}
 
           {/* Activity Log Modal */}
-          {showActivityLogModal && (
-            <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50">
-              <div className="bg-white rounded-xl p-6 w-full max-w-4xl h-[80vh] flex flex-col">
-                <div className="flex justify-between items-center mb-6 gap-3">
-                  <div>
-                    <h2 className="text-xl font-bold text-slate-900">Лог действий</h2>
-                    <p className="text-slate-500">{showActivityLogModal.full_name}</p>
+          {showActivityLogModal && (() => {
+            const TONES: Record<string, { bubble: string; badge: string }> = {
+              indigo: { bubble: 'bg-indigo-50 text-indigo-600 ring-indigo-100', badge: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
+              emerald: { bubble: 'bg-emerald-50 text-emerald-600 ring-emerald-100', badge: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+              amber: { bubble: 'bg-amber-50 text-amber-600 ring-amber-100', badge: 'bg-amber-50 text-amber-700 border-amber-200' },
+              rose: { bubble: 'bg-rose-50 text-rose-600 ring-rose-100', badge: 'bg-rose-50 text-rose-700 border-rose-200' },
+              sky: { bubble: 'bg-sky-50 text-sky-600 ring-sky-100', badge: 'bg-sky-50 text-sky-700 border-sky-200' },
+              violet: { bubble: 'bg-violet-50 text-violet-600 ring-violet-100', badge: 'bg-violet-50 text-violet-700 border-violet-200' },
+              slate: { bubble: 'bg-slate-100 text-slate-500 ring-slate-200', badge: 'bg-slate-100 text-slate-600 border-slate-200' },
+            };
+            const opLabel = (op: string) => op === 'create' ? 'создание' : op === 'update' ? 'изменение' : 'удаление';
+            const q = activityLogSearch.trim().toLowerCase();
+            const initials = String(showActivityLogModal.full_name || '?').split(' ').map((p: string) => p[0]).filter(Boolean).slice(0, 2).join('').toUpperCase();
+            const decorated = (filteredActivityLogs || []).map((log: any) => {
+              const change = parseEmployeeChange(log.details || '');
+              const assemblyChange = parseAssemblyChange(log.details || '');
+              const cls = classifyActivityLog(log, change, assemblyChange);
+              return { log, change, assemblyChange, cls };
+            }).filter((d: any) => {
+              if (activityLogTypeFilter !== 'all' && d.cls.type !== activityLogTypeFilter) return false;
+              if (q) {
+                const hay = `${d.log.action || ''} ${d.log.details || ''}`.toLowerCase();
+                if (!hay.includes(q)) return false;
+              }
+              return true;
+            });
+            const groups = decorated.reduce((acc: any, d: any) => {
+              const date = new Date(d.log.created_at).toLocaleDateString('ru-RU');
+              (acc[date] = acc[date] || []).push(d);
+              return acc;
+            }, {});
+            const TYPE_CHIPS: Array<[string, string]> = [['all', 'Все'], ['create', 'Создание'], ['update', 'Изменение'], ['delete', 'Удаление'], ['auth', 'Вход'], ['payment', 'Оплата'], ['other', 'Прочее']];
+            return (
+            <div className="fixed inset-0 bg-slate-900/55 backdrop-blur-sm flex items-center justify-center z-50 p-3" onClick={() => setShowActivityLogModal(null)}>
+              <div className="bg-white rounded-3xl w-full max-w-4xl h-[86vh] flex flex-col overflow-hidden shadow-2xl" onClick={(e) => e.stopPropagation()}>
+                {/* Шапка */}
+                <div className="flex items-center justify-between gap-3 px-6 py-4 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-white">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-500 text-white font-bold">{initials}</span>
+                    <div className="min-w-0">
+                      <h2 className="text-lg font-bold text-slate-900 leading-tight truncate">{showActivityLogModal.full_name}</h2>
+                      <p className="text-xs text-slate-500">Журнал действий · {decorated.length} записей</p>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => setActivityLogsUsefulOnly((v) => !v)}
-                      className="px-3 py-1.5 text-xs rounded-lg border border-slate-300 hover:bg-slate-50"
-                    >
-                      {activityLogsUsefulOnly ? 'Показать все' : 'Только полезные'}
-                    </button>
-                    <button onClick={() => setShowActivityLogModal(null)} className="p-2 hover:bg-slate-100 rounded-lg">
-                      <X className="h-6 w-6 text-slate-500" />
-                    </button>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button onClick={() => setActivityLogsUsefulOnly((v) => !v)} className="px-3 py-1.5 text-xs rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-600">{activityLogsUsefulOnly ? 'Показать все' : 'Только полезные'}</button>
+                    <button onClick={() => setShowActivityLogModal(null)} className="p-2 hover:bg-slate-100 rounded-lg"><X className="h-5 w-5 text-slate-500" /></button>
+                  </div>
+                </div>
+                {/* Поиск + фильтр типа */}
+                <div className="px-6 py-3 border-b border-slate-100 flex flex-col sm:flex-row gap-2 sm:items-center">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                    <input value={activityLogSearch} onChange={(e) => setActivityLogSearch(e.target.value)} placeholder="Поиск по действию или данным…" className="w-full h-9 pl-9 pr-3 rounded-xl border border-slate-200 text-sm outline-none focus:ring-2 focus:ring-indigo-500" />
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {TYPE_CHIPS.map(([k, label]) => (
+                      <button key={k} onClick={() => setActivityLogTypeFilter(k as any)} className={`px-2.5 py-1 rounded-full text-[11px] font-semibold border transition-colors ${activityLogTypeFilter === k ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'}`}>{label}</button>
+                    ))}
                   </div>
                 </div>
 
-                <div className="flex-1 overflow-y-auto custom-scrollbar">
+                <div className="flex-1 overflow-y-auto custom-scrollbar px-6 py-4">
                   {loadingLogs ? (
                     <div className="text-center py-12 text-slate-400">Загрузка...</div>
-                  ) : filteredActivityLogs.length === 0 ? (
-                    <div className="text-center py-12 text-slate-400">
-                        История действий пуста
-                        <div className="text-xs mt-2 text-slate-300">ID: {showActivityLogModal.id}</div>
-                    </div>
+                  ) : decorated.length === 0 ? (
+                    <div className="text-center py-12 text-slate-400">{(q || activityLogTypeFilter !== 'all') ? 'Ничего не найдено по фильтрам' : 'История действий пуста'}</div>
                   ) : (
                     <div className="space-y-6">
-                      {Object.entries(filteredActivityLogs.reduce((acc: any, log) => {
-                        const date = new Date(log.created_at).toLocaleDateString('ru-RU');
-                        if (!acc[date]) acc[date] = [];
-                        acc[date].push(log);
-                        return acc;
-                      }, {})).map(([date, logs]: [string, any]) => (
+                      {Object.entries(groups).map(([date, items]: [string, any]) => (
                         <div key={date}>
-                          <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-3 sticky top-0 bg-white py-2">{date}</h3>
-                          <div className="bg-slate-50 rounded-xl border border-slate-100 overflow-hidden">
-                            {logs.map((log: any) => {
-                              const change = parseEmployeeChange(log.details || '');
-                              const assemblyChange = parseAssemblyChange(log.details || '');
+                          <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 sticky top-0 bg-white/95 backdrop-blur py-1.5 z-10">{date}</h3>
+                          <div className="space-y-2">
+                            {items.map(({ log, change, assemblyChange, cls }: any) => {
+                              const tone = TONES[cls.tone] || TONES.slate;
+                              const Icon = cls.icon;
                               const rollbackable = Boolean(change || assemblyChange);
-                              const opLabel = (op: string) => op === 'create' ? 'создание' : op === 'update' ? 'изменение' : 'удаление';
+                              const title = change ? 'Изменение карточки сотрудника' : assemblyChange ? `${opLabel(assemblyChange.op)[0].toUpperCase()}${opLabel(assemblyChange.op).slice(1)}: ${assemblyEntityLabel(assemblyChange.entity)}` : log.action;
                               return (
-                              <div key={log.id} className="p-4 border-b border-slate-100 last:border-0 hover:bg-white transition-colors">
-                                <div className="flex justify-between items-start gap-3">
-                                  <div className="min-w-0">
-                                    <div className="font-medium text-slate-900">
-                                      {change ? 'Изменение карточки сотрудника' : assemblyChange ? `Сборка: ${assemblyChange.entity}` : log.action}
+                              <div key={log.id} className="rounded-2xl border border-slate-200 bg-white p-3 hover:shadow-sm transition-shadow">
+                                <div className="flex items-start gap-3">
+                                  <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ring-1 ${tone.bubble}`}><Icon className="h-4 w-4" /></span>
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex items-start justify-between gap-2">
+                                      <div className="font-semibold text-slate-900 leading-tight">{title}</div>
+                                      <div className="flex items-center gap-2 shrink-0">
+                                        <span className={`hidden sm:inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold border ${tone.badge}`}>{cls.badge}</span>
+                                        <span className="text-xs text-slate-400 tabular-nums">{new Date(log.created_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}</span>
+                                      </div>
                                     </div>
                                     {change ? (
-                                      <div className="text-sm text-slate-600 mt-1 space-y-1">
-                                        <div>Операция: {opLabel(change.op)}</div>
-                                        <div>Сотрудник: {change.after?.full_name || change.before?.full_name || '-'}</div>
-                                        {change.op === 'update' && (
-                                          <div className="text-xs text-slate-500">Логин: {change.before?.login || '-'} → {change.after?.login || '-'}</div>
-                                        )}
-                                        <details className="mt-2">
-                                          <summary className="cursor-pointer text-xs text-indigo-600">Подробнее</summary>
-                                          <pre className="mt-1 p-2 bg-slate-100 rounded text-[10px] overflow-auto max-h-36">{JSON.stringify({ before: change.before || null, after: change.after || null }, null, 2)}</pre>
-                                        </details>
+                                      <div className="text-sm text-slate-600 mt-1.5">
+                                        <div className="flex flex-wrap gap-1.5">
+                                          <span className="px-2 py-0.5 rounded-full text-[11px] bg-slate-100 text-slate-700 border border-slate-200">Сотрудник: {change.after?.full_name || change.before?.full_name || '-'}</span>
+                                          {change.op === 'update' && (change.before?.login !== change.after?.login) && (
+                                            <span className="px-2 py-0.5 rounded-full text-[11px] bg-slate-100 text-slate-700 border border-slate-200">Логин: {change.before?.login || '—'} → {change.after?.login || '—'}</span>
+                                          )}
+                                        </div>
+                                        <details className="mt-2"><summary className="cursor-pointer text-xs text-indigo-600">Подробнее</summary><pre className="mt-1 p-2 bg-slate-50 rounded-lg text-[10px] overflow-auto max-h-36">{JSON.stringify({ before: change.before || null, after: change.after || null }, null, 2)}</pre></details>
                                       </div>
                                     ) : assemblyChange ? (
-                                      <div className="text-sm text-slate-600 mt-1 space-y-1">
+                                      <div className="text-sm text-slate-600 mt-1.5">
                                         <div className="flex flex-wrap gap-1.5">
-                                          <span className="px-2 py-0.5 rounded-full text-[11px] bg-indigo-50 text-indigo-700 border border-indigo-200">Операция: {opLabel(assemblyChange.op)}</span>
-                                          <span className="px-2 py-0.5 rounded-full text-[11px] bg-amber-50 text-amber-700 border border-amber-200">Секция: {assemblyChange.entity}</span>
-                                        </div>
-                                        <div className="flex flex-wrap gap-1.5 mt-1">
-                                          {getAssemblyChangeDetails(assemblyChange).map((line, idx) => (
+                                          {getAssemblyChangeDetails(assemblyChange).map((line: string, idx: number) => (
                                             <span key={`asm-line-${log.id}-${idx}`} className="px-2 py-0.5 rounded-full text-[11px] bg-slate-100 text-slate-700 border border-slate-200">{line}</span>
                                           ))}
                                         </div>
-                                        <details className="mt-2">
-                                          <summary className="cursor-pointer text-xs text-indigo-600">Подробнее</summary>
-                                          <pre className="mt-1 p-2 bg-slate-100 rounded text-[10px] overflow-auto max-h-36">{JSON.stringify({ before: assemblyChange.before || null, after: assemblyChange.after || null }, null, 2)}</pre>
-                                        </details>
+                                        <details className="mt-2"><summary className="cursor-pointer text-xs text-indigo-600">Подробнее</summary><pre className="mt-1 p-2 bg-slate-50 rounded-lg text-[10px] overflow-auto max-h-36">{JSON.stringify({ before: assemblyChange.before || null, after: assemblyChange.after || null }, null, 2)}</pre></details>
                                       </div>
                                     ) : (
-                                      <div className="text-sm text-slate-600 mt-1">{log.details}</div>
+                                      (log.details && String(log.details).trim() && String(log.details).trim() !== title) ? <div className="text-sm text-slate-500 mt-1 break-words">{log.details}</div> : null
                                     )}
-                                  </div>
-                                  <div className="flex flex-col items-end gap-2 shrink-0">
-                                    <div className="text-xs text-slate-400 font-mono">
-                                      {new Date(log.created_at).toLocaleTimeString('ru-RU')}
-                                    </div>
-                                    {assemblyChange && (
-                                      <button
-                                        onClick={() => jumpToAssemblyChange(log)}
-                                        className="px-2 py-1 text-xs rounded border border-slate-200 text-slate-700 hover:bg-slate-50"
-                                      >
-                                        Перейти к данным
-                                      </button>
-                                    )}
-                                    {rollbackable && (
-                                      <button
-                                        onClick={() => change ? rollbackEmployeeChange(log) : rollbackAssemblyChange(log)}
-                                        disabled={rollingBackLogId === String(log.id)}
-                                        className={`px-2 py-1 text-xs rounded border ${rollingBackLogId === String(log.id) ? 'border-slate-200 text-slate-400' : 'border-indigo-200 text-indigo-700 hover:bg-indigo-50'}`}
-                                      >
-                                        {rollingBackLogId === String(log.id) ? 'Откат…' : 'Откатить'}
-                                      </button>
+                                    {(assemblyChange || rollbackable) && (
+                                      <div className="mt-2 flex flex-wrap gap-2">
+                                        {assemblyChange && (
+                                          <button onClick={() => jumpToAssemblyChange(log)} className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50"><ChevronRight className="h-3.5 w-3.5" /> Перейти к данным</button>
+                                        )}
+                                        {rollbackable && (
+                                          <button onClick={() => change ? rollbackEmployeeChange(log) : rollbackAssemblyChange(log)} disabled={rollingBackLogId === String(log.id)} className={`inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-lg border ${rollingBackLogId === String(log.id) ? 'border-slate-200 text-slate-400' : 'border-indigo-200 text-indigo-700 hover:bg-indigo-50'}`}><Undo2 className="h-3.5 w-3.5" /> {rollingBackLogId === String(log.id) ? 'Откат…' : 'Откатить'}</button>
+                                        )}
+                                      </div>
                                     )}
                                   </div>
                                 </div>
@@ -26514,7 +28132,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 </div>
               </div>
             </div>
-          )}
+            );
+          })()}
 
           {showDevicesModal && (
             <div className="fixed inset-0 bg-slate-900/55 backdrop-blur-sm backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setShowDevicesModal(null)}>
@@ -26808,6 +28427,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
               databaseLogsLoading={databaseLogsLoading}
               databaseBackupLoading={databaseBackupLoading}
               databaseDownloadLoading={databaseDownloadLoading}
+              handleDownloadBackupFromHistory={handleDownloadBackupFromHistory}
+              handleClearDatabaseLogs={handleClearDatabaseLogs}
+              databaseDownloadingPath={databaseDownloadingPath}
             />
           )}
 
@@ -26973,7 +28595,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                 <History className="h-3.5 w-3.5" /> История
                               </button>
                               <button
-                                onClick={() => setCwRateBulkModal({ open: true, rateId: String(rate.id), rateName: String(rate.name || ''), oldPrice: String(rate.price || ''), price: String(rate.price || ''), start: new Date().toISOString().split('T')[0], end: new Date().toISOString().split('T')[0] })}
+                                onClick={() => setCwRateBulkModal({ open: true, rateId: String(rate.id), rateName: String(rate.name || ''), oldPrice: String(rate.price || ''), price: String(rate.price || ''), start: mskTodayYmd(), end: mskTodayYmd() })}
                                 className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 text-xs px-2.5 py-1.5 rounded-lg border border-indigo-200"
                               >
                                 <RefreshCw className="h-3.5 w-3.5" /> Обновить
@@ -27178,19 +28800,19 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 )}
 
                 {cwRateBulkModal.open && (
-                  <div className="fixed inset-0 z-[90] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setCwRateBulkModal({ open: false, rateId: '', rateName: '', oldPrice: '', price: '', start: new Date().toISOString().split('T')[0], end: new Date().toISOString().split('T')[0] })}>
+                  <div className="fixed inset-0 z-[90] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setCwRateBulkModal({ open: false, rateId: '', rateName: '', oldPrice: '', price: '', start: mskTodayYmd(), end: mskTodayYmd() })}>
                     <div className="w-full max-w-lg bg-white rounded-2xl shadow-2xl p-4 sm:p-6" onClick={(e) => e.stopPropagation()}>
                       <div className="flex items-center justify-between mb-4">
                         <div>
                           <div className="text-lg font-bold">Обновить цену с даты</div>
                           <div className="text-sm text-slate-500">{cwRateBulkModal.rateName || '-'}</div>
                         </div>
-                        <button onClick={() => setCwRateBulkModal({ open: false, rateId: '', rateName: '', oldPrice: '', price: '', start: new Date().toISOString().split('T')[0], end: new Date().toISOString().split('T')[0] })} className="p-2 hover:bg-slate-100 rounded-lg"><X className="h-5 w-5" /></button>
+                        <button onClick={() => setCwRateBulkModal({ open: false, rateId: '', rateName: '', oldPrice: '', price: '', start: mskTodayYmd(), end: mskTodayYmd() })} className="p-2 hover:bg-slate-100 rounded-lg"><X className="h-5 w-5" /></button>
                       </div>
                       <div className="space-y-3">
                         <div className="text-sm text-slate-500">Текущая цена: <span className="font-semibold text-slate-700">{cwRateBulkModal.oldPrice || '0'} ₽</span></div>
                         <div className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
-                          Старые записи в календаре не будут пересчитаны. Новая цена начнет применяться только к новым операциям с выбранной даты.
+                          Записи в календаре с выбранной даты будут пересчитаны на новую цену. Более ранние записи останутся по старой цене.
                         </div>
                         <input value={cwRateBulkModal.price} onChange={(e) => setCwRateBulkModal(prev => ({ ...prev, price: e.target.value }))} type="number" placeholder="Новая цена" className="oc-input" />
                         <div className="grid grid-cols-1 gap-3">
@@ -27200,18 +28822,57 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           onClick={async () => {
                             const newPrice = Number(cwRateBulkModal.price || 0);
                             if (!cwRateBulkModal.rateId || newPrice <= 0 || !cwRateBulkModal.start) return;
-                            const nextRateHistory = { ...(cwWorkRateHistory || {}) } as Record<string, Array<{ changed_at: string; price: number; old_price?: number | null; new_price?: number | null; name?: string }>>;
-                            const currentHistory = Array.isArray(nextRateHistory[cwRateBulkModal.rateId]) ? nextRateHistory[cwRateBulkModal.rateId] : [];
+                            const rateId = String(cwRateBulkModal.rateId);
+                            const startStr = String(cwRateBulkModal.start);
                             const oldPrice = Number(cwRateBulkModal.oldPrice || 0);
-                            nextRateHistory[cwRateBulkModal.rateId] = [...currentHistory, { changed_at: new Date().toISOString(), price: newPrice, old_price: oldPrice, new_price: newPrice, name: `${cwRateBulkModal.rateName} (с ${new Date(`${cwRateBulkModal.start}T00:00:00`).toLocaleDateString('ru-RU')})` }];
+
+                            const nextRateHistory = { ...(cwWorkRateHistory || {}) } as Record<string, Array<{ changed_at: string; price: number; old_price?: number | null; new_price?: number | null; name?: string }>>;
+                            const currentHistory = Array.isArray(nextRateHistory[rateId]) ? nextRateHistory[rateId] : [];
+                            nextRateHistory[rateId] = [...currentHistory, { changed_at: new Date().toISOString(), price: newPrice, old_price: oldPrice, new_price: newPrice, name: `${cwRateBulkModal.rateName} (с ${new Date(`${startStr}T00:00:00`).toLocaleDateString('ru-RU')})` }];
                             setCwWorkRateHistory(nextRateHistory);
                             await supabase.from('app_settings').upsert([{ key: 'cw_work_rate_history_v1', value: JSON.stringify(nextRateHistory) }], { onConflict: 'key' });
-                            await supabase.from('work_rates').update({ price: newPrice }).eq('id', cwRateBulkModal.rateId);
+
+                            // Пересчёт календаря: записям с выбранной даты ставим новую цену
+                            // (с учётом индивидуальной цены сотрудника), более ранние без снимка
+                            // фиксируем по старой цене, чтобы смена базовой цены их не сдвинула.
+                            const cfg = getCwRateEmployeeConfig(rateId);
+                            const effFor = (empId: string) => {
+                              if (cfg.useSharedPrice) return newPrice;
+                              const ep = (cfg.employeePrices as any)[String(empId || '')];
+                              if (ep === '' || ep === null || ep === undefined) return newPrice;
+                              const n = Number(ep);
+                              return Number.isFinite(n) ? n : newPrice;
+                            };
+                            const { data: rateLogs } = await supabase.from('work_logs')
+                              .select('id, date, employee_id')
+                              .eq('work_rate_id', rateId)
+                              .is('deleted_at', null);
+                            const nextSnapshots = { ...(cwWorkRateSnapshots || {}) } as Record<string, number>;
+                            let recalced = 0;
+                            (rateLogs || []).forEach((log: any) => {
+                              const id = String(log?.id || '');
+                              const dk = String(log?.date || '').slice(0, 10);
+                              if (!id || !dk) return;
+                              if (dk >= startStr) {
+                                nextSnapshots[id] = effFor(String(log?.employee_id || ''));
+                                recalced += 1;
+                              } else if (!(id in nextSnapshots) && oldPrice > 0) {
+                                nextSnapshots[id] = oldPrice;
+                              }
+                            });
+                            setCwWorkRateSnapshots(nextSnapshots);
+                            await supabase.from('app_settings').upsert([{ key: 'cw_work_rate_snapshots_v1', value: JSON.stringify(nextSnapshots) }], { onConflict: 'key' });
+
+                            await supabase.from('work_rates').update({ price: newPrice }).eq('id', rateId);
                             const { data: refreshedRates } = await supabase.from('work_rates').select('*').is('deleted_at', null);
                             setCwWorkRates(refreshedRates || []);
                             await loadCwWorkRateEmployeePrices(refreshedRates || []);
-                            setCwRateBulkModal({ open: false, rateId: '', rateName: '', oldPrice: '', price: '', start: new Date().toISOString().split('T')[0], end: new Date().toISOString().split('T')[0] });
-                            showToast('Новая цена сохранена. Старые записи не пересчитаны', 'success');
+                            if (cwSelectedEmployee?.id) {
+                              const { data: refreshedLogs } = await supabase.from('work_logs').select('*').eq('employee_id', cwSelectedEmployee.id).is('deleted_at', null);
+                              setCwWorkLogs(refreshedLogs || []);
+                            }
+                            setCwRateBulkModal({ open: false, rateId: '', rateName: '', oldPrice: '', price: '', start: mskTodayYmd(), end: mskTodayYmd() });
+                            showToast(`Цена обновлена. Пересчитано записей: ${recalced}`, 'success');
                           }}
                           className="w-full btn-primary py-3"
                         >
@@ -27329,7 +28990,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   if (error) { showToast('Ошибка добавления: ' + (error.message || 'неизвестно'), 'error'); return; }
                   setCwPurchaseRows([{ id: getSafeId(), quantity: '', size: '', price: '', delivery: '' }]);
                   setCwPurchaseOtherRows([{ id: getSafeId(), item_name: '', price: '' }]);
-                  setCwPurchaseForm({ purchase_date: new Date().toISOString().slice(0, 10), supplier_ids: [] });
+                  setCwPurchaseForm({ purchase_date: mskTodayYmd(), supplier_ids: [] });
                   await fetchCwPurchaseHistory();
                   await loadBoxStock();
                   showToast(`Добавлено записей: ${payload.length}${N > 1 ? ` (по ${N} поставщикам)` : ''}`, 'success');
@@ -27552,7 +29213,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                   : 'bg-slate-50 text-slate-700 hover:bg-slate-100'
                               }`}
                             >
-                              <div className={`w-2 h-2 rounded-full ${e.is_online ? 'bg-green-400' : 'bg-slate-300'}`} />
+                              <div className={`w-2 h-2 rounded-full ${isEmployeeOnline(e) ? 'bg-green-400' : 'bg-slate-300'}`} />
                               {e.full_name}
                             </button>
                           ))}
@@ -28063,7 +29724,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           onClick={() => {
                             setCwReportDatePickerOpen(true);
                             setCwReportPickingEnd(false);
-                            setCwReportDatePickerMonth(new Date(`${cwReportForm.start_date || new Date().toISOString().split('T')[0]}T12:00:00`));
+                            setCwReportDatePickerMonth(new Date(`${cwReportForm.start_date || mskTodayYmd()}T12:00:00`));
                           }}
                           className="w-full rounded-2xl border border-slate-200 bg-white p-4 text-left hover:border-indigo-300 hover:bg-indigo-50 transition"
                         >
@@ -31601,6 +33262,22 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       const totalPaid = nextMap[key].reduce((s: number, p: any) => s + Number(p.amount || 0), 0);
                       const nextPaid = totalPaid >= Number(log.earnings || 0);
                       setTempWorkerLogs(prevLogs => prevLogs.map((x: any) => String(x.id) === key ? { ...x, is_paid: nextPaid, paid_by_supplier_id: String(tempWorkerPaymentModal.supplierId) } : x));
+                      // Отчёт об оплате (кроме режима «правка» — он не новая оплата, а корректировка).
+                      if (tempWorkerPaymentModal.mode !== 'edit') {
+                        const payer = suppliers.find((s: any) => String(s.id) === String(tempWorkerPaymentModal.supplierId));
+                        const workerName = String(log.worker_name || log.worker || 'сотрудник');
+                        await savePaymentReport({
+                          kind: 'temp',
+                          title: `Оплата временному: ${workerName}`,
+                          amount,
+                          payload: {
+                            paid_by: payer?.name || '',
+                            employee_name: workerName,
+                            count: 1,
+                            items: [{ worker: workerName, comment: String(log.work_comment || log.comment || ''), date: log.date || null, amount }],
+                          },
+                        });
+                      }
                       setTempWorkerPaymentModal({ open: false, logId: '', mode: 'pay', supplierId: '', amount: '', error: '' });
                       showToast('Оплата сохранена', 'success');
                     }}
@@ -31907,14 +33584,19 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-slate-700 mb-1.5">Имя рабочего</label>
-                      <input
-                        type="text"
+                      <label className="block text-sm font-medium text-slate-700 mb-1.5">Сотрудник</label>
+                      <select
                         value={tempWorkerEditForm.worker_name}
                         onChange={e => setTempWorkerEditForm({...tempWorkerEditForm, worker_name: e.target.value})}
                         className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
                         required
-                      />
+                      >
+                        <option value="">Сотрудник…</option>
+                        {tempWorkersList.map((n) => <option key={`twe-n-${n}`} value={n}>{n}</option>)}
+                        {tempWorkerEditForm.worker_name && !tempWorkersList.includes(tempWorkerEditForm.worker_name) && (
+                          <option value={tempWorkerEditForm.worker_name}>{tempWorkerEditForm.worker_name}</option>
+                        )}
+                      </select>
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-slate-700 mb-1.5">Тип работы</label>
@@ -31930,39 +33612,25 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         )}
                       </select>
                     </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1.5">Количество</label>
-                        <input
-                          type="number"
-                          min="0"
-                          value={tempWorkerEditForm.quantity}
-                          onChange={e => setTempWorkerEditForm({...tempWorkerEditForm, quantity: e.target.value})}
-                          className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
-                          placeholder="0"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1.5">Часы</label>
-                        <input
-                          type="number"
-                          step="0.5"
-                          value={tempWorkerEditForm.hours}
-                          onChange={e => setTempWorkerEditForm({...tempWorkerEditForm, hours: e.target.value})}
-                          className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
-                          required
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1.5">Заработок (₽)</label>
-                        <input
-                          type="number"
-                          value={tempWorkerEditForm.earnings}
-                          onChange={e => setTempWorkerEditForm({...tempWorkerEditForm, earnings: e.target.value})}
-                          className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
-                          required
-                        />
-                      </div>
+                    <div>
+                      <label className="inline-flex items-center gap-2 text-sm font-medium text-slate-600 cursor-pointer">
+                        <input type="checkbox" checked={tempWorkerEditForm.isTime} onChange={e => setTempWorkerEditForm({...tempWorkerEditForm, isTime: e.target.checked})} className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
+                        Время (почасовая)
+                      </label>
+                    </div>
+                    <div className="grid grid-cols-3 gap-3 items-end">
+                      {tempWorkerEditForm.isTime ? (
+                        <>
+                          <div><label className="block text-sm font-medium text-slate-700 mb-1.5">Часы</label><input type="number" step="0.5" min="0" value={tempWorkerEditForm.hours} onChange={e => setTempWorkerEditForm({...tempWorkerEditForm, hours: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500" placeholder="0" /></div>
+                          <div><label className="block text-sm font-medium text-slate-700 mb-1.5">Цена за час ₽</label><input type="number" min="0" value={tempWorkerEditForm.price} onChange={e => setTempWorkerEditForm({...tempWorkerEditForm, price: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500" placeholder="0" /></div>
+                        </>
+                      ) : (
+                        <>
+                          <div><label className="block text-sm font-medium text-slate-700 mb-1.5">Количество</label><input type="number" min="0" value={tempWorkerEditForm.quantity} onChange={e => setTempWorkerEditForm({...tempWorkerEditForm, quantity: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500" placeholder="0" /></div>
+                          <div><label className="block text-sm font-medium text-slate-700 mb-1.5">Цена сборки ₽</label><input type="number" min="0" value={tempWorkerEditForm.price} onChange={e => setTempWorkerEditForm({...tempWorkerEditForm, price: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500" placeholder="0" /></div>
+                        </>
+                      )}
+                      <div><label className="block text-sm font-medium text-slate-700 mb-1.5">Заработок</label><div className="p-3 rounded-xl bg-emerald-50 text-emerald-700 font-bold text-center">{tempEditEarnings(tempWorkerEditForm).toLocaleString('ru-RU')} ₽</div></div>
                     </div>
                     <div className="flex justify-end gap-3 mt-8">
                       <button type="button" onClick={() => setShowTempWorkerEditModal(false)} className="px-5 py-2.5 text-slate-600 hover:bg-slate-100 rounded-xl font-medium transition-colors">Отмена</button>

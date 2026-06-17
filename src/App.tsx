@@ -4,12 +4,35 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import Login from './pages/Login';
 // Heavy pages are lazy-loaded so the initial bundle stays small (jspdf, exceljs,
 // zxing, html2canvas etc. live inside these and load only when the page opens).
-const Dashboard = lazy(() => import('./pages/Dashboard'));
-const SharedAnalytics = lazy(() => import('./pages/SharedAnalytics'));
-const TasksPage = lazy(() => import('./pages/TasksPage'));
+// lazyRetry: при ошибке загрузки чанка (устаревший кэш после деплоя) делаем
+// одноразовую жёсткую перезагрузку — браузер подтянет свежий index + чанки.
+function lazyRetry<T extends { default: React.ComponentType<any> }>(factory: () => Promise<T>, key: string) {
+  const flag = `chunk-reload-${key}`;
+  return lazy(() =>
+    factory()
+      .then((mod) => {
+        try { sessionStorage.removeItem(flag); } catch {}
+        return mod;
+      })
+      .catch((err) => {
+        if (typeof sessionStorage !== 'undefined' && !sessionStorage.getItem(flag)) {
+          try { sessionStorage.setItem(flag, '1'); } catch {}
+          window.location.reload();
+          // возвращаем «висящий» промис, пока идёт перезагрузка
+          return new Promise<T>(() => {});
+        }
+        throw err;
+      })
+  );
+}
+const Dashboard = lazyRetry(() => import('./pages/Dashboard'), 'dashboard');
+const SharedAnalytics = lazyRetry(() => import('./pages/SharedAnalytics'), 'shared');
+const TasksPage = lazyRetry(() => import('./pages/TasksPage'), 'tasks');
 import { DASHBOARD_TAB_IDS, DEFAULT_DASHBOARD_TAB, isDashboardTabId } from './constants/dashboardTabs';
 import { PageSkeleton } from './components/Skeleton';
 import { ConfirmHost } from './components/ConfirmDialog';
+import PrintRelay from './components/PrintRelay';
+import PullToRefresh from './components/PullToRefresh';
 
 const PageFallback = () => <PageSkeleton />;
 
@@ -76,6 +99,8 @@ function App() {
           <AppRoutes />
         </Suspense>
         <ConfirmHost />
+        <PrintRelay />
+        <PullToRefresh />
       </AuthProvider>
     </BrowserRouter>
   );

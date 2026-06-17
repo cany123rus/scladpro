@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Settings, Layers, ShieldCheck, UserCog, Search, Check, Save, Pencil, History, Smartphone, Send, Bot, Wallet, TrendingDown, TrendingUp, Box } from 'lucide-react';
+import { Settings, Layers, ShieldCheck, UserCog, Search, Check, Save, Pencil, History, Smartphone, Send, Bot, Wallet, TrendingDown, TrendingUp, Box, Bell, Trash2 } from 'lucide-react';
 import { getEmpAvatarColor, getEmpInitials, normalizeRoleKey, getWarehouseMoneyOwner, getWarehouseMoneyDisplayComment, WAREHOUSE_MONEY_OWNERS, isAssemblyExcludedStaffRate, isAssemblyTempType } from './dashboardHelpers';
 import { supabase } from '../lib/supabase';
 import { telegramService } from '../services/telegram.service';
+import { sendPush } from '../utils/push';
 
 type BotSlot = { key: string; label: string; hint?: string };
 const BOT_SLOTS: BotSlot[] = [
@@ -18,7 +19,7 @@ type SectionItem = { id: string; label: string };
 type SectionGroup = { title: string; items: SectionItem[] };
 type AssemblyGroup = { title: string; items: ReadonlyArray<{ id: string; label: string }> };
 
-type AdminSection = 'sections-emp' | 'sections-role' | 'buttons' | 'employees' | 'bots' | 'finance' | 'assembly';
+type AdminSection = 'sections-emp' | 'sections-role' | 'buttons' | 'employees' | 'bots' | 'finance' | 'assembly' | 'push';
 
 const money = (v: number) => Math.round(Number(v || 0)).toLocaleString('ru-RU') + ' ₽';
 const spendCategory = (comment: string): string => {
@@ -109,6 +110,73 @@ export function AdminPanel(props: AdminPanelProps) {
   const [writeoffChat, setWriteoffChat] = useState('498924112');
   const [botsLoaded, setBotsLoaded] = useState(false);
   const [botBusyKey, setBotBusyKey] = useState('');
+
+  // ── Push-уведомления ────────────────────────────────────────────
+  const [pushSubs, setPushSubs] = useState<any[]>([]);
+  const [pushSubsLoaded, setPushSubsLoaded] = useState(false);
+  const [pushForm, setPushForm] = useState({ title: '', body: '', url: '/', target: 'all' as 'all' | string });
+  const [pushSending, setPushSending] = useState(false);
+
+  const loadPushSubs = async () => {
+    try {
+      const { data } = await supabase
+        .from('push_subscriptions')
+        .select('id, employee_id, user_agent, created_at, last_seen')
+        .order('created_at', { ascending: false });
+      setPushSubs(data || []);
+    } catch (e: any) {
+      notify('Ошибка загрузки подписок: ' + (e?.message || 'неизвестно'), 'error');
+    } finally {
+      setPushSubsLoaded(true);
+    }
+  };
+
+  useEffect(() => {
+    if (section !== 'push' || pushSubsLoaded) return;
+    loadPushSubs();
+  }, [section, pushSubsLoaded]);
+
+  const empName = (id?: string) => {
+    const e = employees.find((x: any) => String(x.id) === String(id));
+    return e ? (e.full_name || e.login || 'Сотрудник') : (id ? 'Без привязки' : 'Без привязки');
+  };
+  const shortDevice = (ua?: string) => {
+    const s = String(ua || '');
+    if (/android/i.test(s)) return 'Android';
+    if (/iphone|ipad|ios/i.test(s)) return 'iPhone/iPad';
+    if (/windows/i.test(s)) return 'Windows';
+    if (/mac/i.test(s)) return 'Mac';
+    return 'Устройство';
+  };
+
+  const handleSendPush = async () => {
+    const t = pushForm.title.trim();
+    const b = pushForm.body.trim();
+    if (!t && !b) { notify('Введите текст уведомления', 'error'); return; }
+    setPushSending(true);
+    try {
+      // Без заголовка показываем текст как заголовок — чтобы не было дубля «СкладПро».
+      const res = await sendPush({
+        title: t || b,
+        body: t ? b : '',
+        url: pushForm.url || '/',
+        target: pushForm.target === 'all' ? 'all' : [pushForm.target],
+      });
+      if (!res.ok) notify('Не отправлено: ' + (res.reason || 'ошибка'), 'error');
+      else notify(`Отправлено на ${res.sent ?? 0} устройств`, res.sent ? 'success' : 'info');
+    } finally {
+      setPushSending(false);
+    }
+  };
+
+  const handleDeletePushSub = async (id: string) => {
+    try {
+      await supabase.from('push_subscriptions').delete().eq('id', id);
+      setPushSubs((prev) => prev.filter((s) => s.id !== id));
+    } catch (e: any) {
+      notify('Не удалось удалить подписку: ' + (e?.message || 'неизвестно'), 'error');
+    }
+  };
 
   useEffect(() => {
     if (section !== 'bots' || botsLoaded) return;
@@ -374,6 +442,7 @@ export function AdminPanel(props: AdminPanelProps) {
         <SubTab active={section === 'finance'} onClick={() => setSection('finance')} icon={Wallet} label="Финансы" />
         <SubTab active={section === 'assembly'} onClick={() => setSection('assembly')} icon={Box} label="Сборка" />
         <SubTab active={section === 'bots'} onClick={() => setSection('bots')} icon={Bot} label="Боты" />
+        <SubTab active={section === 'push'} onClick={() => setSection('push')} icon={Bell} label="Push-уведомления" />
       </div>
 
       {/* SECTIONS BY EMPLOYEE */}
@@ -851,6 +920,83 @@ export function AdminPanel(props: AdminPanelProps) {
               );
             })
           )}
+        </div>
+      )}
+
+      {section === 'push' && (
+        <div className="space-y-4">
+          <div className="rounded-2xl border border-indigo-100 bg-indigo-50/60 p-4 text-sm text-indigo-900">
+            Push-уведомления приходят на телефон/ПК от сайта. Сотрудник включает их кнопкой-колокольчиком 🔔 в шапке. На iPhone работают только если сайт добавлен на домашний экран.
+          </div>
+
+          {/* Рассылка */}
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex items-center gap-2 mb-3 font-semibold text-slate-900"><Send className="h-4 w-4 text-indigo-600" /> Отправить уведомление</div>
+            <div className="space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 mb-1">Заголовок <span className="text-slate-400">(необязательно)</span></label>
+                  <input type="text" value={pushForm.title} onChange={(e) => setPushForm((p) => ({ ...p, title: e.target.value }))} className="oc-input" placeholder="Напр.: Новая задача" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 mb-1">Кому</label>
+                  <select value={pushForm.target} onChange={(e) => setPushForm((p) => ({ ...p, target: e.target.value }))} className="oc-select w-full">
+                    <option value="all">Всем устройствам</option>
+                    {employees.map((e: any) => (
+                      <option key={e.id} value={String(e.id)}>{e.full_name || e.login}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-500 mb-1">Текст</label>
+                <textarea value={pushForm.body} onChange={(e) => setPushForm((p) => ({ ...p, body: e.target.value }))} rows={2} className="oc-input w-full" placeholder="Текст уведомления" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-500 mb-1">Открыть раздел (URL)</label>
+                <input type="text" value={pushForm.url} onChange={(e) => setPushForm((p) => ({ ...p, url: e.target.value }))} className="oc-input font-mono text-xs" placeholder="/tasks" />
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button onClick={handleSendPush} disabled={pushSending} className="inline-flex items-center gap-1.5 btn-primary px-4 py-2 text-sm disabled:opacity-50">
+                  <Send className="h-4 w-4" /> {pushSending ? 'Отправка…' : 'Отправить'}
+                </button>
+                <button
+                  onClick={() => { setPushForm((p) => ({ ...p, title: 'Тест', body: 'Тестовое уведомление ✅', url: '/' })); setTimeout(handleSendPush, 0); }}
+                  disabled={pushSending}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 text-sm rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  <Bell className="h-4 w-4" /> Выслать тестовое
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Подписки */}
+          <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+            <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+              <div className="font-semibold text-slate-900">Подписанные устройства ({pushSubs.length})</div>
+              <button onClick={() => { setPushSubsLoaded(false); loadPushSubs(); }} className="text-xs px-2.5 py-1 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">Обновить</button>
+            </div>
+            {!pushSubsLoaded ? (
+              <div className="p-6 text-center text-slate-400 text-sm">Загрузка…</div>
+            ) : pushSubs.length === 0 ? (
+              <div className="p-6 text-center text-slate-400 text-sm">Пока никто не подписан. Сотрудники включают уведомления колокольчиком 🔔 в шапке.</div>
+            ) : (
+              <div className="divide-y divide-slate-100">
+                {pushSubs.map((s) => (
+                  <div key={s.id} className="flex items-center justify-between gap-3 px-4 py-2.5">
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium text-slate-800 truncate">{empName(s.employee_id)}</div>
+                      <div className="text-[11px] text-slate-400">{shortDevice(s.user_agent)} · {new Date(s.created_at).toLocaleDateString('ru-RU')}</div>
+                    </div>
+                    <button onClick={() => handleDeletePushSub(s.id)} className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50" title="Удалить подписку">
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>

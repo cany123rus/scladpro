@@ -400,6 +400,7 @@ export const ASSEMBLY_BUTTONS = [
   { id: 'cw_form_delete', label: 'Сборка: Форма - Удалить запись' },
   { id: 'cw_box_log_edit_submit', label: 'Сборка: Коробки - Сохранить редактирование записи' },
   { id: 'cw_calendar_salary_pay', label: 'Сборка: Календарь - Оплата ЗП (финансовая)' },
+  { id: 'supply_scanner_picker', label: 'Поставки: выбор сборщика (бейдж/учёт выработки)' },
 ] as const;
 
 // Financial / sensitive buttons. Unlike normal buttons (visible by default),
@@ -407,6 +408,7 @@ export const ASSEMBLY_BUTTONS = [
 // the Admin Panel → "Права кнопок". Admins always see them.
 export const FINANCIAL_DEFAULT_DENY_BUTTONS = new Set<string>([
   'cw_calendar_salary_pay',
+  'supply_scanner_picker',
 ]);
 
 // Assembly analytics: which records count toward "собрано".

@@ -19,6 +19,7 @@ import {
   Send,
   UserCog,
   Database,
+  BookOpen,
 } from 'lucide-react';
 import type { DashboardTabId } from './dashboardTabs';
 
@@ -29,6 +30,7 @@ export type DashboardMenuItem = {
 };
 
 export const DASHBOARD_MENU_ITEMS: DashboardMenuItem[] = [
+  { id: 'instruction', icon: BookOpen, label: 'Инструкция' },
   { id: 'tasks', icon: CheckSquare, label: 'Задачи' },
   { id: 'warehouse', icon: Box, label: 'Склад' },
   { id: 'cameras', icon: Camera, label: 'Камеры' },

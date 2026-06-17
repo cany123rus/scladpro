@@ -3,6 +3,8 @@ import { Box, LogOut, Menu, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { DASHBOARD_MENU_ITEMS } from '../constants/dashboardMenu';
 import type { DashboardTabId } from '../constants/dashboardTabs';
+import NightToggle from './NightToggle';
+import PushToggle from './PushToggle';
 
 type EmployeeLike = {
   full_name?: string;
@@ -129,7 +131,11 @@ export default function AppShell({
           </div>
           <span className="text-sm font-bold text-slate-900">СкладПро</span>
         </div>
-        <ConnectionBadge />
+        <div className="flex items-center gap-2">
+          <PushToggle />
+          <NightToggle />
+          <ConnectionBadge />
+        </div>
       </div>
 
       {/* Mobile backdrop when sidebar open */}
@@ -205,6 +211,8 @@ export default function AppShell({
             </div>
             <div className="hidden md:flex items-center gap-3 shrink-0">
               <Clock />
+              <PushToggle />
+              <NightToggle />
               <ConnectionBadge />
             </div>
           </div>

@@ -12,10 +12,10 @@ const isChunkError = (message: string) => {
     m.includes("importing a module script failed") || // iOS Safari
     m.includes("'text/html' is not a valid javascript mime type") ||
     m.includes("unable to preload css") ||
-    (m.includes("module script") && m.includes("failed")) ||
-    // SPA-rewrite served index.html for a missing hashed chunk → module is HTML,
-    // so `.default` is undefined. Match that specific shape only.
-    (m.includes("default") && (m.includes("undefined is not an object") || m.includes("cannot read properties of undefined")))
+    (m.includes("module script") && m.includes("failed"))
+    // ВАЖНО: не матчим обычные рантайм-ошибки ("undefined is not an object ...") —
+    // они бывают при рендере аналитики/выборе поставщика и не должны вызывать reload.
+    // Протухшие чанки ловятся сообщениями выше + событием vite:preloadError + обёрткой lazyNamed.
   );
 };
 
@@ -69,7 +69,16 @@ createRoot(document.getElementById("root")!).render(
 
 // Register the app-shell service worker for offline support (PWA).
 if ("serviceWorker" in navigator) {
+  // Авто-reload по смене SW-контроллера убран: давал лишнее обновление после Ctrl+F5.
+  // Новый код подхватится при следующем заходе; battle-states лечит watchdog/lazyNamed.
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("/sw.js").catch(() => undefined);
+    navigator.serviceWorker
+      .register("/sw.js")
+      .then((reg) => {
+        // Принудительно проверяем обновление сразу и периодически (для standalone-PWA).
+        try { reg.update(); } catch {}
+        setInterval(() => { try { reg.update(); } catch {} }, 60 * 60 * 1000);
+      })
+      .catch(() => undefined);
   });
 }

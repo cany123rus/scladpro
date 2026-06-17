@@ -11,5 +11,38 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+    <!-- Watchdog: если приложение не смонтировалось (белый экран из-за устаревшего кэша/чанков),
+         один раз чистим Service Worker + кэши и перезагружаемся. -->
+    <script>
+      (function () {
+        var KEY = 'app-watchdog-reloaded';
+        setTimeout(function () {
+          var root = document.getElementById('root');
+          if (root && root.childElementCount > 0) return; // приложение отрисовалось — ок
+          var tried = false;
+          try { tried = sessionStorage.getItem(KEY) === '1'; } catch (e) {}
+          if (tried) return; // не зацикливаемся
+          try { sessionStorage.setItem(KEY, '1'); } catch (e) {}
+          var done = function () { try { location.reload(); } catch (e) {} };
+          try {
+            var tasks = [];
+            if (window.caches && caches.keys) {
+              tasks.push(caches.keys().then(function (ks) { return Promise.all(ks.map(function (k) { return caches.delete(k); })); }));
+            }
+            if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+              tasks.push(navigator.serviceWorker.getRegistrations().then(function (rs) { return Promise.all(rs.map(function (r) { return r.unregister(); })); }));
+            }
+            Promise.all(tasks).then(done, done);
+          } catch (e) { done(); }
+        }, 9000);
+        // Если приложение успешно стартовало — снимаем флаг, чтобы будущие сбои тоже лечились.
+        window.addEventListener('load', function () {
+          setTimeout(function () {
+            var root = document.getElementById('root');
+            if (root && root.childElementCount > 0) { try { sessionStorage.removeItem(KEY); } catch (e) {} }
+          }, 12000);
+        });
+      })();
+    </script>
   </body>
 </html>

@@ -14,10 +14,11 @@ import {
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { supabase } from '../lib/supabase';
-import { Plus, Trash2, Calendar, X, Pencil } from 'lucide-react';
+import { Plus, Trash2, Calendar, X, Pencil, CheckSquare } from 'lucide-react';
 import { createTask, fetchActiveTasks, softDeleteTask, updateTask } from '../services/tasks.service';
 import { buildTaskColumnUpdate, ColumnId, getTaskColumn, resolveDropColumn } from '../utils/tasks';
 import { confirmDialog } from './ConfirmDialog';
+import { sendPush } from '../utils/push';
 
 interface Task {
   id: string;
@@ -49,14 +50,24 @@ interface TaskAssignment {
   assignedAt: string;
 }
 
-const COLUMNS: { id: ColumnId; title: string; color: string }[] = [
-  { id: 'priority-5', title: 'Честный знак', color: 'bg-pink-50 border-pink-200 text-pink-700' },
-  { id: 'priority-4', title: 'Поставки', color: 'bg-purple-50 border-purple-200 text-purple-700' },
-  { id: 'priority-1', title: 'Сделать сразу', color: 'bg-red-50 border-red-200 text-red-700' },
-  { id: 'priority-2', title: 'Сборка очередь', color: 'bg-yellow-50 border-yellow-200 text-yellow-700' },
-  { id: 'priority-3', title: 'В работе!', color: 'bg-blue-50 border-blue-200 text-blue-700' },
-  { id: 'done', title: 'Выполненные', color: 'bg-green-50 border-green-200 text-green-700' },
+type ColumnMeta = {
+  id: ColumnId; title: string; accent: string; soft: string; ring: string; text: string; dot: string; chip: string;
+};
+const COLUMNS: ColumnMeta[] = [
+  { id: 'priority-5', title: 'Честный знак', accent: '#ec4899', soft: 'bg-pink-50/60', ring: 'border-pink-200', text: 'text-pink-700', dot: 'bg-pink-500', chip: 'bg-pink-100 text-pink-700' },
+  { id: 'priority-4', title: 'Поставки', accent: '#a855f7', soft: 'bg-purple-50/60', ring: 'border-purple-200', text: 'text-purple-700', dot: 'bg-purple-500', chip: 'bg-purple-100 text-purple-700' },
+  { id: 'priority-1', title: 'Сделать сразу', accent: '#ef4444', soft: 'bg-rose-50/60', ring: 'border-rose-200', text: 'text-rose-700', dot: 'bg-rose-500', chip: 'bg-rose-100 text-rose-700' },
+  { id: 'priority-2', title: 'Сборка очередь', accent: '#f59e0b', soft: 'bg-amber-50/60', ring: 'border-amber-200', text: 'text-amber-700', dot: 'bg-amber-500', chip: 'bg-amber-100 text-amber-700' },
+  { id: 'priority-3', title: 'В работе!', accent: '#3b82f6', soft: 'bg-blue-50/60', ring: 'border-blue-200', text: 'text-blue-700', dot: 'bg-blue-500', chip: 'bg-blue-100 text-blue-700' },
+  { id: 'done', title: 'Выполненные', accent: '#10b981', soft: 'bg-emerald-50/60', ring: 'border-emerald-200', text: 'text-emerald-700', dot: 'bg-emerald-500', chip: 'bg-emerald-100 text-emerald-700' },
 ];
+const accentByPriority = (p: number): string => (COLUMNS.find((c) => c.id === `priority-${p}`)?.accent || '#94a3b8');
+const initialsOf = (name?: string) => {
+  const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return '—';
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[1][0]).toUpperCase();
+};
 
 const normalizeBossName = (name?: string | null) => {
   const src = String(name || '').trim().toLowerCase();
@@ -104,60 +115,79 @@ const SortableTaskItem = memo(({ task, onToggleComplete, onDelete, onEdit, taskA
     position: 'relative' as const,
   };
 
+  const dueTs = task.due_date ? new Date(task.due_date).getTime() : null;
+  const overdue = !task.is_completed && dueTs !== null && dueTs < new Date(new Date().toDateString()).getTime();
+  const accent = task.is_completed ? '#10b981' : accentByPriority(task.priority);
+
   return (
-    <div ref={setNodeRef} style={style} className={`relative bg-white py-3 pr-3 pl-10 rounded-lg shadow-sm border border-slate-200 mb-2 group ${task.is_completed ? 'opacity-70' : ''}`} {...attributes} {...listeners}>
-      <div className="absolute left-3 top-3 cursor-grab active:cursor-grabbing text-slate-400 hover:text-slate-600">
+    <div
+      ref={setNodeRef}
+      style={{ ...style, borderLeftColor: accent }}
+      className={`relative bg-white py-3 pr-3 pl-10 rounded-xl shadow-sm hover:shadow-md border border-slate-200 border-l-[3px] mb-2.5 group transition-shadow ${task.is_completed ? 'opacity-75' : ''}`}
+      {...attributes}
+      {...listeners}
+    >
+      <div className="absolute left-2.5 top-3.5 cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500">
         <GripIcon />
       </div>
 
-      <div className="absolute right-2 top-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-        <button onClick={() => onEdit(task)} className="text-slate-300 hover:text-indigo-500">
-          <Pencil className="w-4 h-4" />
+      <div className="absolute right-2 top-2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+        <button onClick={() => onEdit(task)} className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50" title="Редактировать">
+          <Pencil className="w-3.5 h-3.5" />
         </button>
-        <button onClick={() => onDelete(task.id)} className="text-slate-300 hover:text-red-500">
-          <Trash2 className="w-4 h-4" />
+        <button onClick={() => onDelete(task.id)} className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50" title="Удалить">
+          <Trash2 className="w-3.5 h-3.5" />
         </button>
       </div>
 
-      <div className="min-w-0 pr-5">
-        <div className={`text-sm font-medium text-slate-900 whitespace-normal break-words leading-relaxed ${task.is_completed ? 'line-through text-slate-500' : ''}`}>{task.content}</div>
+      <div className="min-w-0 pr-6">
+        <div className={`text-sm font-semibold text-slate-900 whitespace-normal break-words leading-snug ${task.is_completed ? 'line-through text-slate-400' : ''}`}>{task.content}</div>
+
         {taskAssemblyFile?.url ? (
           <a
             href={taskAssemblyFile.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="mt-1 inline-flex max-w-full items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 truncate"
+            className="mt-1.5 inline-flex max-w-full items-center gap-1 rounded-md bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-600 hover:bg-indigo-100 truncate"
             title="Файл сборки"
           >
             📎 Файл сборки
           </a>
         ) : task.priority === 2 ? (
-          <div className="mt-1 text-xs text-rose-600">📎 Файл сборки не прикреплен</div>
+          <div className="mt-1.5 inline-flex items-center gap-1 rounded-md bg-rose-50 px-2 py-0.5 text-xs font-medium text-rose-600">📎 Файл не прикреплён</div>
         ) : null}
+
         {(assignment || acceptance) && (
-          <div className="mt-1 flex flex-wrap gap-1 text-[11px]">
+          <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
             {assignment && (
-              <span className="inline-flex items-center gap-1 rounded bg-violet-50 text-violet-700 px-2 py-0.5">Поручено: {assignedToName || assignment.employeeName}</span>
+              <span className="inline-flex items-center gap-1 rounded-full bg-violet-50 text-violet-700 pl-1 pr-2 py-0.5 font-medium">
+                <span className="flex h-4 w-4 items-center justify-center rounded-full bg-violet-500 text-[8px] font-bold text-white">{initialsOf(assignedToName || assignment.employeeName)}</span>
+                {assignedToName || assignment.employeeName}
+              </span>
             )}
             {acceptance && (
-              <span className="inline-flex items-center gap-1 rounded bg-blue-50 text-blue-700 px-2 py-0.5">В работе: {acceptedByName || acceptance.employeeName}</span>
+              <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 text-blue-700 pl-1 pr-2 py-0.5 font-medium">
+                <span className="flex h-4 w-4 items-center justify-center rounded-full bg-blue-500 text-[8px] font-bold text-white">{initialsOf(acceptedByName || acceptance.employeeName)}</span>
+                В работе: {acceptedByName || acceptance.employeeName}
+              </span>
             )}
           </div>
         )}
-        <div className="flex flex-wrap gap-2 mt-2 text-xs text-slate-500">
-          <div className="flex items-center gap-1 bg-slate-50 px-1.5 py-0.5 rounded">
+
+        <div className="flex flex-wrap items-center gap-1.5 mt-2.5 text-[11px]">
+          <div className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md ${overdue ? 'bg-rose-100 text-rose-700 font-semibold' : 'bg-slate-100 text-slate-500'}`} title={overdue ? 'Просрочена' : undefined}>
             <Calendar className="w-3 h-3" />
-            {new Date(task.is_completed ? (task.completed_at || task.created_at) : task.created_at).toLocaleDateString('ru-RU')}
+            {new Date(task.is_completed ? (task.completed_at || task.created_at) : (task.due_date || task.created_at)).toLocaleDateString('ru-RU')}
           </div>
-          {task.quantity !== null && task.quantity > 0 && <div className="flex items-center gap-1 bg-slate-50 px-1.5 py-0.5 rounded"><span className="font-bold">{task.quantity}</span> шт.</div>}
+          {task.quantity !== null && task.quantity > 0 && <div className="inline-flex items-center gap-1 bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded-md"><span className="font-bold">{task.quantity}</span> шт.</div>}
         </div>
 
-        <div className="mt-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-2 flex-wrap">
+        <div className="mt-2.5 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1.5 flex-wrap">
           {!task.is_completed && (
             <button
               onClick={() => onAcceptToggle(task)}
               disabled={!canAccept || !canAcceptThisTask}
-              className="px-3 py-1.5 text-xs font-medium rounded-lg disabled:opacity-50"
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${acceptance ? 'bg-slate-100 text-slate-600 hover:bg-slate-200' : 'bg-indigo-600 text-white hover:bg-indigo-700'}`}
               title={!canAccept ? 'Нужно войти как сотрудник' : (!canAcceptThisTask ? 'Задача поручена другому сотруднику' : '')}
             >
               {acceptance ? 'Снять принятие' : 'Принять в работу'}
@@ -167,7 +197,7 @@ const SortableTaskItem = memo(({ task, onToggleComplete, onDelete, onEdit, taskA
             onClick={() => onToggleComplete(task.id, task.is_completed)}
             disabled={!task.is_completed && !acceptance}
             title={!task.is_completed && !acceptance ? 'Сначала примите задачу в работу' : ''}
-            className="px-3 py-1.5 text-xs font-medium rounded-lg disabled:opacity-50"
+            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${task.is_completed ? 'bg-slate-100 text-slate-600 hover:bg-slate-200' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}
           >
             {task.is_completed ? 'Вернуть в работу' : 'Выполнено'}
           </button>
@@ -195,12 +225,15 @@ const TaskColumn = memo(({ col, tasks, loading, onToggleComplete, onDelete, onEd
   const { setNodeRef, isOver } = useDroppable({ id: col.id, data: { type: 'column', columnId: col.id } });
 
   return (
-    <div ref={setNodeRef} className={`rounded-xl border ${col.color.replace('text-', 'border-').replace('bg-', 'bg-opacity-30 ')} flex flex-col ${isOver ? 'ring-2 ring-indigo-400' : ''}`}>
-      <div className={`p-3 font-bold border-b ${col.color.replace('text-', 'border-')} flex justify-between items-center`}>
-        <span className="pr-2">{col.title}</span>
-        <span className="bg-white bg-opacity-50 px-2 py-0.5 rounded-full text-xs">{tasks.length}</span>
+    <div ref={setNodeRef} className={`rounded-2xl border ${col.ring} ${col.soft} flex flex-col transition-all ${isOver ? 'ring-2 ring-indigo-400 ring-offset-1' : ''}`}>
+      <div className="px-3.5 py-3 flex items-center justify-between gap-2 border-b border-slate-200/70" style={{ borderTopColor: col.accent }}>
+        <div className="flex items-center gap-2 min-w-0">
+          <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${col.dot}`} />
+          <span className={`font-bold text-sm truncate ${col.text}`}>{col.title}</span>
+        </div>
+        <span className={`shrink-0 px-2 py-0.5 rounded-full text-xs font-bold ${col.chip}`}>{tasks.length}</span>
       </div>
-      <div className="p-2 flex-1 min-h-[100px]">
+      <div className="p-2 flex-1 min-h-[120px]">
         {loading ? (
           <div className="h-full flex items-center justify-center text-slate-400">Загрузка...</div>
         ) : (
@@ -215,7 +248,7 @@ const TaskColumn = memo(({ col, tasks, loading, onToggleComplete, onDelete, onEd
             })}
           </SortableContext>
         )}
-        {!loading && tasks.length === 0 && <div className="h-full flex items-center justify-center text-slate-400 text-sm italic py-4">Нет задач</div>}
+        {!loading && tasks.length === 0 && <div className="flex items-center justify-center text-slate-300 text-xs py-8 border-2 border-dashed border-slate-200 rounded-xl m-1">Перетащите задачу сюда</div>}
       </div>
     </div>
   );
@@ -426,13 +459,31 @@ export const Tasks = () => {
     return { url: dataUrl, name: 'Файл сборки', supplierName } as TaskAssemblyFileMeta;
   }, []);
 
+  // Удаление самого файла из бакета (а не только ссылки). Для data:-URL (fallback) нечего удалять.
+  const removeTaskFileFromStorage = useCallback(async (meta?: TaskAssemblyFileMeta) => {
+    const url = String(meta?.url || '');
+    const marker = '/object/public/orders/';
+    const i = url.indexOf(marker);
+    if (i === -1) return; // data-url или не из стораджа
+    const path = url.slice(i + marker.length);
+    if (!path) return;
+    try {
+      await supabase.storage.from('orders').remove([path]);
+    } catch (e) {
+      console.warn('Не удалось удалить файл сборки из бакета:', e);
+    }
+  }, []);
+
+  // Авто-очистка: файл выполненной задачи хранится 2 недели, затем удаляется и из бакета, и из ссылок.
+  // Возврат задачи в работу сбрасывает таймер (is_completed=false → не чистим), файл не теряется.
   useEffect(() => {
     if (!tasks.length || !Object.keys(taskAssemblyFiles || {}).length) return;
 
     const now = Date.now();
-    const ttlMs = 3 * 24 * 60 * 60 * 1000;
+    const ttlMs = 14 * 24 * 60 * 60 * 1000;
     let changed = false;
     const next: Record<string, TaskAssemblyFileMeta> = { ...(taskAssemblyFiles || {}) };
+    const toRemove: TaskAssemblyFileMeta[] = [];
 
     tasks.forEach((task) => {
       if (!next[task.id]) return;
@@ -441,16 +492,18 @@ export const Tasks = () => {
       const ts = baseDate ? new Date(baseDate).getTime() : 0;
       if (!ts) return;
       if (now - ts >= ttlMs) {
+        toRemove.push(next[task.id]);
         delete next[task.id];
         changed = true;
       }
     });
 
     if (changed) {
+      toRemove.forEach((meta) => { void removeTaskFileFromStorage(meta); });
       setTaskAssemblyFiles(next);
       persistTaskAssemblyFiles(next);
     }
-  }, [tasks, taskAssemblyFiles, persistTaskAssemblyFiles]);
+  }, [tasks, taskAssemblyFiles, persistTaskAssemblyFiles, removeTaskFileFromStorage]);
 
   const addTask = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -485,6 +538,13 @@ export const Tasks = () => {
             persistTaskAssignments(next);
             return next;
           });
+          // Push-уведомление назначенному сотруднику.
+          sendPush({
+            title: 'Новая задача',
+            body: finalContent.slice(0, 120),
+            url: '/tasks',
+            target: [String(assignee.id)],
+          }).catch(() => undefined);
         }
       }
 
@@ -613,6 +673,15 @@ export const Tasks = () => {
         persistTaskAssignments(next);
         return next;
       });
+      // Удаляем прикреплённый файл сборки: и сам объект из бакета, и ссылку.
+      setTaskAssemblyFiles((prev) => {
+        if (!prev[id]) return prev;
+        void removeTaskFileFromStorage(prev[id]);
+        const next = { ...prev };
+        delete next[id];
+        persistTaskAssemblyFiles(next);
+        return next;
+      });
     } catch (error) {
       console.error('Error deleting task:', error);
     }
@@ -702,10 +771,47 @@ export const Tasks = () => {
     if (pendingAssignedTasks.length > 0) setShowAssignedModal(true);
   }, [pendingAssignedTasks.length]);
 
+  const stats = useMemo(() => {
+    const active = tasks.filter((t) => !t.is_completed);
+    const done = tasks.filter((t) => t.is_completed);
+    const todayStart = new Date(new Date().toDateString()).getTime();
+    const overdue = active.filter((t) => t.due_date && new Date(t.due_date).getTime() < todayStart).length;
+    const inWork = active.filter((t) => taskAcceptances[t.id]).length;
+    return { active: active.length, done: done.length, overdue, inWork };
+  }, [tasks, taskAcceptances]);
+
   if (loading) return <div className="p-8 text-center text-slate-500">Загрузка задач...</div>;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
+      {/* Шапка раздела со статистикой */}
+      <div className="overflow-hidden rounded-3xl bg-gradient-to-r from-slate-900 via-indigo-900 to-slate-900 p-5 sm:p-6 shadow-xl ring-1 ring-white/10">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-center gap-4">
+            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-white/10 ring-1 ring-white/15">
+              <CheckSquare className="h-7 w-7 text-white" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-extrabold tracking-tight text-white">Задачи</h1>
+              <p className="mt-0.5 text-sm text-indigo-100/80">Канбан-доска: перетаскивайте карточки между колонками</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-4 gap-2 sm:gap-3">
+            {[
+              { label: 'Активных', value: stats.active, c: 'text-white' },
+              { label: 'В работе', value: stats.inWork, c: 'text-blue-300' },
+              { label: 'Просрочено', value: stats.overdue, c: 'text-rose-300' },
+              { label: 'Выполнено', value: stats.done, c: 'text-emerald-300' },
+            ].map((s) => (
+              <div key={s.label} className="rounded-2xl bg-white/10 px-3 py-2 text-center ring-1 ring-white/10 min-w-[72px]">
+                <div className={`text-xl font-extrabold ${s.c}`}>{s.value}</div>
+                <div className="text-[10px] text-indigo-100/70 mt-0.5">{s.label}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
       {showAssignedModal && pendingAssignedTasks.length > 0 && (
         <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setShowAssignedModal(false)}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[80vh] overflow-auto p-5" onClick={(e) => e.stopPropagation()}>
@@ -718,7 +824,7 @@ export const Tasks = () => {
                 <div key={`assigned-${task.id}`} className="border border-slate-200 rounded-xl p-3">
                   <div className="text-sm font-medium text-slate-900">{task.content}</div>
                   <div className="mt-2">
-                    <button onClick={() => toggleAcceptTask(task)} className="px-3 py-1.5 text-xs font-medium rounded-lg">Взять задачу в работу</button>
+                    <button onClick={() => toggleAcceptTask(task)} className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">Взять задачу в работу</button>
                   </div>
                 </div>
               ))}
@@ -727,23 +833,85 @@ export const Tasks = () => {
         </div>
       )}
 
-      <form onSubmit={addTask} className="oc-card p-4">
-        <div className="flex flex-wrap gap-2">
-          <input type="text" placeholder="Задача" value={newTaskContent} onChange={e => setNewTaskContent(e.target.value)} className="flex-1 min-w-[200px] oc-input" required />
-          <select value={newTaskPriority} onChange={e => setNewTaskPriority(parseInt(e.target.value) as 1 | 2 | 3 | 4 | 5)} className="oc-select">
-            <option value={1}>Срочно</option><option value={2}>Сборка очередь</option><option value={3}>В работе!</option><option value={4}>Поставки</option><option value={5}>Честный знак</option>
-          </select>
-          <input type="date" value={newTaskDate} onChange={e => setNewTaskDate(e.target.value)} className="oc-select" />
-          {newTaskPriority === 2 && (
-            <>
-              <select value={newTaskSupplierId} onChange={e => setNewTaskSupplierId(e.target.value)} className="oc-select min-w-[220px]" required>
-                <option value="">Поставщик для сборки...</option>
+      <form onSubmit={addTask} className="oc-card p-5">
+        <div className="mb-4 flex items-center gap-2 text-sm font-bold text-slate-800">
+          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-100 text-indigo-600"><Plus className="h-4 w-4" /></span>
+          Новая задача
+        </div>
+
+        {/* Текст задачи */}
+        <input
+          type="text"
+          placeholder="Что нужно сделать?"
+          value={newTaskContent}
+          onChange={e => setNewTaskContent(e.target.value)}
+          className="oc-input w-full text-base mb-4"
+          required
+        />
+
+        {/* Приоритет — цветные чипы */}
+        <div className="mb-4">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-1.5">Колонка / приоритет</div>
+          <div className="flex flex-wrap gap-2">
+            {[
+              { p: 1, label: 'Срочно' },
+              { p: 2, label: 'Сборка очередь' },
+              { p: 3, label: 'В работе!' },
+              { p: 4, label: 'Поставки' },
+              { p: 5, label: 'Честный знак' },
+            ].map(({ p, label }) => {
+              const on = newTaskPriority === p;
+              const accent = accentByPriority(p);
+              return (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => setNewTaskPriority(p as 1 | 2 | 3 | 4 | 5)}
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-all ${on ? 'text-white shadow-sm' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
+                  style={on ? { backgroundColor: accent, borderColor: accent } : undefined}
+                >
+                  <span className="h-2 w-2 rounded-full" style={{ backgroundColor: on ? '#fff' : accent }} />
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Дата / Исполнитель / Кол-во */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-1.5">Срок</div>
+            <input type="date" value={newTaskDate} onChange={e => setNewTaskDate(e.target.value)} className="oc-input w-full" />
+          </div>
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-1.5">Исполнитель</div>
+            <select value={newTaskAssigneeId} onChange={e => setNewTaskAssigneeId(e.target.value)} className="oc-select w-full">
+              <option value="">Без исполнителя</option>
+              {employees.map((e) => (
+                <option key={e.id} value={String(e.id)}>{getEmployeeDisplayName(e as any)}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-1.5">Количество</div>
+            <input type="number" placeholder="шт." value={newTaskQuantity} onChange={e => setNewTaskQuantity(e.target.value)} className="oc-input w-full" />
+          </div>
+        </div>
+
+        {/* Блок сборки — только для «Сборка очередь» */}
+        {newTaskPriority === 2 && (
+          <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50/60 p-3.5">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-amber-600 mb-2">Данные сборки</div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <select value={newTaskSupplierId} onChange={e => setNewTaskSupplierId(e.target.value)} className="oc-select w-full" required>
+                <option value="">Поставщик для сборки…</option>
                 {suppliers.map((s) => (
                   <option key={s.id} value={String(s.id)}>{s.name}</option>
                 ))}
               </select>
-              <label className="oc-select min-w-[240px] cursor-pointer text-sm text-slate-600">
-                {newTaskAssemblyFile ? `📎 ${newTaskAssemblyFile.name}` : '📎 Файл сборки (PDF)'}
+              <label className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors ${newTaskAssemblyFile ? 'border-emerald-300 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50'}`}>
+                <span className="truncate">{newTaskAssemblyFile ? `📎 ${newTaskAssemblyFile.name}` : '📎 Файл сборки (PDF)'}</span>
                 <input
                   type="file"
                   accept="application/pdf"
@@ -767,23 +935,21 @@ export const Tasks = () => {
                     console.error('Failed to load order history PDF', err);
                   }
                 }}
-                className="oc-select min-w-[260px]"
+                className="oc-select w-full"
               >
-                <option value="">Выбрать из истории заказов...</option>
+                <option value="">Из истории заказов…</option>
                 {supplierOrderHistory.map((item) => (
                   <option key={item.id} value={String(item.id)}>{item.fileName}</option>
                 ))}
               </select>
-            </>
-          )}
-          <select value={newTaskAssigneeId} onChange={e => setNewTaskAssigneeId(e.target.value)} className="oc-select min-w-[220px]">
-            <option value="">Без исполнителя</option>
-            {employees.map((e) => (
-              <option key={e.id} value={String(e.id)}>{getEmployeeDisplayName(e as any)}</option>
-            ))}
-          </select>
-          <input type="number" placeholder="Кол-во" value={newTaskQuantity} onChange={e => setNewTaskQuantity(e.target.value)} className="p-2 border rounded-lg w-24" />
-          <button type="submit" disabled={!newTaskContent.trim()} className="btn-primary p-2"><Plus className="w-6 h-6" /></button>
+            </div>
+          </div>
+        )}
+
+        <div className="flex justify-end">
+          <button type="submit" disabled={!newTaskContent.trim()} className="btn-primary px-5 py-2.5 inline-flex items-center gap-2 font-semibold disabled:opacity-50">
+            <Plus className="w-5 h-5" /> Добавить задачу
+          </button>
         </div>
       </form>
 
