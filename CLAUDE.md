@@ -57,9 +57,23 @@
 2. **Отозвать утёкший Telegram-токен старого бота** на @BotFather (ручное действие владельца) + перенести токены из `app_settings`/кода в env.
 3. Supabase Auth: включить leaked-password protection (advisor).
 
-## Telegram-боты
-- `supabase/functions/telegram-bot/` — приём файлов от поставщиков (токен → env `TELEGRAM_BOT_TOKEN`).
-- `supabase/functions/claude-chat/` — бот-ассистент на Claude API (новый, см. его README).
+## Edge Functions (Deno, Supabase) — всего 7
+Все через `createClient` + `service_role`; внешние API оборачивают в `wbFetch`/`sleep`/backoff с обработкой 429.
+- `telegram-bot/` — приём файлов от поставщиков (PDF/Excel/img); MIME-whitelist + лимит 20МБ; токен → env `TELEGRAM_BOT_TOKEN`.
+- `claude-chat/` — Telegram→Claude-ассистент; история на чат в `app_settings`; whitelist `ALLOWED_CHAT_IDS` + `secret_token`. См. README.
+- `dev-tasks-bot/` — Telegram→очередь `dev_tasks` (агент исполняет на ПК/Mac); whitelist + secret. См. README.
+- `wb-adv-sync/` — синк рекламы WB с `advert-api.wildberries.ru` (`wbFetch` ×4, чтит `Retry-After`).
+- `wb-adv-keywords/` — ключевые слова рекламы WB с `advert-api.wildberries.ru` (`wbFetch` ×3 на 429).
+- `wb-reports/` — финотчёты WB со `statistics-api.wildberries.ru`; `clampSpan` ограничивает период запроса.
+- `backup-db/` — бэкап таблиц БД через `service_role`.
+
+## Сетевой слой (важно для РФ)
+- **Cloudflare-прокси:** `cloudflare-supabase-proxy/src/worker.js` форвардит ВЕСЬ трафик Supabase (REST/Auth/Storage/Functions/Realtime-ws)
+  на твоём домене — обход блокировки `*.supabase.co` в РФ. Фронт меняет один `VITE_SUPABASE_URL`. Сам добавляет CORS.
+- **Устойчивый fetch:** `src/lib/supabase.ts` → `resilientFetch` подменяет fetch в клиенте: лимит 4 параллельных + очередь,
+  ретраи ×4 с backoff на `408/425/429/5xx/52x`, таймаут 35с, «деградация» 45с после 6 фейлов, событие связи в UI (бейдж в шапке).
+- **Warehouse Offline:** `scripts/warehouse-offline-server.mjs` (Node http, :8787) — складской ПК отдаёт `dist/` + локальный JSON-API
+  планшету по LAN; утренний снапшот, очереди сканов `pending/synced/conflicts`, вечерний синк в Supabase. См. `docs/warehouse-offline.md`.
 
 ## Оптимизация (СДЕЛАНО, 2026-06)
 - N+1 устранены: история поставщика (`handleOpenSupplierHistory`) → RPC `supplier_supply_item_counts`;
