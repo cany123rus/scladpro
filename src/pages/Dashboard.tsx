@@ -5490,7 +5490,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [selectedBotForManual, setSelectedBotForManual] = useState('main'); // main, reception, file
 
   // Backup Bot State
-  const [backupBotToken, setBackupBotToken] = useState('8535851324:AAGug52myT700ifTAlha_APm__ykSpIS1TM');
+  const [backupBotToken, setBackupBotToken] = useState(''); // грузится из app_settings.backup_bot_token; не хардкодить токен
   const [backupChatId, setBackupChatId] = useState('498924112');
   const [isBackupTokenLocked, setIsBackupTokenLocked] = useState(true);
 

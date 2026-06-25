@@ -1,6 +1,6 @@
 param(
   [string]$ProjectRoot = "C:\Users\cany1\Documents\source_code",
-  [string]$TelegramBotToken = "8535851324:AAGug52myT700ifTAlha_APm__ykSpIS1TM",
+  [string]$TelegramBotToken = "",  # передавать через -TelegramBotToken или .env; не хардкодить
   [string]$TelegramChatId = "498924112"
 )
 
