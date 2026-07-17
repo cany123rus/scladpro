@@ -14892,6 +14892,84 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   };
 
 
+  // Загрузка себестоимости файлом Excel (2–3 столбца: артикул поставщика + цена).
+  // Матч по «Артикул поставщика» (vendor_code, напр. h156012816), fallback — «Код
+  // номенклатуры» (code/nmId). Цена пишется в persistedCostByCode[code] и применяется live.
+  const handleUploadCostFile = async (file: File) => {
+    if (!Array.isArray(uploadedReportAnalytics) || uploadedReportAnalytics.length === 0) {
+      showToast('Сначала загрузите отчёт, затем файл себестоимости', 'error');
+      return;
+    }
+    try {
+      setUploadedSavingCosts(true);
+      const buf = await file.arrayBuffer();
+      const aoa = await readFirstSheetAsJson<any[]>(buf, { header: 1, raw: false });
+      const normArt = (v: any) => String(v ?? '').trim().toLowerCase().replace(/\s+/g, '');
+      const parseMoney = (v: any) => {
+        const n = Number(String(v ?? '').replace(/[^0-9.,-]/g, '').replace(/\s+/g, '').replace(',', '.'));
+        return Number.isFinite(n) ? n : NaN;
+      };
+      const priceByArt = new Map<string, number>();
+      (Array.isArray(aoa) ? aoa : []).forEach((rowArr: any) => {
+        const cells = Array.isArray(rowArr) ? rowArr : Object.values(rowArr || {});
+        let article = '';
+        let price = NaN;
+        for (const cell of cells) {
+          const s = String(cell ?? '').trim();
+          if (!s) continue;
+          const digitsOnly = s.replace(/\s+/g, '');
+          const isBigInt = /^\d{7,}$/.test(digitsOnly); // nmId-подобное — это не цена
+          const hasLetter = /[a-zA-Zа-яА-Я]/.test(s);
+          if (hasLetter && !article) { article = s; continue; }     // артикул поставщика (H…)
+          if (!hasLetter && !isBigInt && Number.isNaN(price)) {
+            const n = parseMoney(s);
+            if (Number.isFinite(n) && n > 0) price = n;               // цена
+          }
+        }
+        // Если букв нет (артикул чисто числовой) — ключом берём nmId-подобное число.
+        if (!article) {
+          for (const cell of cells) {
+            const s = String(cell ?? '').trim();
+            if (/^\d{7,}$/.test(s.replace(/\s+/g, ''))) { article = s; break; }
+          }
+        }
+        if (article && Number.isFinite(price) && price > 0) priceByArt.set(normArt(article), price);
+      });
+      if (priceByArt.size === 0) {
+        showToast('В файле не найдено пар «артикул + цена». Нужны столбцы: артикул поставщика и цена.', 'error');
+        return;
+      }
+      const nextByCode: Record<string, number> = { ...(uploadedPersistedCostByCode || {}) };
+      const used = new Set<string>();
+      let matched = 0;
+      (uploadedReportAnalytics || []).forEach((r: any) => {
+        const code = String(r?.code || '').trim();
+        if (!code) return;
+        const vc = normArt(r?.vendor_code);
+        const cd = normArt(r?.code);
+        let price: number | undefined;
+        let hitKey = '';
+        if (vc && priceByArt.has(vc)) { price = priceByArt.get(vc); hitKey = vc; }
+        else if (cd && priceByArt.has(cd)) { price = priceByArt.get(cd); hitKey = cd; }
+        if (price !== undefined && price > 0) { nextByCode[code] = price; matched += 1; if (hitKey) used.add(hitKey); }
+      });
+      if (matched === 0) {
+        showToast('Ни один артикул из файла не совпал с товарами отчёта (сверяется «Артикул поставщика»).', 'warning');
+        return;
+      }
+      await persistUploadedCostsByCode(nextByCode);
+      setUploadedPersistedCostByCode(nextByCode);
+      const notMatched = priceByArt.size - used.size;
+      logAction('Аналитика: себестоимость файлом', `совпало ${matched}, не совпало ${notMatched}`, currentEmployee?.id);
+      showToast(`Себестоимость применена: ${matched} тов.${notMatched > 0 ? `, не совпало ${notMatched} строк файла` : ''}`, 'success');
+    } catch (e: any) {
+      console.error('handleUploadCostFile error', e);
+      showToast('Ошибка чтения файла: ' + (e?.message || 'неизвестно'), 'error');
+    } finally {
+      setUploadedSavingCosts(false);
+    }
+  };
+
   const getUploadedCostKeyCandidates = (row: any) => {
     const code = String(row?.code || '').trim();
     const name = String(row?.name || '').trim();
@@ -24766,6 +24844,19 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     >
                       Отчёты API
                     </button>
+                    <label
+                      className={`px-4 py-2 text-sm font-semibold rounded-xl border shadow-sm ${(uploadedReportAnalytics || []).length > 0 && !uploadedSavingCosts ? 'border-orange-300 bg-orange-50 text-orange-700 hover:bg-orange-100 cursor-pointer' : 'border-slate-200 bg-slate-50 text-slate-400 cursor-not-allowed'}`}
+                      title="Загрузить себестоимость из Excel (столбцы: артикул поставщика + цена). Матч по «Артикул поставщика», для товаров без ключа кабинета."
+                    >
+                      {uploadedSavingCosts ? 'Загрузка…' : 'Себестоимость (файл)'}
+                      <input
+                        type="file"
+                        accept=".xlsx,.xls"
+                        className="hidden"
+                        disabled={(uploadedReportAnalytics || []).length === 0 || uploadedSavingCosts}
+                        onChange={async (e) => { const f = e.target.files?.[0]; if (f) await handleUploadCostFile(f); if (e.target) e.target.value = ''; }}
+                      />
+                    </label>
                   </div>
 
                   <ExcelUploader
