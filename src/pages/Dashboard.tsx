@@ -1051,6 +1051,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [summaryLogProblemOnly, setSummaryLogProblemOnly] = useState(false);
   const [uploadedCostByKey, setUploadedCostByKey] = useState<Record<string, string>>({});
   const [uploadedSelectedSupplierId, setUploadedSelectedSupplierId] = useState<string>('');
+  // Сентинел «Любой поставщик»: отчёт грузится без привязки к поставщику
+  // (нет API-ключа WB → без фото товаров); в БД supplier_id = null.
+  const ANY_SUPPLIER_ID = '__any__';
   const [uploadedPhotoMap, setUploadedPhotoMap] = useState<Record<string, string>>({});
   const [uploadedPhotoLoading, setUploadedPhotoLoading] = useState(false);
   const MAX_UPLOAD_ROWS = 250000;
@@ -15784,10 +15787,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     }
     try {
       // Лёгкий список: без тяжёлых rows_json/summary_json — только метаданные.
-      const { data, error } = await supabase
+      let rawQuery = supabase
         .from('analytics_upload_reports_raw')
-        .select('id, supplier_id, supplier_name, file_name, period_start, period_end, report_number, created_at, rn:summary_json->>report_number, src_bucket:summary_json->>source_file_bucket, src_path:summary_json->>source_file_path')
-        .eq('supplier_id', supplierId)
+        .select('id, supplier_id, supplier_name, file_name, period_start, period_end, report_number, created_at, rn:summary_json->>report_number, src_bucket:summary_json->>source_file_bucket, src_path:summary_json->>source_file_path');
+      rawQuery = supplierId === ANY_SUPPLIER_ID ? rawQuery.is('supplier_id', null) : rawQuery.eq('supplier_id', supplierId);
+      const { data, error } = await rawQuery
         .order('period_start', { ascending: true, nullsFirst: false })
         .order('created_at', { ascending: true })
         .limit(300);
@@ -15806,6 +15810,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
   const saveUploadedRawReportHistory = async (rows: any[], fileName?: string, summaryArg?: any, sourceFile?: File) => {
     if (!uploadedSelectedSupplierId || !Array.isArray(rows) || !rows.length) return;
+    const isAnySup = uploadedSelectedSupplierId === ANY_SUPPLIER_ID;
+    const supplierDbId = isAnySup ? null : uploadedSelectedSupplierId;
+    const supplierPathId = isAnySup ? '_any_' : uploadedSelectedSupplierId;
     try {
       const supplier = (suppliers || []).find((s: any) => String(s?.id) === String(uploadedSelectedSupplierId));
       const summary = summaryArg || null;
@@ -15825,7 +15832,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           const yyyy = String(now.getFullYear());
           const mm = String(now.getMonth() + 1).padStart(2, '0');
           const dd = String(now.getDate()).padStart(2, '0');
-          const targetPath = `${uploadedSelectedSupplierId}/${yyyy}/${mm}/${dd}/${Date.now()}_${safeName}`;
+          const targetPath = `${supplierPathId}/${yyyy}/${mm}/${dd}/${Date.now()}_${safeName}`;
           const { error: uploadErr } = await supabase.storage.from(RAW_REPORTS_BUCKET).upload(targetPath, sourceFile, {
             cacheControl: '3600',
             upsert: false,
@@ -15850,7 +15857,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       showToast(`RAW строки (${rows.length.toLocaleString('ru-RU')}) не сохраняются в БД: сохраняется только сводка`, 'info');
 
       const payload: any = {
-        supplier_id: uploadedSelectedSupplierId,
+        supplier_id: supplierDbId,
         supplier_name: supplierName,
         file_name: defaultName,
         period_start: summary?.period_start ? new Date(summary.period_start).toISOString().slice(0, 10) : null,
@@ -15864,20 +15871,19 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         // Дедуп: по номеру отчёта, а если его нет (в WB-отчёте колонки нет) —
         // по поставщику + периоду (чтобы один и тот же отчёт не плодил дубли).
         let existingId: string | null = null;
+        const supFilter = (q: any) => isAnySup ? q.is('supplier_id', null) : q.eq('supplier_id', uploadedSelectedSupplierId);
         if (reportNumber) {
-          const { data: existing, error: findErr } = await supabase
+          const { data: existing, error: findErr } = await supFilter(supabase
             .from('analytics_upload_reports_raw')
-            .select('id')
-            .eq('supplier_id', uploadedSelectedSupplierId)
+            .select('id'))
             .eq('report_number', reportNumber)
             .maybeSingle();
           if (findErr) throw findErr;
           existingId = existing?.id ? String(existing.id) : null;
         } else if (p?.period_start && p?.period_end) {
-          const { data: existing, error: findErr } = await supabase
+          const { data: existing, error: findErr } = await supFilter(supabase
             .from('analytics_upload_reports_raw')
-            .select('id')
-            .eq('supplier_id', uploadedSelectedSupplierId)
+            .select('id'))
             .eq('period_start', p.period_start)
             .eq('period_end', p.period_end)
             .limit(1)
@@ -15918,7 +15924,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
         // fallback for older table schema and/or oversized payload: keep rows + summary without binary file
         const fallbackPayload: any = {
-          supplier_id: uploadedSelectedSupplierId,
+          supplier_id: supplierDbId,
           supplier_name: supplierName,
           file_name: defaultName,
           summary_json: { ...(summary || {}), source_file_name: fileName || null, source_file_bucket: sourceFileBucket, source_file_path: sourceFilePath, source_file_size: sourceFileSize },
@@ -16299,10 +16305,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       setUploadedHistoryLoading(true);
       // Лёгкий список: вытаскиваем только нужные поля из summary_json (без geo_snapshot/аналитики),
       // полные данные подгружаются при открытии конкретного отчёта.
-      const { data, error } = await supabase
+      let histQuery = supabase
         .from('analytics_upload_history')
-        .select('id, supplier_id, supplier_name, file_name, created_at, rn:summary_json->>report_number, ps:summary_json->>period_start, pe:summary_json->>period_end')
-        .eq('supplier_id', supplierId)
+        .select('id, supplier_id, supplier_name, file_name, created_at, rn:summary_json->>report_number, ps:summary_json->>period_start, pe:summary_json->>period_end');
+      histQuery = supplierId === ANY_SUPPLIER_ID ? histQuery.is('supplier_id', null) : histQuery.eq('supplier_id', supplierId);
+      const { data, error } = await histQuery
         .order('created_at', { ascending: false })
         .limit(200);
       if (error) throw error;
@@ -16776,15 +16783,18 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     const summaryToSave = summaryArg || uploadedReportSummary;
     const analyticsToSave = analyticsArg || uploadedReportAnalytics;
     if (!uploadedSelectedSupplierId || !summaryToSave || !analyticsToSave?.length) return;
+    const isAnySup = uploadedSelectedSupplierId === ANY_SUPPLIER_ID;
+    const supplierDbId = isAnySup ? null : uploadedSelectedSupplierId;
     const supplier = (suppliers || []).find((s: any) => String(s?.id) === String(uploadedSelectedSupplierId));
     try {
       const reportNumber = String((summaryToSave as any)?.report_number || '').trim();
       let duplicateId: string | null = null;
       {
-        const { data: existingRows, error: checkError } = await supabase
+        let checkQuery = supabase
           .from('analytics_upload_history')
-          .select('id, summary_json, created_at')
-          .eq('supplier_id', uploadedSelectedSupplierId)
+          .select('id, summary_json, created_at');
+        checkQuery = isAnySup ? checkQuery.is('supplier_id', null) : checkQuery.eq('supplier_id', uploadedSelectedSupplierId);
+        const { data: existingRows, error: checkError } = await checkQuery
           .order('created_at', { ascending: false })
           .limit(400);
         if (checkError) throw checkError;
@@ -16871,7 +16881,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       const summarySafe = { ...(summaryToSave || {}), geo_snapshot: geoSafe, analytics_truncated: analyticsTruncated, analytics_rows_saved: analyticsSafe.length, analytics_rows_original: Array.isArray(analyticsToSave) ? analyticsToSave.length : 0 } as any;
 
       const payload = {
-        supplier_id: uploadedSelectedSupplierId,
+        supplier_id: supplierDbId,
         supplier_name: supplierName,
         file_name: defaultHistoryName,
         summary_json: summarySafe,
@@ -24728,6 +24738,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         className="w-full md:w-[420px] px-3 py-2 border border-slate-300 rounded-lg bg-white"
                       >
                         <option value="">- Выберите поставщика -</option>
+                        <option value={ANY_SUPPLIER_ID}>Любой поставщик (без фото)</option>
                         {visibleUploadedAnalyticsSuppliers.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
                       </select>
                       {(uploadedAnalyticsSuppliers || []).length === 0 && (
@@ -24748,8 +24759,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       История отчётов WB
                     </button>
                     <button
-                      onClick={() => { setWbApiPickerOpen(true); if (uploadedSelectedSupplierId) loadWbApiReports(uploadedSelectedSupplierId); }}
-                      disabled={!uploadedSelectedSupplierId}
+                      onClick={() => { setWbApiPickerOpen(true); if (uploadedSelectedSupplierId && uploadedSelectedSupplierId !== ANY_SUPPLIER_ID) loadWbApiReports(uploadedSelectedSupplierId); }}
+                      disabled={!uploadedSelectedSupplierId || uploadedSelectedSupplierId === ANY_SUPPLIER_ID}
                       className="px-4 py-2 text-sm font-semibold rounded-xl border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
                       title="Еженедельные отчёты о реализации напрямую из WB — посмотреть и скачать без ручного захода в кабинет"
                     >
@@ -24775,10 +24786,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       if (turbo) {
                         showToast(`Включён турбо-режим (${rows.length.toLocaleString('ru-RU')} строк)`, 'info');
                       }
-                      const belongs = await validateUploadedReportSupplier(rows, uploadedSelectedSupplierId);
-                      if (!belongs) {
-                        showToast('Отчет не принадлежит данному поставщику', 'error');
-                        return;
+                      // «Любой поставщик» — без привязки: пропускаем проверку принадлежности.
+                      if (uploadedSelectedSupplierId !== ANY_SUPPLIER_ID) {
+                        const belongs = await validateUploadedReportSupplier(rows, uploadedSelectedSupplierId);
+                        if (!belongs) {
+                          showToast('Отчет не принадлежит данному поставщику', 'error');
+                          return;
+                        }
                       }
                       const result = processUploadedWbReport(rows, { turbo });
                       // Проверка дубля: по номеру отчёта, иначе по периоду. Если отчёт
@@ -24813,10 +24827,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       const dps = norm(sm?.period_start), dpe = norm(sm?.period_end);
                       let alreadyExists = false;
                       try {
-                        const { data: ex } = await supabase
+                        let exQuery = supabase
                           .from('analytics_upload_history')
-                          .select('id, summary_json')
-                          .eq('supplier_id', uploadedSelectedSupplierId)
+                          .select('id, summary_json');
+                        exQuery = uploadedSelectedSupplierId === ANY_SUPPLIER_ID
+                          ? exQuery.is('supplier_id', null)
+                          : exQuery.eq('supplier_id', uploadedSelectedSupplierId);
+                        const { data: ex } = await exQuery
                           .order('created_at', { ascending: false })
                           .limit(400);
                         alreadyExists = (ex || []).some((x: any) => {
