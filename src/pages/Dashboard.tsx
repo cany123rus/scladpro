@@ -25655,7 +25655,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     const prodsAll = (sortedFilteredUploadedAnalytics || []).map((x: any) => {
                       const sold = Number(x.sold_qty || 0);
                       const cost = Number(getUploadedCostValue(x) || 0);
-                      const profit = (Number(x.to_pay_total || 0)) - cost * sold - Number(x.tax_sum || 0);
+                      // Налог берём по ТЕКУЩЕЙ ставке (переключатель 1/6/15%), как в строках размеров,
+                      // а не замороженный x.tax_sum — иначе прибыль товара/ИТОГО ≠ сумма по размерам.
+                      const profit = (Number(x.to_pay_total || 0)) - cost * sold - (Number(x.sales_net || 0) * getCurrentUploadedTaxRate());
                       const sNet = Number(x.sales_net || 0);
                       const salesGross = Number(x.sales_gross || 0);
                       const retSum = Number(x.returns_gross || 0);
@@ -26147,7 +26149,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                                     <td className="px-2 py-1.5 text-right">{rub(zlog)}</td>
                                                     <td className="px-2 py-1.5 text-right">{rub(z.payout_net ?? 0)}</td>
                                                     <td className="px-2 py-1.5 text-right text-indigo-600">{rub(ztopay)}</td>
-                                                    <td className="px-2 py-1.5 text-right text-slate-400">{rub(p.cost || 0)}</td>
+                                                    <td className="px-2 py-1.5 text-right text-slate-400">{rub((Number(p.cost) || 0) * zsold)}</td>
                                                     <td className={`px-2 py-1.5 text-right ${zppu < 0 ? 'text-rose-600' : 'text-slate-700'}`}>{rub(zppu)}</td>
                                                     <td className={`px-2 py-1.5 text-right font-semibold ${zprofit < 0 ? 'text-rose-600' : 'text-emerald-600'}`}>{rub(zprofit)}</td>
                                                     <td className="px-2 py-1.5 text-right">{zsold.toLocaleString('ru-RU')}</td>
