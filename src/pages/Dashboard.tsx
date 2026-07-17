@@ -25970,6 +25970,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     const orderedSumHero = Number(sx.ordered_retail_sum || 0) || (salesX + returnsSumHero);  // заказано = Σ «Цена розничная» по заказам
                     const taxValHero = Number(getUploadedTaxValue(sx) || 0);
                     const commissionWB = salesX - payoutHero;           // комиссия WB = продажи − к перечислению
+                    // Разбивка расходов без задвоения (тождество: Продажи − УдержалWB − ТвоиРасходы = Чистая прибыль):
+                    //  «Твои расходы» — что ты платишь СВЕРХ выплаты WB (себест+реклама+налог+хранение+доп).
+                    //  «Удержал WB» — всё, что WB забрал ДО выплаты (комиссия+логистика+эквайринг+штрафы),
+                    //   считаем ОСТАТКОМ (Продажи − Прибыль − ТвоиРасходы), чтобы точно сходилось и не задваивать.
+                    const yourCosts = costSumTotal + taxValHero + Number(sx.withhold_sum || 0) + Number(sx.storage_sum || 0) + Number(uploadedExtraCosts || 0);
+                    const wbHeld = Math.max(0, salesX - profitNet - yourCosts);
                     const R = 52, C = 2 * Math.PI * R, dash = C * Math.min(1, Math.max(0, payoutPct / 100));
                     return (
                       <div className="space-y-4 mb-2">
@@ -25990,8 +25996,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             <StatCard label="Хранение" value={rub(Number(sx.storage_sum || 0))} sub={salesX > 0 ? `${pct(Number(sx.storage_sum || 0) / salesX * 100)} от продаж` : '—'} color="#22d3ee" />
                             <StatCard label="Чистая прибыль" value={rub(profitNet)} sub={salesX > 0 ? `маржа ${pct(profitNet / salesX * 100)}` : '—'} signOf={profitNet} delta={cmpProfitDelta} />
                             <StatCard label="Рентабельность (ROI)" value={costSumTotal > 0 ? pct(profitNet / costSumTotal * 100) : '—'} sub="прибыль / себест." signOf={profitNet} />
-                            <StatCard label="Расходы всего" value={rub(costTotal)} sub={salesX > 0 ? `${pct(costTotal / salesX * 100)} от продаж` : '—'} color="#fbbf24" />
-                            <StatCard label="% к перечислению" value={`${payoutPct}%`} sub="доля выплаты" color="#34d399" />
+                            <StatCard label="Твои расходы" value={rub(yourCosts)} sub={salesX > 0 ? `себест+реклама+налог · ${pct(yourCosts / salesX * 100)}` : 'себест+реклама+налог'} color="#fbbf24" />
+                            <StatCard label="Удержал WB" value={rub(wbHeld)} sub={salesX > 0 ? `комиссия+логистика · ${pct(wbHeld / salesX * 100)}` : 'комиссия+логистика'} color="#f59e0b" />
                           </div>
                           <div className="mt-3 flex flex-wrap items-center gap-3 text-sm border-t border-white/10 pt-3">
                             <div className="flex items-center gap-2">
@@ -26194,7 +26200,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               ); })}
                             </div>
                             <div className="mt-4 pt-3 border-t border-slate-100 grid grid-cols-2 gap-2">
-                              <div className="rounded-xl bg-slate-50 p-3"><div className="text-[11px] text-slate-500">Все расходы</div><div className="font-extrabold text-slate-800">{rub(costTotal)}</div><div className="text-[11px] text-slate-400">{sales > 0 ? pct(costTotal / sales * 100) : '—'} от продаж</div></div>
+                              <div className="rounded-xl bg-slate-50 p-3"><div className="text-[11px] text-slate-500">Все расходы</div><div className="font-extrabold text-slate-800">{rub(Math.max(0, sales - profitNet))}</div><div className="text-[11px] text-slate-400">{sales > 0 ? pct(Math.max(0, sales - profitNet) / sales * 100) : '—'} от продаж</div></div>
                               <div className="rounded-xl bg-emerald-50 p-3"><div className="text-[11px] text-emerald-600">Чистая прибыль</div><div className="font-extrabold text-emerald-700">{rub(profitNet)}</div><div className="text-[11px] text-emerald-500/70">маржа {sales > 0 ? pct(profitNet / sales * 100) : '—'}</div></div>
                             </div>
                           </Card>
