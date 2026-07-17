@@ -25973,10 +25973,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     // Прибыль/расходы считаем ЯВНО от summary-полей (не от построчной прибыли,
                     // которая при фильтре +/− плывёт из-за рекламы на «артикуле 0»). База — К перечислению.
                     //  «Твои расходы»  = себестоимость + реклама + налог + хранение + доп.
-                    //  «Удержал WB»    = (Продажи − К перечислению)=комиссия + логистика + штрафы + эквайринг.
-                    //  «Чистая прибыль»= К перечислению − логистика − штрафы − эквайринг − Твои расходы.
+                    //  «Удержал WB»    = (Продажи − К перечислению)=комиссия + логистика + штрафы.
+                    //  «Чистая прибыль»= К перечислению − логистика − штрафы − Твои расходы.
                     //  Тождество: Продажи − УдержалWB − ТвоиРасходы = Чистая прибыль.
-                    const wbOtherFees = Number(sx.logistics_sum || 0) + Number(sx.fine_sum || 0) + Number(sx.acquiring_sum || 0);
+                    //  Эквайринг НЕ вычитаем: в родной формуле to_pay_total (см. ~15556) его нет —
+                    //  он уже учтён в комиссии, иначе прибыль задваивалась бы (поле даёт ~4% — нереально).
+                    const wbOtherFees = Number(sx.logistics_sum || 0) + Number(sx.fine_sum || 0);
                     const yourCosts = costSumTotal + taxValHero + Number(sx.withhold_sum || 0) + Number(sx.storage_sum || 0) + Number(uploadedExtraCosts || 0);
                     const wbHeld = Math.max(0, salesX - payoutHero) + wbOtherFees;
                     const profitFromPayout = payoutHero - wbOtherFees - yourCosts;
