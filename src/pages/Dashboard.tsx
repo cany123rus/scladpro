@@ -16635,6 +16635,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         const cur = grouped.get(key) || {
           code,
           name,
+          vendor_code: '',
           sales_net: 0,
           returns_gross: 0,
           logistics_sum: 0,
@@ -16654,6 +16655,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           size_stats: {},
         };
 
+        // Артикул поставщика берём из любого отчёта, где он заполнен (в старых записях пусто).
+        if (!cur.vendor_code) {
+          const vcSrc = String(r?.vendor_code || '').trim();
+          if (vcSrc) cur.vendor_code = vcSrc;
+        }
         cur.sales_net += Number(r?.sales_net || 0);
         cur.returns_gross += Number(r?.returns_gross || 0);
         cur.logistics_sum += Number(r?.logistics_sum || 0);
@@ -26024,7 +26030,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     //  он уже учтён в комиссии, иначе прибыль задваивалась бы (поле даёт ~4% — нереально).
                     const wbOtherFees = Number(sx.logistics_sum || 0) + Number(sx.fine_sum || 0);
                     const yourCosts = costSumTotal + taxValHero + Number(sx.withhold_sum || 0) + Number(sx.storage_sum || 0) + Number(uploadedExtraCosts || 0);
-                    const wbHeld = Math.max(0, salesX - payoutHero) + wbOtherFees;
+                    // Без обрезки в 0: если К перечислению > Продаж (компенсации/корректировки),
+                    // комиссия отрицательная — показываем как есть, иначе ломается тождество
+                    // Продажи − УдержалWB − ТвоиРасходы = Прибыль.
+                    const wbHeld = (salesX - payoutHero) + wbOtherFees;
                     const profitFromPayout = payoutHero - wbOtherFees - yourCosts;
                     const R = 52, C = 2 * Math.PI * R, dash = C * Math.min(1, Math.max(0, payoutPct / 100));
                     return (
