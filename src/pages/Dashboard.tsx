@@ -15686,15 +15686,18 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
     // Локальная дата YYYY-MM-DD без UTC-сдвига (toISOString уводил период на день назад).
     const localISO = (d: Date | null) => d ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` : null;
-    // Период по «Дата продажи». WB-отчёт недельный: конец = ПОСЛЕДНЯЯ дата продажи,
-    // начало = конец − 6 дней. Так единичные старые строки (возвраты/корректировки за
-    // прошлые месяцы) не растягивают период — отчёт остаётся неделей.
+    // Период по «Дата продажи»: конец = ПОСЛЕДНЯЯ дата продажи, начало = РЕАЛЬНАЯ первая
+    // дата продажи, но не раньше чем конец − 6 дней. Так короткий отчёт (напр. продажи
+    // только 29–31.12) показывает свой настоящий диапазон, а единичные старые строки
+    // (возвраты/корректировки за прошлые месяцы) не растягивают период дальше недели.
     const finalPeriodEnd = periodEnd || anyDateEnd;
     let finalPeriodStart = periodStart || anyDateStart;
     if (finalPeriodEnd) {
-      const s = new Date(finalPeriodEnd.getTime());
-      s.setDate(s.getDate() - 6);
-      finalPeriodStart = s;
+      const weekFloor = new Date(finalPeriodEnd.getTime());
+      weekFloor.setDate(weekFloor.getDate() - 6);
+      finalPeriodStart = (finalPeriodStart && finalPeriodStart.getTime() > weekFloor.getTime())
+        ? finalPeriodStart
+        : weekFloor;
     }
     const summary = {
       report_number: reportNumber || null,
