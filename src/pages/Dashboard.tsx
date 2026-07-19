@@ -1054,6 +1054,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   // Сентинел «Любой поставщик»: отчёт грузится без привязки к поставщику
   // (нет API-ключа WB → без фото товаров); в БД supplier_id = null.
   const ANY_SUPPLIER_ID = '__any__';
+  // Проверять ли отчёт на дубли при загрузке (галочка рядом с «Себестоимость (файл)»).
+  // Выкл. — отчёт всегда сохраняется новой записью, ничего не обновляя.
+  const [uploadedCheckDuplicates, setUploadedCheckDuplicates] = useState<boolean>(() => {
+    try { return localStorage.getItem('uploaded_check_duplicates_v1') !== '0'; } catch { return true; }
+  });
   const [uploadedPhotoMap, setUploadedPhotoMap] = useState<Record<string, string>>({});
   const [uploadedPhotoLoading, setUploadedPhotoLoading] = useState(false);
   const MAX_UPLOAD_ROWS = 250000;
@@ -15961,7 +15966,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         // (маленький и большой), и они не должны затирать друг друга.
         let existingId: string | null = null;
         const supFilter = (q: any) => isAnySup ? q.is('supplier_id', null) : q.eq('supplier_id', uploadedSelectedSupplierId);
-        if (reportNumber) {
+        if (!uploadedCheckDuplicates) {
+          existingId = null; // проверка дублей выключена галочкой — всегда новая запись
+        } else if (reportNumber) {
           const { data: existing, error: findErr } = await supFilter(supabase
             .from('analytics_upload_reports_raw')
             .select('id'))
@@ -16879,7 +16886,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     try {
       const reportNumber = String((summaryToSave as any)?.report_number || '').trim();
       let duplicateId: string | null = null;
-      {
+      if (uploadedCheckDuplicates) {
         let checkQuery = supabase
           .from('analytics_upload_history')
           .select('id, summary_json, created_at');
@@ -24872,6 +24879,22 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         onChange={async (e) => { const f = e.target.files?.[0]; if (f) await handleUploadCostFile(f); if (e.target) e.target.value = ''; }}
                       />
                     </label>
+                    <label
+                      className="flex items-center gap-2 px-3 py-2 text-sm rounded-xl border border-slate-200 bg-white text-slate-600 cursor-pointer hover:bg-slate-50 shadow-sm select-none"
+                      title="Если выключено — отчёт всегда сохраняется новой записью, без вопроса «Отчёт уже есть» и без обновления существующего."
+                    >
+                      <input
+                        type="checkbox"
+                        checked={uploadedCheckDuplicates}
+                        onChange={(e) => {
+                          const v = e.target.checked;
+                          setUploadedCheckDuplicates(v);
+                          try { localStorage.setItem('uploaded_check_duplicates_v1', v ? '1' : '0'); } catch {}
+                        }}
+                        className="w-4 h-4 accent-indigo-600"
+                      />
+                      Проверять дубли
+                    </label>
                   </div>
 
                   <ExcelUploader
@@ -24932,7 +24955,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       const norm = (v: any) => v ? String(new Date(v).toISOString()).slice(0, 10) : '';
                       const dps = norm(sm?.period_start), dpe = norm(sm?.period_end);
                       let alreadyExists = false;
-                      try {
+                      if (uploadedCheckDuplicates) try {
                         let exQuery = supabase
                           .from('analytics_upload_history')
                           .select('id, summary_json');
