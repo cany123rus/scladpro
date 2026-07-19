@@ -15032,7 +15032,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           if (uploadedCostEditorFilter === 'without_price' && hasPrice) return false;
         }
         if (!q) return true;
-        return String(r?.code || '').toLowerCase().includes(q) || String(r?.name || '').toLowerCase().includes(q);
+        return String(r?.code || '').toLowerCase().includes(q) || String(r?.name || '').toLowerCase().includes(q) || String(r?.vendor_code || '').toLowerCase().includes(q);
       })
       .sort((a: any, b: any) => String(a?.name || '').localeCompare(String(b?.name || ''), 'ru'));
 
@@ -15393,6 +15393,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         log_kinds: {} as Record<string, { sum: number; qty: number }>,
         size_stats: {},
       };
+
+      // «Артикул поставщика» берём из ЛЮБОЙ строки товара, где он заполнен: группу может
+      // создать служебная строка (логистика/удержание) с пустым артикулом, и тогда он терялся.
+      if (!item.vendor_code) {
+        const vcRow = String(row?.['Артикул поставщика'] ?? '').trim();
+        if (vcRow) item.vendor_code = vcRow;
+      }
 
       if (isReturn) {
         item.returns_gross += Math.abs(sales);
@@ -26534,7 +26541,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                 <div className="w-32 h-40 rounded border border-slate-200 bg-slate-100 text-slate-400 text-xs flex items-center justify-center">N/A</div>
                               )}
                             </td>
-                            <td className="px-3 py-2 sticky left-[140px] bg-white group-hover:bg-white z-30 w-[160px] min-w-[160px] max-w-[160px] border-r border-slate-200 shadow-[2px_0_0_rgba(229,231,235,0.9)]">{row.code ? <a href={`https://www.wildberries.ru/catalog/${encodeURIComponent(String(row.code))}/detail.aspx`} target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline">{row.code}</a> : '-'}</td>
+                            <td className="px-3 py-2 sticky left-[140px] bg-white group-hover:bg-white z-30 w-[160px] min-w-[160px] max-w-[160px] border-r border-slate-200 shadow-[2px_0_0_rgba(229,231,235,0.9)]">{row.code ? <a href={`https://www.wildberries.ru/catalog/${encodeURIComponent(String(row.code))}/detail.aspx`} target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline">{row.code}</a> : '-'}{row.vendor_code ? <div className="text-[11px] text-slate-400 font-normal mt-0.5" title="Артикул поставщика">{row.vendor_code}</div> : null}</td>
                             <td className="px-3 py-2 sticky left-[300px] bg-white group-hover:bg-white z-30 w-[320px] min-w-[320px] max-w-[320px] border-r border-slate-200 shadow-[2px_0_0_rgba(229,231,235,0.9)] align-top">
                               <div className="whitespace-normal break-words leading-5" title={row.name || ''}>{row.name || '-'}</div>
                               <div className="mt-1">
@@ -26752,6 +26759,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             )}
                             <div className="min-w-0 flex-1">
                               <div className="text-xs text-slate-500">{code}</div>
+                              {r?.vendor_code ? <div className="text-[11px] text-slate-400" title="Артикул поставщика">{r.vendor_code}</div> : null}
                               <div className="text-sm text-slate-900 leading-5 break-words">{r?.name || '-'}</div>
                               <div className="mt-2">
                                 <input
