@@ -15946,8 +15946,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       };
 
       const saveWithPayload = async (p: any) => {
-        // Дедуп: по номеру отчёта, а если его нет (в WB-отчёте колонки нет) —
-        // по поставщику + периоду (чтобы один и тот же отчёт не плодил дубли).
+        // Дедуп: по номеру отчёта. Если номера нет — по поставщику + периоду, но только
+        // среди строк БЕЗ номера: за один период бывает несколько разных отчётов
+        // (маленький и большой), и они не должны затирать друг друга.
         let existingId: string | null = null;
         const supFilter = (q: any) => isAnySup ? q.is('supplier_id', null) : q.eq('supplier_id', uploadedSelectedSupplierId);
         if (reportNumber) {
@@ -15964,6 +15965,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
             .select('id'))
             .eq('period_start', p.period_start)
             .eq('period_end', p.period_end)
+            .is('report_number', null)
             .limit(1)
             .maybeSingle();
           if (findErr) throw findErr;
@@ -16884,8 +16886,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           const rn = String(x?.summary_json?.report_number || '').trim();
           const xps = x?.summary_json?.period_start ? new Date(x.summary_json.period_start).toISOString().slice(0, 10) : '';
           const xpe = x?.summary_json?.period_end ? new Date(x.summary_json.period_end).toISOString().slice(0, 10) : '';
-          // Если есть номер отчёта — сверяем по номеру+периоду; иначе по периоду.
-          if (reportNumber) return rn === reportNumber && xps === psIso && xpe === peIso;
+          // Дедуп ТОЛЬКО по номеру отчёта: за один период бывает несколько разных отчётов
+          // (маленький и большой) — оба должны сохраняться. По периоду сверяем лишь когда
+          // номера нет ни у нового, ни у существующего.
+          if (reportNumber) return rn === reportNumber;
+          if (rn) return false;
           return !!psIso && !!peIso && xps === psIso && xpe === peIso;
         });
 
@@ -24927,9 +24932,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         const { data: ex } = await exQuery
                           .order('created_at', { ascending: false })
                           .limit(400);
+                        // Дедуп ТОЛЬКО по номеру отчёта: за один период бывает несколько разных
+                        // отчётов (маленький и большой) — они должны сохраняться оба, а не затирать
+                        // друг друга. По периоду сверяем лишь если номера нет ни у нового, ни у старого.
                         alreadyExists = (ex || []).some((x: any) => {
                           const rn = String(x?.summary_json?.report_number || '').trim();
-                          if (dnum && rn) return rn === dnum;
+                          if (dnum) return rn === dnum;
+                          if (rn) return false;
                           const xps = norm(x?.summary_json?.period_start), xpe = norm(x?.summary_json?.period_end);
                           return !!dps && !!dpe && xps === dps && xpe === dpe;
                         });
