@@ -1143,7 +1143,16 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       return {};
     }
   });
-  const [analyticsSubTab, setAnalyticsSubTab] = useState<'reports' | 'ads' | 'ads_api'>('reports');
+  const [analyticsSubTab, setAnalyticsSubTab] = useState<'reports' | 'ads' | 'ads_api' | 'calculator'>('reports');
+  // Калькулятор юнит-экономики товара (вкладка «Калькулятор товара»).
+  const [calcCost, setCalcCost] = useState<number>(700);
+  const [calcPrice, setCalcPrice] = useState<number>(1500);
+  const [calcCommissionPct, setCalcCommissionPct] = useState<number>(8);
+  const [calcLogisticsValue, setCalcLogisticsValue] = useState<number>(5);
+  const [calcLogisticsMode, setCalcLogisticsMode] = useState<'pct' | 'rub'>('pct');
+  const [calcAdsPct, setCalcAdsPct] = useState<number>(14);
+  const [calcStorage, setCalcStorage] = useState<number>(0);
+  const [calcUsnRate, setCalcUsnRate] = useState<number>(0.06);
   // ── Реклама API (WB Продвижение) ──
   const [adsApiSupplierId, setAdsApiSupplierId] = useState('');
   const [adsApiFrom, setAdsApiFrom] = useState('');
@@ -24259,6 +24268,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     >
                       Реклама API
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => setAnalyticsSubTab('calculator')}
+                      className={`px-4 sm:px-5 py-2 text-sm font-semibold rounded-xl transition-all ${analyticsSubTab === 'calculator' ? 'bg-white text-indigo-700 shadow-sm' : 'text-white/90 hover:bg-white/10'}`}
+                    >
+                      Калькулятор товара
+                    </button>
                   </div>
                 </div>
               </div>
@@ -24903,6 +24919,179 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   })()}
                 </div>
               )}
+
+              {analyticsSubTab === 'calculator' && (() => {
+                const num = (v: any) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+                const cost = num(calcCost);
+                const cPct = num(calcCommissionPct);
+                const lVal = num(calcLogisticsValue);
+                const aPct = num(calcAdsPct);
+                const storage = num(calcStorage);
+                const usnRate = num(calcUsnRate);
+                const VAT = 0.22;
+                const ex = (a: number) => (a * VAT) / (1 + VAT);
+                const vS = (a: number) => uploadedVatSalesIncluded ? ex(a) : a * VAT;
+                const vC = (a: number) => uploadedVatCostIncluded ? ex(a) : a * VAT;
+                // Полный расчёт юнит-экономики для произвольной цены (нужен и для точки безубыточности).
+                const calcAt = (p: number) => {
+                  const commission = p * cPct / 100;
+                  const logistics = calcLogisticsMode === 'pct' ? p * lVal / 100 : lVal;
+                  const ads = p * aPct / 100;
+                  const wbFees = commission + logistics + ads + storage;
+                  const fromWb = p - wbFees;
+                  const vatOut = vS(p);
+                  const vatInGoods = vC(cost);
+                  const vatInServices = ex(wbFees);
+                  const vatToPay = vatOut - vatInGoods - vatInServices;
+                  const before = fromWb - cost - vatToPay;
+                  const osnoTax = Math.max(0, before) * 0.25;
+                  const osno = before - osnoTax;
+                  const usnTax = usnRate === 0.06 ? p * 0.06 : Math.max(0, fromWb - cost) * usnRate;
+                  const usn = fromWb - cost - usnTax;
+                  return { commission, logistics, ads, wbFees, fromWb, vatOut, vatInGoods, vatInServices, vatToPay, before, osnoTax, osno, usnTax, usn };
+                };
+                const R = calcAt(num(calcPrice));
+                const breakeven = (pick: (r: ReturnType<typeof calcAt>) => number) => {
+                  let lo = 0, hi = Math.max(cost * 20, 10000);
+                  if (pick(calcAt(hi)) < 0) return null;
+                  for (let i = 0; i < 60; i += 1) { const mid = (lo + hi) / 2; if (pick(calcAt(mid)) >= 0) hi = mid; else lo = mid; }
+                  return hi;
+                };
+                const beOsno = breakeven((r) => r.osno);
+                const beUsn = breakeven((r) => r.usn);
+                const price = num(calcPrice);
+                const money = (v: number) => v.toLocaleString('ru-RU', { maximumFractionDigits: 2 });
+                const pctOf = (v: number, base: number) => base > 0 ? `${(v / base * 100).toFixed(1)}%` : '—';
+                const fromReport = () => {
+                  const s: any = uploadedReportSummary; if (!s) return;
+                  const sales = num(s.sales_net); if (sales <= 0) return;
+                  setCalcCommissionPct(Number(((sales - num(s.payout_net)) / sales * 100).toFixed(2)));
+                  setCalcLogisticsMode('pct');
+                  setCalcLogisticsValue(Number((num(s.logistics_sum) / sales * 100).toFixed(2)));
+                  setCalcAdsPct(Number((num(s.withhold_sum) / sales * 100).toFixed(2)));
+                  setCalcStorage(0);
+                  showToast('Подставлены комиссия, логистика и реклама из открытого отчёта', 'success');
+                };
+                const Field = ({ label, value, onChange, suffix, step = '0.01' }: any) => (
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">{label}</label>
+                    <div className="flex items-center gap-1">
+                      <input type="number" step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+                      {suffix ? <span className="text-xs text-slate-400 w-8 shrink-0">{suffix}</span> : null}
+                    </div>
+                  </div>
+                );
+                const Line = ({ label, value, sign, strong, muted }: any) => (
+                  <div className={`flex items-center justify-between py-1.5 text-sm ${strong ? 'font-bold text-slate-900' : muted ? 'text-slate-400' : 'text-slate-600'}`}>
+                    <span>{sign}{label}</span>
+                    <span className={strong ? '' : 'font-medium text-slate-800'}>{money(value)} ₽</span>
+                  </div>
+                );
+                return (
+                  <div className="w-full space-y-4">
+                    <div className="bg-white rounded-xl border border-slate-100 p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                        <div className="font-semibold text-slate-900">Юнит-экономика товара</div>
+                        <button type="button" onClick={fromReport} disabled={!uploadedReportSummary} className="px-3 py-1.5 text-xs font-semibold rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 disabled:opacity-50 disabled:cursor-not-allowed">
+                          Подставить из отчёта
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+                        <Field label="Себестоимость" value={calcCost} onChange={setCalcCost} suffix="₽" />
+                        <Field label="Цена для покупателя" value={calcPrice} onChange={setCalcPrice} suffix="₽" />
+                        <Field label="Комиссия WB" value={calcCommissionPct} onChange={setCalcCommissionPct} suffix="%" />
+                        <div>
+                          <label className="block text-xs font-medium text-slate-600 mb-1">Логистика</label>
+                          <div className="flex items-center gap-1">
+                            <input type="number" step="0.01" value={calcLogisticsValue} onChange={(e) => setCalcLogisticsValue(Number(e.target.value))} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+                            <select value={calcLogisticsMode} onChange={(e) => setCalcLogisticsMode(e.target.value as any)} className="px-1 py-2 border border-slate-300 rounded-lg text-xs">
+                              <option value="pct">%</option>
+                              <option value="rub">₽</option>
+                            </select>
+                          </div>
+                        </div>
+                        <Field label="Реклама (ДРР)" value={calcAdsPct} onChange={setCalcAdsPct} suffix="%" />
+                        <Field label="Хранение" value={calcStorage} onChange={setCalcStorage} suffix="₽" />
+                      </div>
+                      <div className="mt-3 text-xs text-slate-500">
+                        Комиссия и реклама — % от цены. Логистика — {calcLogisticsMode === 'pct' ? '% от цены' : '₽ за единицу'}.
+                        НДС: продажи {uploadedVatSalesIncluded ? '×22/122' : '×22%'}, себестоимость {uploadedVatCostIncluded ? '×22/122' : '×22%'} (меняется в «Аналитике отчётов»).
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                      {/* ОСНО */}
+                      <div className="bg-white rounded-xl border border-slate-200 p-4">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="font-bold text-slate-900">ОСНО · НДС 22% + налог 25%</div>
+                        </div>
+                        <Line label="Цена для покупателя" value={price} />
+                        <Line label="Комиссия WB" value={-R.commission} sign="− " />
+                        <Line label="Логистика" value={-R.logistics} sign="− " />
+                        <Line label="Реклама" value={-R.ads} sign="− " />
+                        {storage > 0 && <Line label="Хранение" value={-storage} sign="− " />}
+                        <div className="border-t border-slate-200 my-1" />
+                        <Line label="Пришло от WB" value={R.fromWb} strong />
+                        <div className="mt-2 rounded-lg bg-slate-50 p-2">
+                          <Line label="НДС выходной" value={R.vatOut} muted />
+                          <Line label="НДС входной (товар)" value={-R.vatInGoods} sign="− " muted />
+                          <Line label="НДС входной (услуги WB)" value={-R.vatInServices} sign="− " muted />
+                          <Line label="НДС к уплате" value={R.vatToPay} strong />
+                        </div>
+                        <Line label="Себестоимость" value={-cost} sign="− " />
+                        <Line label="НДС к уплате" value={-R.vatToPay} sign="− " />
+                        <div className="border-t border-slate-200 my-1" />
+                        <Line label="Прибыль до налога" value={R.before} strong />
+                        <Line label="Налог на прибыль 25%" value={-R.osnoTax} sign="− " />
+                        <div className="border-t-2 border-slate-300 my-1" />
+                        <div className={`flex items-center justify-between py-2 text-lg font-extrabold ${R.osno < 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
+                          <span>Чистая прибыль</span><span>{money(R.osno)} ₽</span>
+                        </div>
+                        <div className="flex gap-4 text-xs text-slate-500">
+                          <span>маржа <b className="text-slate-700">{pctOf(R.osno, price)}</b></span>
+                          <span>ROI <b className="text-slate-700">{pctOf(R.osno, cost)}</b></span>
+                          <span>безубыток <b className="text-slate-700">{beOsno == null ? '—' : `${money(Math.ceil(beOsno))} ₽`}</b></span>
+                        </div>
+                      </div>
+
+                      {/* УСН */}
+                      <div className="bg-white rounded-xl border border-slate-200 p-4">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="font-bold text-slate-900">УСН · без НДС</div>
+                          <select value={usnRate} onChange={(e) => setCalcUsnRate(Number(e.target.value))} className="px-2 py-1 text-xs border border-slate-300 rounded-lg">
+                            <option value={0.06}>6% «Доходы»</option>
+                            <option value={0.15}>15% «Доходы − расходы»</option>
+                          </select>
+                        </div>
+                        <Line label="Цена для покупателя" value={price} />
+                        <Line label="Комиссия WB" value={-R.commission} sign="− " />
+                        <Line label="Логистика" value={-R.logistics} sign="− " />
+                        <Line label="Реклама" value={-R.ads} sign="− " />
+                        {storage > 0 && <Line label="Хранение" value={-storage} sign="− " />}
+                        <div className="border-t border-slate-200 my-1" />
+                        <Line label="Пришло от WB" value={R.fromWb} strong />
+                        <Line label="Себестоимость" value={-cost} sign="− " />
+                        <Line label={usnRate === 0.06 ? 'Налог 6% с выручки' : 'Налог 15% с прибыли'} value={-R.usnTax} sign="− " />
+                        <div className="border-t-2 border-slate-300 my-1" />
+                        <div className={`flex items-center justify-between py-2 text-lg font-extrabold ${R.usn < 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
+                          <span>Чистая прибыль</span><span>{money(R.usn)} ₽</span>
+                        </div>
+                        <div className="flex gap-4 text-xs text-slate-500">
+                          <span>маржа <b className="text-slate-700">{pctOf(R.usn, price)}</b></span>
+                          <span>ROI <b className="text-slate-700">{pctOf(R.usn, cost)}</b></span>
+                          <span>безубыток <b className="text-slate-700">{beUsn == null ? '—' : `${money(Math.ceil(beUsn))} ₽`}</b></span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className={`rounded-xl border p-3 text-sm ${R.osno >= R.usn ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-indigo-200 bg-indigo-50 text-indigo-800'}`}>
+                      {R.osno >= R.usn
+                        ? <>Выгоднее <b>ОСНО с НДС</b>: +{money(R.osno - R.usn)} ₽ с единицы</>
+                        : <>Выгоднее <b>УСН {usnRate === 0.06 ? '6%' : '15%'}</b>: +{money(R.usn - R.osno)} ₽ с единицы</>}
+                    </div>
+                  </div>
+                );
+              })()}
 
               <div className={analyticsSubTab === 'reports' ? 'w-full' : 'hidden'}>
                 <div className="bg-white rounded-xl border border-slate-100 p-4 w-full">
