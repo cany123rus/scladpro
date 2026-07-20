@@ -316,6 +316,21 @@ const CalcSection = ({ title, color, children, right }: any) => (
   </div>
 );
 
+// Строка результата: сумма + доля от продажи (base). Модульный уровень — см. коммент выше.
+const CalcRow = ({ label, value, base, strong, tone, hint }: any) => {
+  const v = Number(value) || 0;
+  const pct = Number(base) > 0 ? `${(v / Number(base) * 100).toFixed(1)}%` : '';
+  return (
+    <div className={`flex justify-between items-baseline gap-2 ${strong ? 'py-1.5 mt-1 border-t font-extrabold text-base' : 'py-0.5'} ${tone || ''}`}>
+      <span className={strong ? '' : 'text-slate-600'}>{label}{hint ? <span className="ml-1 text-[10px] text-slate-400">{hint}</span> : null}</span>
+      <span className="tabular-nums whitespace-nowrap">
+        {v.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽
+        {pct ? <span className={`ml-1.5 text-[11px] font-normal ${strong ? 'opacity-70' : 'text-slate-400'}`}>{pct}</span> : null}
+      </span>
+    </div>
+  );
+};
+
 const CalcLine = ({ label, value, sign, strong, muted }: any) => (
   <div className={`flex items-center justify-between py-1.5 text-sm ${strong ? 'font-bold text-slate-900' : muted ? 'text-slate-400' : 'text-slate-600'}`}>
     <span>{sign}{label}</span>
@@ -25166,7 +25181,22 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     vatOut, vatInServices, vatToPay, beforeO, taxO, osno, taxU, usn };
                 };
 
-                const rows = calcItems.map((it) => ({ it, r: computeItem(it) }));
+                // Цена безубытка: подбираем цену продажи бинарным поиском до нулевой прибыли.
+                const breakevenFor = (it: any, pick: (r: any) => number) => {
+                  const c = computeItem(it);
+                  let lo = 0;
+                  let hi = Math.max(c.costOsno, c.costUsn, 100) * 30 + 10000;
+                  const at = (p: number) => pick(computeItem({ ...it, price: p }));
+                  if (at(hi) < 0) return null;
+                  for (let i = 0; i < 50; i += 1) { const mid = (lo + hi) / 2; if (at(mid) >= 0) hi = mid; else lo = mid; }
+                  return hi;
+                };
+                const rows = calcItems.map((it) => ({
+                  it,
+                  r: computeItem(it),
+                  beO: breakevenFor(it, (x) => x.osno),
+                  beU: breakevenFor(it, (x) => x.usn),
+                }));
                 const tot = rows.reduce((a, x) => ({
                   rev: a.rev + x.r.p, osno: a.osno + x.r.osno, usn: a.usn + x.r.usn,
                   cost: a.cost + x.r.costOsno, duty: a.duty + x.r.duty, vat: a.vat + x.r.importVat, log: a.log + x.r.logistics,
@@ -25249,7 +25279,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     </div>
 
                     {/* Позиции */}
-                    {rows.map(({ it, r }, idx) => {
+                    {rows.map(({ it, r, beO, beU }, idx) => {
                       const cat = IMPORT_CATEGORIES.find((c) => c.key === it.category);
                       const country = IMPORT_COUNTRIES.find((c) => c.key === it.country);
                       const win = r.osno >= r.usn;
@@ -25367,10 +25397,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 text-sm mt-1">
                               <div className="rounded-xl bg-slate-50 border border-slate-200 p-3">
                                 <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500 mb-2">{r.isRu ? 'Закупка' : 'Ввоз'}</div>
-                                <div className="flex justify-between py-0.5"><span className="text-slate-600">{r.isRu ? 'С НДС' : 'Закупка'}</span><span className="tabular-nums">{money(r.purchaseRub)} ₽</span></div>
-                                {!r.isRu && <div className="flex justify-between py-0.5"><span className="text-slate-600">Там. стоимость</span><span className="tabular-nums">{money(r.customs)} ₽</span></div>}
-                                {!r.isRu && <div className="flex justify-between py-0.5"><span className="text-slate-600">Пошлина{r.dutyByWeight ? ' (вес)' : ''}</span><span className="font-medium tabular-nums">{money(r.duty)} ₽</span></div>}
-                                <div className="flex justify-between py-0.5"><span className="text-slate-600">{r.isRu ? 'НДС в закупке' : 'НДС ввозной'}</span><span className="tabular-nums">{money(r.importVat)} ₽</span></div>
+                                <CalcRow label={r.isRu ? 'С НДС' : 'Закупка'} value={r.purchaseRub} base={r.p} />
+                                {!r.isRu && <CalcRow label="Там. стоимость" value={r.customs} base={r.p} />}
+                                {!r.isRu && Math.abs(r.duty) > 0.005 && <CalcRow label={`Пошлина${r.dutyByWeight ? ' (вес)' : ''}`} value={r.duty} base={r.p} />}
+                                <CalcRow label={r.isRu ? 'НДС в закупке' : 'НДС ввозной'} value={r.importVat} base={r.p} />
                                 <div className="mt-2 pt-2 border-t border-slate-200 text-[11px] text-slate-500">
                                   Логистика УСН: {money(r.fwd)} прямая / {(B * 100).toFixed(0)}% + {money(r.back)} возврат → <b className="text-slate-700">{money(r.logistics)} ₽</b>
                                 </div>
@@ -25379,22 +25409,22 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                               <div className="rounded-xl border-2 border-emerald-200 bg-emerald-50/40 p-3">
                                 <div className="text-[11px] font-bold uppercase tracking-wide text-emerald-700 mb-2">ОСНО · НДС 22% + 25%</div>
-                                <div className="flex justify-between py-0.5"><span className="text-slate-600">Себестоимость</span><span className="tabular-nums">{money(r.costOsno)} ₽</span></div>
-                                <div className="flex justify-between py-0.5"><span className="text-slate-600">Пришло от WB</span><span className="tabular-nums">{money(r.fromO)} ₽</span></div>
-                                <div className="flex justify-between py-0.5"><span className="text-slate-600">НДС к уплате</span><span className="tabular-nums">{money(r.vatToPay)} ₽</span></div>
-                                <div className="flex justify-between py-0.5"><span className="text-slate-600">Налог 25%</span><span className="tabular-nums">{money(r.taxO)} ₽</span></div>
-                                <div className={`flex justify-between py-1.5 mt-1 border-t border-emerald-200 font-extrabold text-base ${r.osno < 0 ? 'text-rose-600' : 'text-emerald-700'}`}><span>Прибыль</span><span className="tabular-nums">{money(r.osno)} ₽</span></div>
-                                <div className="text-[11px] text-slate-500">маржа {pctOf(r.osno, r.p)} · ROI {pctOf(r.osno, r.costOsno)}</div>
+                                <CalcRow label="Себестоимость" value={r.costOsno} base={r.p} />
+                                <CalcRow label="Пришло от WB" value={r.fromO} base={r.p} />
+                                <CalcRow label="НДС к уплате" value={r.vatToPay} base={r.p} />
+                                <CalcRow label="Налог 25%" value={r.taxO} base={r.p} />
+                                <CalcRow label="Прибыль" value={r.osno} base={r.p} strong tone={`border-emerald-200 ${r.osno < 0 ? 'text-rose-600' : 'text-emerald-700'}`} />
+                                <div className="text-[11px] text-slate-500">ROI {pctOf(r.osno, r.costOsno)} · безубыток <b className="text-slate-700">{beO == null ? '—' : `${money(Math.ceil(beO))} ₽`}</b></div>
                               </div>
 
                               <div className="rounded-xl border-2 border-indigo-200 bg-indigo-50/40 p-3">
                                 <div className="text-[11px] font-bold uppercase tracking-wide text-indigo-700 mb-2">УСН {usnRate === 0.06 ? '6%' : '15%'} · без НДС</div>
-                                <div className="flex justify-between py-0.5"><span className="text-slate-600">Себестоимость</span><span className="tabular-nums">{money(r.costUsn)} ₽</span></div>
-                                <div className="flex justify-between py-0.5"><span className="text-slate-600">Логистика</span><span className="tabular-nums">{money(r.logistics)} ₽</span></div>
-                                <div className="flex justify-between py-0.5"><span className="text-slate-600">Пришло от WB</span><span className="tabular-nums">{money(r.fromU)} ₽</span></div>
-                                <div className="flex justify-between py-0.5"><span className="text-slate-600">Налог</span><span className="tabular-nums">{money(r.taxU)} ₽</span></div>
-                                <div className={`flex justify-between py-1.5 mt-1 border-t border-indigo-200 font-extrabold text-base ${r.usn < 0 ? 'text-rose-600' : 'text-indigo-700'}`}><span>Прибыль</span><span className="tabular-nums">{money(r.usn)} ₽</span></div>
-                                <div className="text-[11px] text-slate-500">маржа {pctOf(r.usn, r.p)} · ROI {pctOf(r.usn, r.costUsn)}</div>
+                                <CalcRow label="Себестоимость" value={r.costUsn} base={r.p} />
+                                <CalcRow label="Логистика" value={r.logistics} base={r.p} />
+                                <CalcRow label="Пришло от WB" value={r.fromU} base={r.p} />
+                                <CalcRow label="Налог" value={r.taxU} base={r.p} />
+                                <CalcRow label="Прибыль" value={r.usn} base={r.p} strong tone={`border-indigo-200 ${r.usn < 0 ? 'text-rose-600' : 'text-indigo-700'}`} />
+                                <div className="text-[11px] text-slate-500">ROI {pctOf(r.usn, r.costUsn)} · безубыток <b className="text-slate-700">{beU == null ? '—' : `${money(Math.ceil(beU))} ₽`}</b></div>
                               </div>
                             </div>
                           </div>
@@ -25416,7 +25446,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         {[
                           { l: 'Выручка', v: tot.rev, c: 'text-white' },
                           { l: 'Себестоимость', v: tot.cost, c: 'text-white' },
-                          { l: 'Пошлина', v: tot.duty, c: 'text-amber-300' },
+                          // Нулевую пошлину не показываем — не занимает место зря.
+                          ...(Math.abs(tot.duty) > 0.005 ? [{ l: 'Пошлина', v: tot.duty, c: 'text-amber-300' }] : []),
                           { l: 'Логистика (УСН)', v: tot.log, c: 'text-sky-300' },
                           { l: 'Прибыль ОСНО', v: tot.osno, c: tot.osno < 0 ? 'text-rose-400' : 'text-emerald-400' },
                           { l: 'Прибыль УСН', v: tot.usn, c: tot.usn < 0 ? 'text-rose-400' : 'text-indigo-300' },
@@ -25424,6 +25455,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           <div key={x.l}>
                             <div className="text-slate-400 text-[11px] uppercase tracking-wide">{x.l}</div>
                             <div className={`font-extrabold text-lg tabular-nums ${x.c}`}>{money(x.v)} ₽</div>
+                            <div className="text-[11px] text-slate-500 tabular-nums">{tot.rev > 0 ? `${(x.v / tot.rev * 100).toFixed(1)}% от продаж` : ''}</div>
                           </div>
                         ))}
                       </div>
