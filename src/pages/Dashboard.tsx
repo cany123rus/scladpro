@@ -1174,13 +1174,18 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   });
   const [analyticsSubTab, setAnalyticsSubTab] = useState<'reports' | 'ads' | 'ads_api' | 'calculator'>('reports');
   // Калькулятор юнит-экономики товара (вкладка «Калькулятор товара»).
-  const [calcCost, setCalcCost] = useState<number>(700);
   const [calcPrice, setCalcPrice] = useState<number>(1500);
   const [calcCommissionPct, setCalcCommissionPct] = useState<number>(8);
+  // Логистика — только УСН (на ОСНО другие условия).
   const [calcLogisticsValue, setCalcLogisticsValue] = useState<number>(5);
   const [calcLogisticsMode, setCalcLogisticsMode] = useState<'pct' | 'rub'>('pct');
-  const [calcAdsPct, setCalcAdsPct] = useState<number>(14);
-  const [calcStorage, setCalcStorage] = useState<number>(0);
+  // Себестоимость, реклама и хранение задаются отдельно для каждого режима.
+  const [calcCostOsno, setCalcCostOsno] = useState<number>(700);
+  const [calcCostUsn, setCalcCostUsn] = useState<number>(700);
+  const [calcAdsPctOsno, setCalcAdsPctOsno] = useState<number>(14);
+  const [calcAdsPctUsn, setCalcAdsPctUsn] = useState<number>(14);
+  const [calcStoragePctOsno, setCalcStoragePctOsno] = useState<number>(0);
+  const [calcStoragePctUsn, setCalcStoragePctUsn] = useState<number>(0);
   const [calcUsnRate, setCalcUsnRate] = useState<number>(0.06);
   // ── Реклама API (WB Продвижение) ──
   const [adsApiSupplierId, setAdsApiSupplierId] = useState('');
@@ -24951,11 +24956,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
               {analyticsSubTab === 'calculator' && (() => {
                 const num = (v: any) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
-                const cost = num(calcCost);
+                const costOsno = num(calcCostOsno);
+                const costUsn = num(calcCostUsn);
                 const cPct = num(calcCommissionPct);
                 const lVal = num(calcLogisticsValue);
-                const aPct = num(calcAdsPct);
-                const storage = num(calcStorage);
+                const aPctOsno = num(calcAdsPctOsno);
+                const aPctUsn = num(calcAdsPctUsn);
+                const stPctOsno = num(calcStoragePctOsno);
+                const stPctUsn = num(calcStoragePctUsn);
                 const usnRate = num(calcUsnRate);
                 const VAT = 0.22;
                 const ex = (a: number) => (a * VAT) / (1 + VAT);
@@ -24965,26 +24973,29 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 const calcAt = (p: number) => {
                   const commission = p * cPct / 100;
                   const logistics = calcLogisticsMode === 'pct' ? p * lVal / 100 : lVal;
-                  const ads = p * aPct / 100;
+                  const adsOsno = p * aPctOsno / 100;
+                  const adsUsn = p * aPctUsn / 100;
+                  const storageOsno = p * stPctOsno / 100;
+                  const storageUsn = p * stPctUsn / 100;
                   // На ОСНО логистики нет (другие условия) — не вычитаем её и НДС по ней не берём.
-                  const feesOsno = commission + ads + storage;
-                  const feesUsn = commission + logistics + ads + storage;
+                  const feesOsno = commission + adsOsno + storageOsno;
+                  const feesUsn = commission + logistics + adsUsn + storageUsn;
                   const fromWbOsno = p - feesOsno;
                   const fromWbUsn = p - feesUsn;
                   const vatOut = vS(p);
-                  const vatInGoods = vC(cost);
+                  const vatInGoods = vC(costOsno);
                   const vatInServices = ex(feesOsno);
                   const vatToPay = vatOut - vatInGoods - vatInServices;
-                  const before = fromWbOsno - cost - vatToPay;
+                  const before = fromWbOsno - costOsno - vatToPay;
                   const osnoTax = Math.max(0, before) * 0.25;
                   const osno = before - osnoTax;
-                  const usnTax = usnRate === 0.06 ? p * 0.06 : Math.max(0, fromWbUsn - cost) * usnRate;
-                  const usn = fromWbUsn - cost - usnTax;
-                  return { commission, logistics, ads, feesOsno, feesUsn, fromWbOsno, fromWbUsn, vatOut, vatInGoods, vatInServices, vatToPay, before, osnoTax, osno, usnTax, usn };
+                  const usnTax = usnRate === 0.06 ? p * 0.06 : Math.max(0, fromWbUsn - costUsn) * usnRate;
+                  const usn = fromWbUsn - costUsn - usnTax;
+                  return { commission, logistics, adsOsno, adsUsn, storageOsno, storageUsn, feesOsno, feesUsn, fromWbOsno, fromWbUsn, vatOut, vatInGoods, vatInServices, vatToPay, before, osnoTax, osno, usnTax, usn };
                 };
                 const R = calcAt(num(calcPrice));
                 const breakeven = (pick: (r: ReturnType<typeof calcAt>) => number) => {
-                  let lo = 0, hi = Math.max(cost * 20, 10000);
+                  let lo = 0, hi = Math.max(Math.max(costOsno, costUsn) * 20, 10000);
                   if (pick(calcAt(hi)) < 0) return null;
                   for (let i = 0; i < 60; i += 1) { const mid = (lo + hi) / 2; if (pick(calcAt(mid)) >= 0) hi = mid; else lo = mid; }
                   return hi;
@@ -25000,9 +25011,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   setCalcCommissionPct(Number(((sales - num(s.payout_net)) / sales * 100).toFixed(2)));
                   setCalcLogisticsMode('pct');
                   setCalcLogisticsValue(Number((num(s.logistics_sum) / sales * 100).toFixed(2)));
-                  setCalcAdsPct(Number((num(s.withhold_sum) / sales * 100).toFixed(2)));
-                  setCalcStorage(0);
-                  showToast('Подставлены комиссия, логистика и реклама из открытого отчёта', 'success');
+                  const adsPct = Number((num(s.withhold_sum) / sales * 100).toFixed(2));
+                  const stPct = Number((num(s.storage_sum) / sales * 100).toFixed(2));
+                  setCalcAdsPctOsno(adsPct); setCalcAdsPctUsn(adsPct);
+                  setCalcStoragePctOsno(stPct); setCalcStoragePctUsn(stPct);
+                  showToast('Подставлены комиссия, логистика, реклама и хранение из открытого отчёта', 'success');
                 };
                 const Field = CalcField;
                 const Line = CalcLine;
@@ -25015,8 +25028,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           Подставить из отчёта
                         </button>
                       </div>
-                      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
-                        <Field label="Себестоимость" value={calcCost} onChange={setCalcCost} suffix="₽" />
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                         <Field label="Цена для покупателя" value={calcPrice} onChange={setCalcPrice} suffix="₽" />
                         <Field label="Комиссия WB" value={calcCommissionPct} onChange={setCalcCommissionPct} suffix="%" />
                         <div>
@@ -25029,11 +25041,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             </select>
                           </div>
                         </div>
-                        <Field label="Реклама (ДРР)" value={calcAdsPct} onChange={setCalcAdsPct} suffix="%" />
-                        <Field label="Хранение" value={calcStorage} onChange={setCalcStorage} suffix="₽" />
                       </div>
                       <div className="mt-3 text-xs text-slate-500">
-                        Комиссия и реклама — % от цены. Логистика ({calcLogisticsMode === 'pct' ? '% от цены' : '₽ за единицу'}) применяется <b>только в УСН</b> — на ОСНО другие условия, там её нет.
+                        Общие поля. Себестоимость, реклама и хранение задаются отдельно в каждой колонке ниже.
+                        Комиссия — % от цены, хранение и реклама — % от цены. Логистика ({calcLogisticsMode === 'pct' ? '% от цены' : '₽ за единицу'}) применяется <b>только в УСН</b> — на ОСНО другие условия, там её нет.
                         НДС: продажи {uploadedVatSalesIncluded ? '×22/122' : '×22%'}, себестоимость {uploadedVatCostIncluded ? '×22/122' : '×22%'} (меняется в «Аналитике отчётов»).
                       </div>
                     </div>
@@ -25044,10 +25055,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <div className="flex items-center justify-between mb-2">
                           <div className="font-bold text-slate-900">ОСНО · НДС 22% + налог 25%</div>
                         </div>
+                        <div className="grid grid-cols-3 gap-2 mb-3 pb-3 border-b border-slate-200">
+                          <Field label="Себестоимость" value={calcCostOsno} onChange={setCalcCostOsno} suffix="₽" />
+                          <Field label="Реклама (ДРР)" value={calcAdsPctOsno} onChange={setCalcAdsPctOsno} suffix="%" />
+                          <Field label="Хранение" value={calcStoragePctOsno} onChange={setCalcStoragePctOsno} suffix="%" />
+                        </div>
                         <Line label="Цена для покупателя" value={price} />
                         <Line label="Комиссия WB" value={-R.commission} sign="− " />
-                        <Line label="Реклама" value={-R.ads} sign="− " />
-                        {storage > 0 && <Line label="Хранение" value={-storage} sign="− " />}
+                        <Line label="Реклама" value={-R.adsOsno} sign="− " />
+                        {R.storageOsno > 0 && <Line label="Хранение" value={-R.storageOsno} sign="− " />}
                         <div className="flex items-center justify-between py-1.5 text-sm text-slate-400">
                           <span>Логистика</span><span className="italic">не применяется</span>
                         </div>
@@ -25059,7 +25075,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           <Line label="НДС входной (услуги WB)" value={-R.vatInServices} sign="− " muted />
                           <Line label="НДС к уплате" value={R.vatToPay} strong />
                         </div>
-                        <Line label="Себестоимость" value={-cost} sign="− " />
+                        <Line label="Себестоимость" value={-costOsno} sign="− " />
                         <Line label="НДС к уплате" value={-R.vatToPay} sign="− " />
                         <div className="border-t border-slate-200 my-1" />
                         <Line label="Прибыль до налога" value={R.before} strong />
@@ -25070,7 +25086,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         </div>
                         <div className="flex gap-4 text-xs text-slate-500">
                           <span>маржа <b className="text-slate-700">{pctOf(R.osno, price)}</b></span>
-                          <span>ROI <b className="text-slate-700">{pctOf(R.osno, cost)}</b></span>
+                          <span>ROI <b className="text-slate-700">{pctOf(R.osno, costOsno)}</b></span>
                           <span>безубыток <b className="text-slate-700">{beOsno == null ? '—' : `${money(Math.ceil(beOsno))} ₽`}</b></span>
                         </div>
                       </div>
@@ -25084,14 +25100,19 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             <option value={0.15}>15% «Доходы − расходы»</option>
                           </select>
                         </div>
+                        <div className="grid grid-cols-3 gap-2 mb-3 pb-3 border-b border-slate-200">
+                          <Field label="Себестоимость" value={calcCostUsn} onChange={setCalcCostUsn} suffix="₽" />
+                          <Field label="Реклама (ДРР)" value={calcAdsPctUsn} onChange={setCalcAdsPctUsn} suffix="%" />
+                          <Field label="Хранение" value={calcStoragePctUsn} onChange={setCalcStoragePctUsn} suffix="%" />
+                        </div>
                         <Line label="Цена для покупателя" value={price} />
                         <Line label="Комиссия WB" value={-R.commission} sign="− " />
                         <Line label="Логистика" value={-R.logistics} sign="− " />
-                        <Line label="Реклама" value={-R.ads} sign="− " />
-                        {storage > 0 && <Line label="Хранение" value={-storage} sign="− " />}
+                        <Line label="Реклама" value={-R.adsUsn} sign="− " />
+                        {R.storageUsn > 0 && <Line label="Хранение" value={-R.storageUsn} sign="− " />}
                         <div className="border-t border-slate-200 my-1" />
                         <Line label="Пришло от WB" value={R.fromWbUsn} strong />
-                        <Line label="Себестоимость" value={-cost} sign="− " />
+                        <Line label="Себестоимость" value={-costUsn} sign="− " />
                         <Line label={usnRate === 0.06 ? 'Налог 6% с выручки' : 'Налог 15% с прибыли'} value={-R.usnTax} sign="− " />
                         <div className="border-t-2 border-slate-300 my-1" />
                         <div className={`flex items-center justify-between py-2 text-lg font-extrabold ${R.usn < 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
@@ -25099,7 +25120,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         </div>
                         <div className="flex gap-4 text-xs text-slate-500">
                           <span>маржа <b className="text-slate-700">{pctOf(R.usn, price)}</b></span>
-                          <span>ROI <b className="text-slate-700">{pctOf(R.usn, cost)}</b></span>
+                          <span>ROI <b className="text-slate-700">{pctOf(R.usn, costUsn)}</b></span>
                           <span>безубыток <b className="text-slate-700">{beUsn == null ? '—' : `${money(Math.ceil(beUsn))} ₽`}</b></span>
                         </div>
                       </div>
