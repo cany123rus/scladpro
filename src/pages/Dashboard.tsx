@@ -25582,6 +25582,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               <button type="button" onClick={() => upd(it.id, { source: 'import' })} className={`px-3 py-1.5 font-medium ${it.source !== 'ru' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>Импорт</button>
                               <button type="button" onClick={() => upd(it.id, { source: 'ru' })} className={`px-3 py-1.5 font-medium ${it.source === 'ru' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>Закупка в РФ</button>
                             </div>
+                            <span className={`text-xs px-2 py-1 rounded-lg font-semibold border ${it.source === 'ru' ? 'bg-amber-50 border-amber-200 text-amber-700' : 'bg-indigo-50 border-indigo-200 text-indigo-700'}`}>{it.source === 'ru' ? 'Закупка в РФ' : 'Импорт'}</span>
                             <span className="text-xs px-2 py-1 rounded-lg bg-white border border-slate-200 text-slate-500 tabular-nums">{r.liters.toFixed(2)} л</span>
                             <button type="button" onClick={() => setCalcSaveModal({ open: true, itemId: it.id, name: String(it.name || '') })} className="px-2.5 py-1.5 text-xs font-semibold rounded-lg border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100">Сохранить</button>
                             <div className="ml-auto flex items-center gap-2">
@@ -25696,7 +25697,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             {/* Результат — две самодостаточные колонки */}
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                               <div className="rounded-xl border-2 border-emerald-200 bg-emerald-50/30 p-4">
-                                <div className="text-xs font-bold uppercase tracking-wide text-emerald-700 mb-2">ОСНО · официальный ввоз · НДС 22% + 25%</div>
+                                <div className="text-xs font-bold uppercase tracking-wide text-emerald-700 mb-2">ОСНО · {r.isRu ? 'закупка в РФ' : 'официальный ввоз'} · НДС 22% + 25%</div>
                                 {!r.isRu && <><CalcRow label="Закупка" value={r.purchaseRub} base={r.p} />
                                 <CalcRow label="Доставка до РФ" value={r.customs - r.purchaseRub} base={r.p} />
                                 {Math.abs(r.duty) > 0.005 && <CalcRow label={`Пошлина${r.dutyByWeight ? ' (по весу)' : ''}`} value={r.duty} base={r.p} />}
@@ -25726,7 +25727,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               </div>
 
                               <div className="rounded-xl border-2 border-indigo-200 bg-indigo-50/30 p-4">
-                                <div className="text-xs font-bold uppercase tracking-wide text-indigo-700 mb-2">УСН {usnRate === 0.06 ? '6%' : '15%'} · карго · без НДС</div>
+                                <div className="text-xs font-bold uppercase tracking-wide text-indigo-700 mb-2">УСН {usnRate === 0.06 ? '6%' : '15%'} · {r.isRu ? 'закупка в РФ' : 'карго'} · без НДС</div>
                                 {!r.isRu && <><CalcRow label="Закупка" value={r.purchaseRub} base={r.p} />
                                 <CalcRow label="Карго" value={r.cargo} base={r.p} hint={`${it.weightKg} кг × ${calcCargoPerKg} ₽`} /></>}
                                 {r.isRu && <CalcRow label="Закупка с НДС" value={r.purchaseRub === 0 ? r.costUsn : r.costUsn} base={r.p} />}
