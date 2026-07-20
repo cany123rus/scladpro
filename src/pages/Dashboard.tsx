@@ -1307,6 +1307,35 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [calcAdsPctOsno, setCalcAdsPctOsno] = useState<number>(14);
   const [calcAdsPctUsn, setCalcAdsPctUsn] = useState<number>(14);
   const [calcUsnRate, setCalcUsnRate] = useState<number>(0.06);
+  // Сохранённые карточки товаров калькулятора (в app_settings — доступны с любого устройства).
+  const [calcSavedProducts, setCalcSavedProducts] = useState<any[]>([]);
+  const [calcPickerOpen, setCalcPickerOpen] = useState(false);
+  const loadCalcSavedProducts = useCallback(async () => {
+    try {
+      const { data } = await supabase.from('app_settings').select('value').eq('key', 'calc_saved_products_v1').maybeSingle();
+      const raw: any = data?.value;
+      let arr: any[] = [];
+      if (typeof raw === 'string') { try { arr = JSON.parse(raw); } catch { arr = []; } }
+      else if (Array.isArray(raw)) arr = raw;
+      setCalcSavedProducts(Array.isArray(arr) ? arr : []);
+    } catch (e) { console.error('loadCalcSavedProducts error', e); }
+  }, []);
+  const persistCalcSavedProducts = async (next: any[]) => {
+    const payload = JSON.stringify(next);
+    const { data: updated, error } = await supabase.from('app_settings').update({ value: payload }).eq('key', 'calc_saved_products_v1').select('key');
+    if (error) throw error;
+    if (!updated || updated.length === 0) {
+      const { error: insErr } = await supabase.from('app_settings').insert({ key: 'calc_saved_products_v1', value: payload });
+      if (insErr) throw insErr;
+    }
+  };
+  useEffect(() => {
+    if (analyticsSubTab === 'calculator') {
+      loadCalcSavedProducts();
+      if (!cbrRates.USD) loadCbrRates();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [analyticsSubTab]);
   // Наличные расходы за единицу: сборка/упаковка и отвоз до склада WB.
   // Без документов → нет вычета НДС и налоговую базу они НЕ уменьшают, но деньги тратятся.
   const [calcAssembly, setCalcAssembly] = useState<number>(0);
@@ -25124,6 +25153,30 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 const B = Math.max(0.01, num(wbBuyoutPct) / 100);
 
                 const upd = (id: string, patch: any) => setCalcItems((prev) => prev.map((x) => x.id === id ? { ...x, ...patch } : x));
+                const saveProduct = async (it: any) => {
+                  const nm = String(it.name || '').trim();
+                  if (!nm) { showToast('Введите название товара', 'error'); return; }
+                  const { id, ...rest } = it;
+                  const entry = { ...rest, name: nm, savedAt: new Date().toISOString() };
+                  const next = [...calcSavedProducts.filter((x) => String(x?.name || '').trim() !== nm), entry];
+                  try {
+                    setCalcSavedProducts(next);
+                    await persistCalcSavedProducts(next);
+                    showToast(`Товар «${nm}» сохранён`, 'success');
+                  } catch (e: any) {
+                    console.error('saveProduct error', e);
+                    showToast('Не удалось сохранить товар', 'error');
+                  }
+                };
+                const applySaved = (s: any) => {
+                  setCalcItems((prev) => [...prev, { ...s, id: `${Date.now()}-${Math.round(Math.random() * 1e6)}` }]);
+                  setCalcPickerOpen(false);
+                  showToast(`Добавлен «${s?.name || 'товар'}»`, 'success');
+                };
+                const deleteSaved = async (nm: string) => {
+                  const next = calcSavedProducts.filter((x) => String(x?.name || '').trim() !== nm);
+                  try { setCalcSavedProducts(next); await persistCalcSavedProducts(next); } catch (e) { console.error(e); }
+                };
                 const applyCategory = (id: string, key: string) => {
                   const c = IMPORT_CATEGORIES.find((x) => x.key === key);
                   if (!c) return;
@@ -25334,6 +25387,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               <button type="button" onClick={() => upd(it.id, { source: 'ru' })} className={`px-3 py-1.5 font-medium ${it.source === 'ru' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>Закупка в РФ</button>
                             </div>
                             <span className="text-xs px-2 py-1 rounded-lg bg-white border border-slate-200 text-slate-600 tabular-nums">{r.liters.toFixed(2)} л · логистика {money(r.logistics)} ₽</span>
+                            <button type="button" onClick={() => saveProduct(it)} className="px-2.5 py-1.5 text-xs font-semibold rounded-lg border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100">
+                              Сохранить
+                            </button>
                             <div className="ml-auto flex items-center gap-2">
                               <span className={`text-xs font-bold px-2.5 py-1 rounded-lg ${win ? 'bg-emerald-100 text-emerald-700' : 'bg-indigo-100 text-indigo-700'}`}>
                                 {win ? 'ОСНО' : 'УСН'} +{money(Math.abs(r.osno - r.usn))} ₽
@@ -25490,9 +25546,47 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       );
                     })}
 
-                    <button type="button" onClick={() => setCalcItems((prev) => [...prev, makeCalcItem(prev.length + 1)])} className="w-full py-3.5 rounded-2xl border-2 border-dashed border-indigo-300 text-indigo-600 font-bold hover:bg-indigo-50 hover:border-indigo-400 transition-colors">
-                      + Добавить товар
-                    </button>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <button type="button" onClick={() => setCalcItems((prev) => [...prev, makeCalcItem(prev.length + 1)])} className="py-3.5 rounded-2xl border-2 border-dashed border-indigo-300 text-indigo-600 font-bold hover:bg-indigo-50 hover:border-indigo-400 transition-colors">
+                        + Добавить товар
+                      </button>
+                      <button type="button" onClick={() => { loadCalcSavedProducts(); setCalcPickerOpen(true); }} className="py-3.5 rounded-2xl border-2 border-dashed border-emerald-300 text-emerald-700 font-bold hover:bg-emerald-50 hover:border-emerald-400 transition-colors">
+                        Выбрать сохранённый {calcSavedProducts.length > 0 ? `(${calcSavedProducts.length})` : ''}
+                      </button>
+                    </div>
+
+                    {calcPickerOpen && (
+                      <div className="fixed inset-0 z-[130] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setCalcPickerOpen(false)}>
+                        <div className="w-full max-w-2xl bg-white rounded-2xl shadow-2xl border border-slate-200 p-5 max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+                          <div className="flex items-center justify-between mb-3">
+                            <div className="text-base font-bold text-slate-900">Сохранённые товары</div>
+                            <button type="button" onClick={() => setCalcPickerOpen(false)} className="px-3 py-1.5 text-xs rounded-xl border border-slate-200 hover:bg-slate-50">Закрыть</button>
+                          </div>
+                          {calcSavedProducts.length === 0 ? (
+                            <div className="text-sm text-slate-500 py-8 text-center">
+                              Пока пусто. Заполни карточку товара и нажми «Сохранить» в её шапке.
+                            </div>
+                          ) : (
+                            <div className="overflow-auto space-y-2 pr-1">
+                              {calcSavedProducts.map((s: any, i: number) => (
+                                <div key={`${s?.name}-${i}`} className="flex items-center gap-3 border border-slate-200 rounded-xl px-3 py-2 hover:border-emerald-300 hover:bg-emerald-50/40">
+                                  <div className="min-w-0 flex-1">
+                                    <div className="font-semibold text-slate-900 truncate">{s?.name || 'Без названия'}</div>
+                                    <div className="text-[11px] text-slate-500">
+                                      {s?.source === 'ru' ? `Закупка в РФ · ${Number(s?.costRu || 0).toLocaleString('ru-RU')} ₽` : `Импорт · ${Number(s?.purchase || 0)} ${s?.currency || ''}`}
+                                      {' · '}цена {Number(s?.price || 0).toLocaleString('ru-RU')} ₽
+                                      {' · '}{Number(s?.len || 0)}×{Number(s?.wid || 0)}×{Number(s?.hei || 0)} см
+                                    </div>
+                                  </div>
+                                  <button type="button" onClick={() => applySaved(s)} className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 shrink-0">Добавить</button>
+                                  <button type="button" onClick={() => deleteSaved(String(s?.name || '').trim())} className="w-7 h-7 rounded-lg border border-rose-200 text-rose-500 hover:bg-rose-50 text-sm shrink-0">×</button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
 
                     {/* Итог */}
                     <div className="rounded-2xl bg-gradient-to-br from-slate-900 to-slate-800 p-5 text-white shadow-xl">
