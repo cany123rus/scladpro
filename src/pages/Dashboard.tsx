@@ -25399,7 +25399,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <div className="flex items-center gap-2 text-xs bg-white/15 rounded-xl px-3 py-2 backdrop-blur-sm">
                           <span className="text-white/70">ЦБ{cbrDate ? ` ${cbrDate}` : ''}</span>
                           <span className="font-bold tabular-nums">
-                            {cbrRates.USD ? `$${cbrRates.USD.toFixed(2)}` : '—'} · {cbrRates.CNY ? `¥${cbrRates.CNY.toFixed(2)}` : '—'} · {cbrRates.EUR ? `€${cbrRates.EUR.toFixed(2)}` : '—'}
+                            {cbrRates.USD ? `$${cbrRates.USD.toFixed(2)}` : '—'} · {cbrRates.CNY ? `¥${cbrRates.CNY.toFixed(2)}` : '—'} · {cbrRates.EUR ? `€${cbrRates.EUR.toFixed(2)}` : '—'} · {cbrRates.KGS ? `${cbrRates.KGS.toFixed(3)} сом` : '—'}
                           </span>
                           <button type="button" onClick={() => loadCbrRates()} disabled={cbrLoading} className="ml-1 px-2 py-1 rounded-lg bg-white/20 hover:bg-white/30 font-semibold disabled:opacity-50">
                             {cbrLoading ? '…' : 'Обновить'}
@@ -25539,7 +25539,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                     <div className="flex items-center gap-1">
                                       <CalcInput value={it.purchase} onChange={(v: number) => upd(it.id, { purchase: v })} className="w-full px-2 py-2 border border-slate-300 rounded-lg text-sm" />
                                       <select value={it.currency} onChange={(e) => upd(it.id, { currency: e.target.value })} className="px-1 py-2 border border-slate-300 rounded-lg text-xs">
-                                        {['CNY', 'USD', 'EUR', 'RUB', 'TRY'].map((c) => <option key={c} value={c}>{c}</option>)}
+                                        {['CNY', 'USD', 'EUR', 'RUB', 'TRY', 'KGS'].map((c) => <option key={c} value={c}>{c}</option>)}
                                       </select>
                                     </div>
                                   </div>
