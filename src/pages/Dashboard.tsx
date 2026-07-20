@@ -25647,9 +25647,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                 <CalcRow label="Пришло от WB" value={r.fromO} base={r.p} />
                                 <CalcRow label="Себестоимость с НДС" value={-r.costOsnoFull} base={r.p} />
                                 <CalcRow label="Заработок (наценка)" value={r.fromO - r.costOsno} base={r.p} hint="пришло − себестоимость" tone="bg-emerald-100/70 rounded-lg px-2 -mx-1 my-1 text-emerald-900 font-bold" />
-                                {r.importVat > 0.005 && <CalcRow label={r.isRu ? 'НДС к вычету' : 'Ввозной НДС к вычету'} value={r.importVat} base={r.p} />}
-                                {r.vatInServices > 0.005 && <CalcRow label="НДС с рекламы и комиссии к вычету" value={r.vatInServices} base={r.p} />}
-                                <CalcRow label="НДС к уплате" value={-(r.vatToPay + r.vatInServices)} base={r.p} />
+                                {(r.importVat > 0.005 || r.vatInServices > 0.005) && <CalcRow label="НДС к вычету" value={r.importVat + r.vatInServices} base={r.p} hint={`${r.isRu ? 'входной' : 'ввозной'} ${money(r.importVat)} + услуги ${money(r.vatInServices)}`} />}
+                                <CalcRow label="НДС к уплате" value={-(r.vatToPay + r.vatInServices)} base={r.p} hint={`с продажи ${money(r.vatOut)} за вычетом входного`} />
                                 {r.vatRefundCut > 0 && <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 my-1">Возмещение {money(r.vatRefundCut)} ₽ не учтено</div>}
                                 <CalcRow label="Налог 25%" value={-r.taxO} base={r.p} />
                                 {r.cash > 0 && <CalcRow label="Сборка и отвоз" value={-r.cash} base={r.p} hint="нал." />}
