@@ -269,6 +269,19 @@ const IMPORT_CATEGORIES: any[] = [
   { key: 'custom', label: 'Своя ставка', type: 'adv', pct: 0, spec: 0, unit: 'kg', vat: 22, note: '' },
 ];
 
+// Базовый тариф логистики WB по объёму (тарифы с 15.09.2025).
+// До 1 л — ступенчатая шкала (плата за товар целиком), от 1 л — база + доп. литры ДРОБНО
+// (WB не округляет вверх: 1.8 л → 46 + 0.8×14 = 57.2 ₽).
+const wbBaseLogistics = (liters: number, tiers: number[], base1L: number, extraL: number) => {
+  const L = Math.max(0, Number(liters) || 0);
+  if (L <= 0) return 0;
+  if (L <= 1) {
+    const idx = Math.min(4, Math.max(0, Math.ceil(L / 0.2) - 1));
+    return Number(tiers[idx]) || 0;
+  }
+  return base1L + (L - 1) * extraL;
+};
+
 // Страна происхождения влияет на пошлину через преференции.
 const IMPORT_COUNTRIES: any[] = [
   { key: 'cn', label: 'Китай', mult: 1, note: 'Преференций нет с 12.10.2021 — полная базовая ставка' },
@@ -1235,6 +1248,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     currency: 'CNY',
     rateManual: 0,          // 0 = берём курс ЦБ
     weightKg: 0.4,          // вес единицы — нужен для €/кг
+    len: 25, wid: 20, hei: 4, // габариты упаковки, см → литраж для логистики WB
     deliveryToBorder: 40,   // доставка до границы, ₽ за единицу
     dutyType: 'comb',
     dutyPct: 10,
@@ -1245,9 +1259,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   });
   const [calcItems, setCalcItems] = useState<any[]>(() => [makeCalcItem(1)]);
   const [calcCommissionPct, setCalcCommissionPct] = useState<number>(8);
-  // Логистика — только УСН (на ОСНО другие условия).
-  const [calcLogisticsValue, setCalcLogisticsValue] = useState<number>(5);
-  const [calcLogisticsMode, setCalcLogisticsMode] = useState<'pct' | 'rub'>('pct');
+  // Логистика WB — только УСН (на ОСНО другие условия). Считается по литражу и выкупу.
+  // Тарифы с 15.09.2025; обратная логистика с 20.03.2026 — без коэффициентов склада.
+  const [wbBuyoutPct, setWbBuyoutPct] = useState<number>(70);
+  const [wbWarehouseCoef, setWbWarehouseCoef] = useState<number>(100);   // % коэффициент логистики склада
+  const [wbLocalIndex, setWbLocalIndex] = useState<number>(1);           // индекс локализации 0.5–2.0
+  const [wbBase1L, setWbBase1L] = useState<number>(46);
+  const [wbExtraL, setWbExtraL] = useState<number>(14);
+  const [wbTiers, setWbTiers] = useState<number[]>([23, 26, 29, 30, 32]); // ≤0.2/0.4/0.6/0.8/1.0 л
+  const [wbTariffsOpen, setWbTariffsOpen] = useState(false);
   // Реклама и хранение задаются отдельно для каждого режима (себестоимость — в позиции).
   const [calcAdsPctOsno, setCalcAdsPctOsno] = useState<number>(14);
   const [calcAdsPctUsn, setCalcAdsPctUsn] = useState<number>(14);
@@ -25051,7 +25071,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
               {analyticsSubTab === 'calculator' && (() => {
                 const num = (v: any) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
                 const cPct = num(calcCommissionPct);
-                const lVal = num(calcLogisticsValue);
                 const aPctOsno = num(calcAdsPctOsno);
                 const aPctUsn = num(calcAdsPctUsn);
                 const stPctOsno = num(calcStoragePctOsno);
@@ -25063,6 +25082,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 const eurRate = num(cbrRates.EUR);
                 const money = (v: number) => v.toLocaleString('ru-RU', { maximumFractionDigits: 2 });
                 const pctOf = (v: number, base: number) => base > 0 ? `${(v / base * 100).toFixed(1)}%` : '—';
+                const B = Math.max(0.01, num(wbBuyoutPct) / 100);
 
                 const upd = (id: string, patch: any) => setCalcItems((prev) => prev.map((x) => x.id === id ? { ...x, ...patch } : x));
                 const applyCategory = (id: string, key: string) => {
@@ -25071,24 +25091,21 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   upd(id, { category: key, dutyType: c.type, dutyPct: c.pct, dutySpec: c.spec, dutyUnit: c.unit, vatPct: c.vat });
                 };
 
-                // Полный расчёт позиции: ввоз → себестоимость → продажа → налоги.
                 const computeItem = (it: any) => {
                   const isRu = it.source === 'ru';
                   let rate = 1, purchaseRub = 0, customs = 0, dutyAdv = 0, dutySpecRub = 0, duty = 0;
-                  let dutyByWeight = false, vatBase = 0, importVat = 0, costOsno = 0, costUsn = 0;
+                  let dutyByWeight = false, importVat = 0, costOsno = 0, costUsn = 0;
                   if (isRu) {
-                    // Куплено в РФ: себестоимость вводится с НДС. На ОСНО НДС выделяем и берём
-                    // к вычету (себестоимость становится без НДС), на УСН он остаётся в цене.
                     const gross = num(it.costRu);
                     const vr = num(it.vatPct) / 100;
-                    importVat = vr > 0 ? gross * vr / (1 + vr) : 0;   // 0% — поставщик без НДС (УСН)
+                    importVat = vr > 0 ? gross * vr / (1 + vr) : 0;
                     purchaseRub = gross;
                     costOsno = gross - importVat;
                     costUsn = gross;
                   } else {
                     rate = num(it.rateManual) > 0 ? num(it.rateManual) : num(cbrRates[it.currency] || (it.currency === 'RUB' ? 1 : 0));
                     purchaseRub = num(it.purchase) * rate;
-                    customs = purchaseRub + num(it.deliveryToBorder);              // таможенная стоимость за ед.
+                    customs = purchaseRub + num(it.deliveryToBorder);
                     const countryMult = IMPORT_COUNTRIES.find((c) => c.key === it.country)?.mult ?? 1;
                     dutyAdv = customs * num(it.dutyPct) / 100;
                     const specQty = it.dutyUnit === 'kg' ? num(it.weightKg) : 1;
@@ -25096,21 +25113,25 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     const dutyBase = it.dutyType === 'adv' ? dutyAdv : it.dutyType === 'spec' ? dutySpecRub : Math.max(dutyAdv, dutySpecRub);
                     duty = dutyBase * countryMult;
                     dutyByWeight = it.dutyType === 'comb' && dutySpecRub > dutyAdv;
-                    vatBase = customs + duty;                                       // база ввозного НДС
-                    importVat = vatBase * num(it.vatPct) / 100;
-                    // На ОСНО ввозной НДС идёт к вычету, на УСН — в себестоимость.
+                    importVat = (customs + duty) * num(it.vatPct) / 100;
                     costOsno = customs + duty;
                     costUsn = customs + duty + importVat;
                   }
 
+                  // Логистика WB по литражу и выкупу (только УСН).
+                  const liters = Math.max(0, num(it.len) * num(it.wid) * num(it.hei) / 1000);
+                  const baseLog = wbBaseLogistics(liters, wbTiers, num(wbBase1L), num(wbExtraL));
+                  const fwd = baseLog * (num(wbWarehouseCoef) / 100) * num(wbLocalIndex);
+                  const back = baseLog;                       // с 20.03.2026 без коэффициентов
+                  const logistics = fwd / B + back * (1 - B) / B;
+
                   const p = num(it.price);
                   const commission = p * cPct / 100;
-                  const logistics = calcLogisticsMode === 'pct' ? p * lVal / 100 : lVal;
                   const adsO = p * aPctOsno / 100;
                   const adsU = p * aPctUsn / 100;
                   const stO = p * stPctOsno / 100;
                   const stU = p * stPctUsn / 100;
-                  const feesO = commission + adsO + stO;                            // на ОСНО логистики нет
+                  const feesO = commission + adsO + stO;      // на ОСНО логистики нет
                   const feesU = commission + logistics + adsU + stU;
                   const fromO = p - feesO;
                   const fromU = p - feesU;
@@ -25125,56 +25146,101 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   const taxU = usnRate === 0.06 ? p * 0.06 : Math.max(0, fromU - costUsn) * usnRate;
                   const usn = fromU - costUsn - taxU;
 
-                  return { isRu, rate, purchaseRub, customs, duty, dutyAdv, dutySpecRub, dutyByWeight, vatBase, importVat, costOsno, costUsn, p, commission, logistics, adsO, adsU, stO, stU, fromO, fromU, vatOut, vatInServices, vatToPay, beforeO, taxO, osno, taxU, usn };
+                  return { isRu, rate, purchaseRub, customs, duty, dutyAdv, dutySpecRub, dutyByWeight, importVat, costOsno, costUsn,
+                    liters, baseLog, fwd, back, logistics, p, commission, adsO, adsU, stO, stU, feesO, feesU, fromO, fromU,
+                    vatOut, vatInServices, vatToPay, beforeO, taxO, osno, taxU, usn };
                 };
 
                 const rows = calcItems.map((it) => ({ it, r: computeItem(it) }));
-                const totRevenue = rows.reduce((a, x) => a + x.r.p, 0);
-                const totOsno = rows.reduce((a, x) => a + x.r.osno, 0);
-                const totUsn = rows.reduce((a, x) => a + x.r.usn, 0);
-                const totCostOsno = rows.reduce((a, x) => a + x.r.costOsno, 0);
-                const totDuty = rows.reduce((a, x) => a + x.r.duty, 0);
-                const totImportVat = rows.reduce((a, x) => a + x.r.importVat, 0);
+                const tot = rows.reduce((a, x) => ({
+                  rev: a.rev + x.r.p, osno: a.osno + x.r.osno, usn: a.usn + x.r.usn,
+                  cost: a.cost + x.r.costOsno, duty: a.duty + x.r.duty, vat: a.vat + x.r.importVat, log: a.log + x.r.logistics,
+                }), { rev: 0, osno: 0, usn: 0, cost: 0, duty: 0, vat: 0, log: 0 });
+
+                const Sec = ({ title, color, children, right }: any) => (
+                  <div className="mb-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <span className={`w-1.5 h-4 rounded-full ${color}`} />
+                        <span className="text-xs font-bold uppercase tracking-wide text-slate-500">{title}</span>
+                      </div>
+                      {right}
+                    </div>
+                    {children}
+                  </div>
+                );
 
                 return (
-                  <div className="w-full space-y-4">
-                    {/* Общие условия продажи */}
-                    <div className="bg-white rounded-xl border border-slate-100 p-4">
-                      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-                        <div className="font-semibold text-slate-900">Общие условия продажи</div>
-                        <div className="flex items-center gap-2 text-xs">
-                          <span className="text-slate-500">Курс ЦБ{cbrDate ? ` на ${cbrDate}` : ''}:</span>
-                          <span className="font-semibold text-slate-700">
-                            {cbrRates.USD ? `$ ${cbrRates.USD.toFixed(2)}` : '—'} · {cbrRates.CNY ? `¥ ${cbrRates.CNY.toFixed(2)}` : '—'} · {cbrRates.EUR ? `€ ${cbrRates.EUR.toFixed(2)}` : '—'}
+                  <div className="w-full space-y-4 pb-4">
+                    {/* Шапка */}
+                    <div className="rounded-2xl bg-gradient-to-r from-indigo-600 to-violet-600 p-4 text-white shadow-lg">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <div className="text-lg font-extrabold">Калькулятор юнит-экономики</div>
+                          <div className="text-xs text-white/70">Импорт, пошлины, НДС 22% и логистика WB по литражу — ОСНО против УСН</div>
+                        </div>
+                        <div className="flex items-center gap-2 text-xs bg-white/15 rounded-xl px-3 py-2 backdrop-blur-sm">
+                          <span className="text-white/70">Курс ЦБ{cbrDate ? ` ${cbrDate}` : ''}:</span>
+                          <span className="font-bold tabular-nums">
+                            {cbrRates.USD ? `$${cbrRates.USD.toFixed(2)}` : '—'} · {cbrRates.CNY ? `¥${cbrRates.CNY.toFixed(2)}` : '—'} · {cbrRates.EUR ? `€${cbrRates.EUR.toFixed(2)}` : '—'}
                           </span>
-                          <button type="button" onClick={() => loadCbrRates()} disabled={cbrLoading} className="px-2 py-1 rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 disabled:opacity-50">
-                            {cbrLoading ? 'Загрузка…' : 'Обновить курс'}
+                          <button type="button" onClick={() => loadCbrRates()} disabled={cbrLoading} className="ml-1 px-2 py-1 rounded-lg bg-white/20 hover:bg-white/30 font-semibold disabled:opacity-50">
+                            {cbrLoading ? '…' : 'Обновить'}
                           </button>
                         </div>
                       </div>
-                      <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3">
-                        <CalcField label="Комиссия WB" value={calcCommissionPct} onChange={setCalcCommissionPct} suffix="%" />
-                        <div>
-                          <label className="block text-xs font-medium text-slate-600 mb-1">Логистика <span className="text-indigo-500">(УСН)</span></label>
-                          <div className="flex items-center gap-1">
-                            <CalcInput value={calcLogisticsValue} onChange={setCalcLogisticsValue} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
-                            <select value={calcLogisticsMode} onChange={(e) => setCalcLogisticsMode(e.target.value as any)} className="px-1 py-2 border border-slate-300 rounded-lg text-xs">
-                              <option value="pct">%</option>
-                              <option value="rub">₽</option>
-                            </select>
+                    </div>
+
+                    {/* Настройки */}
+                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                      <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
+                        <Sec title="Условия продажи" color="bg-emerald-500">
+                          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                            <CalcField label="Комиссия WB" value={calcCommissionPct} onChange={setCalcCommissionPct} suffix="%" />
+                            <CalcField label="Реклама ОСНО" value={calcAdsPctOsno} onChange={setCalcAdsPctOsno} suffix="%" />
+                            <CalcField label="Реклама УСН" value={calcAdsPctUsn} onChange={setCalcAdsPctUsn} suffix="%" />
+                            <CalcField label="Хранение ОСНО" value={calcStoragePctOsno} onChange={setCalcStoragePctOsno} suffix="%" />
+                            <CalcField label="Хранение УСН" value={calcStoragePctUsn} onChange={setCalcStoragePctUsn} suffix="%" />
+                            <div>
+                              <label className="block text-xs font-medium text-slate-600 mb-1">Ставка УСН</label>
+                              <select value={usnRate} onChange={(e) => setCalcUsnRate(Number(e.target.value))} className="w-full px-2 py-2 border border-slate-300 rounded-lg text-sm">
+                                <option value={0.06}>6% «Доходы»</option>
+                                <option value={0.15}>15% «Д − Р»</option>
+                              </select>
+                            </div>
                           </div>
-                        </div>
-                        <CalcField label="Реклама ОСНО" value={calcAdsPctOsno} onChange={setCalcAdsPctOsno} suffix="%" />
-                        <CalcField label="Реклама УСН" value={calcAdsPctUsn} onChange={setCalcAdsPctUsn} suffix="%" />
-                        <CalcField label="Хранение ОСНО" value={calcStoragePctOsno} onChange={setCalcStoragePctOsno} suffix="%" />
-                        <CalcField label="Хранение УСН" value={calcStoragePctUsn} onChange={setCalcStoragePctUsn} suffix="%" />
-                        <div>
-                          <label className="block text-xs font-medium text-slate-600 mb-1">Ставка УСН</label>
-                          <select value={usnRate} onChange={(e) => setCalcUsnRate(Number(e.target.value))} className="w-full px-2 py-2 border border-slate-300 rounded-lg text-sm">
-                            <option value={0.06}>6% «Доходы»</option>
-                            <option value={0.15}>15% «Д − Р»</option>
-                          </select>
-                        </div>
+                        </Sec>
+                      </div>
+
+                      <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
+                        <Sec
+                          title="Логистика WB · только УСН"
+                          color="bg-indigo-500"
+                          right={<button type="button" onClick={() => setWbTariffsOpen((v) => !v)} className="text-xs font-semibold text-indigo-600 hover:underline">{wbTariffsOpen ? 'Скрыть тарифы' : 'Тарифы WB'}</button>}
+                        >
+                          <div className="grid grid-cols-3 gap-3">
+                            <CalcField label="Выкуп" value={wbBuyoutPct} onChange={setWbBuyoutPct} suffix="%" />
+                            <CalcField label="Коэф. склада" value={wbWarehouseCoef} onChange={setWbWarehouseCoef} suffix="%" />
+                            <CalcField label="Индекс локал." value={wbLocalIndex} onChange={setWbLocalIndex} />
+                          </div>
+                          {wbTariffsOpen && (
+                            <div className="mt-3 pt-3 border-t border-slate-200">
+                              <div className="text-[11px] text-slate-500 mb-2">Тарифы с 15.09.2025. До 1 л — плата за товар целиком, от 1 л — база + доп. литры дробно.</div>
+                              <div className="grid grid-cols-5 gap-2 mb-2">
+                                {['≤0.2 л', '≤0.4 л', '≤0.6 л', '≤0.8 л', '≤1.0 л'].map((lbl, i) => (
+                                  <CalcField key={lbl} label={lbl} value={wbTiers[i]} onChange={(v: number) => setWbTiers((prev) => prev.map((x, j) => j === i ? v : x))} suffix="₽" />
+                                ))}
+                              </div>
+                              <div className="grid grid-cols-2 gap-2">
+                                <CalcField label="База от 1 л" value={wbBase1L} onChange={setWbBase1L} suffix="₽" />
+                                <CalcField label="Каждый доп. литр" value={wbExtraL} onChange={setWbExtraL} suffix="₽" />
+                              </div>
+                              <div className="mt-2 text-[11px] text-slate-500">
+                                Обратная логистика с 20.03.2026 = базовый тариф <b>без</b> коэффициента склада и индекса локализации.
+                              </div>
+                            </div>
+                          )}
+                        </Sec>
                       </div>
                     </div>
 
@@ -25182,173 +25248,192 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     {rows.map(({ it, r }, idx) => {
                       const cat = IMPORT_CATEGORIES.find((c) => c.key === it.category);
                       const country = IMPORT_COUNTRIES.find((c) => c.key === it.country);
+                      const win = r.osno >= r.usn;
                       return (
-                        <div key={it.id} className="bg-white rounded-xl border border-slate-200 p-4">
-                          <div className="flex flex-wrap items-center gap-2 mb-3">
-                            <input value={it.name} onChange={(e) => upd(it.id, { name: e.target.value })} className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm font-semibold min-w-[180px]" />
-                            <div className="inline-flex rounded-lg border border-slate-300 overflow-hidden text-xs">
-                              <button type="button" onClick={() => upd(it.id, { source: 'import' })} className={`px-3 py-1.5 font-medium ${it.source !== 'ru' ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>Импорт</button>
-                              <button type="button" onClick={() => upd(it.id, { source: 'ru' })} className={`px-3 py-1.5 font-medium ${it.source === 'ru' ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>Закупка в РФ</button>
+                        <div key={it.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                          <div className="flex flex-wrap items-center gap-2 px-4 py-3 bg-slate-50 border-b border-slate-200">
+                            <span className="w-6 h-6 rounded-lg bg-slate-800 text-white text-xs font-bold flex items-center justify-center">{idx + 1}</span>
+                            <input value={it.name} onChange={(e) => upd(it.id, { name: e.target.value })} className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm font-semibold min-w-[160px] bg-white" />
+                            <div className="inline-flex rounded-lg border border-slate-300 overflow-hidden text-xs bg-white">
+                              <button type="button" onClick={() => upd(it.id, { source: 'import' })} className={`px-3 py-1.5 font-medium ${it.source !== 'ru' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>Импорт</button>
+                              <button type="button" onClick={() => upd(it.id, { source: 'ru' })} className={`px-3 py-1.5 font-medium ${it.source === 'ru' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>Закупка в РФ</button>
                             </div>
-                            <span className="text-xs text-slate-400">позиция {idx + 1}</span>
+                            <span className="text-xs px-2 py-1 rounded-lg bg-white border border-slate-200 text-slate-600 tabular-nums">{r.liters.toFixed(2)} л · логистика {money(r.logistics)} ₽</span>
                             <div className="ml-auto flex items-center gap-2">
-                              <span className={`text-sm font-bold ${r.osno >= r.usn ? 'text-emerald-600' : 'text-indigo-600'}`}>
-                                {r.osno >= r.usn ? 'ОСНО' : 'УСН'} выгоднее на {money(Math.abs(r.osno - r.usn))} ₽
+                              <span className={`text-xs font-bold px-2.5 py-1 rounded-lg ${win ? 'bg-emerald-100 text-emerald-700' : 'bg-indigo-100 text-indigo-700'}`}>
+                                {win ? 'ОСНО' : 'УСН'} +{money(Math.abs(r.osno - r.usn))} ₽
                               </span>
                               {calcItems.length > 1 && (
-                                <button type="button" onClick={() => setCalcItems((prev) => prev.filter((x) => x.id !== it.id))} className="px-2 py-1 text-xs rounded-lg border border-rose-200 text-rose-600 hover:bg-rose-50">Удалить</button>
+                                <button type="button" onClick={() => setCalcItems((prev) => prev.filter((x) => x.id !== it.id))} className="w-7 h-7 rounded-lg border border-rose-200 text-rose-500 hover:bg-rose-50 text-sm">×</button>
                               )}
                             </div>
                           </div>
 
-                          {it.source === 'ru' ? (
-                            /* Куплено в РФ — только себестоимость, НДС поставщика и цена */
-                            <div className="grid grid-cols-2 md:grid-cols-3 gap-2 mb-3 pb-3 border-b border-slate-200">
-                              <CalcField label="Себестоимость (с НДС), ₽" value={it.costRu} onChange={(v: number) => upd(it.id, { costRu: v })} suffix="₽" />
-                              <div>
-                                <label className="block text-xs font-medium text-slate-600 mb-1">НДС в закупке</label>
-                                <select value={it.vatPct} onChange={(e) => upd(it.id, { vatPct: Number(e.target.value) })} className="w-full px-2 py-2 border border-slate-300 rounded-lg text-sm">
-                                  <option value={22}>22% — обычный поставщик</option>
-                                  <option value={10}>10% — льготный товар</option>
-                                  <option value={0}>0% — поставщик без НДС (УСН)</option>
-                                </select>
-                              </div>
-                              <CalcField label="Цена продажи, ₽" value={it.price} onChange={(v: number) => upd(it.id, { price: v })} suffix="₽" />
-                            </div>
-                          ) : (
-                          <>
-                          {/* Ввоз */}
-                          <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-2 mb-2">
-                            <div>
-                              <label className="block text-xs font-medium text-slate-600 mb-1">Страна</label>
-                              <select value={it.country} onChange={(e) => upd(it.id, { country: e.target.value })} className="w-full px-2 py-2 border border-slate-300 rounded-lg text-xs">
-                                {IMPORT_COUNTRIES.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
-                              </select>
-                            </div>
-                            <div className="md:col-span-2">
-                              <label className="block text-xs font-medium text-slate-600 mb-1">Категория</label>
-                              <select value={it.category} onChange={(e) => applyCategory(it.id, e.target.value)} className="w-full px-2 py-2 border border-slate-300 rounded-lg text-xs">
-                                {IMPORT_CATEGORIES.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
-                              </select>
-                            </div>
-                            <div>
-                              <label className="block text-xs font-medium text-slate-600 mb-1">Закупка</label>
-                              <div className="flex items-center gap-1">
-                                <CalcInput value={it.purchase} onChange={(v: number) => upd(it.id, { purchase: v })} className="w-full px-2 py-2 border border-slate-300 rounded-lg text-sm" />
-                                <select value={it.currency} onChange={(e) => upd(it.id, { currency: e.target.value })} className="px-1 py-2 border border-slate-300 rounded-lg text-xs">
-                                  {['CNY', 'USD', 'EUR', 'RUB', 'TRY'].map((c) => <option key={c} value={c}>{c}</option>)}
-                                </select>
-                              </div>
-                            </div>
-                            <div>
-                              <label className="block text-xs font-medium text-slate-600 mb-1">Курс <span className="text-slate-400">(0 = ЦБ)</span></label>
-                              <CalcInput value={it.rateManual} onChange={(v: number) => upd(it.id, { rateManual: v })} className="w-full px-2 py-2 border border-slate-300 rounded-lg text-sm" />
-                            </div>
-                            <div>
-                              <label className="block text-xs font-medium text-slate-600 mb-1">Вес, кг</label>
-                              <CalcInput value={it.weightKg} onChange={(v: number) => upd(it.id, { weightKg: v })} className="w-full px-2 py-2 border border-slate-300 rounded-lg text-sm" />
-                            </div>
-                            <div>
-                              <label className="block text-xs font-medium text-slate-600 mb-1">Доставка до РФ, ₽</label>
-                              <CalcInput value={it.deliveryToBorder} onChange={(v: number) => upd(it.id, { deliveryToBorder: v })} className="w-full px-2 py-2 border border-slate-300 rounded-lg text-sm" />
-                            </div>
-                            <div>
-                              <label className="block text-xs font-medium text-slate-600 mb-1">Цена продажи, ₽</label>
-                              <CalcInput value={it.price} onChange={(v: number) => upd(it.id, { price: v })} className="w-full px-2 py-2 border border-slate-300 rounded-lg text-sm" />
-                            </div>
-                          </div>
-
-                          {/* Пошлина */}
-                          <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-3 pb-3 border-b border-slate-200">
-                            <div>
-                              <label className="block text-xs font-medium text-slate-600 mb-1">Тип пошлины</label>
-                              <select value={it.dutyType} onChange={(e) => upd(it.id, { dutyType: e.target.value })} className="w-full px-2 py-2 border border-slate-300 rounded-lg text-xs">
-                                <option value="adv">Адвалорная (%)</option>
-                                <option value="spec">Специфическая (€)</option>
-                                <option value="comb">Комбинированная (макс)</option>
-                              </select>
-                            </div>
-                            <CalcField label="Пошлина, %" value={it.dutyPct} onChange={(v: number) => upd(it.id, { dutyPct: v })} suffix="%" />
-                            <CalcField label="Пошлина, €" value={it.dutySpec} onChange={(v: number) => upd(it.id, { dutySpec: v })} suffix="€" />
-                            <div>
-                              <label className="block text-xs font-medium text-slate-600 mb-1">За единицу</label>
-                              <select value={it.dutyUnit} onChange={(e) => upd(it.id, { dutyUnit: e.target.value })} className="w-full px-2 py-2 border border-slate-300 rounded-lg text-xs">
-                                <option value="kg">€ / кг</option>
-                                <option value="pair">€ / пару (шт)</option>
-                              </select>
-                            </div>
-                            <CalcField label="НДС ввозной" value={it.vatPct} onChange={(v: number) => upd(it.id, { vatPct: v })} suffix="%" />
-                          </div>
-                          {(cat?.note || country?.note) && (
-                            <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5 mb-3">
-                              {cat?.note ? <>{cat.note}. </> : null}{country?.note}
-                            </div>
-                          )}
-                          </>
-                          )}
-
-                          {/* Результат позиции */}
-                          <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 text-sm">
-                            <div className="rounded-lg bg-slate-50 p-3">
-                              <div className="text-xs font-semibold text-slate-500 mb-1">{r.isRu ? 'ЗАКУПКА В РФ' : 'ВВОЗ'}</div>
-                              <div className="flex justify-between py-0.5"><span className="text-slate-600">{r.isRu ? 'Себестоимость с НДС' : 'Закупка'}</span><span>{money(r.purchaseRub)} ₽</span></div>
-                              {!r.isRu && <div className="flex justify-between py-0.5"><span className="text-slate-600">Таможенная стоимость</span><span>{money(r.customs)} ₽</span></div>}
-                              {!r.isRu && (
-                                <div className="flex justify-between py-0.5">
-                                  <span className="text-slate-600">Пошлина{r.dutyByWeight ? ' (по весу)' : ''}</span>
-                                  <span className="font-medium">{money(r.duty)} ₽</span>
+                          <div className="p-4">
+                            {it.source === 'ru' ? (
+                              <Sec title="Закупка в РФ" color="bg-slate-400">
+                                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                                  <CalcField label="Себестоимость (с НДС)" value={it.costRu} onChange={(v: number) => upd(it.id, { costRu: v })} suffix="₽" />
+                                  <div>
+                                    <label className="block text-xs font-medium text-slate-600 mb-1">НДС в закупке</label>
+                                    <select value={it.vatPct} onChange={(e) => upd(it.id, { vatPct: Number(e.target.value) })} className="w-full px-2 py-2 border border-slate-300 rounded-lg text-sm">
+                                      <option value={22}>22% — обычный поставщик</option>
+                                      <option value={10}>10% — льготный товар</option>
+                                      <option value={0}>0% — поставщик без НДС</option>
+                                    </select>
+                                  </div>
+                                  <CalcField label="Цена продажи" value={it.price} onChange={(v: number) => upd(it.id, { price: v })} suffix="₽" />
                                 </div>
-                              )}
-                              <div className="flex justify-between py-0.5"><span className="text-slate-600">{r.isRu ? 'НДС в закупке' : 'НДС ввозной'}</span><span>{money(r.importVat)} ₽</span></div>
-                              {r.isRu && <div className="text-[11px] text-slate-500 mt-1">На ОСНО этот НДС к вычету, на УСН остаётся в себестоимости</div>}
-                              {r.dutyByWeight && <div className="text-[11px] text-amber-700 mt-1">Сработала весовая ставка: {money(r.dutySpecRub)} ₽ &gt; {money(r.dutyAdv)} ₽</div>}
-                            </div>
-                            <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 p-3">
-                              <div className="text-xs font-semibold text-emerald-700 mb-1">ОСНО · НДС 22% + 25%</div>
-                              <div className="flex justify-between py-0.5"><span className="text-slate-600">Себестоимость</span><span>{money(r.costOsno)} ₽</span></div>
-                              <div className="flex justify-between py-0.5"><span className="text-slate-600">Пришло от WB</span><span>{money(r.fromO)} ₽</span></div>
-                              <div className="flex justify-between py-0.5"><span className="text-slate-600">НДС к уплате</span><span>{money(r.vatToPay)} ₽</span></div>
-                              <div className="flex justify-between py-0.5"><span className="text-slate-600">Налог 25%</span><span>{money(r.taxO)} ₽</span></div>
-                              <div className={`flex justify-between py-1 font-bold ${r.osno < 0 ? 'text-rose-600' : 'text-emerald-700'}`}><span>Прибыль</span><span>{money(r.osno)} ₽</span></div>
-                              <div className="text-[11px] text-slate-500">маржа {pctOf(r.osno, r.p)} · ROI {pctOf(r.osno, r.costOsno)}</div>
-                            </div>
-                            <div className="rounded-lg border border-indigo-200 bg-indigo-50/50 p-3">
-                              <div className="text-xs font-semibold text-indigo-700 mb-1">УСН {usnRate === 0.06 ? '6%' : '15%'} · без НДС</div>
-                              <div className="flex justify-between py-0.5"><span className="text-slate-600">Себестоимость</span><span>{money(r.costUsn)} ₽</span></div>
-                              <div className="flex justify-between py-0.5"><span className="text-slate-600">Пришло от WB</span><span>{money(r.fromU)} ₽</span></div>
-                              <div className="flex justify-between py-0.5"><span className="text-slate-600">Налог</span><span>{money(r.taxU)} ₽</span></div>
-                              <div className="flex justify-between py-0.5 text-[11px] text-slate-400"><span>ввозной НДС в себестоимости</span><span>{money(r.importVat)} ₽</span></div>
-                              <div className={`flex justify-between py-1 font-bold ${r.usn < 0 ? 'text-rose-600' : 'text-indigo-700'}`}><span>Прибыль</span><span>{money(r.usn)} ₽</span></div>
-                              <div className="text-[11px] text-slate-500">маржа {pctOf(r.usn, r.p)} · ROI {pctOf(r.usn, r.costUsn)}</div>
+                              </Sec>
+                            ) : (
+                              <>
+                                <Sec title="Ввоз" color="bg-amber-500">
+                                  <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-3">
+                                    <div>
+                                      <label className="block text-xs font-medium text-slate-600 mb-1">Страна</label>
+                                      <select value={it.country} onChange={(e) => upd(it.id, { country: e.target.value })} className="w-full px-2 py-2 border border-slate-300 rounded-lg text-xs">
+                                        {IMPORT_COUNTRIES.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+                                      </select>
+                                    </div>
+                                    <div className="md:col-span-2">
+                                      <label className="block text-xs font-medium text-slate-600 mb-1">Категория</label>
+                                      <select value={it.category} onChange={(e) => applyCategory(it.id, e.target.value)} className="w-full px-2 py-2 border border-slate-300 rounded-lg text-xs">
+                                        {IMPORT_CATEGORIES.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+                                      </select>
+                                    </div>
+                                    <div>
+                                      <label className="block text-xs font-medium text-slate-600 mb-1">Закупка</label>
+                                      <div className="flex items-center gap-1">
+                                        <CalcInput value={it.purchase} onChange={(v: number) => upd(it.id, { purchase: v })} className="w-full px-2 py-2 border border-slate-300 rounded-lg text-sm" />
+                                        <select value={it.currency} onChange={(e) => upd(it.id, { currency: e.target.value })} className="px-1 py-2 border border-slate-300 rounded-lg text-xs">
+                                          {['CNY', 'USD', 'EUR', 'RUB', 'TRY'].map((c) => <option key={c} value={c}>{c}</option>)}
+                                        </select>
+                                      </div>
+                                    </div>
+                                    <CalcField label="Курс (0 = ЦБ)" value={it.rateManual} onChange={(v: number) => upd(it.id, { rateManual: v })} />
+                                    <CalcField label="Доставка до РФ" value={it.deliveryToBorder} onChange={(v: number) => upd(it.id, { deliveryToBorder: v })} suffix="₽" />
+                                  </div>
+                                </Sec>
+
+                                <Sec title="Пошлина" color="bg-rose-500">
+                                  <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                                    <div>
+                                      <label className="block text-xs font-medium text-slate-600 mb-1">Тип ставки</label>
+                                      <select value={it.dutyType} onChange={(e) => upd(it.id, { dutyType: e.target.value })} className="w-full px-2 py-2 border border-slate-300 rounded-lg text-xs">
+                                        <option value="adv">Адвалорная (%)</option>
+                                        <option value="spec">Специфическая (€)</option>
+                                        <option value="comb">Комбинированная</option>
+                                      </select>
+                                    </div>
+                                    <CalcField label="Ставка" value={it.dutyPct} onChange={(v: number) => upd(it.id, { dutyPct: v })} suffix="%" />
+                                    <CalcField label="Ставка" value={it.dutySpec} onChange={(v: number) => upd(it.id, { dutySpec: v })} suffix="€" />
+                                    <div>
+                                      <label className="block text-xs font-medium text-slate-600 mb-1">За единицу</label>
+                                      <select value={it.dutyUnit} onChange={(e) => upd(it.id, { dutyUnit: e.target.value })} className="w-full px-2 py-2 border border-slate-300 rounded-lg text-xs">
+                                        <option value="kg">€ / кг</option>
+                                        <option value="pair">€ / шт</option>
+                                      </select>
+                                    </div>
+                                    <CalcField label="НДС ввозной" value={it.vatPct} onChange={(v: number) => upd(it.id, { vatPct: v })} suffix="%" />
+                                  </div>
+                                  {(cat?.note || country?.note) && (
+                                    <div className="mt-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                                      {cat?.note ? <>{cat.note}. </> : null}{country?.note}
+                                    </div>
+                                  )}
+                                </Sec>
+                              </>
+                            )}
+
+                            <Sec title="Габариты и цена" color="bg-sky-500">
+                              <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+                                <CalcField label="Длина, см" value={it.len} onChange={(v: number) => upd(it.id, { len: v })} />
+                                <CalcField label="Ширина, см" value={it.wid} onChange={(v: number) => upd(it.id, { wid: v })} />
+                                <CalcField label="Высота, см" value={it.hei} onChange={(v: number) => upd(it.id, { hei: v })} />
+                                <CalcField label="Вес, кг" value={it.weightKg} onChange={(v: number) => upd(it.id, { weightKg: v })} />
+                                {it.source !== 'ru' && <CalcField label="Цена продажи" value={it.price} onChange={(v: number) => upd(it.id, { price: v })} suffix="₽" />}
+                                <div className="flex flex-col justify-end pb-2 text-xs text-slate-500">
+                                  <span>Объём <b className="text-slate-700">{r.liters.toFixed(3)} л</b></span>
+                                  <span>Базовый тариф <b className="text-slate-700">{money(r.baseLog)} ₽</b></span>
+                                </div>
+                              </div>
+                            </Sec>
+
+                            {/* Результат */}
+                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 text-sm mt-1">
+                              <div className="rounded-xl bg-slate-50 border border-slate-200 p-3">
+                                <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500 mb-2">{r.isRu ? 'Закупка' : 'Ввоз'}</div>
+                                <div className="flex justify-between py-0.5"><span className="text-slate-600">{r.isRu ? 'С НДС' : 'Закупка'}</span><span className="tabular-nums">{money(r.purchaseRub)} ₽</span></div>
+                                {!r.isRu && <div className="flex justify-between py-0.5"><span className="text-slate-600">Там. стоимость</span><span className="tabular-nums">{money(r.customs)} ₽</span></div>}
+                                {!r.isRu && <div className="flex justify-between py-0.5"><span className="text-slate-600">Пошлина{r.dutyByWeight ? ' (вес)' : ''}</span><span className="font-medium tabular-nums">{money(r.duty)} ₽</span></div>}
+                                <div className="flex justify-between py-0.5"><span className="text-slate-600">{r.isRu ? 'НДС в закупке' : 'НДС ввозной'}</span><span className="tabular-nums">{money(r.importVat)} ₽</span></div>
+                                <div className="mt-2 pt-2 border-t border-slate-200 text-[11px] text-slate-500">
+                                  Логистика УСН: {money(r.fwd)} прямая / {(B * 100).toFixed(0)}% + {money(r.back)} возврат → <b className="text-slate-700">{money(r.logistics)} ₽</b>
+                                </div>
+                                {r.dutyByWeight && <div className="text-[11px] text-amber-700 mt-1">Весовая ставка выиграла: {money(r.dutySpecRub)} &gt; {money(r.dutyAdv)} ₽</div>}
+                              </div>
+
+                              <div className="rounded-xl border-2 border-emerald-200 bg-emerald-50/40 p-3">
+                                <div className="text-[11px] font-bold uppercase tracking-wide text-emerald-700 mb-2">ОСНО · НДС 22% + 25%</div>
+                                <div className="flex justify-between py-0.5"><span className="text-slate-600">Себестоимость</span><span className="tabular-nums">{money(r.costOsno)} ₽</span></div>
+                                <div className="flex justify-between py-0.5"><span className="text-slate-600">Пришло от WB</span><span className="tabular-nums">{money(r.fromO)} ₽</span></div>
+                                <div className="flex justify-between py-0.5"><span className="text-slate-600">НДС к уплате</span><span className="tabular-nums">{money(r.vatToPay)} ₽</span></div>
+                                <div className="flex justify-between py-0.5"><span className="text-slate-600">Налог 25%</span><span className="tabular-nums">{money(r.taxO)} ₽</span></div>
+                                <div className={`flex justify-between py-1.5 mt-1 border-t border-emerald-200 font-extrabold text-base ${r.osno < 0 ? 'text-rose-600' : 'text-emerald-700'}`}><span>Прибыль</span><span className="tabular-nums">{money(r.osno)} ₽</span></div>
+                                <div className="text-[11px] text-slate-500">маржа {pctOf(r.osno, r.p)} · ROI {pctOf(r.osno, r.costOsno)}</div>
+                              </div>
+
+                              <div className="rounded-xl border-2 border-indigo-200 bg-indigo-50/40 p-3">
+                                <div className="text-[11px] font-bold uppercase tracking-wide text-indigo-700 mb-2">УСН {usnRate === 0.06 ? '6%' : '15%'} · без НДС</div>
+                                <div className="flex justify-between py-0.5"><span className="text-slate-600">Себестоимость</span><span className="tabular-nums">{money(r.costUsn)} ₽</span></div>
+                                <div className="flex justify-between py-0.5"><span className="text-slate-600">Логистика</span><span className="tabular-nums">{money(r.logistics)} ₽</span></div>
+                                <div className="flex justify-between py-0.5"><span className="text-slate-600">Пришло от WB</span><span className="tabular-nums">{money(r.fromU)} ₽</span></div>
+                                <div className="flex justify-between py-0.5"><span className="text-slate-600">Налог</span><span className="tabular-nums">{money(r.taxU)} ₽</span></div>
+                                <div className={`flex justify-between py-1.5 mt-1 border-t border-indigo-200 font-extrabold text-base ${r.usn < 0 ? 'text-rose-600' : 'text-indigo-700'}`}><span>Прибыль</span><span className="tabular-nums">{money(r.usn)} ₽</span></div>
+                                <div className="text-[11px] text-slate-500">маржа {pctOf(r.usn, r.p)} · ROI {pctOf(r.usn, r.costUsn)}</div>
+                              </div>
                             </div>
                           </div>
                         </div>
                       );
                     })}
 
-                    <button type="button" onClick={() => setCalcItems((prev) => [...prev, makeCalcItem(prev.length + 1)])} className="w-full py-3 rounded-xl border-2 border-dashed border-indigo-300 text-indigo-600 font-semibold hover:bg-indigo-50">
+                    <button type="button" onClick={() => setCalcItems((prev) => [...prev, makeCalcItem(prev.length + 1)])} className="w-full py-3.5 rounded-2xl border-2 border-dashed border-indigo-300 text-indigo-600 font-bold hover:bg-indigo-50 hover:border-indigo-400 transition-colors">
                       + Добавить товар
                     </button>
 
                     {/* Итог */}
-                    <div className="bg-slate-900 rounded-2xl p-4 text-white">
-                      <div className="font-bold mb-3">Итого по {rows.length} поз.</div>
-                      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-sm">
-                        <div><div className="text-slate-400 text-xs">Выручка</div><div className="font-bold text-lg">{money(totRevenue)} ₽</div></div>
-                        <div><div className="text-slate-400 text-xs">Себестоимость (ОСНО)</div><div className="font-bold text-lg">{money(totCostOsno)} ₽</div></div>
-                        <div><div className="text-slate-400 text-xs">Пошлина</div><div className="font-bold text-lg">{money(totDuty)} ₽</div></div>
-                        <div><div className="text-slate-400 text-xs">Прибыль ОСНО</div><div className={`font-bold text-lg ${totOsno < 0 ? 'text-rose-400' : 'text-emerald-400'}`}>{money(totOsno)} ₽</div></div>
-                        <div><div className="text-slate-400 text-xs">Прибыль УСН</div><div className={`font-bold text-lg ${totUsn < 0 ? 'text-rose-400' : 'text-indigo-300'}`}>{money(totUsn)} ₽</div></div>
+                    <div className="rounded-2xl bg-gradient-to-br from-slate-900 to-slate-800 p-5 text-white shadow-xl">
+                      <div className="font-bold mb-4 flex items-center gap-2">
+                        <span className="w-1.5 h-5 rounded-full bg-emerald-400" />
+                        Итого по {rows.length} {rows.length === 1 ? 'позиции' : 'позициям'}
                       </div>
-                      <div className="mt-3 pt-3 border-t border-white/10 text-sm">
-                        {totOsno >= totUsn
-                          ? <>По всем позициям выгоднее <b className="text-emerald-400">ОСНО с НДС</b>: +{money(totOsno - totUsn)} ₽ (ввозной НДС {money(totImportVat)} ₽ идёт к вычету)</>
-                          : <>По всем позициям выгоднее <b className="text-indigo-300">УСН {usnRate === 0.06 ? '6%' : '15%'}</b>: +{money(totUsn - totOsno)} ₽</>}
+                      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
+                        {[
+                          { l: 'Выручка', v: tot.rev, c: 'text-white' },
+                          { l: 'Себестоимость', v: tot.cost, c: 'text-white' },
+                          { l: 'Пошлина', v: tot.duty, c: 'text-amber-300' },
+                          { l: 'Логистика (УСН)', v: tot.log, c: 'text-sky-300' },
+                          { l: 'Прибыль ОСНО', v: tot.osno, c: tot.osno < 0 ? 'text-rose-400' : 'text-emerald-400' },
+                          { l: 'Прибыль УСН', v: tot.usn, c: tot.usn < 0 ? 'text-rose-400' : 'text-indigo-300' },
+                        ].map((x) => (
+                          <div key={x.l}>
+                            <div className="text-slate-400 text-[11px] uppercase tracking-wide">{x.l}</div>
+                            <div className={`font-extrabold text-lg tabular-nums ${x.c}`}>{money(x.v)} ₽</div>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="mt-4 pt-3 border-t border-white/10 text-sm">
+                        {tot.osno >= tot.usn
+                          ? <>Выгоднее <b className="text-emerald-400">ОСНО с НДС</b>: +{money(tot.osno - tot.usn)} ₽ — ввозной/входной НДС {money(tot.vat)} ₽ идёт к вычету</>
+                          : <>Выгоднее <b className="text-indigo-300">УСН {usnRate === 0.06 ? '6%' : '15%'}</b>: +{money(tot.usn - tot.osno)} ₽</>}
                       </div>
                     </div>
 
-                    <div className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg p-3">
-                      <b>Ставки — ориентир, не основание для контракта.</b> Пошлина определяется полным 10-значным кодом ТН ВЭД: внутри одной группы разброс бывает 0–17.5%. Комбинированная ставка = максимум из «%» и «€/кг», и на дешёвом товаре обычно срабатывает вес. НДС 22% с 01.01.2026; 10% — только для товаров из перечня ПП 908 (детские, продукты, книги, медизделия) и требует подтверждения. Китай преференций не имеет с 12.10.2021. Перед закупкой сверяйте конкретный код через «Таксу Онлайн» alta.ru.
+                    <div className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-xl p-3 leading-relaxed">
+                      <b>Ставки — ориентир, не основание для контракта.</b> Пошлина определяется полным 10-значным кодом ТН ВЭД: внутри группы разброс бывает 0–17.5%. Комбинированная = максимум из «%» и «€/кг», на дешёвом товаре обычно выигрывает вес. НДС 22% с 01.01.2026; 10% — только перечень ПП 908 и требует подтверждения. Китай без преференций с 12.10.2021.
+                      <br />
+                      <b>Логистика WB:</b> тарифы с 15.09.2025, обратная логистика без коэффициентов с 20.03.2026. WB меняет тарифы почти ежемесячно — сверяйте коэффициент своего склада в ЛК («Поставки → Тарифы → Тарифы складов») и правьте поля здесь. Выкуп берите от <b>доставленных</b> заказов, иначе расходы завысятся.
                     </div>
                   </div>
                 );
@@ -26623,7 +26708,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             )}
                             <StatCard label="Чистая прибыль" value={rub(profitFromPayout)} sub={salesX > 0 ? `маржа ${pct(profitFromPayout / salesX * 100)}` : '—'} signOf={profitFromPayout} />
                             <StatCard label="Рентабельность (ROI)" value={costSumTotal > 0 ? pct(profitFromPayout / costSumTotal * 100) : '—'} sub="прибыль / себест." signOf={profitFromPayout} />
-                            <StatCard label="Твои расходы" value={rub(yourCosts)} sub={salesX > 0 ? `себест+реклама+налог · ${pct(yourCosts / salesX * 100)}` : 'себест+реклама+налог'} color="#fbbf24" />
+                            <StatCard label="Твои расходы" value={rub(yourCosts)} sub={`${uploadedVatMode ? 'себест+реклама+НДС+налог' : 'себест+реклама+налог'}${salesX > 0 ? ` · ${pct(yourCosts / salesX * 100)}` : ''}`} color="#fbbf24" />
                             <StatCard label="Удержал WB" value={rub(wbHeld)} sub={salesX > 0 ? `комиссия+логистика · ${pct(wbHeld / salesX * 100)}` : 'комиссия+логистика'} color="#f59e0b" />
                           </div>
                           <div className="mt-3 flex flex-wrap items-center gap-3 text-sm border-t border-white/10 pt-3">
