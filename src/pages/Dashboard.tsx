@@ -1321,6 +1321,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [calcUsnCashExpense, setCalcUsnCashExpense] = useState<boolean>(() => {
     try { return localStorage.getItem('calc_usn_cash_expense_v1') === '1'; } catch { return false; }
   });
+  // Быстрый вывод WB (ОСНО): % с суммы к перечислению за ускоренную выплату.
+  const [calcFastWithdraw, setCalcFastWithdraw] = useState<boolean>(() => {
+    try { return localStorage.getItem('calc_fast_withdraw_v1') === '1'; } catch { return false; }
+  });
+  const [calcFastWithdrawPct, setCalcFastWithdrawPct] = useState<number>(3);
   // Сохранённые карточки товаров калькулятора (в app_settings — доступны с любого устройства).
   const [calcSavedProducts, setCalcSavedProducts] = useState<any[]>([]);
   const [calcPickerOpen, setCalcPickerOpen] = useState(false);
@@ -1365,6 +1370,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       setCalcTargetMargin(n(s.targetMargin, 25));
       setCalcNoVatRefund(!!s.noVatRefund);
       if (typeof s.usnCashExpense === 'boolean') setCalcUsnCashExpense(s.usnCashExpense);
+      if (typeof s.fastWithdraw === 'boolean') setCalcFastWithdraw(s.fastWithdraw);
+      setCalcFastWithdrawPct(n(s.fastWithdrawPct, 3));
       setWbBuyoutPct(n(s.buyoutPct, 70));
       setWbWarehouseCoef(n(s.warehouseCoef, 100));
       setWbLocalIndex(n(s.localIndex, 1));
@@ -1383,6 +1390,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         commissionPct: calcCommissionPct, adsOsno: calcAdsPctOsno, adsUsn: calcAdsPctUsn,
         assembly: calcAssembly, deliveryToWb: calcDeliveryToWb, cargoPerKg: calcCargoPerKg,
         usnRate: calcUsnRate, targetMargin: calcTargetMargin, noVatRefund: calcNoVatRefund, usnCashExpense: calcUsnCashExpense,
+        fastWithdraw: calcFastWithdraw, fastWithdrawPct: calcFastWithdrawPct,
         buyoutPct: wbBuyoutPct, warehouseCoef: wbWarehouseCoef, localIndex: wbLocalIndex,
         base1L: wbBase1L, extraL: wbExtraL, tiers: wbTiers,
         storageTariff: wbStorageTariff, storageCoef: wbStorageCoef, storageDays: wbStorageDays,
@@ -25237,6 +25245,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   commissionPct: calcCommissionPct, adsOsno: calcAdsPctOsno, adsUsn: calcAdsPctUsn,
                   assembly: calcAssembly, deliveryToWb: calcDeliveryToWb, cargoPerKg: calcCargoPerKg,
                   usnRate: calcUsnRate, targetMargin: calcTargetMargin, noVatRefund: calcNoVatRefund, usnCashExpense: calcUsnCashExpense,
+                  fastWithdraw: calcFastWithdraw, fastWithdrawPct: calcFastWithdrawPct,
                   buyoutPct: wbBuyoutPct, warehouseCoef: wbWarehouseCoef, localIndex: wbLocalIndex,
                   base1L: wbBase1L, extraL: wbExtraL, tiers: wbTiers,
                   storageTariff: wbStorageTariff, storageCoef: wbStorageCoef, storageDays: wbStorageDays,
@@ -25254,6 +25263,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   setCalcTargetMargin(n(s.targetMargin, calcTargetMargin));
                   if (typeof s.noVatRefund === 'boolean') setCalcNoVatRefund(s.noVatRefund);
                   if (typeof s.usnCashExpense === 'boolean') setCalcUsnCashExpense(s.usnCashExpense);
+                  if (typeof s.fastWithdraw === 'boolean') setCalcFastWithdraw(s.fastWithdraw);
+                  setCalcFastWithdrawPct(n(s.fastWithdrawPct, calcFastWithdrawPct));
                   setWbBuyoutPct(n(s.buyoutPct, wbBuyoutPct));
                   setWbWarehouseCoef(n(s.warehouseCoef, wbWarehouseCoef));
                   setWbLocalIndex(n(s.localIndex, wbLocalIndex));
@@ -25333,7 +25344,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   const commission = p * cPct / 100;
                   const adsO = p * aPctOsno / 100;
                   const adsU = p * aPctUsn / 100;
-                  const feesO = commission + adsO;                       // на ОСНО ни логистики, ни хранения
+                  const payoutO = p - commission - adsO;                 // сумма к перечислению (до быстрого вывода)
+                  const fastWithdrawO = calcFastWithdraw ? payoutO * Math.max(0, num(calcFastWithdrawPct)) / 100 : 0;
+                  const feesO = commission + adsO + fastWithdrawO;       // на ОСНО ни логистики, ни хранения
                   const feesU = commission + logistics + adsU + storage;
                   const fromO = p - feesO;
                   const fromU = p - feesU;
@@ -25381,7 +25394,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   };
 
                   return { isRu, rate, purchaseRub, customs, duty, dutyAdv, dutySpecRub, dutyByWeight, importVat, cargo, costOsno, costOsnoFull, costUsn,
-                    liters, baseLog, fwd, back, logistics, storage, cash, p, commission, adsO, adsU, feesO, feesU, fromO, fromU,
+                    liters, baseLog, fwd, back, logistics, storage, cash, p, commission, adsO, adsU, fastWithdrawO, feesO, feesU, fromO, fromU,
                     vatOut, vatInServices, vatToPay, vatToPayRaw, vatRefundCut, beforeO, taxO, osno, taxU, usn, qty, batch };
                 };
 
@@ -25482,6 +25495,17 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                 <span className="block text-[11px] text-slate-400">Уменьшают базу УСН «Доходы−Расходы» (нужны документы)</span>
                               </span>
                             </label>
+                            <div className="mt-2 flex items-start gap-2">
+                              <input type="checkbox" checked={calcFastWithdraw} onChange={(e) => { const v = e.target.checked; setCalcFastWithdraw(v); try { localStorage.setItem('calc_fast_withdraw_v1', v ? '1' : '0'); } catch {} }} className="w-4 h-4 accent-indigo-600 mt-0.5 cursor-pointer" />
+                              <div className="text-xs text-slate-600">
+                                <div className="flex items-center gap-2">
+                                  <span>Быстрый вывод WB · ОСНО</span>
+                                  <CalcInput value={calcFastWithdrawPct} onChange={setCalcFastWithdrawPct} step="0.5" className="w-14 px-2 py-1 border border-slate-300 rounded-md text-xs" />
+                                  <span className="text-slate-400">%</span>
+                                </div>
+                                <span className="block text-[11px] text-slate-400">WB забирает % с суммы к перечислению за ускоренную выплату</span>
+                              </div>
+                            </div>
                           </Sec>
                         </div>
 
@@ -25643,6 +25667,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                 <CalcRow label="Цена продажи" value={r.p} base={r.p} />
                                 <CalcRow label="Комиссия WB" value={-r.commission} base={r.p} />
                                 <CalcRow label="Реклама" value={-r.adsO} base={r.p} />
+                                {r.fastWithdrawO > 0.005 && <CalcRow label="Быстрый вывод" value={-r.fastWithdrawO} base={r.p} hint={`${calcFastWithdrawPct}% с к перечислению`} />}
                                 <div className="flex justify-between py-0.5 text-slate-400 text-xs"><span>Логистика и хранение</span><span className="italic">не применяются</span></div>
                                 <CalcRow label="Пришло от WB" value={r.fromO} base={r.p} />
                                 <CalcRow label="Себестоимость с НДС" value={-r.costOsnoFull} base={r.p} />
