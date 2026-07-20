@@ -25270,6 +25270,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     cargo = num(it.weightKg) * num(calcCargoPerKg);
                     costUsn = purchaseRub + cargo;
                   }
+                  // Ввозной НДС не идёт сразу к вычету, а входит в себестоимость и возвращается отдельной строкой.
+                  const costOsnoFull = costOsno + importVat;
 
                   const liters = Math.max(0, num(it.len) * num(it.wid) * num(it.hei) / 1000);
                   const baseLog = wbBaseLogistics(liters, wbTiers, num(wbBase1L), num(wbExtraL));
@@ -25306,7 +25308,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   const batch = {
                     qty,
                     rev: p * qty,
-                    costO: costOsno * qty, costU: costUsn * qty,
+                    costO: costOsnoFull * qty, costU: costUsn * qty,
                     investO: (costOsno + (isRu ? 0 : importVat) + cash) * qty,
                     investU: (costUsn + cash) * qty,
                     profO: osno * qty, profU: usn * qty,
@@ -25314,7 +25316,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     vat: importVat * qty, duty: duty * qty, log: logistics * qty,
                   };
 
-                  return { isRu, rate, purchaseRub, customs, duty, dutyAdv, dutySpecRub, dutyByWeight, importVat, cargo, costOsno, costUsn,
+                  return { isRu, rate, purchaseRub, customs, duty, dutyAdv, dutySpecRub, dutyByWeight, importVat, cargo, costOsno, costOsnoFull, costUsn,
                     liters, baseLog, fwd, back, logistics, storage, cash, p, commission, adsO, adsU, feesO, feesU, fromO, fromU,
                     vatOut, vatInServices, vatToPay, vatToPayRaw, vatRefundCut, beforeO, taxO, osno, taxU, usn, qty, batch };
                 };
@@ -25547,23 +25549,24 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                 <div className="text-xs font-bold uppercase tracking-wide text-emerald-700 mb-2">ОСНО · официальный ввоз · НДС 22% + 25%</div>
                                 {!r.isRu && <><CalcRow label="Закупка" value={r.purchaseRub} base={r.p} />
                                 <CalcRow label="Доставка до РФ" value={r.customs - r.purchaseRub} base={r.p} />
-                                {Math.abs(r.duty) > 0.005 && <CalcRow label={`Пошлина${r.dutyByWeight ? ' (по весу)' : ''}`} value={r.duty} base={r.p} />}</>}
+                                {Math.abs(r.duty) > 0.005 && <CalcRow label={`Пошлина${r.dutyByWeight ? ' (по весу)' : ''}`} value={r.duty} base={r.p} />}
+                                {r.importVat > 0.005 && <CalcRow label="Ввозной НДС" value={r.importVat} base={r.p} hint="в себестоимости" />}</>}
                                 {r.isRu && <CalcRow label="Закупка с НДС" value={r.purchaseRub} base={r.p} />}
-                                <CalcRow label="НДС к вычету" value={-r.importVat} base={r.p} />
-                                <CalcRow label="Себестоимость" value={r.costOsno} base={r.p} strong tone="border-emerald-200 text-slate-800" />
+                                <CalcRow label="Себестоимость с НДС" value={r.costOsnoFull} base={r.p} strong tone="border-emerald-200 text-slate-800" />
                                 <div className="h-2" />
                                 <CalcRow label="Цена продажи" value={r.p} base={r.p} />
                                 <CalcRow label="Комиссия WB" value={-r.commission} base={r.p} />
                                 <CalcRow label="Реклама" value={-r.adsO} base={r.p} />
                                 <div className="flex justify-between py-0.5 text-slate-400 text-xs"><span>Логистика и хранение</span><span className="italic">не применяются</span></div>
                                 <CalcRow label="Пришло от WB" value={r.fromO} base={r.p} />
-                                <CalcRow label="Себестоимость" value={-r.costOsno} base={r.p} />
+                                <CalcRow label="Себестоимость с НДС" value={-r.costOsnoFull} base={r.p} />
+                                {r.importVat > 0.005 && <CalcRow label={r.isRu ? 'НДС к вычету' : 'Ввозной НДС к вычету'} value={r.importVat} base={r.p} />}
                                 <CalcRow label="НДС к уплате" value={-r.vatToPay} base={r.p} />
                                 {r.vatRefundCut > 0 && <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 my-1">Возмещение {money(r.vatRefundCut)} ₽ не учтено</div>}
                                 <CalcRow label="Налог 25%" value={-r.taxO} base={r.p} />
                                 {r.cash > 0 && <CalcRow label="Сборка и отвоз" value={-r.cash} base={r.p} hint="нал." />}
                                 <CalcRow label="Прибыль" value={r.osno} base={r.p} strong tone={`border-emerald-300 ${r.osno < 0 ? 'text-rose-600' : 'text-emerald-700'}`} />
-                                <div className="text-[11px] text-slate-500 mt-1">ROI {pctOf(r.osno, r.costOsno)} · безубыток <b className="text-slate-700">{beO == null ? '—' : `${money(Math.ceil(beO))} ₽`}</b></div>
+                                <div className="text-[11px] text-slate-500 mt-1">ROI {pctOf(r.osno, r.costOsnoFull)} · безубыток <b className="text-slate-700">{beO == null ? '—' : `${money(Math.ceil(beO))} ₽`}</b></div>
                               </div>
 
                               <div className="rounded-xl border-2 border-indigo-200 bg-indigo-50/30 p-4">
