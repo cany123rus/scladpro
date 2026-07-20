@@ -1288,6 +1288,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     vatPct: 22,
     price: 1500,            // цена для покупателя
     qty: 100,               // размер партии, шт — для просчёта закупки целиком
+    pricePoints: [],        // доп. ценовые сценарии {price, qty} сверх основной цены
     obnalSum: 0,            // ОСНО: сумма «бумажного» счёта на партию (с НДС) для доп. вычета
     obnalPct: 0,            // комиссия конторы за обнал, % от суммы
     obnalWithdrawPct: 13,   // во сколько обошёлся бы легальный вывод этих денег с ООО (дивиденды НДФЛ), %
@@ -25235,6 +25236,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 const B = Math.max(0.01, num(wbBuyoutPct) / 100);
 
                 const upd = (id: string, patch: any) => setCalcItems((prev) => prev.map((x) => x.id === id ? { ...x, ...patch } : x));
+                const addPricePoint = (it: any) => upd(it.id, { pricePoints: [...(Array.isArray(it.pricePoints) ? it.pricePoints : []), { price: Math.round(num(it.price) * 1.15), qty: Math.max(1, Math.round(num(it.qty) || 1)) }] });
+                const updPricePoint = (it: any, i: number, patch: any) => upd(it.id, { pricePoints: (it.pricePoints || []).map((pp: any, k: number) => k === i ? { ...pp, ...patch } : pp) });
+                const delPricePoint = (it: any, i: number) => upd(it.id, { pricePoints: (it.pricePoints || []).filter((_: any, k: number) => k !== i) });
                 const applyCategory = (id: string, key: string) => {
                   const c = IMPORT_CATEGORIES.find((x) => x.key === key);
                   if (!c) return;
@@ -25341,36 +25345,49 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   const storage = num(wbStorageTariff) * liters * (num(wbStorageCoef) / 100) * num(wbStorageDays);
 
                   const p = num(it.price);
-                  const commission = p * cPct / 100;
-                  const adsO = p * aPctOsno / 100;
-                  const adsU = p * aPctUsn / 100;
-                  const payoutO = p - commission - adsO;                 // сумма к перечислению (до быстрого вывода)
-                  const fastWithdrawO = calcFastWithdraw ? payoutO * Math.max(0, num(calcFastWithdrawPct)) / 100 : 0;
-                  const feesO = commission + adsO + fastWithdrawO;       // на ОСНО ни логистики, ни хранения
-                  const feesU = commission + logistics + adsU + storage;
-                  const fromO = p - feesO;
-                  const fromU = p - feesU;
-
-                  const vatOut = vS(p);
-                  const vatInServices = ex(feesO);
-                  const vatToPayRaw = vatOut - importVat - vatInServices;
-                  const vatToPay = calcNoVatRefund ? Math.max(0, vatToPayRaw) : vatToPayRaw;
-                  const vatRefundCut = calcNoVatRefund && vatToPayRaw < 0 ? -vatToPayRaw : 0;
-
                   const cash = num(calcAssembly) + num(calcDeliveryToWb);
-                  const beforeO = fromO - costOsno - vatToPay;
-                  const taxO = Math.max(0, beforeO) * 0.25;
-                  const osno = beforeO - taxO - cash;
-                  // УСН «Доходы−Расходы»: база = доход(цена) − расходы (комиссия WB, логистика, реклама,
-                  // хранение — всё сидит в fromU) − себестоимость − (опц.) сборка/отвоз.
+                  const fastPct = calcFastWithdraw ? Math.max(0, num(calcFastWithdrawPct)) : 0;
                   const usnCashExpense = calcUsnCashExpense ? cash : 0;
-                  const usnTaxBase = fromU - costUsn - usnCashExpense;
-                  const taxU = usnRate === 0.06 ? p * 0.06 : Math.max(0, usnTaxBase) * usnRate;
-                  const usn = fromU - costUsn - taxU - cash;
 
-                  // Партия: всё, что считалось на единицу, множим на количество.
-                  // Вложения — деньги, которые нужны до первой продажи: товар на складе + наличные расходы.
+                  // Всё, что зависит от цены, — функцией, чтобы прогонять несколько ценовых сценариев.
+                  const atPrice = (pr: number) => {
+                    const commission = pr * cPct / 100;
+                    const adsO = pr * aPctOsno / 100;
+                    const adsU = pr * aPctUsn / 100;
+                    const payoutO = pr - commission - adsO;                 // сумма к перечислению (до быстрого вывода)
+                    const fastWithdrawO = payoutO * fastPct / 100;
+                    const feesO = commission + adsO + fastWithdrawO;        // на ОСНО ни логистики, ни хранения
+                    const feesU = commission + logistics + adsU + storage;
+                    const fromO = pr - feesO;
+                    const fromU = pr - feesU;
+                    const vatOut = vS(pr);
+                    const vatInServices = ex(feesO);
+                    const vatToPayRaw = vatOut - importVat - vatInServices;
+                    const vatToPay = calcNoVatRefund ? Math.max(0, vatToPayRaw) : vatToPayRaw;
+                    const vatRefundCut = calcNoVatRefund && vatToPayRaw < 0 ? -vatToPayRaw : 0;
+                    const beforeO = fromO - costOsno - vatToPay;
+                    const taxO = Math.max(0, beforeO) * 0.25;
+                    const osno = beforeO - taxO - cash;
+                    // УСН «Доходы−Расходы»: база = доход(цена) − расходы (комиссия/логистика/реклама/хранение
+                    // сидят в fromU) − себестоимость − (опц.) сборка/отвоз.
+                    const usnTaxBase = fromU - costUsn - usnCashExpense;
+                    const taxU = usnRate === 0.06 ? pr * 0.06 : Math.max(0, usnTaxBase) * usnRate;
+                    const usn = fromU - costUsn - taxU - cash;
+                    return { p: pr, commission, adsO, adsU, fastWithdrawO, feesO, feesU, fromO, fromU, vatOut, vatInServices, vatToPay, vatToPayRaw, vatRefundCut, beforeO, taxO, osno, taxU, usn };
+                  };
+                  const prim = atPrice(p);
+                  const { commission, adsO, adsU, fastWithdrawO, feesO, feesU, fromO, fromU, vatOut, vatInServices, vatToPay, vatToPayRaw, vatRefundCut, beforeO, taxO, osno, taxU, usn } = prim;
+
+                  // Ценовые сценарии: основная цена + доп. точки {цена, кол-во} — сравнение «оборот vs дороже».
                   const qty = Math.max(1, Math.round(num(it.qty) || 1));
+                  const extraPts = (Array.isArray(it.pricePoints) ? it.pricePoints : []).map((pp: any) => ({ price: num(pp.price), qty: Math.max(1, Math.round(num(pp.qty) || 1)) }));
+                  const scenPts = [{ price: p, qty }, ...extraPts];
+                  const scen = scenPts.map((pt) => ({ price: pt.price, qty: pt.qty, a: atPrice(pt.price) }));
+                  const sumS = (f: (s: any) => number) => scen.reduce((acc, s) => acc + f(s), 0);
+                  const totalQty = sumS((s) => s.qty);
+                  const profOAll = sumS((s) => s.a.osno * s.qty);
+                  const profUAll = sumS((s) => s.a.usn * s.qty);
+
                   // Обнал (ОСНО, на партию): бумажный счёт даёт вычет входного НДС, минус комиссия конторы.
                   const obnalSum = Math.max(0, num(it.obnalSum));
                   const obnalPct = Math.max(0, num(it.obnalPct));
@@ -25381,16 +25398,17 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   const obnalWithdrawSave = obnalCash * obnalWithdrawPct / 100; // экономия vs легальный вывод (дивиденды НДФЛ)
                   const obnalNet = obnalVat - obnalFee + obnalWithdrawSave;     // выгода: НДС − комиссия + экономия на выводе
                   const batch = {
-                    qty,
-                    rev: p * qty,
-                    costO: costOsnoFull * qty, costU: costUsn * qty,
-                    investO: (costOsnoFull + cash) * qty,   // реальные деньги вперёд — с НДС (вычет придёт позже)
-                    investU: (costUsn + cash) * qty,
-                    profO: osno * qty, profU: usn * qty,
-                    taxO: taxO * qty, taxU: taxU * qty,
-                    vat: importVat * qty, duty: duty * qty, log: logistics * qty,
+                    qty: totalQty,
+                    rev: sumS((s) => s.price * s.qty),
+                    costO: costOsnoFull * totalQty, costU: costUsn * totalQty,
+                    investO: (costOsnoFull + cash) * totalQty,   // реальные деньги вперёд — с НДС (вычет придёт позже)
+                    investU: (costUsn + cash) * totalQty,
+                    profO: profOAll, profU: profUAll,
+                    taxO: sumS((s) => s.a.taxO * s.qty), taxU: sumS((s) => s.a.taxU * s.qty),
+                    vat: importVat * totalQty, duty: duty * totalQty, log: logistics * totalQty,
+                    scenarios: scen.map((s) => ({ price: s.price, qty: s.qty, osno: s.a.osno, usn: s.a.usn })),
                     obnalSum, obnalPct, obnalVat, obnalFee, obnalCash, obnalWithdrawSave, obnalNet,
-                    profOObnal: osno * qty + obnalNet,
+                    profOObnal: profOAll + obnalNet,
                   };
 
                   return { isRu, rate, purchaseRub, customs, duty, dutyAdv, dutySpecRub, dutyByWeight, importVat, cargo, costOsno, costOsnoFull, costUsn,
@@ -25581,6 +25599,16 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                   <span>Тариф WB <b className="text-slate-700">{money(r.baseLog)} ₽</b></span>
                                 </div>
                               </div>
+                              {/* Доп. ценовые сценарии — сравнить «оборачивать дешевле» vs «продавать дороже» */}
+                              {(it.pricePoints || []).map((pp: any, i: number) => (
+                                <div key={i} className="mt-2 flex flex-wrap items-end gap-3 rounded-lg bg-sky-50/60 border border-sky-100 px-3 py-2">
+                                  <span className="text-[11px] font-semibold text-sky-700 pb-2">Цена {i + 2}</span>
+                                  <CalcField label="Цена продажи" value={pp.price} onChange={(v: number) => updPricePoint(it, i, { price: v })} suffix="₽" />
+                                  <CalcField label="Партия" value={pp.qty} onChange={(v: number) => updPricePoint(it, i, { qty: v })} suffix="шт" step="1" />
+                                  <button type="button" onClick={() => delPricePoint(it, i)} className="mb-2 w-7 h-7 rounded-lg border border-rose-200 text-rose-500 hover:bg-rose-50 text-sm">×</button>
+                                </div>
+                              ))}
+                              <button type="button" onClick={() => addPricePoint(it)} className="mt-2 px-3 py-1.5 text-xs font-semibold rounded-lg border border-sky-300 text-sky-700 hover:bg-sky-50">+ ещё цена</button>
                             </Sec>
 
                             {it.source === 'ru' ? (
@@ -25734,6 +25762,33 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                   </div>
                                 ))}
                               </div>
+                              {r.batch.scenarios && r.batch.scenarios.length > 1 && (
+                                <div className="mt-3 pt-2 border-t border-slate-200">
+                                  <div className="text-[11px] font-semibold text-slate-600 mb-1">По ценам · оборот vs дороже</div>
+                                  <div className="overflow-x-auto">
+                                    <table className="w-full text-xs tabular-nums">
+                                      <thead>
+                                        <tr className="text-slate-400 text-[10px] uppercase">
+                                          <th className="text-left font-medium py-0.5">Цена × кол-во</th>
+                                          <th className="text-right font-medium">Выручка</th>
+                                          <th className="text-right font-medium text-emerald-600">Прибыль ОСНО</th>
+                                          <th className="text-right font-medium text-indigo-600">Прибыль УСН</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {r.batch.scenarios.map((s: any, i: number) => (
+                                          <tr key={i} className="border-t border-slate-100">
+                                            <td className="text-left py-1 text-slate-600">{money(s.price)} ₽ × {s.qty}</td>
+                                            <td className="text-right text-slate-700">{money(s.price * s.qty)} ₽</td>
+                                            <td className={`text-right font-semibold ${s.osno < 0 ? 'text-rose-600' : 'text-emerald-700'}`}>{money(s.osno * s.qty)} ₽</td>
+                                            <td className={`text-right font-semibold ${s.usn < 0 ? 'text-rose-600' : 'text-indigo-700'}`}>{money(s.usn * s.qty)} ₽</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </div>
+                              )}
                               <div className="mt-2 text-[10px] text-slate-400 leading-snug">Вложения — деньги на закупку и завоз всей партии до первой продажи (ОСНО: товар + пошлина + ввозной НДС + сборка; УСН: товар + карго + сборка). Маржа — % прибыли от выручки, ROI — от вложений.</div>
                             </div>
 
