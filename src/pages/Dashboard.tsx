@@ -1271,7 +1271,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     id: `${n}-${Math.round(Math.random() * 1e6)}`,
     name: `Товар ${n}`,
     source: 'import',       // 'import' — ввоз с пошлиной, 'ru' — куплено в РФ
-    costRu: 700,            // себестоимость с НДС при покупке в РФ
+    costRu: 700,            // себестоимость с НДС при покупке в РФ (ОСНО)
+    costRuUsn: 700,         // и отдельно для УСН — условия закупки могут отличаться
     country: 'cn',
     category: 'apparel_knit',
     purchase: 6,            // цена закупки за единицу в валюте
@@ -25126,12 +25127,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   let rate = 1, purchaseRub = 0, customs = 0, dutyAdv = 0, dutySpecRub = 0, duty = 0;
                   let dutyByWeight = false, importVat = 0, costOsno = 0, costUsn = 0;
                   if (isRu) {
+                    // Себестоимость задаётся отдельно для каждого режима — условия закупки
+                    // могут отличаться. На ОСНО НДС выделяем к вычету, на УСН он остаётся в цене.
                     const gross = num(it.costRu);
+                    const grossUsn = num(it.costRuUsn);
                     const vr = num(it.vatPct) / 100;
                     importVat = vr > 0 ? gross * vr / (1 + vr) : 0;
                     purchaseRub = gross;
                     costOsno = gross - importVat;
-                    costUsn = gross;
+                    costUsn = grossUsn;
                   } else {
                     rate = num(it.rateManual) > 0 ? num(it.rateManual) : num(cbrRates[it.currency] || (it.currency === 'RUB' ? 1 : 0));
                     purchaseRub = num(it.purchase) * rate;
@@ -25306,10 +25310,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           <div className="p-4">
                             {it.source === 'ru' ? (
                               <Sec title="Закупка в РФ" color="bg-slate-400">
-                                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                                  <CalcField label="Себестоимость (с НДС)" value={it.costRu} onChange={(v: number) => upd(it.id, { costRu: v })} suffix="₽" />
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                  <CalcField label="Себестоимость ОСНО (с НДС)" value={it.costRu} onChange={(v: number) => upd(it.id, { costRu: v })} suffix="₽" />
+                                  <CalcField label="Себестоимость УСН (с НДС)" value={it.costRuUsn} onChange={(v: number) => upd(it.id, { costRuUsn: v })} suffix="₽" />
                                   <div>
-                                    <label className="block text-xs font-medium text-slate-600 mb-1">НДС в закупке</label>
+                                    <label className="block text-xs font-medium text-slate-600 mb-1">НДС в закупке <span className="text-slate-400">(ОСНО)</span></label>
                                     <select value={it.vatPct} onChange={(e) => upd(it.id, { vatPct: Number(e.target.value) })} className="w-full px-2 py-2 border border-slate-300 rounded-lg text-sm">
                                       <option value={22}>22% — обычный поставщик</option>
                                       <option value={10}>10% — льготный товар</option>
