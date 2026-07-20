@@ -24937,18 +24937,21 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   const commission = p * cPct / 100;
                   const logistics = calcLogisticsMode === 'pct' ? p * lVal / 100 : lVal;
                   const ads = p * aPct / 100;
-                  const wbFees = commission + logistics + ads + storage;
-                  const fromWb = p - wbFees;
+                  // На ОСНО логистики нет (другие условия) — не вычитаем её и НДС по ней не берём.
+                  const feesOsno = commission + ads + storage;
+                  const feesUsn = commission + logistics + ads + storage;
+                  const fromWbOsno = p - feesOsno;
+                  const fromWbUsn = p - feesUsn;
                   const vatOut = vS(p);
                   const vatInGoods = vC(cost);
-                  const vatInServices = ex(wbFees);
+                  const vatInServices = ex(feesOsno);
                   const vatToPay = vatOut - vatInGoods - vatInServices;
-                  const before = fromWb - cost - vatToPay;
+                  const before = fromWbOsno - cost - vatToPay;
                   const osnoTax = Math.max(0, before) * 0.25;
                   const osno = before - osnoTax;
-                  const usnTax = usnRate === 0.06 ? p * 0.06 : Math.max(0, fromWb - cost) * usnRate;
-                  const usn = fromWb - cost - usnTax;
-                  return { commission, logistics, ads, wbFees, fromWb, vatOut, vatInGoods, vatInServices, vatToPay, before, osnoTax, osno, usnTax, usn };
+                  const usnTax = usnRate === 0.06 ? p * 0.06 : Math.max(0, fromWbUsn - cost) * usnRate;
+                  const usn = fromWbUsn - cost - usnTax;
+                  return { commission, logistics, ads, feesOsno, feesUsn, fromWbOsno, fromWbUsn, vatOut, vatInGoods, vatInServices, vatToPay, before, osnoTax, osno, usnTax, usn };
                 };
                 const R = calcAt(num(calcPrice));
                 const breakeven = (pick: (r: ReturnType<typeof calcAt>) => number) => {
@@ -25001,7 +25004,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <Field label="Цена для покупателя" value={calcPrice} onChange={setCalcPrice} suffix="₽" />
                         <Field label="Комиссия WB" value={calcCommissionPct} onChange={setCalcCommissionPct} suffix="%" />
                         <div>
-                          <label className="block text-xs font-medium text-slate-600 mb-1">Логистика</label>
+                          <label className="block text-xs font-medium text-slate-600 mb-1">Логистика <span className="text-indigo-500">(только УСН)</span></label>
                           <div className="flex items-center gap-1">
                             <input type="number" step="0.01" value={calcLogisticsValue} onChange={(e) => setCalcLogisticsValue(Number(e.target.value))} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
                             <select value={calcLogisticsMode} onChange={(e) => setCalcLogisticsMode(e.target.value as any)} className="px-1 py-2 border border-slate-300 rounded-lg text-xs">
@@ -25014,7 +25017,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <Field label="Хранение" value={calcStorage} onChange={setCalcStorage} suffix="₽" />
                       </div>
                       <div className="mt-3 text-xs text-slate-500">
-                        Комиссия и реклама — % от цены. Логистика — {calcLogisticsMode === 'pct' ? '% от цены' : '₽ за единицу'}.
+                        Комиссия и реклама — % от цены. Логистика ({calcLogisticsMode === 'pct' ? '% от цены' : '₽ за единицу'}) применяется <b>только в УСН</b> — на ОСНО другие условия, там её нет.
                         НДС: продажи {uploadedVatSalesIncluded ? '×22/122' : '×22%'}, себестоимость {uploadedVatCostIncluded ? '×22/122' : '×22%'} (меняется в «Аналитике отчётов»).
                       </div>
                     </div>
@@ -25027,11 +25030,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         </div>
                         <Line label="Цена для покупателя" value={price} />
                         <Line label="Комиссия WB" value={-R.commission} sign="− " />
-                        <Line label="Логистика" value={-R.logistics} sign="− " />
                         <Line label="Реклама" value={-R.ads} sign="− " />
                         {storage > 0 && <Line label="Хранение" value={-storage} sign="− " />}
+                        <div className="flex items-center justify-between py-1.5 text-sm text-slate-400">
+                          <span>Логистика</span><span className="italic">не применяется</span>
+                        </div>
                         <div className="border-t border-slate-200 my-1" />
-                        <Line label="Пришло от WB" value={R.fromWb} strong />
+                        <Line label="Пришло от WB" value={R.fromWbOsno} strong />
                         <div className="mt-2 rounded-lg bg-slate-50 p-2">
                           <Line label="НДС выходной" value={R.vatOut} muted />
                           <Line label="НДС входной (товар)" value={-R.vatInGoods} sign="− " muted />
@@ -25069,7 +25074,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <Line label="Реклама" value={-R.ads} sign="− " />
                         {storage > 0 && <Line label="Хранение" value={-storage} sign="− " />}
                         <div className="border-t border-slate-200 my-1" />
-                        <Line label="Пришло от WB" value={R.fromWb} strong />
+                        <Line label="Пришло от WB" value={R.fromWbUsn} strong />
                         <Line label="Себестоимость" value={-cost} sign="− " />
                         <Line label={usnRate === 0.06 ? 'Налог 6% с выручки' : 'Налог 15% с прибыли'} value={-R.usnTax} sign="− " />
                         <div className="border-t-2 border-slate-300 my-1" />
