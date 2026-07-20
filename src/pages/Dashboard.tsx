@@ -1307,6 +1307,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [calcAdsPctOsno, setCalcAdsPctOsno] = useState<number>(14);
   const [calcAdsPctUsn, setCalcAdsPctUsn] = useState<number>(14);
   const [calcUsnRate, setCalcUsnRate] = useState<number>(0.06);
+  // Наличные расходы за единицу: сборка/упаковка и отвоз до склада WB.
+  // Без документов → нет вычета НДС и налоговую базу они НЕ уменьшают, но деньги тратятся.
+  const [calcAssembly, setCalcAssembly] = useState<number>(0);
+  const [calcDeliveryToWb, setCalcDeliveryToWb] = useState<number>(0);
   // Консервативный режим: отрицательный НДС (возмещение из бюджета) не засчитываем в прибыль.
   const [calcNoVatRefund, setCalcNoVatRefund] = useState<boolean>(() => {
     try { return localStorage.getItem('calc_no_vat_refund_v1') === '1'; } catch { return false; }
@@ -25183,15 +25187,19 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   // В консервативном режиме его в прибыль не берём — обрезаем в ноль.
                   const vatToPay = calcNoVatRefund ? Math.max(0, vatToPayRaw) : vatToPayRaw;
                   const vatRefundCut = calcNoVatRefund && vatToPayRaw < 0 ? -vatToPayRaw : 0;
+                  // Наличные (сборка, отвоз до склада WB): документов нет, поэтому налоговую базу
+                  // они НЕ уменьшают и вычета НДС не дают — вычитаем их уже ПОСЛЕ налога.
+                  const cash = num(calcAssembly) + num(calcDeliveryToWb);
+
                   const beforeO = fromO - costOsno - vatToPay;
                   const taxO = Math.max(0, beforeO) * 0.25;
-                  const osno = beforeO - taxO;
+                  const osno = beforeO - taxO - cash;
 
                   const taxU = usnRate === 0.06 ? p * 0.06 : Math.max(0, fromU - costUsn) * usnRate;
-                  const usn = fromU - costUsn - taxU;
+                  const usn = fromU - costUsn - taxU - cash;
 
                   return { isRu, rate, purchaseRub, customs, duty, dutyAdv, dutySpecRub, dutyByWeight, importVat, costOsno, costUsn,
-                    liters, baseLog, fwd, back, logistics, storage, p, commission, adsO, adsU, feesO, feesU, fromO, fromU,
+                    liters, baseLog, fwd, back, logistics, storage, cash, p, commission, adsO, adsU, feesO, feesU, fromO, fromU,
                     vatOut, vatInServices, vatToPay, vatToPayRaw, vatRefundCut, beforeO, taxO, osno, taxU, usn };
                 };
 
@@ -25249,6 +25257,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             <CalcField label="Реклама УСН" value={calcAdsPctUsn} onChange={setCalcAdsPctUsn} suffix="%" />
                             <CalcField label="Дни хранения" value={wbStorageDays} onChange={setWbStorageDays} suffix="дн" />
                             <CalcField label="Коэф. хранения" value={wbStorageCoef} onChange={setWbStorageCoef} suffix="%" />
+                            <CalcField label="Сборка (нал.)" value={calcAssembly} onChange={setCalcAssembly} suffix="₽" />
+                            <CalcField label="Отвоз до WB (нал.)" value={calcDeliveryToWb} onChange={setCalcDeliveryToWb} suffix="₽" />
                             <div>
                               <label className="block text-xs font-medium text-slate-600 mb-1">Ставка УСН</label>
                               <select value={usnRate} onChange={(e) => setCalcUsnRate(Number(e.target.value))} className="w-full px-2 py-2 border border-slate-300 rounded-lg text-sm">
@@ -25455,6 +25465,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                   </div>
                                 )}
                                 <CalcRow label="Налог 25%" value={-r.taxO} base={r.p} />
+                                {r.cash > 0 && <CalcRow label="Сборка и отвоз" value={-r.cash} base={r.p} hint="нал." />}
                                 <CalcRow label="Прибыль" value={r.osno} base={r.p} strong tone={`border-emerald-200 ${r.osno < 0 ? 'text-rose-600' : 'text-emerald-700'}`} />
                                 <div className="text-[11px] text-slate-500">ROI {pctOf(r.osno, r.costOsno)} · безубыток <b className="text-slate-700">{beO == null ? '—' : `${money(Math.ceil(beO))} ₽`}</b></div>
                               </div>
@@ -25469,6 +25480,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                 <CalcRow label="Пришло от WB" value={r.fromU} base={r.p} />
                                 <CalcRow label="Себестоимость" value={-r.costUsn} base={r.p} />
                                 <CalcRow label="Налог" value={-r.taxU} base={r.p} />
+                                {r.cash > 0 && <CalcRow label="Сборка и отвоз" value={-r.cash} base={r.p} hint="нал." />}
                                 <CalcRow label="Прибыль" value={r.usn} base={r.p} strong tone={`border-indigo-200 ${r.usn < 0 ? 'text-rose-600' : 'text-indigo-700'}`} />
                                 <div className="text-[11px] text-slate-500">ROI {pctOf(r.usn, r.costUsn)} · безубыток <b className="text-slate-700">{beU == null ? '—' : `${money(Math.ceil(beU))} ₽`}</b></div>
                               </div>
