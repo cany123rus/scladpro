@@ -1298,7 +1298,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     obnalPct: 0,            // комиссия конторы за обнал, % от суммы
     obnalWithdrawPct: 13,   // во сколько обошёлся бы легальный вывод этих денег с ООО (дивиденды НДФЛ), %
   });
-  const [calcItems, setCalcItems] = useState<any[]>(() => [makeCalcItem(1)]);
+  const [calcItems, setCalcItems] = useState<any[]>(() => []);
   const [calcCommissionPct, setCalcCommissionPct] = useState<number>(8);
   // Логистика WB — только УСН (на ОСНО другие условия). Считается по литражу и выкупу.
   // Тарифы с 15.09.2025; обратная логистика с 20.03.2026 — без коэффициентов склада.
@@ -25587,6 +25587,33 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       </div>
                     </div>
 
+                    {/* Пустой экран — выбор: новый товар или сохранённый */}
+                    {calcItems.length === 0 && (
+                      <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+                        <div className="text-4xl mb-2">🧮</div>
+                        <div className="text-lg font-extrabold text-slate-800 mb-1">Начните расчёт товара</div>
+                        <div className="text-sm text-slate-500 mb-5">Создайте новый товар или откройте сохранённый</div>
+                        <div className="flex flex-wrap justify-center gap-3">
+                          <button type="button" onClick={() => setCalcItems([makeCalcItem(1)])} className="px-6 py-3 rounded-xl bg-indigo-600 text-white font-bold hover:bg-indigo-700 shadow-sm">+ Новый товар</button>
+                          {calcSavedProducts.length > 0 && (
+                            <button type="button" onClick={() => { loadCalcSavedProducts(); setCalcPickerOpen(true); }} className="px-6 py-3 rounded-xl border-2 border-emerald-300 text-emerald-700 font-bold hover:bg-emerald-50">Все сохранённые ({calcSavedProducts.length})</button>
+                          )}
+                        </div>
+                        {calcSavedProducts.length > 0 && (
+                          <div className="mt-6 pt-5 border-t border-slate-100">
+                            <div className="text-xs font-semibold text-slate-500 mb-2">Быстрый выбор</div>
+                            <div className="flex flex-wrap justify-center gap-2">
+                              {calcSavedProducts.slice(0, 12).map((s: any, i: number) => (
+                                <button key={i} type="button" onClick={() => applySaved(s)} className="px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 text-sm text-slate-700 hover:bg-indigo-50 hover:border-indigo-300 transition-colors">
+                                  {s?.name || 'Товар'}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     {/* Позиции */}
                     {rows.map(({ it, r, beO, beU, idO, idU }, idx) => {
                       const cat = IMPORT_CATEGORIES.find((c) => c.key === it.category);
@@ -26029,14 +26056,16 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       );
                     })}
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <button type="button" onClick={() => setCalcItems((prev) => [...prev, makeCalcItem(prev.length + 1)])} className="py-3.5 rounded-2xl border-2 border-dashed border-indigo-300 text-indigo-600 font-bold hover:bg-indigo-50 hover:border-indigo-400 transition-colors">
-                        + Добавить товар
-                      </button>
-                      <button type="button" onClick={() => { loadCalcSavedProducts(); setCalcPickerOpen(true); }} className="py-3.5 rounded-2xl border-2 border-dashed border-emerald-300 text-emerald-700 font-bold hover:bg-emerald-50 hover:border-emerald-400 transition-colors">
-                        Выбрать сохранённый {calcSavedProducts.length > 0 ? `(${calcSavedProducts.length})` : ''}
-                      </button>
-                    </div>
+                    {calcItems.length > 0 && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <button type="button" onClick={() => setCalcItems((prev) => [...prev, makeCalcItem(prev.length + 1)])} className="py-3.5 rounded-2xl border-2 border-dashed border-indigo-300 text-indigo-600 font-bold hover:bg-indigo-50 hover:border-indigo-400 transition-colors">
+                          + Добавить товар
+                        </button>
+                        <button type="button" onClick={() => { loadCalcSavedProducts(); setCalcPickerOpen(true); }} className="py-3.5 rounded-2xl border-2 border-dashed border-emerald-300 text-emerald-700 font-bold hover:bg-emerald-50 hover:border-emerald-400 transition-colors">
+                          Выбрать сохранённый {calcSavedProducts.length > 0 ? `(${calcSavedProducts.length})` : ''}
+                        </button>
+                      </div>
+                    )}
 
                     {calcSaveModal.open && (() => {
                       const target = calcItems.find((x) => x.id === calcSaveModal.itemId);
@@ -26092,6 +26121,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     )}
 
                     {/* Итог */}
+                    {calcItems.length > 0 && (
                     <div className="rounded-2xl bg-gradient-to-br from-slate-900 to-slate-800 p-5 text-white shadow-xl">
                       <div className="font-bold mb-4 flex items-center gap-2">
                         <span className="w-1.5 h-5 rounded-full bg-emerald-400" />
@@ -26131,6 +26161,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         )}
                       </div>
                     </div>
+                    )}
 
                     <div className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-xl p-3 leading-relaxed">
                       <b>Ставки — ориентир, не основание для контракта.</b> Пошлина зависит от полного 10-значного кода ТН ВЭД: внутри группы разброс 0–17.5%. Комбинированная = максимум из «%» и «€/кг», на дешёвом товаре обычно выигрывает вес. НДС 22% с 01.01.2026; 10% — только перечень ПП 908. Китай без преференций с 12.10.2021.
