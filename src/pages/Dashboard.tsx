@@ -25561,7 +25561,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                 <CalcRow label="Пришло от WB" value={r.fromO} base={r.p} />
                                 <CalcRow label="Себестоимость с НДС" value={-r.costOsnoFull} base={r.p} />
                                 {r.importVat > 0.005 && <CalcRow label={r.isRu ? 'НДС к вычету' : 'Ввозной НДС к вычету'} value={r.importVat} base={r.p} />}
-                                <CalcRow label="НДС к уплате" value={-r.vatToPay} base={r.p} />
+                                {r.vatInServices > 0.005 && <CalcRow label="НДС с рекламы и комиссии к вычету" value={r.vatInServices} base={r.p} />}
+                                <CalcRow label="НДС к уплате" value={-(r.vatToPay + r.vatInServices)} base={r.p} />
                                 {r.vatRefundCut > 0 && <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 my-1">Возмещение {money(r.vatRefundCut)} ₽ не учтено</div>}
                                 <CalcRow label="Налог 25%" value={-r.taxO} base={r.p} />
                                 {r.cash > 0 && <CalcRow label="Сборка и отвоз" value={-r.cash} base={r.p} hint="нал." />}
