@@ -1313,6 +1313,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [calcUsnRate, setCalcUsnRate] = useState<number>(0.06);
   // Целевая наценка: прибыль / цена продажи. Идеальная цена — при которой прибыль = этому % от цены.
   const [calcTargetMargin, setCalcTargetMargin] = useState<number>(25);
+  // Скрыть блок обнала и убрать его из итогов.
+  const [calcHideObnal, setCalcHideObnal] = useState<boolean>(() => {
+    try { return localStorage.getItem('calc_hide_obnal_v1') === '1'; } catch { return false; }
+  });
   // Сохранённые карточки товаров калькулятора (в app_settings — доступны с любого устройства).
   const [calcSavedProducts, setCalcSavedProducts] = useState<any[]>([]);
   const [calcPickerOpen, setCalcPickerOpen] = useState(false);
@@ -25454,6 +25458,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                 <span className="block text-[11px] text-slate-400">Консервативный безубыток — без расчёта на возврат из бюджета</span>
                               </span>
                             </label>
+                            <label className="mt-2 flex items-start gap-2 cursor-pointer select-none">
+                              <input type="checkbox" checked={calcHideObnal} onChange={(e) => { const v = e.target.checked; setCalcHideObnal(v); try { localStorage.setItem('calc_hide_obnal_v1', v ? '1' : '0'); } catch {} }} className="w-4 h-4 accent-indigo-600 mt-0.5" />
+                              <span className="text-xs text-slate-600">
+                                Скрыть обнал из расчёта
+                                <span className="block text-[11px] text-slate-400">Прячет блок обнала и убирает его из итогов</span>
+                              </span>
+                            </label>
                           </Sec>
                         </div>
 
@@ -25684,7 +25695,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             </div>
 
                             {/* Обнал — только ОСНО, на партию */}
-                            <div className="rounded-xl border border-amber-200 bg-amber-50/50 p-3">
+                            {!calcHideObnal && <div className="rounded-xl border border-amber-200 bg-amber-50/50 p-3">
                               <div className="flex items-center justify-between mb-2">
                                 <div className="text-xs font-bold text-amber-800">Обнал · ОСНО, на партию</div>
                                 <div className="text-[10px] text-amber-600">бумажный НДС к вычету</div>
@@ -25706,7 +25717,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               ) : (
                                 <div className="text-[10px] text-slate-400 leading-snug">Заведи сумму «бумажного» счёта — контора вернёт её наличными за вычетом комиссии, а НДС (22/122) уйдёт в вычет и уменьшит НДС партии. Наличные ещё и выгодны тем, что легальный вывод с ООО (дивиденды НДФЛ) стоил бы дороже. Выгода = сэкономленный НДС − комиссия + экономия на выводе.</div>
                               )}
-                            </div>
+                            </div>}
                           </div>
                         </div>
                       );
@@ -25805,7 +25816,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <div className="text-xs text-slate-400 mt-1">
                           ROI партии: ОСНО {pctOf(tot.osno, tot.investO)} · УСН {pctOf(tot.usn, tot.investU)}
                         </div>
-                        {(Math.abs(tot.obnal) > 0.005 || tot.obnalCash > 0.005) && (
+                        {!calcHideObnal && (Math.abs(tot.obnal) > 0.005 || tot.obnalCash > 0.005) && (
                           <div className="mt-2 pt-2 border-t border-amber-400/20 flex flex-wrap gap-x-5 gap-y-1 text-xs">
                             <span className="text-amber-300">Прибыль ОСНО с обналом: <b>{money(tot.osnoObnal)} ₽</b></span>
                             <span className="text-amber-300/80">выгода {tot.obnal >= 0 ? '+' : ''}{money(tot.obnal)} ₽</span>
