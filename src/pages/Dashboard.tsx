@@ -217,6 +217,35 @@ function HeaderClock() {
   );
 }
 
+// Компоненты калькулятора объявлены на уровне модуля НАМЕРЕННО: если объявить их внутри
+// рендера, React на каждый ввод создаёт новый тип компонента, размонтирует input и теряет
+// фокус — вводился бы только один символ за клик.
+const calcMoney = (v: number) => Number(v || 0).toLocaleString('ru-RU', { maximumFractionDigits: 2 });
+
+const CalcField = ({ label, value, onChange, suffix, step = '0.01' }: any) => (
+  <div>
+    <label className="block text-xs font-medium text-slate-600 mb-1">{label}</label>
+    <div className="flex items-center gap-1">
+      <input
+        type="number"
+        step={step}
+        value={value}
+        onChange={(e) => onChange(e.target.value === '' ? 0 : Number(e.target.value))}
+        onFocus={(e) => e.target.select()}
+        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
+      />
+      {suffix ? <span className="text-xs text-slate-400 w-8 shrink-0">{suffix}</span> : null}
+    </div>
+  </div>
+);
+
+const CalcLine = ({ label, value, sign, strong, muted }: any) => (
+  <div className={`flex items-center justify-between py-1.5 text-sm ${strong ? 'font-bold text-slate-900' : muted ? 'text-slate-400' : 'text-slate-600'}`}>
+    <span>{sign}{label}</span>
+    <span className={strong ? '' : 'font-medium text-slate-800'}>{calcMoney(value)} ₽</span>
+  </div>
+);
+
 export default function Dashboard({ forcedTab }: DashboardProps) {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
@@ -24975,21 +25004,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   setCalcStorage(0);
                   showToast('Подставлены комиссия, логистика и реклама из открытого отчёта', 'success');
                 };
-                const Field = ({ label, value, onChange, suffix, step = '0.01' }: any) => (
-                  <div>
-                    <label className="block text-xs font-medium text-slate-600 mb-1">{label}</label>
-                    <div className="flex items-center gap-1">
-                      <input type="number" step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
-                      {suffix ? <span className="text-xs text-slate-400 w-8 shrink-0">{suffix}</span> : null}
-                    </div>
-                  </div>
-                );
-                const Line = ({ label, value, sign, strong, muted }: any) => (
-                  <div className={`flex items-center justify-between py-1.5 text-sm ${strong ? 'font-bold text-slate-900' : muted ? 'text-slate-400' : 'text-slate-600'}`}>
-                    <span>{sign}{label}</span>
-                    <span className={strong ? '' : 'font-medium text-slate-800'}>{money(value)} ₽</span>
-                  </div>
-                );
+                const Field = CalcField;
+                const Line = CalcLine;
                 return (
                   <div className="w-full space-y-4">
                     <div className="bg-white rounded-xl border border-slate-100 p-4">
@@ -25006,7 +25022,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <div>
                           <label className="block text-xs font-medium text-slate-600 mb-1">Логистика <span className="text-indigo-500">(только УСН)</span></label>
                           <div className="flex items-center gap-1">
-                            <input type="number" step="0.01" value={calcLogisticsValue} onChange={(e) => setCalcLogisticsValue(Number(e.target.value))} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+                            <input type="number" step="0.01" value={calcLogisticsValue} onChange={(e) => setCalcLogisticsValue(e.target.value === '' ? 0 : Number(e.target.value))} onFocus={(e) => e.target.select()} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
                             <select value={calcLogisticsMode} onChange={(e) => setCalcLogisticsMode(e.target.value as any)} className="px-1 py-2 border border-slate-300 rounded-lg text-xs">
                               <option value="pct">%</option>
                               <option value="rub">₽</option>
