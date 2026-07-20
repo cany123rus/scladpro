@@ -1292,6 +1292,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     qty: 100,               // размер партии, шт — для просчёта закупки целиком
     turnoverDays: 30,       // срок оборачиваемости партии — за сколько дней распродаётся
     pricePoints: [],        // доп. ценовые сценарии {price, qty, turnoverDays} сверх основной цены
+    importVariants: [],     // доп. варианты ввоза {purchase, currency, country, deliveryToBorder} для сравнения
     obnalSum: 0,            // ОСНО: сумма «бумажного» счёта на партию (с НДС) для доп. вычета
     obnalPct: 0,            // комиссия конторы за обнал, % от суммы
     obnalWithdrawPct: 13,   // во сколько обошёлся бы легальный вывод этих денег с ООО (дивиденды НДФЛ), %
@@ -25242,6 +25243,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 const addPricePoint = (it: any) => upd(it.id, { pricePoints: [...(Array.isArray(it.pricePoints) ? it.pricePoints : []), { price: Math.round(num(it.price) * 1.15), qty: Math.max(1, Math.round(num(it.qty) || 1)), turnoverDays: Math.max(1, Math.round(num(it.turnoverDays) || 30)) }] });
                 const updPricePoint = (it: any, i: number, patch: any) => upd(it.id, { pricePoints: (it.pricePoints || []).map((pp: any, k: number) => k === i ? { ...pp, ...patch } : pp) });
                 const delPricePoint = (it: any, i: number) => upd(it.id, { pricePoints: (it.pricePoints || []).filter((_: any, k: number) => k !== i) });
+                const addImportVariant = (it: any) => upd(it.id, { importVariants: [...(Array.isArray(it.importVariants) ? it.importVariants : []), { purchase: num(it.purchase), currency: it.currency, country: it.country, deliveryToBorder: num(it.deliveryToBorder) }] });
+                const updImportVariant = (it: any, i: number, patch: any) => upd(it.id, { importVariants: (it.importVariants || []).map((v: any, k: number) => k === i ? { ...v, ...patch } : v) });
+                const delImportVariant = (it: any, i: number) => upd(it.id, { importVariants: (it.importVariants || []).filter((_: any, k: number) => k !== i) });
                 const applyCategory = (id: string, key: string) => {
                   const c = IMPORT_CATEGORIES.find((x) => x.key === key);
                   if (!c) return;
@@ -25728,6 +25732,71 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                       {cat?.note ? <>{cat.note}. </> : null}{country?.note}
                                     </div>
                                   )}
+
+                                  {/* Варианты ввоза — сравнить разные поставки одного товара */}
+                                  <div className="mt-3 pt-3 border-t border-amber-200">
+                                    <div className="flex items-center justify-between mb-2">
+                                      <span className="text-[11px] font-semibold text-emerald-700">Варианты ввоза — сравнить поставки</span>
+                                      <button type="button" onClick={() => addImportVariant(it)} className="px-2.5 py-1 text-xs font-semibold rounded-lg border border-emerald-300 text-emerald-700 hover:bg-emerald-50">+ вариант ввоза</button>
+                                    </div>
+                                    {(it.importVariants || []).map((v: any, i: number) => (
+                                      <div key={i} className="mb-2 flex flex-wrap items-end gap-2 rounded-lg bg-white border border-slate-200 px-2 py-2">
+                                        <span className="text-[11px] font-semibold text-slate-500 pb-2">#{i + 2}</span>
+                                        <div>
+                                          <label className="block text-xs font-medium text-slate-600 mb-1">Закупка за ед.</label>
+                                          <div className="flex items-center gap-1">
+                                            <CalcInput value={v.purchase} onChange={(x: number) => updImportVariant(it, i, { purchase: x })} className="w-24 px-2 py-2 border border-slate-300 rounded-lg text-sm" />
+                                            <select value={v.currency} onChange={(e) => updImportVariant(it, i, { currency: e.target.value })} className="px-1 py-2 border border-slate-300 rounded-lg text-xs">
+                                              {['CNY', 'USD', 'EUR', 'RUB', 'TRY', 'KGS'].map((c) => <option key={c} value={c}>{c}</option>)}
+                                            </select>
+                                          </div>
+                                        </div>
+                                        <div>
+                                          <label className="block text-xs font-medium text-slate-600 mb-1">Страна</label>
+                                          <select value={v.country} onChange={(e) => updImportVariant(it, i, { country: e.target.value })} className="px-2 py-2 border border-slate-300 rounded-lg text-xs">
+                                            {IMPORT_COUNTRIES.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+                                          </select>
+                                        </div>
+                                        <CalcField label="Доставка до РФ" value={v.deliveryToBorder} onChange={(x: number) => updImportVariant(it, i, { deliveryToBorder: x })} suffix="₽" />
+                                        <button type="button" onClick={() => delImportVariant(it, i)} className="mb-2 w-7 h-7 rounded-lg border border-rose-200 text-rose-500 hover:bg-rose-50 text-sm">×</button>
+                                      </div>
+                                    ))}
+                                    {(() => {
+                                      const variants = [{ label: 'Текущий', ov: null as any }, ...(it.importVariants || []).map((v: any, i: number) => ({ label: `#${i + 2}`, ov: v }))];
+                                      if (variants.length < 2) return null;
+                                      const rows = variants.map((vr) => {
+                                        const merged = vr.ov ? { ...it, osnoSource: 'import', purchase: vr.ov.purchase, currency: vr.ov.currency, country: vr.ov.country, deliveryToBorder: vr.ov.deliveryToBorder } : { ...it, osnoSource: 'import' };
+                                        const rr = computeItem(merged);
+                                        const ctry = vr.ov ? vr.ov.country : it.country;
+                                        return { label: vr.label, cost: rr.costOsnoFull, prof: rr.batch.profO, country: IMPORT_COUNTRIES.find((c) => c.key === ctry)?.label || ctry };
+                                      });
+                                      const best = rows.reduce((a, b) => (b.prof > a.prof ? b : a), rows[0]);
+                                      return (
+                                        <div className="mt-1 overflow-x-auto">
+                                          <table className="w-full text-xs tabular-nums">
+                                            <thead>
+                                              <tr className="text-slate-400 text-[10px] uppercase">
+                                                <th className="text-left font-medium py-0.5">Вариант</th>
+                                                <th className="text-left font-medium">Страна</th>
+                                                <th className="text-right font-medium">Себест/ед</th>
+                                                <th className="text-right font-medium text-emerald-600">Прибыль партии</th>
+                                              </tr>
+                                            </thead>
+                                            <tbody>
+                                              {rows.map((row, i) => (
+                                                <tr key={i} className="border-t border-slate-100">
+                                                  <td className="text-left py-1 text-slate-600 font-medium">{row.label}{best.label === row.label && rows.length > 1 && <span className="ml-1 text-[9px] font-bold text-emerald-600 bg-emerald-100 rounded px-1">лучший</span>}</td>
+                                                  <td className="text-left text-slate-500">{row.country}</td>
+                                                  <td className="text-right text-slate-700">{money(row.cost)} ₽</td>
+                                                  <td className={`text-right font-semibold ${row.prof < 0 ? 'text-rose-600' : 'text-emerald-700'}`}>{money(row.prof)} ₽</td>
+                                                </tr>
+                                              ))}
+                                            </tbody>
+                                          </table>
+                                        </div>
+                                      );
+                                    })()}
+                                  </div>
                                 </>)}
 
                                 {/* ОСНО — закупка в РФ: себестоимость с НДС */}
