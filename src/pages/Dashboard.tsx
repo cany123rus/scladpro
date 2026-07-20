@@ -1270,7 +1270,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const makeCalcItem = (n: number) => ({
     id: `${n}-${Math.round(Math.random() * 1e6)}`,
     name: `Товар ${n}`,
-    source: 'import',       // 'import' — ввоз с пошлиной, 'ru' — куплено в РФ
+    source: 'import',       // легаси-совместимость (старые сохранённые товары)
+    osnoSource: 'import',   // ОСНО: 'import' — официальный ввоз, 'ru' — закупка в РФ
+    usnSource: 'cargo',     // УСН: 'cargo' — карго, 'ru' — закупка в РФ
     costRu: 700,            // себестоимость с НДС при покупке в РФ (ОСНО)
     costRuUsn: 700,         // и отдельно для УСН — условия закупки могут отличаться
     country: 'cn',
@@ -25306,22 +25308,28 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 };
 
                 const computeItem = (it: any) => {
-                  const isRu = it.source === 'ru';
-                  let rate = 1, purchaseRub = 0, customs = 0, dutyAdv = 0, dutySpecRub = 0, duty = 0;
+                  // Источник считается отдельно для каждого режима:
+                  // ОСНО — официальный ввоз ('import') или закупка в РФ ('ru');
+                  // УСН — карго ('cargo') или закупка в РФ ('ru').
+                  const osnoSrc = it.osnoSource || (it.source === 'ru' ? 'ru' : 'import');
+                  const usnSrc = it.usnSource || (it.source === 'ru' ? 'ru' : 'cargo');
+                  const isRuOsno = osnoSrc === 'ru';
+                  const isRuUsn = usnSrc === 'ru';
+                  let rate = 1, customs = 0, dutyAdv = 0, dutySpecRub = 0, duty = 0;
                   let dutyByWeight = false, importVat = 0, costOsno = 0, costUsn = 0, cargo = 0;
-                  if (isRu) {
+
+                  // Валютная закупка нужна и для официального ввоза (ОСНО), и для карго (УСН).
+                  rate = num(it.rateManual) > 0 ? num(it.rateManual) : num(cbrRates[it.currency] || (it.currency === 'RUB' ? 1 : 0));
+                  const purchaseForeign = num(it.purchase) * rate;
+
+                  // ОСНО
+                  if (isRuOsno) {
                     const gross = num(it.costRu);
-                    const grossUsn = num(it.costRuUsn);
                     const vr = num(it.vatPct) / 100;
                     importVat = vr > 0 ? gross * vr / (1 + vr) : 0;
-                    purchaseRub = gross;
                     costOsno = gross - importVat;
-                    costUsn = grossUsn;
                   } else {
-                    rate = num(it.rateManual) > 0 ? num(it.rateManual) : num(cbrRates[it.currency] || (it.currency === 'RUB' ? 1 : 0));
-                    purchaseRub = num(it.purchase) * rate;
-                    // ОСНО — официальный ввоз: таможенная стоимость, пошлина, НДС к вычету.
-                    customs = purchaseRub + num(it.deliveryToBorder);
+                    customs = purchaseForeign + num(it.deliveryToBorder);
                     const countryMult = IMPORT_COUNTRIES.find((c) => c.key === it.country)?.mult ?? 1;
                     dutyAdv = customs * num(it.dutyPct) / 100;
                     const specQty = it.dutyUnit === 'kg' ? num(it.weightKg) : 1;
@@ -25331,10 +25339,16 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     dutyByWeight = it.dutyType === 'comb' && dutySpecRub > dutyAdv;
                     importVat = (customs + duty) * num(it.vatPct) / 100;
                     costOsno = customs + duty;
-                    // УСН — карго: платим за вес, пошлины и вычета НДС нет.
-                    cargo = num(it.weightKg) * num(calcCargoPerKg);
-                    costUsn = purchaseRub + cargo;
                   }
+                  // УСН
+                  if (isRuUsn) {
+                    costUsn = num(it.costRuUsn);
+                  } else {
+                    cargo = num(it.weightKg) * num(calcCargoPerKg);
+                    costUsn = purchaseForeign + cargo;
+                  }
+                  // «Закупка» для строки в колонке ОСНО.
+                  const purchaseRub = isRuOsno ? num(it.costRu) : purchaseForeign;
                   // Ввозной НДС не идёт сразу к вычету, а входит в себестоимость и возвращается отдельной строкой.
                   const costOsnoFull = costOsno + importVat;
 
@@ -25417,7 +25431,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     profOObnal: profOAll + obnalNet,
                   };
 
-                  return { isRu, rate, purchaseRub, customs, duty, dutyAdv, dutySpecRub, dutyByWeight, importVat, cargo, costOsno, costOsnoFull, costUsn,
+                  return { isRuOsno, isRuUsn, rate, purchaseRub, customs, duty, dutyAdv, dutySpecRub, dutyByWeight, importVat, cargo, costOsno, costOsnoFull, costUsn,
                     liters, baseLog, fwd, back, logistics, storage, cash, p, commission, adsO, adsU, fastWithdrawO, feesO, feesU, fromO, fromU,
                     vatOut, vatInServices, vatToPay, vatToPayRaw, vatRefundCut, beforeO, taxO, osno, taxU, usn, qty, batch };
                 };
@@ -25573,16 +25587,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       const cat = IMPORT_CATEGORIES.find((c) => c.key === it.category);
                       const country = IMPORT_COUNTRIES.find((c) => c.key === it.country);
                       const win = r.osno >= r.usn;
+                      const osnoSrc = it.osnoSource || (it.source === 'ru' ? 'ru' : 'import');
+                      const usnSrc = it.usnSource || (it.source === 'ru' ? 'ru' : 'cargo');
+                      const needForeign = osnoSrc === 'import' || usnSrc === 'cargo';
                       return (
                         <div key={it.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                           <div className="flex flex-wrap items-center gap-2 px-4 py-3 bg-slate-50 border-b border-slate-200">
                             <span className="w-6 h-6 rounded-lg bg-slate-800 text-white text-xs font-bold flex items-center justify-center shrink-0">{idx + 1}</span>
                             <input value={it.name} onChange={(e) => upd(it.id, { name: e.target.value })} className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm font-semibold min-w-[160px] bg-white" />
-                            <div className="inline-flex rounded-lg border border-slate-300 overflow-hidden text-xs bg-white">
-                              <button type="button" onClick={() => upd(it.id, { source: 'import' })} className={`px-3 py-1.5 font-medium ${it.source !== 'ru' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>Импорт</button>
-                              <button type="button" onClick={() => upd(it.id, { source: 'ru' })} className={`px-3 py-1.5 font-medium ${it.source === 'ru' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>Закупка в РФ</button>
-                            </div>
-                            <span className={`text-xs px-2 py-1 rounded-lg font-semibold border ${it.source === 'ru' ? 'bg-amber-50 border-amber-200 text-amber-700' : 'bg-indigo-50 border-indigo-200 text-indigo-700'}`}>{it.source === 'ru' ? 'Закупка в РФ' : 'Импорт'}</span>
                             <span className="text-xs px-2 py-1 rounded-lg bg-white border border-slate-200 text-slate-500 tabular-nums">{r.liters.toFixed(2)} л</span>
                             <button type="button" onClick={() => setCalcSaveModal({ open: true, itemId: it.id, name: String(it.name || '') })} className="px-2.5 py-1.5 text-xs font-semibold rounded-lg border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100">Сохранить</button>
                             <div className="ml-auto flex items-center gap-2">
@@ -25594,10 +25606,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           <div className="p-4 space-y-4">
                             {/* Общие параметры товара */}
                             <Sec title="Товар" color="bg-sky-500">
-                              <div className="mb-3 inline-flex rounded-lg border border-slate-300 overflow-hidden text-xs bg-white">
-                                <button type="button" onClick={() => upd(it.id, { source: 'import' })} className={`px-3 py-1.5 font-medium ${it.source !== 'ru' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>Импорт</button>
-                                <button type="button" onClick={() => upd(it.id, { source: 'ru' })} className={`px-3 py-1.5 font-medium ${it.source === 'ru' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>Закупка в РФ</button>
-                              </div>
                               <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-8 gap-3">
                                 <CalcField label="Цена продажи" value={it.price} onChange={(v: number) => upd(it.id, { price: v })} suffix="₽" />
                                 <CalcField label="Партия" value={it.qty ?? 1} onChange={(v: number) => upd(it.id, { qty: v })} suffix="шт" step="1" />
@@ -25624,85 +25632,129 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               <button type="button" onClick={() => addPricePoint(it)} className="mt-2 px-3 py-1.5 text-xs font-semibold rounded-lg border border-sky-300 text-sky-700 hover:bg-sky-50">+ ещё цена</button>
                             </Sec>
 
-                            {it.source === 'ru' ? (
-                              <Sec title="Закупка в РФ" color="bg-amber-500">
-                                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                                  <CalcField label="Себестоимость ОСНО (с НДС)" value={it.costRu} onChange={(v: number) => upd(it.id, { costRu: v })} suffix="₽" />
-                                  <CalcField label="Себестоимость УСН (с НДС)" value={it.costRuUsn} onChange={(v: number) => upd(it.id, { costRuUsn: v })} suffix="₽" />
-                                  <div>
-                                    <label className="block text-xs font-medium text-slate-600 mb-1">НДС в закупке <span className="text-slate-400">(ОСНО)</span></label>
-                                    <select value={it.vatPct} onChange={(e) => upd(it.id, { vatPct: Number(e.target.value) })} className="w-full px-2 py-2 border border-slate-300 rounded-lg text-sm">
-                                      <option value={22}>22% — обычный поставщик</option>
-                                      <option value={10}>10% — льготный товар</option>
-                                      <option value={0}>0% — поставщик без НДС</option>
-                                    </select>
+                            {(() => {
+                              const setOsno = (v: string) => upd(it.id, { osnoSource: v });
+                              const setUsn = (v: string) => upd(it.id, { usnSource: v });
+                              return (
+                              <Sec title="Себестоимость" color="bg-amber-500">
+                                {/* Источник считается отдельно для каждого режима */}
+                                <div className="flex flex-wrap items-center gap-4 mb-3">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xs font-bold text-emerald-700">ОСНО</span>
+                                    <div className="inline-flex rounded-lg border border-slate-300 overflow-hidden text-xs bg-white">
+                                      <button type="button" onClick={() => setOsno('import')} className={`px-3 py-1.5 font-medium ${osnoSrc === 'import' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>Офиц. ввоз</button>
+                                      <button type="button" onClick={() => setOsno('ru')} className={`px-3 py-1.5 font-medium ${osnoSrc === 'ru' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>Закупка в РФ</button>
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xs font-bold text-indigo-700">УСН</span>
+                                    <div className="inline-flex rounded-lg border border-slate-300 overflow-hidden text-xs bg-white">
+                                      <button type="button" onClick={() => setUsn('cargo')} className={`px-3 py-1.5 font-medium ${usnSrc === 'cargo' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>Карго</button>
+                                      <button type="button" onClick={() => setUsn('ru')} className={`px-3 py-1.5 font-medium ${usnSrc === 'ru' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>Закупка в РФ</button>
+                                    </div>
                                   </div>
                                 </div>
-                              </Sec>
-                            ) : (
-                              <Sec title="Закупка и ввоз" color="bg-amber-500">
-                                <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-3">
-                                  <div>
-                                    <label className="block text-xs font-medium text-slate-600 mb-1">Закупка за ед.</label>
-                                    <div className="flex items-center gap-1">
-                                      <CalcInput value={it.purchase} onChange={(v: number) => upd(it.id, { purchase: v })} className="w-full px-2 py-2 border border-slate-300 rounded-lg text-sm" />
-                                      <select value={it.currency} onChange={(e) => upd(it.id, { currency: e.target.value })} className="px-1 py-2 border border-slate-300 rounded-lg text-xs">
-                                        {['CNY', 'USD', 'EUR', 'RUB', 'TRY', 'KGS'].map((c) => <option key={c} value={c}>{c}</option>)}
+
+                                {/* Валютная закупка — нужна для офиц. ввоза (ОСНО) и/или карго (УСН) */}
+                                {needForeign && (
+                                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+                                    <div>
+                                      <label className="block text-xs font-medium text-slate-600 mb-1">Закупка за ед. <span className="text-slate-400">(валюта)</span></label>
+                                      <div className="flex items-center gap-1">
+                                        <CalcInput value={it.purchase} onChange={(v: number) => upd(it.id, { purchase: v })} className="w-full px-2 py-2 border border-slate-300 rounded-lg text-sm" />
+                                        <select value={it.currency} onChange={(e) => upd(it.id, { currency: e.target.value })} className="px-1 py-2 border border-slate-300 rounded-lg text-xs">
+                                          {['CNY', 'USD', 'EUR', 'RUB', 'TRY', 'KGS'].map((c) => <option key={c} value={c}>{c}</option>)}
+                                        </select>
+                                      </div>
+                                    </div>
+                                    <CalcField label="Курс (0 = ЦБ)" value={it.rateManual} onChange={(v: number) => upd(it.id, { rateManual: v })} />
+                                    {usnSrc === 'cargo' && <div className="flex flex-col justify-end pb-2 text-[11px] text-slate-500 md:col-span-2">Карго УСН = закупка + вес × {calcCargoPerKg} ₽/кг (без пошлины и НДС)</div>}
+                                  </div>
+                                )}
+
+                                {/* ОСНО — официальный ввоз: страна, категория, пошлина, ввозной НДС */}
+                                {osnoSrc === 'import' && (<>
+                                  <div className="text-[11px] font-semibold text-emerald-700 mb-1">ОСНО · официальный ввоз</div>
+                                  <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-3">
+                                    <div>
+                                      <label className="block text-xs font-medium text-slate-600 mb-1">Страна</label>
+                                      <select value={it.country} onChange={(e) => upd(it.id, { country: e.target.value })} className="w-full px-2 py-2 border border-slate-300 rounded-lg text-xs">
+                                        {IMPORT_COUNTRIES.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+                                      </select>
+                                    </div>
+                                    <div className="md:col-span-2">
+                                      <label className="block text-xs font-medium text-slate-600 mb-1">Категория</label>
+                                      <select value={it.category} onChange={(e) => applyCategory(it.id, e.target.value)} className="w-full px-2 py-2 border border-slate-300 rounded-lg text-xs">
+                                        {IMPORT_CATEGORIES.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+                                      </select>
+                                    </div>
+                                    <CalcField label="Доставка до РФ" value={it.deliveryToBorder} onChange={(v: number) => upd(it.id, { deliveryToBorder: v })} suffix="₽" />
+                                  </div>
+                                  <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mt-3">
+                                    <div>
+                                      <label className="block text-xs font-medium text-slate-600 mb-1">Тип пошлины</label>
+                                      <select value={it.dutyType} onChange={(e) => upd(it.id, { dutyType: e.target.value })} className="w-full px-2 py-2 border border-slate-300 rounded-lg text-xs">
+                                        <option value="adv">Адвалорная (%)</option>
+                                        <option value="spec">Специфическая (€)</option>
+                                        <option value="comb">Комбинированная</option>
+                                      </select>
+                                    </div>
+                                    <CalcField label="Ставка" value={it.dutyPct} onChange={(v: number) => upd(it.id, { dutyPct: v })} suffix="%" />
+                                    <CalcField label="Ставка" value={it.dutySpec} onChange={(v: number) => upd(it.id, { dutySpec: v })} suffix="€" />
+                                    <div>
+                                      <label className="block text-xs font-medium text-slate-600 mb-1">За единицу</label>
+                                      <select value={it.dutyUnit} onChange={(e) => upd(it.id, { dutyUnit: e.target.value })} className="w-full px-2 py-2 border border-slate-300 rounded-lg text-xs">
+                                        <option value="kg">€ / кг</option>
+                                        <option value="pair">€ / шт</option>
+                                      </select>
+                                    </div>
+                                    <CalcField label="НДС ввозной" value={it.vatPct} onChange={(v: number) => upd(it.id, { vatPct: v })} suffix="%" />
+                                  </div>
+                                  {(cat?.note || country?.note) && (
+                                    <div className="mt-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                                      {cat?.note ? <>{cat.note}. </> : null}{country?.note}
+                                    </div>
+                                  )}
+                                </>)}
+
+                                {/* ОСНО — закупка в РФ: себестоимость с НДС */}
+                                {osnoSrc === 'ru' && (<>
+                                  <div className="text-[11px] font-semibold text-emerald-700 mb-1 mt-1">ОСНО · закупка в РФ</div>
+                                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                                    <CalcField label="Себестоимость ОСНО (с НДС)" value={it.costRu} onChange={(v: number) => upd(it.id, { costRu: v })} suffix="₽" />
+                                    <div>
+                                      <label className="block text-xs font-medium text-slate-600 mb-1">НДС в закупке</label>
+                                      <select value={it.vatPct} onChange={(e) => upd(it.id, { vatPct: Number(e.target.value) })} className="w-full px-2 py-2 border border-slate-300 rounded-lg text-sm">
+                                        <option value={22}>22% — обычный поставщик</option>
+                                        <option value={10}>10% — льготный товар</option>
+                                        <option value={0}>0% — поставщик без НДС</option>
                                       </select>
                                     </div>
                                   </div>
-                                  <CalcField label="Курс (0 = ЦБ)" value={it.rateManual} onChange={(v: number) => upd(it.id, { rateManual: v })} />
-                                  <div>
-                                    <label className="block text-xs font-medium text-slate-600 mb-1">Страна</label>
-                                    <select value={it.country} onChange={(e) => upd(it.id, { country: e.target.value })} className="w-full px-2 py-2 border border-slate-300 rounded-lg text-xs">
-                                      {IMPORT_COUNTRIES.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
-                                    </select>
-                                  </div>
-                                  <div className="md:col-span-2">
-                                    <label className="block text-xs font-medium text-slate-600 mb-1">Категория</label>
-                                    <select value={it.category} onChange={(e) => applyCategory(it.id, e.target.value)} className="w-full px-2 py-2 border border-slate-300 rounded-lg text-xs">
-                                      {IMPORT_CATEGORIES.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
-                                    </select>
-                                  </div>
-                                  <CalcField label="Доставка до РФ (ОСНО)" value={it.deliveryToBorder} onChange={(v: number) => upd(it.id, { deliveryToBorder: v })} suffix="₽" />
-                                </div>
-                                <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mt-3">
-                                  <div>
-                                    <label className="block text-xs font-medium text-slate-600 mb-1">Тип пошлины</label>
-                                    <select value={it.dutyType} onChange={(e) => upd(it.id, { dutyType: e.target.value })} className="w-full px-2 py-2 border border-slate-300 rounded-lg text-xs">
-                                      <option value="adv">Адвалорная (%)</option>
-                                      <option value="spec">Специфическая (€)</option>
-                                      <option value="comb">Комбинированная</option>
-                                    </select>
-                                  </div>
-                                  <CalcField label="Ставка" value={it.dutyPct} onChange={(v: number) => upd(it.id, { dutyPct: v })} suffix="%" />
-                                  <CalcField label="Ставка" value={it.dutySpec} onChange={(v: number) => upd(it.id, { dutySpec: v })} suffix="€" />
-                                  <div>
-                                    <label className="block text-xs font-medium text-slate-600 mb-1">За единицу</label>
-                                    <select value={it.dutyUnit} onChange={(e) => upd(it.id, { dutyUnit: e.target.value })} className="w-full px-2 py-2 border border-slate-300 rounded-lg text-xs">
-                                      <option value="kg">€ / кг</option>
-                                      <option value="pair">€ / шт</option>
-                                    </select>
-                                  </div>
-                                  <CalcField label="НДС ввозной" value={it.vatPct} onChange={(v: number) => upd(it.id, { vatPct: v })} suffix="%" />
-                                </div>
-                                {(cat?.note || country?.note) && (
-                                  <div className="mt-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                                    {cat?.note ? <>{cat.note}. </> : null}{country?.note}
+                                </>)}
+
+                                {/* УСН — закупка в РФ: своя себестоимость */}
+                                {usnSrc === 'ru' && (
+                                  <div className="mt-3">
+                                    <div className="text-[11px] font-semibold text-indigo-700 mb-1">УСН · закупка в РФ</div>
+                                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                                      <CalcField label="Себестоимость УСН (с НДС)" value={it.costRuUsn} onChange={(v: number) => upd(it.id, { costRuUsn: v })} suffix="₽" />
+                                    </div>
                                   </div>
                                 )}
                               </Sec>
-                            )}
+                              );
+                            })()}
 
                             {/* Результат — две самодостаточные колонки */}
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                               <div className="rounded-xl border-2 border-emerald-200 bg-emerald-50/30 p-4">
-                                <div className="text-xs font-bold uppercase tracking-wide text-emerald-700 mb-2">ОСНО · {r.isRu ? 'закупка в РФ' : 'официальный ввоз'} · НДС 22% + 25%</div>
-                                {!r.isRu && <><CalcRow label="Закупка" value={r.purchaseRub} base={r.p} />
+                                <div className="text-xs font-bold uppercase tracking-wide text-emerald-700 mb-2">ОСНО · {r.isRuOsno ? 'закупка в РФ' : 'официальный ввоз'} · НДС 22% + 25%</div>
+                                {!r.isRuOsno && <><CalcRow label="Закупка" value={r.purchaseRub} base={r.p} />
                                 <CalcRow label="Доставка до РФ" value={r.customs - r.purchaseRub} base={r.p} />
                                 {Math.abs(r.duty) > 0.005 && <CalcRow label={`Пошлина${r.dutyByWeight ? ' (по весу)' : ''}`} value={r.duty} base={r.p} />}
                                 {r.importVat > 0.005 && <CalcRow label="Ввозной НДС" value={r.importVat} base={r.p} hint="в себестоимости" />}</>}
-                                {r.isRu && <CalcRow label="Закупка с НДС" value={r.purchaseRub} base={r.p} />}
+                                {r.isRuOsno && <CalcRow label="Закупка с НДС" value={r.purchaseRub} base={r.p} />}
                                 <CalcRow label="Себестоимость с НДС" value={r.costOsnoFull} base={r.p} strong tone="border-emerald-200 text-slate-800" />
                                 <div className="h-2" />
                                 <CalcRow label="Цена продажи" value={r.p} base={r.p} />
@@ -25713,7 +25765,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                 <CalcRow label="Пришло от WB" value={r.fromO} base={r.p} />
                                 <CalcRow label="Себестоимость с НДС" value={-r.costOsnoFull} base={r.p} />
                                 <CalcRow label="Заработок (наценка)" value={r.fromO - r.costOsno} base={r.p} hint="пришло − себестоимость" tone="bg-emerald-100/70 rounded-lg px-2 -mx-1 my-1 text-emerald-900 font-bold" />
-                                {(r.importVat > 0.005 || r.vatInServices > 0.005) && <CalcRow label="НДС к вычету" value={r.importVat + r.vatInServices} base={r.p} hint={`${r.isRu ? 'входной' : 'ввозной'} ${money(r.importVat)} + услуги ${money(r.vatInServices)}`} />}
+                                {(r.importVat > 0.005 || r.vatInServices > 0.005) && <CalcRow label="НДС к вычету" value={r.importVat + r.vatInServices} base={r.p} hint={`${r.isRuOsno ? 'входной' : 'ввозной'} ${money(r.importVat)} + услуги ${money(r.vatInServices)}`} />}
                                 <CalcRow label="НДС к уплате" value={-(r.vatToPay + r.vatInServices)} base={r.p} hint={`с продажи ${money(r.vatOut)} за вычетом входного`} />
                                 {r.vatRefundCut > 0 && <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 my-1">Возмещение {money(r.vatRefundCut)} ₽ не учтено</div>}
                                 <CalcRow label="Налог 25%" value={-r.taxO} base={r.p} />
@@ -25727,10 +25779,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               </div>
 
                               <div className="rounded-xl border-2 border-indigo-200 bg-indigo-50/30 p-4">
-                                <div className="text-xs font-bold uppercase tracking-wide text-indigo-700 mb-2">УСН {usnRate === 0.06 ? '6%' : '15%'} · {r.isRu ? 'закупка в РФ' : 'карго'} · без НДС</div>
-                                {!r.isRu && <><CalcRow label="Закупка" value={r.purchaseRub} base={r.p} />
+                                <div className="text-xs font-bold uppercase tracking-wide text-indigo-700 mb-2">УСН {usnRate === 0.06 ? '6%' : '15%'} · {r.isRuUsn ? 'закупка в РФ' : 'карго'} · без НДС</div>
+                                {!r.isRuUsn && <><CalcRow label="Закупка" value={r.costUsn - r.cargo} base={r.p} />
                                 <CalcRow label="Карго" value={r.cargo} base={r.p} hint={`${it.weightKg} кг × ${calcCargoPerKg} ₽`} /></>}
-                                {r.isRu && <CalcRow label="Закупка с НДС" value={r.purchaseRub === 0 ? r.costUsn : r.costUsn} base={r.p} />}
+                                {r.isRuUsn && <CalcRow label="Закупка с НДС" value={r.costUsn} base={r.p} />}
                                 <CalcRow label="Себестоимость" value={r.costUsn} base={r.p} strong tone="border-indigo-200 text-slate-800" />
                                 <div className="h-2" />
                                 <CalcRow label="Цена продажи" value={r.p} base={r.p} />
