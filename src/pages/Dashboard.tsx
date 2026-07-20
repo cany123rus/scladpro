@@ -1299,11 +1299,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [wbExtraL, setWbExtraL] = useState<number>(14);
   const [wbTiers, setWbTiers] = useState<number[]>([23, 26, 29, 30, 32]); // ≤0.2/0.4/0.6/0.8/1.0 л
   const [wbTariffsOpen, setWbTariffsOpen] = useState(false);
+  // Хранение FBO: 0,08 ₽ × литры × коэф. хранения в день (коэффициент отдельный от логистики).
+  const [wbStorageTariff, setWbStorageTariff] = useState<number>(0.08);
+  const [wbStorageCoef, setWbStorageCoef] = useState<number>(100);
+  const [wbStorageDays, setWbStorageDays] = useState<number>(30);
   // Реклама и хранение задаются отдельно для каждого режима (себестоимость — в позиции).
   const [calcAdsPctOsno, setCalcAdsPctOsno] = useState<number>(14);
   const [calcAdsPctUsn, setCalcAdsPctUsn] = useState<number>(14);
-  const [calcStoragePctOsno, setCalcStoragePctOsno] = useState<number>(0);
-  const [calcStoragePctUsn, setCalcStoragePctUsn] = useState<number>(0);
   const [calcUsnRate, setCalcUsnRate] = useState<number>(0.06);
   // Курсы ЦБ РФ для закупки в валюте (можно переопределить вручную).
   const [cbrRates, setCbrRates] = useState<Record<string, number>>({ RUB: 1 });
@@ -25104,8 +25106,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 const cPct = num(calcCommissionPct);
                 const aPctOsno = num(calcAdsPctOsno);
                 const aPctUsn = num(calcAdsPctUsn);
-                const stPctOsno = num(calcStoragePctOsno);
-                const stPctUsn = num(calcStoragePctUsn);
                 const usnRate = num(calcUsnRate);
                 const VAT = 0.22;
                 const ex = (a: number) => (a * VAT) / (1 + VAT);
@@ -25159,14 +25159,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   const back = baseLog;                       // с 20.03.2026 без коэффициентов
                   const logistics = fwd / B + back * (1 - B) / B;
 
+                  // Хранение FBO по литражу: тариф × литры × коэф. хранения × дни.
+                  const storage = num(wbStorageTariff) * liters * (num(wbStorageCoef) / 100) * num(wbStorageDays);
+
                   const p = num(it.price);
                   const commission = p * cPct / 100;
                   const adsO = p * aPctOsno / 100;
                   const adsU = p * aPctUsn / 100;
-                  const stO = p * stPctOsno / 100;
-                  const stU = p * stPctUsn / 100;
-                  const feesO = commission + adsO + stO;      // на ОСНО логистики нет
-                  const feesU = commission + logistics + adsU + stU;
+                  const feesO = commission + adsO + storage;  // на ОСНО логистики нет
+                  const feesU = commission + logistics + adsU + storage;
                   const fromO = p - feesO;
                   const fromU = p - feesU;
 
@@ -25181,7 +25182,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   const usn = fromU - costUsn - taxU;
 
                   return { isRu, rate, purchaseRub, customs, duty, dutyAdv, dutySpecRub, dutyByWeight, importVat, costOsno, costUsn,
-                    liters, baseLog, fwd, back, logistics, p, commission, adsO, adsU, stO, stU, feesO, feesU, fromO, fromU,
+                    liters, baseLog, fwd, back, logistics, storage, p, commission, adsO, adsU, feesO, feesU, fromO, fromU,
                     vatOut, vatInServices, vatToPay, beforeO, taxO, osno, taxU, usn };
                 };
 
@@ -25237,8 +25238,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             <CalcField label="Комиссия WB" value={calcCommissionPct} onChange={setCalcCommissionPct} suffix="%" />
                             <CalcField label="Реклама ОСНО" value={calcAdsPctOsno} onChange={setCalcAdsPctOsno} suffix="%" />
                             <CalcField label="Реклама УСН" value={calcAdsPctUsn} onChange={setCalcAdsPctUsn} suffix="%" />
-                            <CalcField label="Хранение ОСНО" value={calcStoragePctOsno} onChange={setCalcStoragePctOsno} suffix="%" />
-                            <CalcField label="Хранение УСН" value={calcStoragePctUsn} onChange={setCalcStoragePctUsn} suffix="%" />
+                            <CalcField label="Дни хранения" value={wbStorageDays} onChange={setWbStorageDays} suffix="дн" />
+                            <CalcField label="Коэф. хранения" value={wbStorageCoef} onChange={setWbStorageCoef} suffix="%" />
                             <div>
                               <label className="block text-xs font-medium text-slate-600 mb-1">Ставка УСН</label>
                               <select value={usnRate} onChange={(e) => setCalcUsnRate(Number(e.target.value))} className="w-full px-2 py-2 border border-slate-300 rounded-lg text-sm">
@@ -25269,9 +25270,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                   <CalcField key={lbl} label={lbl} value={wbTiers[i]} onChange={(v: number) => setWbTiers((prev) => prev.map((x, j) => j === i ? v : x))} suffix="₽" />
                                 ))}
                               </div>
-                              <div className="grid grid-cols-2 gap-2">
+                              <div className="grid grid-cols-3 gap-2">
                                 <CalcField label="База от 1 л" value={wbBase1L} onChange={setWbBase1L} suffix="₽" />
                                 <CalcField label="Каждый доп. литр" value={wbExtraL} onChange={setWbExtraL} suffix="₽" />
+                                <CalcField label="Хранение ₽/л/день" value={wbStorageTariff} onChange={setWbStorageTariff} step="0.01" suffix="₽" />
                               </div>
                               <div className="mt-2 text-[11px] text-slate-500">
                                 Обратная логистика с 20.03.2026 = базовый тариф <b>без</b> коэффициента склада и индекса локализации.
@@ -25406,6 +25408,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                 {!r.isRu && <CalcRow label="Там. стоимость" value={r.customs} base={r.p} />}
                                 {!r.isRu && Math.abs(r.duty) > 0.005 && <CalcRow label={`Пошлина${r.dutyByWeight ? ' (вес)' : ''}`} value={r.duty} base={r.p} />}
                                 <CalcRow label={r.isRu ? 'НДС в закупке' : 'НДС ввозной'} value={r.importVat} base={r.p} />
+                                <CalcRow label="Хранение" value={r.storage} base={r.p} hint={`${wbStorageDays} дн`} />
                                 <div className="mt-2 pt-2 border-t border-slate-200 text-[11px] text-slate-500">
                                   Логистика УСН: {money(r.fwd)} прямая / {(B * 100).toFixed(0)}% + {money(r.back)} возврат → <b className="text-slate-700">{money(r.logistics)} ₽</b>
                                 </div>
