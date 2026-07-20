@@ -25629,6 +25629,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                 <div className="flex justify-between py-0.5 text-slate-400 text-xs"><span>Логистика и хранение</span><span className="italic">не применяются</span></div>
                                 <CalcRow label="Пришло от WB" value={r.fromO} base={r.p} />
                                 <CalcRow label="Себестоимость с НДС" value={-r.costOsnoFull} base={r.p} />
+                                <CalcRow label="Заработок (наценка)" value={r.fromO - r.costOsno} base={r.p} hint="пришло − себестоимость" tone="bg-emerald-100/70 rounded-lg px-2 -mx-1 my-1 text-emerald-900 font-bold" />
                                 {r.importVat > 0.005 && <CalcRow label={r.isRu ? 'НДС к вычету' : 'Ввозной НДС к вычету'} value={r.importVat} base={r.p} />}
                                 {r.vatInServices > 0.005 && <CalcRow label="НДС с рекламы и комиссии к вычету" value={r.vatInServices} base={r.p} />}
                                 <CalcRow label="НДС к уплате" value={-(r.vatToPay + r.vatInServices)} base={r.p} />
@@ -25657,6 +25658,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                 <CalcRow label="Хранение" value={-r.storage} base={r.p} hint={`${wbStorageDays} дн`} />
                                 <CalcRow label="Пришло от WB" value={r.fromU} base={r.p} />
                                 <CalcRow label="Себестоимость" value={-r.costUsn} base={r.p} />
+                                <CalcRow label="Заработок (наценка)" value={r.fromU - r.costUsn} base={r.p} hint="пришло − себестоимость" tone="bg-indigo-100/70 rounded-lg px-2 -mx-1 my-1 text-indigo-900 font-bold" />
                                 <CalcRow label="Налог" value={-r.taxU} base={r.p} />
                                 {r.cash > 0 && <CalcRow label="Сборка и отвоз" value={-r.cash} base={r.p} hint="нал." />}
                                 <CalcRow label="Прибыль" value={r.usn} base={r.p} strong tone={`border-indigo-300 ${r.usn < 0 ? 'text-rose-600' : 'text-indigo-700'}`} />
