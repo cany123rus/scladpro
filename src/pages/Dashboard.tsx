@@ -25166,7 +25166,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   const commission = p * cPct / 100;
                   const adsO = p * aPctOsno / 100;
                   const adsU = p * aPctUsn / 100;
-                  const feesO = commission + adsO + storage;  // на ОСНО логистики нет
+                  // На ОСНО другие условия: ни логистики, ни хранения — только комиссия и реклама.
+                  const feesO = commission + adsO;
                   const feesU = commission + logistics + adsU + storage;
                   const fromO = p - feesO;
                   const fromU = p - feesU;
@@ -25420,7 +25421,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                 <CalcRow label="Цена продажи" value={r.p} base={r.p} />
                                 <CalcRow label="Комиссия WB" value={-r.commission} base={r.p} />
                                 <CalcRow label="Реклама" value={-r.adsO} base={r.p} />
-                                <CalcRow label="Хранение" value={-r.storage} base={r.p} hint={`${wbStorageDays} дн`} />
+                                <div className="flex justify-between py-0.5 text-slate-400 text-xs"><span>Логистика и хранение</span><span className="italic">не применяются</span></div>
                                 <CalcRow label="Пришло от WB" value={r.fromO} base={r.p} />
                                 <CalcRow label="Себестоимость" value={-r.costOsno} base={r.p} />
                                 <CalcRow label="НДС к уплате" value={-r.vatToPay} base={r.p} />
