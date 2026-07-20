@@ -25786,7 +25786,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                         const turn = vr.ov ? (vr.ov.turnoverDays ?? 30) : (it.turnoverDays ?? 30);
                                         return { label: vr.label, cost: rr.costOsnoFull, prof: rr.batch.profO, annual: rr.batch.annualO, turn, country: IMPORT_COUNTRIES.find((c) => c.key === ctry)?.label || ctry };
                                       });
-                                      const best = rows.reduce((a, b) => (b.annual > a.annual ? b : a), rows[0]);
+                                      const best = rows.reduce((a, b) => (b.prof > a.prof ? b : a), rows[0]);
                                       return (
                                         <div className="mt-1 overflow-x-auto">
                                           <table className="w-full text-xs tabular-nums">
@@ -25794,21 +25794,17 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                               <tr className="text-slate-400 text-[10px] uppercase">
                                                 <th className="text-left font-medium py-0.5">Вариант</th>
                                                 <th className="text-left font-medium">Страна</th>
-                                                <th className="text-right font-medium">Оборот</th>
                                                 <th className="text-right font-medium">Себест/ед</th>
                                                 <th className="text-right font-medium text-emerald-600">Прибыль партии</th>
-                                                <th className="text-right font-medium text-emerald-600">Прибыль/год</th>
                                               </tr>
                                             </thead>
                                             <tbody>
                                               {rows.map((row, i) => (
                                                 <tr key={i} className="border-t border-slate-100">
-                                                  <td className="text-left py-1 text-slate-600 font-medium">{row.label}{best.label === row.label && rows.length > 1 && <span className="ml-1 text-[9px] font-bold text-emerald-600 bg-emerald-100 rounded px-1">лучший/год</span>}</td>
+                                                  <td className="text-left py-1 text-slate-600 font-medium">{row.label}{best.label === row.label && rows.length > 1 && <span className="ml-1 text-[9px] font-bold text-emerald-600 bg-emerald-100 rounded px-1">лучший</span>}</td>
                                                   <td className="text-left text-slate-500">{row.country}</td>
-                                                  <td className="text-right text-slate-500">{row.turn} дн</td>
                                                   <td className="text-right text-slate-700">{money(row.cost)} ₽</td>
                                                   <td className={`text-right font-semibold ${row.prof < 0 ? 'text-rose-600' : 'text-emerald-700'}`}>{money(row.prof)} ₽</td>
-                                                  <td className={`text-right font-semibold ${row.annual < 0 ? 'text-rose-600' : 'text-emerald-700'}`}>{money(row.annual)} ₽</td>
                                                 </tr>
                                               ))}
                                             </tbody>
@@ -25935,10 +25931,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                                   <span className="text-slate-700 font-medium truncate">{row.label}</span>
                                                   {isBest && <span className="text-[9px] font-bold text-emerald-600 bg-emerald-100 rounded px-1 shrink-0">выгоднее</span>}
                                                 </span>
-                                                <span className="shrink-0 text-right">
-                                                  <span className={`block font-bold tabular-nums ${row.prof < 0 ? 'text-rose-600' : 'text-slate-800'}`}>{money(row.prof)} ₽</span>
-                                                  <span className="block text-[10px] text-slate-400 tabular-nums">год {money(row.annual)}</span>
-                                                </span>
+                                                <span className={`shrink-0 font-bold tabular-nums text-right ${row.prof < 0 ? 'text-rose-600' : 'text-slate-800'}`}>{money(row.prof)} ₽</span>
                                               </span>
                                               {row.sub ? <span className="text-[10px] text-slate-400 text-left pl-3.5">{row.sub}</span> : null}
                                             </button>
@@ -25971,8 +25964,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                       <div className="flex justify-between"><span className="text-slate-500">Прибыль</span><span className={`font-extrabold tabular-nums ${g.pc}`}>{money(g.prof)} ₽</span></div>
                                       <div className="flex justify-between"><span className="text-slate-400">Маржа</span><span className="tabular-nums text-slate-500">{pctOf(g.prof, r.batch.rev)}</span></div>
                                       <div className="flex justify-between"><span className="text-slate-400">ROI</span><span className="tabular-nums text-slate-500">{pctOf(g.prof, g.invest)}</span></div>
-                                      <div className="flex justify-between border-t border-slate-200/70 pt-1 mt-1"><span className="text-slate-500">Прибыль/год</span><span className={`font-semibold tabular-nums ${g.annual < 0 ? 'text-rose-600' : g.tc}`}>{money(g.annual)} ₽</span></div>
-                                      <div className="flex justify-between"><span className="text-slate-400">ROI годовой</span><span className="tabular-nums text-slate-500">{pctOf(g.annual, g.invest)}</span></div>
                                     </div>
                                   </div>
                                 ))}
@@ -25997,8 +25988,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                             <td className="text-left py-1 text-slate-600">{money(s.price)} ₽ × {s.qty}</td>
                                             <td className="text-right text-slate-500">{s.turnoverDays} дн</td>
                                             <td className="text-right text-slate-700">{money(s.price * s.qty)} ₽</td>
-                                            <td className={`text-right font-semibold ${s.osno < 0 ? 'text-rose-600' : 'text-emerald-700'}`}>{money(s.osno * s.qty)} ₽<div className="text-[10px] font-normal text-slate-400">год {money(s.annualO)}</div></td>
-                                            <td className={`text-right font-semibold ${s.usn < 0 ? 'text-rose-600' : 'text-indigo-700'}`}>{money(s.usn * s.qty)} ₽<div className="text-[10px] font-normal text-slate-400">год {money(s.annualU)}</div></td>
+                                            <td className={`text-right font-semibold ${s.osno < 0 ? 'text-rose-600' : 'text-emerald-700'}`}>{money(s.osno * s.qty)} ₽</td>
+                                            <td className={`text-right font-semibold ${s.usn < 0 ? 'text-rose-600' : 'text-indigo-700'}`}>{money(s.usn * s.qty)} ₽</td>
                                           </tr>
                                         ))}
                                       </tbody>
