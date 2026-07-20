@@ -26041,10 +26041,20 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     // к уплате = разница; УСН-налог заменяется налогом на прибыль 25%.
                     const VAT_RATE = 0.22;
                     const PROFIT_TAX_RATE = 0.25;
-                    const vatOf = (amt: number) => uploadedVatIncluded ? (amt * VAT_RATE) / (1 + VAT_RATE) : amt * VAT_RATE;
+                    // Услуги WB всегда приходят с НДС внутри — из них НДС только ВЫДЕЛЯЕМ.
+                    const vatExtract = (amt: number) => (amt * VAT_RATE) / (1 + VAT_RATE);
+                    // Товар/продажи — по переключателю «в сумме» / «сверху».
+                    const vatOf = (amt: number) => uploadedVatIncluded ? vatExtract(amt) : amt * VAT_RATE;
                     const baseCosts = costSumTotal + Number(sx.withhold_sum || 0) + Number(sx.storage_sum || 0) + Number(uploadedExtraCosts || 0);
                     const vatOut = uploadedVatMode ? vatOf(salesX) : 0;
-                    const vatIn = uploadedVatMode ? vatOf(costSumTotal) : 0;
+                    const vatInGoods = uploadedVatMode ? vatOf(costSumTotal) : 0;
+                    // Входной НДС с услуг WB: комиссия, логистика, реклама, хранение.
+                    // Штрафы НДС не облагаются, эквайринг — финуслуга (без НДС) — не берём.
+                    const vatInServices = uploadedVatMode
+                      ? vatExtract(commissionWB) + vatExtract(Number(sx.logistics_sum || 0))
+                        + vatExtract(Number(sx.withhold_sum || 0)) + vatExtract(Number(sx.storage_sum || 0))
+                      : 0;
+                    const vatIn = vatInGoods + vatInServices;
                     const vatToPay = vatOut - vatIn;                       // < 0 — к возмещению
                     const profitBeforeTax = payoutHero - wbOtherFees - baseCosts - (uploadedVatMode ? vatToPay : 0);
                     const profitTax = uploadedVatMode ? Math.max(0, profitBeforeTax) * PROFIT_TAX_RATE : 0;
@@ -26081,7 +26091,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             {uploadedVatMode && (
                               <>
                                 <StatCard label="НДС выходной" value={rub(vatOut)} sub={`с продаж · ${uploadedVatIncluded ? '22/122' : '×22%'}`} color="#f472b6" />
-                                <StatCard label="НДС входной" value={rub(vatIn)} sub="в себестоимости · к вычету" color="#c084fc" />
+                                <StatCard label="НДС входной" value={rub(vatIn)} sub={`товар ${rubK(vatInGoods)} + услуги WB ${rubK(vatInServices)}`} color="#c084fc" />
                                 <StatCard label="НДС к уплате" value={rub(vatToPay)} sub={vatToPay < 0 ? 'к возмещению' : 'выходной − входной'} signOf={-vatToPay} />
                               </>
                             )}
