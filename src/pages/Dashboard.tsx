@@ -1288,6 +1288,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     vatPct: 22,
     price: 1500,            // цена для покупателя
     qty: 100,               // размер партии, шт — для просчёта закупки целиком
+    obnalSum: 0,            // ОСНО: сумма «бумажного» счёта на партию (с НДС) для доп. вычета
+    obnalPct: 0,            // комиссия конторы за обнал, % от суммы
   });
   const [calcItems, setCalcItems] = useState<any[]>(() => [makeCalcItem(1)]);
   const [calcCommissionPct, setCalcCommissionPct] = useState<number>(8);
@@ -25341,6 +25343,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   // Партия: всё, что считалось на единицу, множим на количество.
                   // Вложения — деньги, которые нужны до первой продажи: товар на складе + наличные расходы.
                   const qty = Math.max(1, Math.round(num(it.qty) || 1));
+                  // Обнал (ОСНО, на партию): бумажный счёт даёт вычет входного НДС, минус комиссия конторы.
+                  const obnalSum = Math.max(0, num(it.obnalSum));
+                  const obnalPct = Math.max(0, num(it.obnalPct));
+                  const obnalVat = ex(obnalSum);              // НДС в счёте (22/122) — к вычету, уменьшает НДС партии
+                  const obnalFee = obnalSum * obnalPct / 100;  // комиссия за обнал
+                  const obnalCash = obnalSum - obnalFee;       // получено наличными
+                  const obnalNet = obnalVat - obnalFee;        // чистая выгода: сэкономленный НДС − комиссия
                   const batch = {
                     qty,
                     rev: p * qty,
@@ -25350,6 +25359,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     profO: osno * qty, profU: usn * qty,
                     taxO: taxO * qty, taxU: taxU * qty,
                     vat: importVat * qty, duty: duty * qty, log: logistics * qty,
+                    obnalSum, obnalPct, obnalVat, obnalFee, obnalCash, obnalNet,
+                    profOObnal: osno * qty + obnalNet,
                   };
 
                   return { isRu, rate, purchaseRub, customs, duty, dutyAdv, dutySpecRub, dutyByWeight, importVat, cargo, costOsno, costOsnoFull, costUsn,
@@ -25378,7 +25389,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   rev: a.rev + x.r.batch.rev, osno: a.osno + x.r.batch.profO, usn: a.usn + x.r.batch.profU,
                   cost: a.cost + x.r.batch.costO, duty: a.duty + x.r.batch.duty, vat: a.vat + x.r.batch.vat, log: a.log + x.r.batch.log,
                   investO: a.investO + x.r.batch.investO, investU: a.investU + x.r.batch.investU,
-                }), { qty: 0, rev: 0, osno: 0, usn: 0, cost: 0, duty: 0, vat: 0, log: 0, investO: 0, investU: 0 });
+                  obnal: a.obnal + x.r.batch.obnalNet, osnoObnal: a.osnoObnal + x.r.batch.profOObnal,
+                }), { qty: 0, rev: 0, osno: 0, usn: 0, cost: 0, duty: 0, vat: 0, log: 0, investO: 0, investU: 0, obnal: 0, osnoObnal: 0 });
 
                 const Sec = CalcSection;
                 const saveBtn = (
@@ -25667,6 +25679,29 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               </div>
                               <div className="mt-2 text-[10px] text-slate-400 leading-snug">Вложения — деньги на закупку и завоз всей партии до первой продажи (ОСНО: товар + пошлина + ввозной НДС + сборка; УСН: товар + карго + сборка). Маржа — % прибыли от выручки, ROI — от вложений.</div>
                             </div>
+
+                            {/* Обнал — только ОСНО, на партию */}
+                            <div className="rounded-xl border border-amber-200 bg-amber-50/50 p-3">
+                              <div className="flex items-center justify-between mb-2">
+                                <div className="text-xs font-bold text-amber-800">Обнал · ОСНО, на партию</div>
+                                <div className="text-[10px] text-amber-600">бумажный НДС к вычету</div>
+                              </div>
+                              <div className="grid grid-cols-2 gap-3 mb-2">
+                                <CalcField label="Сумма счёта (с НДС)" value={it.obnalSum ?? 0} onChange={(v: number) => upd(it.id, { obnalSum: v })} suffix="₽" />
+                                <CalcField label="Комиссия конторы" value={it.obnalPct ?? 0} onChange={(v: number) => upd(it.id, { obnalPct: v })} suffix="%" step="0.5" />
+                              </div>
+                              {r.batch.obnalSum > 0 ? (
+                                <div className="space-y-1 text-xs">
+                                  <div className="flex justify-between"><span className="text-slate-500">НДС к вычету (−НДС партии)</span><span className="font-semibold tabular-nums text-emerald-700">+{money(r.batch.obnalVat)} ₽</span></div>
+                                  <div className="flex justify-between"><span className="text-slate-500">Комиссия обнала</span><span className="font-semibold tabular-nums text-rose-600">−{money(r.batch.obnalFee)} ₽</span></div>
+                                  <div className="flex justify-between"><span className="text-slate-400">Получено наличными</span><span className="tabular-nums text-slate-500">{money(r.batch.obnalCash)} ₽</span></div>
+                                  <div className="flex justify-between border-t border-amber-200 pt-1 mt-1"><span className="font-semibold text-slate-700">Выгода обнала</span><span className={`font-extrabold tabular-nums ${r.batch.obnalNet < 0 ? 'text-rose-600' : 'text-emerald-700'}`}>{r.batch.obnalNet >= 0 ? '+' : ''}{money(r.batch.obnalNet)} ₽</span></div>
+                                  <div className="flex justify-between"><span className="font-bold text-emerald-800">Прибыль ОСНО с обналом</span><span className={`font-extrabold tabular-nums ${r.batch.profOObnal < 0 ? 'text-rose-600' : 'text-emerald-700'}`}>{money(r.batch.profOObnal)} ₽</span></div>
+                                </div>
+                              ) : (
+                                <div className="text-[10px] text-slate-400 leading-snug">Заведи сумму «бумажного» счёта — контора вернёт её наличными за вычетом комиссии, а НДС (22/122) уйдёт в вычет и уменьшит НДС партии. Выгода = сэкономленный НДС − комиссия.</div>
+                              )}
+                            </div>
                           </div>
                         </div>
                       );
@@ -25765,6 +25800,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <div className="text-xs text-slate-400 mt-1">
                           ROI партии: ОСНО {pctOf(tot.osno, tot.investO)} · УСН {pctOf(tot.usn, tot.investU)}
                         </div>
+                        {Math.abs(tot.obnal) > 0.005 && (
+                          <div className="text-xs text-amber-300 mt-1">
+                            С обналом: прибыль ОСНО <b>{money(tot.osnoObnal)} ₽</b> (выгода {tot.obnal >= 0 ? '+' : ''}{money(tot.obnal)} ₽)
+                          </div>
+                        )}
                       </div>
                     </div>
 
