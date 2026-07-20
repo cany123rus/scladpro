@@ -1317,6 +1317,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [calcHideObnal, setCalcHideObnal] = useState<boolean>(() => {
     try { return localStorage.getItem('calc_hide_obnal_v1') === '1'; } catch { return false; }
   });
+  // Учитывать сборку и отвоз в расходах УСН «Доходы−Расходы» (уменьшают налоговую базу).
+  const [calcUsnCashExpense, setCalcUsnCashExpense] = useState<boolean>(() => {
+    try { return localStorage.getItem('calc_usn_cash_expense_v1') === '1'; } catch { return false; }
+  });
   // Сохранённые карточки товаров калькулятора (в app_settings — доступны с любого устройства).
   const [calcSavedProducts, setCalcSavedProducts] = useState<any[]>([]);
   const [calcPickerOpen, setCalcPickerOpen] = useState(false);
@@ -1360,6 +1364,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       setCalcUsnRate(n(s.usnRate, 0.06));
       setCalcTargetMargin(n(s.targetMargin, 25));
       setCalcNoVatRefund(!!s.noVatRefund);
+      if (typeof s.usnCashExpense === 'boolean') setCalcUsnCashExpense(s.usnCashExpense);
       setWbBuyoutPct(n(s.buyoutPct, 70));
       setWbWarehouseCoef(n(s.warehouseCoef, 100));
       setWbLocalIndex(n(s.localIndex, 1));
@@ -1377,7 +1382,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       const payload = JSON.stringify({
         commissionPct: calcCommissionPct, adsOsno: calcAdsPctOsno, adsUsn: calcAdsPctUsn,
         assembly: calcAssembly, deliveryToWb: calcDeliveryToWb, cargoPerKg: calcCargoPerKg,
-        usnRate: calcUsnRate, targetMargin: calcTargetMargin, noVatRefund: calcNoVatRefund,
+        usnRate: calcUsnRate, targetMargin: calcTargetMargin, noVatRefund: calcNoVatRefund, usnCashExpense: calcUsnCashExpense,
         buyoutPct: wbBuyoutPct, warehouseCoef: wbWarehouseCoef, localIndex: wbLocalIndex,
         base1L: wbBase1L, extraL: wbExtraL, tiers: wbTiers,
         storageTariff: wbStorageTariff, storageCoef: wbStorageCoef, storageDays: wbStorageDays,
@@ -25231,7 +25236,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 const currentCalcSettings = () => ({
                   commissionPct: calcCommissionPct, adsOsno: calcAdsPctOsno, adsUsn: calcAdsPctUsn,
                   assembly: calcAssembly, deliveryToWb: calcDeliveryToWb, cargoPerKg: calcCargoPerKg,
-                  usnRate: calcUsnRate, targetMargin: calcTargetMargin, noVatRefund: calcNoVatRefund,
+                  usnRate: calcUsnRate, targetMargin: calcTargetMargin, noVatRefund: calcNoVatRefund, usnCashExpense: calcUsnCashExpense,
                   buyoutPct: wbBuyoutPct, warehouseCoef: wbWarehouseCoef, localIndex: wbLocalIndex,
                   base1L: wbBase1L, extraL: wbExtraL, tiers: wbTiers,
                   storageTariff: wbStorageTariff, storageCoef: wbStorageCoef, storageDays: wbStorageDays,
@@ -25248,6 +25253,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   setCalcUsnRate(n(s.usnRate, calcUsnRate));
                   setCalcTargetMargin(n(s.targetMargin, calcTargetMargin));
                   if (typeof s.noVatRefund === 'boolean') setCalcNoVatRefund(s.noVatRefund);
+                  if (typeof s.usnCashExpense === 'boolean') setCalcUsnCashExpense(s.usnCashExpense);
                   setWbBuyoutPct(n(s.buyoutPct, wbBuyoutPct));
                   setWbWarehouseCoef(n(s.warehouseCoef, wbWarehouseCoef));
                   setWbLocalIndex(n(s.localIndex, wbLocalIndex));
@@ -25342,7 +25348,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   const beforeO = fromO - costOsno - vatToPay;
                   const taxO = Math.max(0, beforeO) * 0.25;
                   const osno = beforeO - taxO - cash;
-                  const taxU = usnRate === 0.06 ? p * 0.06 : Math.max(0, fromU - costUsn) * usnRate;
+                  // УСН «Доходы−Расходы»: база = доход(цена) − расходы (комиссия WB, логистика, реклама,
+                  // хранение — всё сидит в fromU) − себестоимость − (опц.) сборка/отвоз.
+                  const usnCashExpense = calcUsnCashExpense ? cash : 0;
+                  const usnTaxBase = fromU - costUsn - usnCashExpense;
+                  const taxU = usnRate === 0.06 ? p * 0.06 : Math.max(0, usnTaxBase) * usnRate;
                   const usn = fromU - costUsn - taxU - cash;
 
                   // Партия: всё, что считалось на единицу, множим на количество.
@@ -25463,6 +25473,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               <span className="text-xs text-slate-600">
                                 Скрыть обнал из расчёта
                                 <span className="block text-[11px] text-slate-400">Прячет блок обнала и убирает его из итогов</span>
+                              </span>
+                            </label>
+                            <label className="mt-2 flex items-start gap-2 cursor-pointer select-none">
+                              <input type="checkbox" checked={calcUsnCashExpense} onChange={(e) => { const v = e.target.checked; setCalcUsnCashExpense(v); try { localStorage.setItem('calc_usn_cash_expense_v1', v ? '1' : '0'); } catch {} }} className="w-4 h-4 accent-indigo-600 mt-0.5" />
+                              <span className="text-xs text-slate-600">
+                                Сборку и отвоз — в расходы УСН
+                                <span className="block text-[11px] text-slate-400">Уменьшают базу УСН «Доходы−Расходы» (нужны документы)</span>
                               </span>
                             </label>
                           </Sec>
