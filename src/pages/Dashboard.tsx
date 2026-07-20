@@ -301,6 +301,21 @@ const CalcField = ({ label, value, onChange, suffix, step = '0.01' }: any) => (
   </div>
 );
 
+// Тоже на уровне модуля: обёртка секции содержит поля ввода, и если объявить её внутри
+// рендера, React пересоздаст тип компонента и размонтирует инпуты — фокус будет слетать.
+const CalcSection = ({ title, color, children, right }: any) => (
+  <div className="mb-3">
+    <div className="flex items-center justify-between mb-2">
+      <div className="flex items-center gap-2">
+        <span className={`w-1.5 h-4 rounded-full ${color}`} />
+        <span className="text-xs font-bold uppercase tracking-wide text-slate-500">{title}</span>
+      </div>
+      {right}
+    </div>
+    {children}
+  </div>
+);
+
 const CalcLine = ({ label, value, sign, strong, muted }: any) => (
   <div className={`flex items-center justify-between py-1.5 text-sm ${strong ? 'font-bold text-slate-900' : muted ? 'text-slate-400' : 'text-slate-600'}`}>
     <span>{sign}{label}</span>
@@ -25157,18 +25172,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   cost: a.cost + x.r.costOsno, duty: a.duty + x.r.duty, vat: a.vat + x.r.importVat, log: a.log + x.r.logistics,
                 }), { rev: 0, osno: 0, usn: 0, cost: 0, duty: 0, vat: 0, log: 0 });
 
-                const Sec = ({ title, color, children, right }: any) => (
-                  <div className="mb-3">
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        <span className={`w-1.5 h-4 rounded-full ${color}`} />
-                        <span className="text-xs font-bold uppercase tracking-wide text-slate-500">{title}</span>
-                      </div>
-                      {right}
-                    </div>
-                    {children}
-                  </div>
-                );
+                const Sec = CalcSection;
 
                 return (
                   <div className="w-full space-y-4 pb-4">
