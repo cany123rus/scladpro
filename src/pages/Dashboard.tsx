@@ -25371,7 +25371,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     qty,
                     rev: p * qty,
                     costO: costOsnoFull * qty, costU: costUsn * qty,
-                    investO: (costOsno + (isRu ? 0 : importVat) + cash) * qty,
+                    investO: (costOsnoFull + cash) * qty,   // реальные деньги вперёд — с НДС (вычет придёт позже)
                     investU: (costUsn + cash) * qty,
                     profO: osno * qty, profU: usn * qty,
                     taxO: taxO * qty, taxU: taxU * qty,
