@@ -17907,25 +17907,37 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     return profitAfterTax - storage - withhold;
   };
   const getUploadedHeadlineProfitNet = (summary: any) => getUploadedHeadlineProfit(summary) - Number(uploadedExtraCosts || 0);
-  // Входной НДС с услуг WB по строке: комиссия — из колонки отчёта, остальное выделяем ×22/122.
-  // Штрафы НДС не облагаются, эквайринг — финуслуга (без НДС), их не берём.
-  const getUploadedRowServicesVat = (row: any) => {
-    const ex = (a: number) => (a * 0.22) / 1.22;
-    return Number(row?.wb_commission_vat || 0)
-      + ex(Number(row?.logistics_sum || 0))
-      + ex(Number(row?.withhold_sum || 0))
-      + ex(Number(row?.storage_sum || 0));
-  };
+  // База для разнесения «нераспределяемых» трат: реклама и хранение приходят на служебных
+  // строках («артикул 0») и не привязаны к товару. Разносим их по доле продаж.
+  const uploadedAllocBase = useMemo(() => {
+    const rows = uploadedReportAnalytics || [];
+    let salesAbs = 0;
+    let unalloc = 0;
+    rows.forEach((r: any) => {
+      salesAbs += Math.abs(Number(r?.sales_net || 0));
+      unalloc += Number(r?.withhold_sum || 0) + Number(r?.storage_sum || 0);
+    });
+    return { salesAbs, unalloc };
+  }, [uploadedReportAnalytics]);
+
   // Прибыль строки по текущему режиму налогообложения:
-  //  УСН        — минус налог с выручки (ставка 1/6/15%);
-  //  ОСНО + НДС — минус НДС к уплате (выходной − входной) и налог на прибыль 25%.
-  const getUploadedRowProfitAfterTaxes = (toPay: number, salesNet: number, costTotal: number, servicesVat: number) => {
-    const base = toPay - costTotal;
-    if (!uploadedVatMode) return base - salesNet * getCurrentUploadedTaxRate();
+  //  УСН        — минус налог с выручки (ставка 1/6/15%), как раньше;
+  //  ОСНО + НДС — реклама/хранение разносятся по доле продаж, минус НДС к уплате
+  //               (выходной − входной, включая НДС разнесённых трат) и налог на прибыль 25%.
+  const getUploadedRowProfitAfterTaxes = (
+    toPayRaw: number, salesNet: number, costTotal: number,
+    commissionVat: number, logistics: number, ownUnalloc: number,
+  ) => {
+    if (!uploadedVatMode) return (toPayRaw - costTotal) - salesNet * getCurrentUploadedTaxRate();
     const VAT = 0.22;
-    const vOf = (a: number) => uploadedVatIncluded ? (a * VAT) / (1 + VAT) : a * VAT;
+    const ex = (a: number) => (a * VAT) / (1 + VAT);
+    const vOf = (a: number) => uploadedVatIncluded ? ex(a) : a * VAT;
+    const share = uploadedAllocBase.salesAbs > 0 ? Math.abs(salesNet) / uploadedAllocBase.salesAbs : 0;
+    const unalloc = uploadedAllocBase.unalloc * share;   // доля рекламы/хранения этой строки
+    const toPay = toPayRaw + ownUnalloc;                 // убираем собственные удержания строки
+    const servicesVat = commissionVat + ex(logistics) + ex(unalloc);
     const vatToPay = vOf(salesNet) - vOf(costTotal) - servicesVat;
-    const before = base - vatToPay;
+    const before = toPay - costTotal - unalloc - vatToPay;
     return before - Math.max(0, before) * 0.25;
   };
   const getUploadedProfitAfterTax = (row: any) => {
@@ -17935,7 +17947,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       Number(row?.to_pay_total || 0),
       Number(row?.sales_net || 0),
       cost * sold,
-      getUploadedRowServicesVat(row),
+      Number(row?.wb_commission_vat || 0),
+      Number(row?.logistics_sum || 0),
+      Number(row?.withhold_sum || 0) + Number(row?.storage_sum || 0),
     );
   };
   const getUploadedAvgProfitAfterTax = (row: any) => {
@@ -25761,7 +25775,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         Number(x.to_pay_total || 0),
                         Number(x.sales_net || 0),
                         cost * sold,
-                        getUploadedRowServicesVat(x),
+                        Number(x.wb_commission_vat || 0),
+                        Number(x.logistics_sum || 0),
+                        Number(x.withhold_sum || 0) + Number(x.storage_sum || 0),
                       );
                       const sNet = Number(x.sales_net || 0);
                       const salesGross = Number(x.sales_gross || 0);
@@ -26293,7 +26309,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                                 const metric = (z: any, key: string) => {
                                                   const zs = Number(z.sold_qty ?? z.sold ?? 0);
                                                   const tp = Number(z.to_pay_total ?? 0);
-                                                  const pr = getUploadedRowProfitAfterTaxes(tp, Number(z.sales_net || 0), cost * zs, getUploadedRowServicesVat(z));
+                                                  const pr = getUploadedRowProfitAfterTaxes(tp, Number(z.sales_net || 0), cost * zs, Number(z.wb_commission_vat || 0), Number(z.logistics_sum || 0), Number(z.withhold_sum || 0) + Number(z.storage_sum || 0));
                                                   if (key === '__profit') return pr;
                                                   if (key === '__ppu') return zs > 0 ? pr / zs : 0;
                                                   if (key === 'size') return null;
@@ -26316,7 +26332,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                                   ztopay,
                                                   Number(z.sales_net || 0),
                                                   Number(p.cost || 0) * zsold,
-                                                  getUploadedRowServicesVat(z),
+                                                  Number(z.wb_commission_vat || 0),
+                                                  Number(z.logistics_sum || 0),
+                                                  Number(z.withhold_sum || 0) + Number(z.storage_sum || 0),
                                                 );
                                                 const zppu = zsold > 0 ? zprofit / zsold : 0;
                                                 return (
@@ -26650,7 +26668,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               if (key === 'avg_profit' || key === 'profit_total') {
                                 const sold = Number(x?.sold_qty ?? 0);
                                 const profitTotal = sold > 0
-                                  ? getUploadedRowProfitAfterTaxes(Number(x?.to_pay_total || 0), Number(x?.sales_net || 0), getUploadedCostValue(row) * sold, getUploadedRowServicesVat(x))
+                                  ? getUploadedRowProfitAfterTaxes(Number(x?.to_pay_total || 0), Number(x?.sales_net || 0), getUploadedCostValue(row) * sold, Number(x?.wb_commission_vat || 0), Number(x?.logistics_sum || 0), Number(x?.withhold_sum || 0) + Number(x?.storage_sum || 0))
                                   : 0;
                                 if (key === 'profit_total') return profitTotal;
                                 return sold > 0 ? profitTotal / sold : 0;
@@ -26824,7 +26842,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                     Number(sz?.to_pay_total || 0),
                                     Number(sz?.sales_net || 0),
                                     getUploadedCostValue(row) * soldForCalc,
-                                    getUploadedRowServicesVat(sz),
+                                    Number(sz?.wb_commission_vat || 0),
+                                    Number(sz?.logistics_sum || 0),
+                                    Number(sz?.withhold_sum || 0) + Number(sz?.storage_sum || 0),
                                   ) : 0;
                                   const avgProfitSize = soldForCalc > 0 ? profitTotalSize / soldForCalc : 0;
                                   return (
