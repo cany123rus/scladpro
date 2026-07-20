@@ -1288,7 +1288,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     vatPct: 22,
     price: 1500,            // цена для покупателя
     qty: 100,               // размер партии, шт — для просчёта закупки целиком
-    pricePoints: [],        // доп. ценовые сценарии {price, qty} сверх основной цены
+    turnoverDays: 30,       // срок оборачиваемости партии — за сколько дней распродаётся
+    pricePoints: [],        // доп. ценовые сценарии {price, qty, turnoverDays} сверх основной цены
     obnalSum: 0,            // ОСНО: сумма «бумажного» счёта на партию (с НДС) для доп. вычета
     obnalPct: 0,            // комиссия конторы за обнал, % от суммы
     obnalWithdrawPct: 13,   // во сколько обошёлся бы легальный вывод этих денег с ООО (дивиденды НДФЛ), %
@@ -25236,7 +25237,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 const B = Math.max(0.01, num(wbBuyoutPct) / 100);
 
                 const upd = (id: string, patch: any) => setCalcItems((prev) => prev.map((x) => x.id === id ? { ...x, ...patch } : x));
-                const addPricePoint = (it: any) => upd(it.id, { pricePoints: [...(Array.isArray(it.pricePoints) ? it.pricePoints : []), { price: Math.round(num(it.price) * 1.15), qty: Math.max(1, Math.round(num(it.qty) || 1)) }] });
+                const addPricePoint = (it: any) => upd(it.id, { pricePoints: [...(Array.isArray(it.pricePoints) ? it.pricePoints : []), { price: Math.round(num(it.price) * 1.15), qty: Math.max(1, Math.round(num(it.qty) || 1)), turnoverDays: Math.max(1, Math.round(num(it.turnoverDays) || 30)) }] });
                 const updPricePoint = (it: any, i: number, patch: any) => upd(it.id, { pricePoints: (it.pricePoints || []).map((pp: any, k: number) => k === i ? { ...pp, ...patch } : pp) });
                 const delPricePoint = (it: any, i: number) => upd(it.id, { pricePoints: (it.pricePoints || []).filter((_: any, k: number) => k !== i) });
                 const applyCategory = (id: string, key: string) => {
@@ -25380,13 +25381,17 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                   // Ценовые сценарии: основная цена + доп. точки {цена, кол-во} — сравнение «оборот vs дороже».
                   const qty = Math.max(1, Math.round(num(it.qty) || 1));
-                  const extraPts = (Array.isArray(it.pricePoints) ? it.pricePoints : []).map((pp: any) => ({ price: num(pp.price), qty: Math.max(1, Math.round(num(pp.qty) || 1)) }));
-                  const scenPts = [{ price: p, qty }, ...extraPts];
-                  const scen = scenPts.map((pt) => ({ price: pt.price, qty: pt.qty, a: atPrice(pt.price) }));
+                  const primTurn = Math.max(1, Math.round(num(it.turnoverDays) || 30));
+                  const extraPts = (Array.isArray(it.pricePoints) ? it.pricePoints : []).map((pp: any) => ({ price: num(pp.price), qty: Math.max(1, Math.round(num(pp.qty) || 1)), turnoverDays: Math.max(1, Math.round(num(pp.turnoverDays) || 30)) }));
+                  const scenPts = [{ price: p, qty, turnoverDays: primTurn }, ...extraPts];
+                  // Годовой цикл: за turnoverDays распродаётся партия → 365/turnoverDays оборотов в год.
+                  const scen = scenPts.map((pt) => ({ price: pt.price, qty: pt.qty, turnoverDays: pt.turnoverDays, cyclesYear: 365 / pt.turnoverDays, a: atPrice(pt.price) }));
                   const sumS = (f: (s: any) => number) => scen.reduce((acc, s) => acc + f(s), 0);
                   const totalQty = sumS((s) => s.qty);
                   const profOAll = sumS((s) => s.a.osno * s.qty);
                   const profUAll = sumS((s) => s.a.usn * s.qty);
+                  const annualO = sumS((s) => s.a.osno * s.qty * s.cyclesYear);
+                  const annualU = sumS((s) => s.a.usn * s.qty * s.cyclesYear);
 
                   // Обнал (ОСНО, на партию): бумажный счёт даёт вычет входного НДС, минус комиссия конторы.
                   const obnalSum = Math.max(0, num(it.obnalSum));
@@ -25406,7 +25411,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     profO: profOAll, profU: profUAll,
                     taxO: sumS((s) => s.a.taxO * s.qty), taxU: sumS((s) => s.a.taxU * s.qty),
                     vat: importVat * totalQty, duty: duty * totalQty, log: logistics * totalQty,
-                    scenarios: scen.map((s) => ({ price: s.price, qty: s.qty, osno: s.a.osno, usn: s.a.usn })),
+                    annualO, annualU,
+                    scenarios: scen.map((s) => ({ price: s.price, qty: s.qty, turnoverDays: s.turnoverDays, osno: s.a.osno, usn: s.a.usn, annualO: s.a.osno * s.qty * s.cyclesYear, annualU: s.a.usn * s.qty * s.cyclesYear })),
                     obnalSum, obnalPct, obnalVat, obnalFee, obnalCash, obnalWithdrawSave, obnalNet,
                     profOObnal: profOAll + obnalNet,
                   };
@@ -25587,9 +25593,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           <div className="p-4 space-y-4">
                             {/* Общие параметры товара */}
                             <Sec title="Товар" color="bg-sky-500">
-                              <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-7 gap-3">
+                              <div className="mb-3 inline-flex rounded-lg border border-slate-300 overflow-hidden text-xs bg-white">
+                                <button type="button" onClick={() => upd(it.id, { source: 'import' })} className={`px-3 py-1.5 font-medium ${it.source !== 'ru' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>Импорт</button>
+                                <button type="button" onClick={() => upd(it.id, { source: 'ru' })} className={`px-3 py-1.5 font-medium ${it.source === 'ru' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>Закупка в РФ</button>
+                              </div>
+                              <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-8 gap-3">
                                 <CalcField label="Цена продажи" value={it.price} onChange={(v: number) => upd(it.id, { price: v })} suffix="₽" />
                                 <CalcField label="Партия" value={it.qty ?? 1} onChange={(v: number) => upd(it.id, { qty: v })} suffix="шт" step="1" />
+                                <CalcField label="Оборот" value={it.turnoverDays ?? 30} onChange={(v: number) => upd(it.id, { turnoverDays: v })} suffix="дн" step="1" />
                                 <CalcField label="Длина, см" value={it.len} onChange={(v: number) => upd(it.id, { len: v })} />
                                 <CalcField label="Ширина, см" value={it.wid} onChange={(v: number) => upd(it.id, { wid: v })} />
                                 <CalcField label="Высота, см" value={it.hei} onChange={(v: number) => upd(it.id, { hei: v })} />
@@ -25605,6 +25616,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                   <span className="text-[11px] font-semibold text-sky-700 pb-2">Цена {i + 2}</span>
                                   <CalcField label="Цена продажи" value={pp.price} onChange={(v: number) => updPricePoint(it, i, { price: v })} suffix="₽" />
                                   <CalcField label="Партия" value={pp.qty} onChange={(v: number) => updPricePoint(it, i, { qty: v })} suffix="шт" step="1" />
+                                  <CalcField label="Оборот" value={pp.turnoverDays ?? 30} onChange={(v: number) => updPricePoint(it, i, { turnoverDays: v })} suffix="дн" step="1" />
                                   <button type="button" onClick={() => delPricePoint(it, i)} className="mb-2 w-7 h-7 rounded-lg border border-rose-200 text-rose-500 hover:bg-rose-50 text-sm">×</button>
                                 </div>
                               ))}
@@ -25748,8 +25760,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               </div>
                               <div className="grid grid-cols-2 gap-3">
                                 {([
-                                  { key: 'osno', title: 'ОСНО', bc: 'border-emerald-200 bg-emerald-50/40', tc: 'text-emerald-700', invest: r.batch.investO, prof: r.batch.profO, pc: r.batch.profO < 0 ? 'text-rose-600' : 'text-emerald-700' },
-                                  { key: 'usn', title: 'УСН', bc: 'border-indigo-200 bg-indigo-50/40', tc: 'text-indigo-700', invest: r.batch.investU, prof: r.batch.profU, pc: r.batch.profU < 0 ? 'text-rose-600' : 'text-indigo-700' },
+                                  { key: 'osno', title: 'ОСНО', bc: 'border-emerald-200 bg-emerald-50/40', tc: 'text-emerald-700', invest: r.batch.investO, prof: r.batch.profO, annual: r.batch.annualO, pc: r.batch.profO < 0 ? 'text-rose-600' : 'text-emerald-700' },
+                                  { key: 'usn', title: 'УСН', bc: 'border-indigo-200 bg-indigo-50/40', tc: 'text-indigo-700', invest: r.batch.investU, prof: r.batch.profU, annual: r.batch.annualU, pc: r.batch.profU < 0 ? 'text-rose-600' : 'text-indigo-700' },
                                 ]).map((g) => (
                                   <div key={g.key} className={`rounded-lg border ${g.bc} p-2.5`}>
                                     <div className={`text-[11px] font-bold ${g.tc} mb-1.5`}>{g.title}</div>
@@ -25758,6 +25770,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                       <div className="flex justify-between"><span className="text-slate-500">Прибыль</span><span className={`font-extrabold tabular-nums ${g.pc}`}>{money(g.prof)} ₽</span></div>
                                       <div className="flex justify-between"><span className="text-slate-400">Маржа</span><span className="tabular-nums text-slate-500">{pctOf(g.prof, r.batch.rev)}</span></div>
                                       <div className="flex justify-between"><span className="text-slate-400">ROI</span><span className="tabular-nums text-slate-500">{pctOf(g.prof, g.invest)}</span></div>
+                                      <div className="flex justify-between border-t border-slate-200/70 pt-1 mt-1"><span className="text-slate-500">Прибыль/год</span><span className={`font-semibold tabular-nums ${g.annual < 0 ? 'text-rose-600' : g.tc}`}>{money(g.annual)} ₽</span></div>
+                                      <div className="flex justify-between"><span className="text-slate-400">ROI годовой</span><span className="tabular-nums text-slate-500">{pctOf(g.annual, g.invest)}</span></div>
                                     </div>
                                   </div>
                                 ))}
@@ -25770,6 +25784,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                       <thead>
                                         <tr className="text-slate-400 text-[10px] uppercase">
                                           <th className="text-left font-medium py-0.5">Цена × кол-во</th>
+                                          <th className="text-right font-medium">Срок</th>
                                           <th className="text-right font-medium">Выручка</th>
                                           <th className="text-right font-medium text-emerald-600">Прибыль ОСНО</th>
                                           <th className="text-right font-medium text-indigo-600">Прибыль УСН</th>
@@ -25779,9 +25794,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                         {r.batch.scenarios.map((s: any, i: number) => (
                                           <tr key={i} className="border-t border-slate-100">
                                             <td className="text-left py-1 text-slate-600">{money(s.price)} ₽ × {s.qty}</td>
+                                            <td className="text-right text-slate-500">{s.turnoverDays} дн</td>
                                             <td className="text-right text-slate-700">{money(s.price * s.qty)} ₽</td>
-                                            <td className={`text-right font-semibold ${s.osno < 0 ? 'text-rose-600' : 'text-emerald-700'}`}>{money(s.osno * s.qty)} ₽</td>
-                                            <td className={`text-right font-semibold ${s.usn < 0 ? 'text-rose-600' : 'text-indigo-700'}`}>{money(s.usn * s.qty)} ₽</td>
+                                            <td className={`text-right font-semibold ${s.osno < 0 ? 'text-rose-600' : 'text-emerald-700'}`}>{money(s.osno * s.qty)} ₽<div className="text-[10px] font-normal text-slate-400">год {money(s.annualO)}</div></td>
+                                            <td className={`text-right font-semibold ${s.usn < 0 ? 'text-rose-600' : 'text-indigo-700'}`}>{money(s.usn * s.qty)} ₽<div className="text-[10px] font-normal text-slate-400">год {money(s.annualU)}</div></td>
                                           </tr>
                                         ))}
                                       </tbody>
