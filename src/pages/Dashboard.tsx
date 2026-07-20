@@ -222,18 +222,33 @@ function HeaderClock() {
 // фокус — вводился бы только один символ за клик.
 const calcMoney = (v: number) => Number(v || 0).toLocaleString('ru-RU', { maximumFractionDigits: 2 });
 
+// Инпут держит СВОЙ текст, чтобы поле можно было полностью очистить: если писать 0 прямо
+// в состояние, он тут же возвращается в поле и ноль невозможно стереть. Наверх отдаём число
+// (пустое поле = 0), а внешние изменения (кнопка «Подставить из отчёта») подхватываем эффектом.
+const CalcInput = ({ value, onChange, step = '0.01', className }: any) => {
+  const [text, setText] = useState<string>(() => String(value ?? 0));
+  useEffect(() => {
+    if (Number(text) !== Number(value)) setText(String(value ?? 0));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+  return (
+    <input
+      type="number"
+      step={step}
+      value={text}
+      onChange={(e) => { const v = e.target.value; setText(v); onChange(v === '' ? 0 : Number(v)); }}
+      onBlur={() => { if (text === '' || !Number.isFinite(Number(text))) { setText('0'); onChange(0); } }}
+      onFocus={(e) => e.target.select()}
+      className={className}
+    />
+  );
+};
+
 const CalcField = ({ label, value, onChange, suffix, step = '0.01' }: any) => (
   <div>
     <label className="block text-xs font-medium text-slate-600 mb-1">{label}</label>
     <div className="flex items-center gap-1">
-      <input
-        type="number"
-        step={step}
-        value={value}
-        onChange={(e) => onChange(e.target.value === '' ? 0 : Number(e.target.value))}
-        onFocus={(e) => e.target.select()}
-        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
-      />
+      <CalcInput value={value} onChange={onChange} step={step} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
       {suffix ? <span className="text-xs text-slate-400 w-8 shrink-0">{suffix}</span> : null}
     </div>
   </div>
@@ -25034,7 +25049,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <div>
                           <label className="block text-xs font-medium text-slate-600 mb-1">Логистика <span className="text-indigo-500">(только УСН)</span></label>
                           <div className="flex items-center gap-1">
-                            <input type="number" step="0.01" value={calcLogisticsValue} onChange={(e) => setCalcLogisticsValue(e.target.value === '' ? 0 : Number(e.target.value))} onFocus={(e) => e.target.select()} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+                            <CalcInput value={calcLogisticsValue} onChange={setCalcLogisticsValue} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
                             <select value={calcLogisticsMode} onChange={(e) => setCalcLogisticsMode(e.target.value as any)} className="px-1 py-2 border border-slate-300 rounded-lg text-xs">
                               <option value="pct">%</option>
                               <option value="rub">₽</option>
