@@ -1329,9 +1329,62 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       if (insErr) throw insErr;
     }
   };
+  // Общие условия расчёта (продажа + логистика WB) — сохраняем одним объектом.
+  const [calcSettingsSaving, setCalcSettingsSaving] = useState(false);
+  const loadCalcSettings = useCallback(async () => {
+    try {
+      const { data } = await supabase.from('app_settings').select('value').eq('key', 'calc_settings_v1').maybeSingle();
+      const raw: any = data?.value;
+      let s: any = null;
+      if (typeof raw === 'string') { try { s = JSON.parse(raw); } catch { s = null; } }
+      else if (raw && typeof raw === 'object') s = raw;
+      if (!s) return;
+      const n = (v: any, d: number) => Number.isFinite(Number(v)) ? Number(v) : d;
+      setCalcCommissionPct(n(s.commissionPct, 8));
+      setCalcAdsPctOsno(n(s.adsOsno, 14));
+      setCalcAdsPctUsn(n(s.adsUsn, 14));
+      setCalcAssembly(n(s.assembly, 0));
+      setCalcDeliveryToWb(n(s.deliveryToWb, 0));
+      setCalcUsnRate(n(s.usnRate, 0.06));
+      setCalcNoVatRefund(!!s.noVatRefund);
+      setWbBuyoutPct(n(s.buyoutPct, 70));
+      setWbWarehouseCoef(n(s.warehouseCoef, 100));
+      setWbLocalIndex(n(s.localIndex, 1));
+      setWbBase1L(n(s.base1L, 46));
+      setWbExtraL(n(s.extraL, 14));
+      setWbStorageTariff(n(s.storageTariff, 0.08));
+      setWbStorageCoef(n(s.storageCoef, 100));
+      setWbStorageDays(n(s.storageDays, 30));
+      if (Array.isArray(s.tiers) && s.tiers.length === 5) setWbTiers(s.tiers.map((x: any) => n(x, 0)));
+    } catch (e) { console.error('loadCalcSettings error', e); }
+  }, []);
+  const saveCalcSettings = async () => {
+    setCalcSettingsSaving(true);
+    try {
+      const payload = JSON.stringify({
+        commissionPct: calcCommissionPct, adsOsno: calcAdsPctOsno, adsUsn: calcAdsPctUsn,
+        assembly: calcAssembly, deliveryToWb: calcDeliveryToWb, usnRate: calcUsnRate, noVatRefund: calcNoVatRefund,
+        buyoutPct: wbBuyoutPct, warehouseCoef: wbWarehouseCoef, localIndex: wbLocalIndex,
+        base1L: wbBase1L, extraL: wbExtraL, tiers: wbTiers,
+        storageTariff: wbStorageTariff, storageCoef: wbStorageCoef, storageDays: wbStorageDays,
+      });
+      const { data: updated, error } = await supabase.from('app_settings').update({ value: payload }).eq('key', 'calc_settings_v1').select('key');
+      if (error) throw error;
+      if (!updated || updated.length === 0) {
+        const { error: insErr } = await supabase.from('app_settings').insert({ key: 'calc_settings_v1', value: payload });
+        if (insErr) throw insErr;
+      }
+      showToast('Условия расчёта сохранены', 'success');
+    } catch (e: any) {
+      console.error('saveCalcSettings error', e);
+      showToast('Не удалось сохранить условия', 'error');
+    } finally { setCalcSettingsSaving(false); }
+  };
+
   useEffect(() => {
     if (analyticsSubTab === 'calculator') {
       loadCalcSavedProducts();
+      loadCalcSettings();
       if (!cbrRates.USD) loadCbrRates();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -25303,7 +25356,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     {/* Настройки */}
                     <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
                       <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
-                        <Sec title="Условия продажи" color="bg-emerald-500">
+                        <Sec
+                          title="Условия продажи"
+                          color="bg-emerald-500"
+                          right={(
+                            <button type="button" onClick={saveCalcSettings} disabled={calcSettingsSaving} className="px-2.5 py-1 text-xs font-semibold rounded-lg border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 disabled:opacity-50">
+                              {calcSettingsSaving ? 'Сохранение…' : 'Сохранить условия'}
+                            </button>
+                          )}
+                        >
                           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                             <CalcField label="Комиссия WB" value={calcCommissionPct} onChange={setCalcCommissionPct} suffix="%" />
                             <CalcField label="Реклама ОСНО" value={calcAdsPctOsno} onChange={setCalcAdsPctOsno} suffix="%" />
@@ -25343,7 +25404,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <Sec
                           title="Логистика WB · только УСН"
                           color="bg-indigo-500"
-                          right={<button type="button" onClick={() => setWbTariffsOpen((v) => !v)} className="text-xs font-semibold text-indigo-600 hover:underline">{wbTariffsOpen ? 'Скрыть тарифы' : 'Тарифы WB'}</button>}
+                          right={(
+                            <div className="flex items-center gap-2">
+                              <button type="button" onClick={() => setWbTariffsOpen((v) => !v)} className="text-xs font-semibold text-indigo-600 hover:underline">{wbTariffsOpen ? 'Скрыть тарифы' : 'Тарифы WB'}</button>
+                              <button type="button" onClick={saveCalcSettings} disabled={calcSettingsSaving} className="px-2.5 py-1 text-xs font-semibold rounded-lg border border-indigo-300 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 disabled:opacity-50">
+                                {calcSettingsSaving ? '…' : 'Сохранить'}
+                              </button>
+                            </div>
+                          )}
                         >
                           <div className="grid grid-cols-3 gap-3">
                             <CalcField label="Выкуп" value={wbBuyoutPct} onChange={setWbBuyoutPct} suffix="%" />
