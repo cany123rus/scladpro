@@ -1290,6 +1290,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     qty: 100,               // размер партии, шт — для просчёта закупки целиком
     obnalSum: 0,            // ОСНО: сумма «бумажного» счёта на партию (с НДС) для доп. вычета
     obnalPct: 0,            // комиссия конторы за обнал, % от суммы
+    obnalWithdrawPct: 13,   // во сколько обошёлся бы легальный вывод этих денег с ООО (дивиденды НДФЛ), %
   });
   const [calcItems, setCalcItems] = useState<any[]>(() => [makeCalcItem(1)]);
   const [calcCommissionPct, setCalcCommissionPct] = useState<number>(8);
@@ -25346,10 +25347,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   // Обнал (ОСНО, на партию): бумажный счёт даёт вычет входного НДС, минус комиссия конторы.
                   const obnalSum = Math.max(0, num(it.obnalSum));
                   const obnalPct = Math.max(0, num(it.obnalPct));
+                  const obnalWithdrawPct = Math.max(0, num(it.obnalWithdrawPct));
                   const obnalVat = ex(obnalSum);              // НДС в счёте (22/122) — к вычету, уменьшает НДС партии
                   const obnalFee = obnalSum * obnalPct / 100;  // комиссия за обнал
                   const obnalCash = obnalSum - obnalFee;       // получено наличными
-                  const obnalNet = obnalVat - obnalFee;        // чистая выгода: сэкономленный НДС − комиссия
+                  const obnalWithdrawSave = obnalCash * obnalWithdrawPct / 100; // экономия vs легальный вывод (дивиденды НДФЛ)
+                  const obnalNet = obnalVat - obnalFee + obnalWithdrawSave;     // выгода: НДС − комиссия + экономия на выводе
                   const batch = {
                     qty,
                     rev: p * qty,
@@ -25359,7 +25362,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     profO: osno * qty, profU: usn * qty,
                     taxO: taxO * qty, taxU: taxU * qty,
                     vat: importVat * qty, duty: duty * qty, log: logistics * qty,
-                    obnalSum, obnalPct, obnalVat, obnalFee, obnalCash, obnalNet,
+                    obnalSum, obnalPct, obnalVat, obnalFee, obnalCash, obnalWithdrawSave, obnalNet,
                     profOObnal: osno * qty + obnalNet,
                   };
 
@@ -25686,20 +25689,22 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                 <div className="text-xs font-bold text-amber-800">Обнал · ОСНО, на партию</div>
                                 <div className="text-[10px] text-amber-600">бумажный НДС к вычету</div>
                               </div>
-                              <div className="grid grid-cols-2 gap-3 mb-2">
+                              <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-2">
                                 <CalcField label="Сумма счёта (с НДС)" value={it.obnalSum ?? 0} onChange={(v: number) => upd(it.id, { obnalSum: v })} suffix="₽" />
                                 <CalcField label="Комиссия конторы" value={it.obnalPct ?? 0} onChange={(v: number) => upd(it.id, { obnalPct: v })} suffix="%" step="0.5" />
+                                <CalcField label="Легальный вывод стоил бы" value={it.obnalWithdrawPct ?? 0} onChange={(v: number) => upd(it.id, { obnalWithdrawPct: v })} suffix="%" step="1" />
                               </div>
                               {r.batch.obnalSum > 0 ? (
                                 <div className="space-y-1 text-xs">
                                   <div className="flex justify-between"><span className="text-slate-500">НДС к вычету (−НДС партии)</span><span className="font-semibold tabular-nums text-emerald-700">+{money(r.batch.obnalVat)} ₽</span></div>
                                   <div className="flex justify-between"><span className="text-slate-500">Комиссия обнала</span><span className="font-semibold tabular-nums text-rose-600">−{money(r.batch.obnalFee)} ₽</span></div>
                                   <div className="flex justify-between"><span className="text-slate-400">Получено наличными</span><span className="tabular-nums text-slate-500">{money(r.batch.obnalCash)} ₽</span></div>
+                                  {r.batch.obnalWithdrawSave > 0.005 && <div className="flex justify-between"><span className="text-slate-500">Экономия на выводе с ООО</span><span className="font-semibold tabular-nums text-emerald-700">+{money(r.batch.obnalWithdrawSave)} ₽</span></div>}
                                   <div className="flex justify-between border-t border-amber-200 pt-1 mt-1"><span className="font-semibold text-slate-700">Выгода обнала</span><span className={`font-extrabold tabular-nums ${r.batch.obnalNet < 0 ? 'text-rose-600' : 'text-emerald-700'}`}>{r.batch.obnalNet >= 0 ? '+' : ''}{money(r.batch.obnalNet)} ₽</span></div>
                                   <div className="flex justify-between"><span className="font-bold text-emerald-800">Прибыль ОСНО с обналом</span><span className={`font-extrabold tabular-nums ${r.batch.profOObnal < 0 ? 'text-rose-600' : 'text-emerald-700'}`}>{money(r.batch.profOObnal)} ₽</span></div>
                                 </div>
                               ) : (
-                                <div className="text-[10px] text-slate-400 leading-snug">Заведи сумму «бумажного» счёта — контора вернёт её наличными за вычетом комиссии, а НДС (22/122) уйдёт в вычет и уменьшит НДС партии. Выгода = сэкономленный НДС − комиссия.</div>
+                                <div className="text-[10px] text-slate-400 leading-snug">Заведи сумму «бумажного» счёта — контора вернёт её наличными за вычетом комиссии, а НДС (22/122) уйдёт в вычет и уменьшит НДС партии. Наличные ещё и выгодны тем, что легальный вывод с ООО (дивиденды НДФЛ) стоил бы дороже. Выгода = сэкономленный НДС − комиссия + экономия на выводе.</div>
                               )}
                             </div>
                           </div>
