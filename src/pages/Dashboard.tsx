@@ -25928,16 +25928,19 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                           const isBest = row.prof === maxP && maxP - minP > 0.5;
                                           return (
                                             <button key={ri} type="button" onClick={row.onClick}
-                                              className={`w-full flex items-center justify-between gap-2 text-xs rounded-lg px-2 py-1.5 border transition-colors ${row.active ? 'bg-white border-slate-300 shadow-sm' : 'border-transparent hover:bg-white/60'}`}>
-                                              <span className="flex items-center gap-1.5 min-w-0">
-                                                <span className={`w-2 h-2 rounded-full shrink-0 ${row.active ? g.dot : 'bg-slate-300'}`} />
-                                                <span className="text-slate-600 truncate">{row.label}{row.sub ? <span className="text-slate-400"> · {row.sub}</span> : null}</span>
-                                                {isBest && <span className="text-[9px] font-bold text-emerald-600 bg-emerald-100 rounded px-1 shrink-0">выгоднее</span>}
+                                              className={`w-full flex flex-col gap-0.5 text-xs rounded-lg px-2 py-1.5 border transition-colors ${row.active ? 'bg-white border-slate-300 shadow-sm' : 'border-transparent hover:bg-white/60'}`}>
+                                              <span className="flex items-center justify-between gap-2">
+                                                <span className="flex items-center gap-1.5 min-w-0">
+                                                  <span className={`w-2 h-2 rounded-full shrink-0 ${row.active ? g.dot : 'bg-slate-300'}`} />
+                                                  <span className="text-slate-700 font-medium truncate">{row.label}</span>
+                                                  {isBest && <span className="text-[9px] font-bold text-emerald-600 bg-emerald-100 rounded px-1 shrink-0">выгоднее</span>}
+                                                </span>
+                                                <span className="shrink-0 text-right">
+                                                  <span className={`block font-bold tabular-nums ${row.prof < 0 ? 'text-rose-600' : 'text-slate-800'}`}>{money(row.prof)} ₽</span>
+                                                  <span className="block text-[10px] text-slate-400 tabular-nums">год {money(row.annual)}</span>
+                                                </span>
                                               </span>
-                                              <span className="shrink-0 text-right">
-                                                <span className={`block font-bold tabular-nums ${row.prof < 0 ? 'text-rose-600' : 'text-slate-800'}`}>{money(row.prof)} ₽</span>
-                                                <span className="block text-[10px] text-slate-400 tabular-nums">год {money(row.annual)}</span>
-                                              </span>
+                                              {row.sub ? <span className="text-[10px] text-slate-400 text-left pl-3.5">{row.sub}</span> : null}
                                             </button>
                                           );
                                         })}
