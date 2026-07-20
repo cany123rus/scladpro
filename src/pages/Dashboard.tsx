@@ -1287,6 +1287,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     dutyUnit: 'kg',
     vatPct: 22,
     price: 1500,            // цена для покупателя
+    qty: 100,               // размер партии, шт — для просчёта закупки целиком
   });
   const [calcItems, setCalcItems] = useState<any[]>(() => [makeCalcItem(1)]);
   const [calcCommissionPct, setCalcCommissionPct] = useState<number>(8);
@@ -25299,9 +25300,23 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   const taxU = usnRate === 0.06 ? p * 0.06 : Math.max(0, fromU - costUsn) * usnRate;
                   const usn = fromU - costUsn - taxU - cash;
 
+                  // Партия: всё, что считалось на единицу, множим на количество.
+                  // Вложения — деньги, которые нужны до первой продажи: товар на складе + наличные расходы.
+                  const qty = Math.max(1, Math.round(num(it.qty) || 1));
+                  const batch = {
+                    qty,
+                    rev: p * qty,
+                    costO: costOsno * qty, costU: costUsn * qty,
+                    investO: (costOsno + (isRu ? 0 : importVat) + cash) * qty,
+                    investU: (costUsn + cash) * qty,
+                    profO: osno * qty, profU: usn * qty,
+                    taxO: taxO * qty, taxU: taxU * qty,
+                    vat: importVat * qty, duty: duty * qty, log: logistics * qty,
+                  };
+
                   return { isRu, rate, purchaseRub, customs, duty, dutyAdv, dutySpecRub, dutyByWeight, importVat, cargo, costOsno, costUsn,
                     liters, baseLog, fwd, back, logistics, storage, cash, p, commission, adsO, adsU, feesO, feesU, fromO, fromU,
-                    vatOut, vatInServices, vatToPay, vatToPayRaw, vatRefundCut, beforeO, taxO, osno, taxU, usn };
+                    vatOut, vatInServices, vatToPay, vatToPayRaw, vatRefundCut, beforeO, taxO, osno, taxU, usn, qty, batch };
                 };
 
                 const breakevenFor = (it: any, pick: (r: any) => number) => {
@@ -25315,9 +25330,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 };
                 const rows = calcItems.map((it) => ({ it, r: computeItem(it), beO: breakevenFor(it, (x) => x.osno), beU: breakevenFor(it, (x) => x.usn) }));
                 const tot = rows.reduce((a, x) => ({
-                  rev: a.rev + x.r.p, osno: a.osno + x.r.osno, usn: a.usn + x.r.usn,
-                  cost: a.cost + x.r.costOsno, duty: a.duty + x.r.duty, vat: a.vat + x.r.importVat, log: a.log + x.r.logistics,
-                }), { rev: 0, osno: 0, usn: 0, cost: 0, duty: 0, vat: 0, log: 0 });
+                  qty: a.qty + x.r.batch.qty,
+                  rev: a.rev + x.r.batch.rev, osno: a.osno + x.r.batch.profO, usn: a.usn + x.r.batch.profU,
+                  cost: a.cost + x.r.batch.costO, duty: a.duty + x.r.batch.duty, vat: a.vat + x.r.batch.vat, log: a.log + x.r.batch.log,
+                  investO: a.investO + x.r.batch.investO, investU: a.investU + x.r.batch.investU,
+                }), { qty: 0, rev: 0, osno: 0, usn: 0, cost: 0, duty: 0, vat: 0, log: 0, investO: 0, investU: 0 });
 
                 const Sec = CalcSection;
                 const saveBtn = (
@@ -25440,8 +25457,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           <div className="p-4 space-y-4">
                             {/* Общие параметры товара */}
                             <Sec title="Товар" color="bg-sky-500">
-                              <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+                              <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-7 gap-3">
                                 <CalcField label="Цена продажи" value={it.price} onChange={(v: number) => upd(it.id, { price: v })} suffix="₽" />
+                                <CalcField label="Партия" value={it.qty ?? 1} onChange={(v: number) => upd(it.id, { qty: v })} suffix="шт" step="1" />
                                 <CalcField label="Длина, см" value={it.len} onChange={(v: number) => upd(it.id, { len: v })} />
                                 <CalcField label="Ширина, см" value={it.wid} onChange={(v: number) => upd(it.id, { wid: v })} />
                                 <CalcField label="Высота, см" value={it.hei} onChange={(v: number) => upd(it.id, { hei: v })} />
@@ -25569,6 +25587,26 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                 <div className="text-[11px] text-slate-400 mt-1">Логистика: {money(r.fwd)} прямая / {(B * 100).toFixed(0)}% + {money(r.back)} возврат</div>
                               </div>
                             </div>
+
+                            {/* Партия */}
+                            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                              <div className="text-xs font-bold text-slate-700 mb-2">Партия {r.batch.qty} шт</div>
+                              <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
+                                {[
+                                  { l: 'Выручка', v: r.batch.rev, c: 'text-slate-900' },
+                                  { l: 'Вложения ОСНО', v: r.batch.investO, c: 'text-slate-900', h: 'товар + НДС + нал.' },
+                                  { l: 'Вложения УСН', v: r.batch.investU, c: 'text-slate-900', h: 'товар + нал.' },
+                                  { l: 'Прибыль ОСНО', v: r.batch.profO, c: r.batch.profO < 0 ? 'text-rose-600' : 'text-emerald-600', h: `ROI ${pctOf(r.batch.profO, r.batch.investO)}` },
+                                  { l: 'Прибыль УСН', v: r.batch.profU, c: r.batch.profU < 0 ? 'text-rose-600' : 'text-indigo-700', h: `ROI ${pctOf(r.batch.profU, r.batch.investU)}` },
+                                ].map((x) => (
+                                  <div key={x.l}>
+                                    <div className="text-[10px] uppercase tracking-wide text-slate-500">{x.l}</div>
+                                    <div className={`font-extrabold tabular-nums ${x.c}`}>{money(x.v)} ₽</div>
+                                    {x.h && <div className="text-[10px] text-slate-400">{x.h}</div>}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
                           </div>
                         </div>
                       );
@@ -25640,11 +25678,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     <div className="rounded-2xl bg-gradient-to-br from-slate-900 to-slate-800 p-5 text-white shadow-xl">
                       <div className="font-bold mb-4 flex items-center gap-2">
                         <span className="w-1.5 h-5 rounded-full bg-emerald-400" />
-                        Итого по {rows.length} {rows.length === 1 ? 'позиции' : 'позициям'}
+                        Итого по {rows.length} {rows.length === 1 ? 'позиции' : 'позициям'} · {tot.qty} шт
                       </div>
                       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
                         {[
                           { l: 'Выручка', v: tot.rev, c: 'text-white' },
+                          { l: 'Вложения ОСНО', v: tot.investO, c: 'text-amber-200' },
+                          { l: 'Вложения УСН', v: tot.investU, c: 'text-amber-200' },
                           { l: 'Себестоимость ОСНО', v: tot.cost, c: 'text-white' },
                           ...(Math.abs(tot.duty) > 0.005 ? [{ l: 'Пошлина', v: tot.duty, c: 'text-amber-300' }] : []),
                           { l: 'Логистика УСН', v: tot.log, c: 'text-sky-300' },
@@ -25662,6 +25702,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         {tot.osno >= tot.usn
                           ? <>Выгоднее <b className="text-emerald-400">ОСНО с НДС</b>: +{money(tot.osno - tot.usn)} ₽ — вычет НДС {money(tot.vat)} ₽</>
                           : <>Выгоднее <b className="text-indigo-300">УСН {usnRate === 0.06 ? '6%' : '15%'}</b>: +{money(tot.usn - tot.osno)} ₽</>}
+                        <div className="text-xs text-slate-400 mt-1">
+                          ROI партии: ОСНО {pctOf(tot.osno, tot.investO)} · УСН {pctOf(tot.usn, tot.investU)}
+                        </div>
                       </div>
                     </div>
 
