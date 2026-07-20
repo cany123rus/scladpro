@@ -25243,7 +25243,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 const addPricePoint = (it: any) => upd(it.id, { pricePoints: [...(Array.isArray(it.pricePoints) ? it.pricePoints : []), { price: Math.round(num(it.price) * 1.15), qty: Math.max(1, Math.round(num(it.qty) || 1)), turnoverDays: Math.max(1, Math.round(num(it.turnoverDays) || 30)) }] });
                 const updPricePoint = (it: any, i: number, patch: any) => upd(it.id, { pricePoints: (it.pricePoints || []).map((pp: any, k: number) => k === i ? { ...pp, ...patch } : pp) });
                 const delPricePoint = (it: any, i: number) => upd(it.id, { pricePoints: (it.pricePoints || []).filter((_: any, k: number) => k !== i) });
-                const addImportVariant = (it: any) => upd(it.id, { importVariants: [...(Array.isArray(it.importVariants) ? it.importVariants : []), { purchase: num(it.purchase), currency: it.currency, country: it.country, deliveryToBorder: num(it.deliveryToBorder) }] });
+                const addImportVariant = (it: any) => upd(it.id, { importVariants: [...(Array.isArray(it.importVariants) ? it.importVariants : []), { purchase: num(it.purchase), currency: it.currency, country: it.country, deliveryToBorder: num(it.deliveryToBorder), turnoverDays: Math.max(1, Math.round(num(it.turnoverDays) || 30)) }] });
                 const updImportVariant = (it: any, i: number, patch: any) => upd(it.id, { importVariants: (it.importVariants || []).map((v: any, k: number) => k === i ? { ...v, ...patch } : v) });
                 const delImportVariant = (it: any, i: number) => upd(it.id, { importVariants: (it.importVariants || []).filter((_: any, k: number) => k !== i) });
                 const applyCategory = (id: string, key: string) => {
@@ -25598,15 +25598,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       const countryLabel = (k: string) => IMPORT_COUNTRIES.find((c) => c.key === k)?.label || k;
                       // ОСНО: официальный ввоз (текущий + все варианты) и закупка в РФ.
                       const importOpts = [
-                        { key: 'import', label: 'Текущий', purchase: it.purchase, currency: it.currency, country: it.country, delivery: it.deliveryToBorder },
-                        ...((it.importVariants || []).map((v: any, i: number) => ({ key: `imp${i}`, label: `#${i + 2}`, purchase: v.purchase, currency: v.currency, country: v.country, delivery: v.deliveryToBorder }))),
+                        { key: 'import', label: 'Текущий', purchase: it.purchase, currency: it.currency, country: it.country, delivery: it.deliveryToBorder, turn: it.turnoverDays },
+                        ...((it.importVariants || []).map((v: any, i: number) => ({ key: `imp${i}`, label: `#${i + 2}`, purchase: v.purchase, currency: v.currency, country: v.country, delivery: v.deliveryToBorder, turn: v.turnoverDays }))),
                       ];
                       const osnoCmp = importOpts.map((o) => ({
                         label: 'Офиц. ввоз',
-                        sub: `${o.currency} · ${countryLabel(o.country)}`,
-                        prof: computeItem({ ...it, osnoSource: 'import', purchase: o.purchase, currency: o.currency, country: o.country, deliveryToBorder: o.delivery }).batch.profO,
+                        sub: `${o.currency} · ${countryLabel(o.country)} · ${o.turn ?? 30} дн`,
+                        prof: computeItem({ ...it, osnoSource: 'import', purchase: o.purchase, currency: o.currency, country: o.country, deliveryToBorder: o.delivery, turnoverDays: o.turn ?? it.turnoverDays }).batch.profO,
                         active: osnoSrc === 'import' && o.key === 'import',
-                        onClick: () => upd(it.id, { osnoSource: 'import', purchase: o.purchase, currency: o.currency, country: o.country, deliveryToBorder: o.delivery }),
+                        onClick: () => upd(it.id, { osnoSource: 'import', purchase: o.purchase, currency: o.currency, country: o.country, deliveryToBorder: o.delivery, turnoverDays: o.turn ?? it.turnoverDays }),
                       }));
                       osnoCmp.push({ label: 'Закупка в РФ', sub: '', prof: computeItem({ ...it, osnoSource: 'ru' }).batch.profO, active: osnoSrc === 'ru', onClick: () => upd(it.id, { osnoSource: 'ru' }) });
                       const usnCmp = [
@@ -25764,6 +25764,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                           </select>
                                         </div>
                                         <CalcField label="Доставка до РФ" value={v.deliveryToBorder} onChange={(x: number) => updImportVariant(it, i, { deliveryToBorder: x })} suffix="₽" />
+                                        <CalcField label="Оборот" value={v.turnoverDays ?? 30} onChange={(x: number) => updImportVariant(it, i, { turnoverDays: x })} suffix="дн" step="1" />
                                         <button type="button" onClick={() => delImportVariant(it, i)} className="mb-2 w-7 h-7 rounded-lg border border-rose-200 text-rose-500 hover:bg-rose-50 text-sm">×</button>
                                       </div>
                                     ))}
@@ -25771,12 +25772,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                       const variants = [{ label: 'Текущий', ov: null as any }, ...(it.importVariants || []).map((v: any, i: number) => ({ label: `#${i + 2}`, ov: v }))];
                                       if (variants.length < 2) return null;
                                       const rows = variants.map((vr) => {
-                                        const merged = vr.ov ? { ...it, osnoSource: 'import', purchase: vr.ov.purchase, currency: vr.ov.currency, country: vr.ov.country, deliveryToBorder: vr.ov.deliveryToBorder } : { ...it, osnoSource: 'import' };
+                                        const merged = vr.ov ? { ...it, osnoSource: 'import', purchase: vr.ov.purchase, currency: vr.ov.currency, country: vr.ov.country, deliveryToBorder: vr.ov.deliveryToBorder, turnoverDays: vr.ov.turnoverDays } : { ...it, osnoSource: 'import' };
                                         const rr = computeItem(merged);
                                         const ctry = vr.ov ? vr.ov.country : it.country;
-                                        return { label: vr.label, cost: rr.costOsnoFull, prof: rr.batch.profO, country: IMPORT_COUNTRIES.find((c) => c.key === ctry)?.label || ctry };
+                                        const turn = vr.ov ? (vr.ov.turnoverDays ?? 30) : (it.turnoverDays ?? 30);
+                                        return { label: vr.label, cost: rr.costOsnoFull, prof: rr.batch.profO, annual: rr.batch.annualO, turn, country: IMPORT_COUNTRIES.find((c) => c.key === ctry)?.label || ctry };
                                       });
-                                      const best = rows.reduce((a, b) => (b.prof > a.prof ? b : a), rows[0]);
+                                      const best = rows.reduce((a, b) => (b.annual > a.annual ? b : a), rows[0]);
                                       return (
                                         <div className="mt-1 overflow-x-auto">
                                           <table className="w-full text-xs tabular-nums">
@@ -25784,17 +25786,21 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                               <tr className="text-slate-400 text-[10px] uppercase">
                                                 <th className="text-left font-medium py-0.5">Вариант</th>
                                                 <th className="text-left font-medium">Страна</th>
+                                                <th className="text-right font-medium">Оборот</th>
                                                 <th className="text-right font-medium">Себест/ед</th>
                                                 <th className="text-right font-medium text-emerald-600">Прибыль партии</th>
+                                                <th className="text-right font-medium text-emerald-600">Прибыль/год</th>
                                               </tr>
                                             </thead>
                                             <tbody>
                                               {rows.map((row, i) => (
                                                 <tr key={i} className="border-t border-slate-100">
-                                                  <td className="text-left py-1 text-slate-600 font-medium">{row.label}{best.label === row.label && rows.length > 1 && <span className="ml-1 text-[9px] font-bold text-emerald-600 bg-emerald-100 rounded px-1">лучший</span>}</td>
+                                                  <td className="text-left py-1 text-slate-600 font-medium">{row.label}{best.label === row.label && rows.length > 1 && <span className="ml-1 text-[9px] font-bold text-emerald-600 bg-emerald-100 rounded px-1">лучший/год</span>}</td>
                                                   <td className="text-left text-slate-500">{row.country}</td>
+                                                  <td className="text-right text-slate-500">{row.turn} дн</td>
                                                   <td className="text-right text-slate-700">{money(row.cost)} ₽</td>
                                                   <td className={`text-right font-semibold ${row.prof < 0 ? 'text-rose-600' : 'text-emerald-700'}`}>{money(row.prof)} ₽</td>
+                                                  <td className={`text-right font-semibold ${row.annual < 0 ? 'text-rose-600' : 'text-emerald-700'}`}>{money(row.annual)} ₽</td>
                                                 </tr>
                                               ))}
                                             </tbody>
