@@ -1063,9 +1063,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [uploadedVatMode, setUploadedVatMode] = useState<boolean>(() => {
     try { return localStorage.getItem('uploaded_vat_mode_v1') === '1'; } catch { return false; }
   });
-  // true — НДС уже сидит В СУММЕ (выделяем ×22/122, как на WB); false — начисляем СВЕРХУ (×22%).
-  const [uploadedVatIncluded, setUploadedVatIncluded] = useState<boolean>(() => {
-    try { return localStorage.getItem('uploaded_vat_included_v1') !== '0'; } catch { return true; }
+  // База НДС задаётся отдельно для продаж и для себестоимости:
+  // true — НДС уже В СУММЕ (выделяем ×22/122); false — начисляем СВЕРХУ (×22%).
+  const [uploadedVatSalesIncluded, setUploadedVatSalesIncluded] = useState<boolean>(() => {
+    try { const v = localStorage.getItem('uploaded_vat_sales_included_v1'); return v === null ? false : v !== '0'; } catch { return false; }
+  });
+  const [uploadedVatCostIncluded, setUploadedVatCostIncluded] = useState<boolean>(() => {
+    try { return localStorage.getItem('uploaded_vat_cost_included_v1') !== '0'; } catch { return true; }
   });
   const [uploadedPhotoMap, setUploadedPhotoMap] = useState<Record<string, string>>({});
   const [uploadedPhotoLoading, setUploadedPhotoLoading] = useState(false);
@@ -17931,12 +17935,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     if (!uploadedVatMode) return (toPayRaw - costTotal) - salesNet * getCurrentUploadedTaxRate();
     const VAT = 0.22;
     const ex = (a: number) => (a * VAT) / (1 + VAT);
-    const vOf = (a: number) => uploadedVatIncluded ? ex(a) : a * VAT;
+    const vSales = (a: number) => uploadedVatSalesIncluded ? ex(a) : a * VAT;
+    const vCost = (a: number) => uploadedVatCostIncluded ? ex(a) : a * VAT;
     const share = uploadedAllocBase.salesAbs > 0 ? Math.abs(salesNet) / uploadedAllocBase.salesAbs : 0;
     const unalloc = uploadedAllocBase.unalloc * share;   // доля рекламы/хранения этой строки
     const toPay = toPayRaw + ownUnalloc;                 // убираем собственные удержания строки
     const servicesVat = commissionVat + ex(logistics) + ex(unalloc);
-    const vatToPay = vOf(salesNet) - vOf(costTotal) - servicesVat;
+    const vatToPay = vSales(salesNet) - vCost(costTotal) - servicesVat;
     const before = toPay - costTotal - unalloc - vatToPay;
     return before - Math.max(0, before) * 0.25;
   };
@@ -26110,10 +26115,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     // Услуги WB всегда приходят с НДС внутри — из них НДС только ВЫДЕЛЯЕМ.
                     const vatExtract = (amt: number) => (amt * VAT_RATE) / (1 + VAT_RATE);
                     // Товар/продажи — по переключателю «в сумме» / «сверху».
-                    const vatOf = (amt: number) => uploadedVatIncluded ? vatExtract(amt) : amt * VAT_RATE;
+                    const vatOfSales = (amt: number) => uploadedVatSalesIncluded ? vatExtract(amt) : amt * VAT_RATE;
+                    const vatOfCost = (amt: number) => uploadedVatCostIncluded ? vatExtract(amt) : amt * VAT_RATE;
                     const baseCosts = costSumTotal + Number(sx.withhold_sum || 0) + Number(sx.storage_sum || 0) + Number(uploadedExtraCosts || 0);
-                    const vatOut = uploadedVatMode ? vatOf(salesX) : 0;
-                    const vatInGoods = uploadedVatMode ? vatOf(costSumTotal) : 0;
+                    const vatOut = uploadedVatMode ? vatOfSales(salesX) : 0;
+                    const vatInGoods = uploadedVatMode ? vatOfCost(costSumTotal) : 0;
                     // Входной НДС с услуг WB: комиссия, логистика, реклама, хранение.
                     // Штрафы НДС не облагаются, эквайринг — финуслуга (без НДС) — не берём.
                     // НДС комиссии — из колонки «НДС с Вознаграждения Вайлдберриз» (точно).
@@ -26160,7 +26166,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             <StatCard label="Хранение" value={rub(Number(sx.storage_sum || 0))} sub={salesX > 0 ? `${pct(Number(sx.storage_sum || 0) / salesX * 100)} от продаж` : '—'} color="#22d3ee" />
                             {uploadedVatMode && (
                               <>
-                                <StatCard label="НДС выходной" value={rub(vatOut)} sub={`с продаж · ${uploadedVatIncluded ? '22/122' : '×22%'}`} color="#f472b6" />
+                                <StatCard label="НДС выходной" value={rub(vatOut)} sub={`с продаж · ${uploadedVatSalesIncluded ? '×22/122' : '×22%'}`} color="#f472b6" />
                                 <StatCard label="НДС входной" value={rub(vatIn)} sub={`товар ${rubK(vatInGoods)} + услуги WB ${rubK(vatInServices)}`} color="#c084fc" />
                                 <StatCard label="НДС к уплате" value={rub(vatToPay)} sub={vatToPay < 0 ? 'к возмещению' : 'выходной − входной'} signOf={-vatToPay} />
                               </>
@@ -26189,19 +26195,40 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               <span className="text-slate-400">Считать НДС (22%)</span>
                             </label>
                             {uploadedVatMode && (
-                              <select
-                                value={uploadedVatIncluded ? 'in' : 'on'}
-                                onChange={(e) => {
-                                  const v = e.target.value === 'in';
-                                  setUploadedVatIncluded(v);
-                                  try { localStorage.setItem('uploaded_vat_included_v1', v ? '1' : '0'); } catch {}
-                                }}
-                                className="px-2 py-1 text-xs rounded-lg bg-white/10 border border-white/15 text-white"
-                                title="Как считать НДС от суммы"
-                              >
-                                <option value="in" className="text-slate-800">НДС в сумме (×22/122)</option>
-                                <option value="on" className="text-slate-800">НДС сверху (×22%)</option>
-                              </select>
+                              <>
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-slate-400 text-xs">Продажи:</span>
+                                  <select
+                                    value={uploadedVatSalesIncluded ? 'in' : 'on'}
+                                    onChange={(e) => {
+                                      const v = e.target.value === 'in';
+                                      setUploadedVatSalesIncluded(v);
+                                      try { localStorage.setItem('uploaded_vat_sales_included_v1', v ? '1' : '0'); } catch {}
+                                    }}
+                                    className="px-2 py-1 text-xs rounded-lg bg-white/10 border border-white/15 text-white"
+                                    title="Как считать НДС с продаж"
+                                  >
+                                    <option value="on" className="text-slate-800">×22% сверху</option>
+                                    <option value="in" className="text-slate-800">×22/122 (НДС в сумме)</option>
+                                  </select>
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-slate-400 text-xs">Себестоимость:</span>
+                                  <select
+                                    value={uploadedVatCostIncluded ? 'in' : 'on'}
+                                    onChange={(e) => {
+                                      const v = e.target.value === 'in';
+                                      setUploadedVatCostIncluded(v);
+                                      try { localStorage.setItem('uploaded_vat_cost_included_v1', v ? '1' : '0'); } catch {}
+                                    }}
+                                    className="px-2 py-1 text-xs rounded-lg bg-white/10 border border-white/15 text-white"
+                                    title="Как считать НДС в себестоимости"
+                                  >
+                                    <option value="in" className="text-slate-800">×22/122 (НДС в сумме)</option>
+                                    <option value="on" className="text-slate-800">×22% сверху</option>
+                                  </select>
+                                </div>
+                              </>
                             )}
                             <div className="flex items-center gap-2">
                               <span className="text-slate-400">Сравнить с:</span>
@@ -26581,7 +26608,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     <div className="bg-slate-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-slate-500">Номенклатур</div><div className="font-bold">{uploadedSummaryForView.items}</div></div>
                     <div className="bg-slate-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-slate-500">Продажи</div><div className="font-bold">{Number(uploadedSummaryForView.sales_net || 0).toLocaleString('ru-RU')}</div></div>
                     {uploadedVatMode ? (
-                      <div className="bg-slate-50 rounded-lg p-2 min-w-[170px] shrink-0"><div className="flex items-center justify-between gap-2"><div className="text-xs text-slate-500">НДС к уплате</div><span className="text-[11px] px-2 py-0.5 rounded-full border border-indigo-200 text-indigo-700 bg-white">22%</span></div><div className="font-bold">{(() => { const VAT = 0.22; const vOf = (a: number) => uploadedVatIncluded ? (a * VAT) / (1 + VAT) : a * VAT; const s = uploadedSummaryForView; const inServ = Number(s?.wb_commission_vat || 0) + ((Number(s?.logistics_sum || 0) + Number(s?.withhold_sum || 0) + Number(s?.storage_sum || 0)) * VAT) / (1 + VAT); return (vOf(Number(s?.sales_net || 0)) - vOf(Number(s?.cost_total || 0)) - inServ).toLocaleString('ru-RU', { maximumFractionDigits: 2 }); })()}</div></div>
+                      <div className="bg-slate-50 rounded-lg p-2 min-w-[170px] shrink-0"><div className="flex items-center justify-between gap-2"><div className="text-xs text-slate-500">НДС к уплате</div><span className="text-[11px] px-2 py-0.5 rounded-full border border-indigo-200 text-indigo-700 bg-white">22%</span></div><div className="font-bold">{(() => { const VAT = 0.22; const ex = (a: number) => (a * VAT) / (1 + VAT); const vS = (a: number) => uploadedVatSalesIncluded ? ex(a) : a * VAT; const vC = (a: number) => uploadedVatCostIncluded ? ex(a) : a * VAT; const s = uploadedSummaryForView; const inServ = Number(s?.wb_commission_vat || 0) + ex(Number(s?.logistics_sum || 0) + Number(s?.withhold_sum || 0) + Number(s?.storage_sum || 0)); return (vS(Number(s?.sales_net || 0)) - vC(Number(s?.cost_total || 0)) - inServ).toLocaleString('ru-RU', { maximumFractionDigits: 2 }); })()}</div></div>
                     ) : (
                       <div className="bg-slate-50 rounded-lg p-2 min-w-[170px] shrink-0"><div className="flex items-center justify-between gap-2"><div className="text-xs text-slate-500">Налоги</div><button type="button" onClick={() => setUploadedTaxRateOverride((prev) => prev === 0.01 ? 0.06 : prev === 0.06 ? 0.15 : 0.01)} className="text-[11px] px-2 py-0.5 rounded-full border border-indigo-200 text-indigo-700 bg-white hover:bg-indigo-50">{Math.round(getCurrentUploadedTaxRate() * 100)}%</button></div><div className="font-bold">{Number(getUploadedTaxValue(uploadedSummaryForView)).toLocaleString('ru-RU', { maximumFractionDigits: 2 })}</div></div>
                     )}
