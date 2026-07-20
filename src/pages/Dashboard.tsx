@@ -15140,6 +15140,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     const fineKeys = ['Общая сумма штрафов', 'Штрафы'];
     const storageKeys = ['Хранение', 'Хранение (руб)', 'Платное хранение'];
     const withholdKeys = ['Удержания', 'Прочие удержания', 'Дедукции'];
+    // НДС с комиссии WB — берём прямо из колонки отчёта (точнее, чем выделять ×22/122).
+    const commissionVatKeys = ['НДС с Вознаграждения Вайлдберриз', 'НДС с вознаграждения Вайлдберриз', 'НДС с Вознаграждения ВВ'];
+    const commissionNetKeys = ['Вознаграждение Вайлдберриз (ВВ), без НДС', 'Вознаграждение Вайлдберриз (ВВ) без НДС', 'Вознаграждение Вайлдберриз (ВВ)'];
 
     const pickNum = (row: any, keys: string[]) => {
       for (const k of keys) {
@@ -15343,6 +15346,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       const sizeValue = sizeRaw || 'Без размера';
       const acquiring = pickNum(row, acqKeys);
       const acquiringPercent = pickNum(row, acqPctKeys);
+      const commissionVat = pickNum(row, commissionVatKeys);
+      const commissionNet = pickNum(row, commissionNetKeys);
 
       const isReturn = isReturnByText || qty < 0 || sales < 0 || payout < 0;
       const isSale = !isReturn && (docType.includes('продажа') || qty > 0 || sales > 0 || payout > 0);
@@ -15401,6 +15406,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         return_qty: 0,
         acquiring_sum: 0,
         tax_sum: 0,
+        wb_commission_vat: 0,
+        wb_commission_net: 0,
         acquiring_percent_sum: 0,
         acquiring_percent_count: 0,
         log_kinds: {} as Record<string, { sum: number; qty: number }>,
@@ -15463,6 +15470,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       item.storage_sum += storage;
       item.withhold_sum += withhold;
       item.acquiring_sum += acquiring;
+      item.wb_commission_vat += commissionVat;
+      item.wb_commission_net += commissionNet;
       item.tax_sum += taxDelta;
       if (acquiringPercent) {
         item.acquiring_percent_sum += acquiringPercent;
@@ -15740,6 +15749,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         ? (analytics.reduce((s, x) => s + Number(x.acquiring_sum || 0), 0) / analytics.reduce((s, x) => s + Number(x.sales_net || 0), 0)) * 100
         : 0,
       tax_sum: analytics.reduce((s, x) => s + Number(x.tax_sum || 0), 0),
+      wb_commission_vat: analytics.reduce((s, x) => s + Number(x.wb_commission_vat || 0), 0),
+      wb_commission_net: analytics.reduce((s, x) => s + Number(x.wb_commission_net || 0), 0),
       profit_total: analytics.reduce((s, x) => {
         const sold = Number(x.sold_qty || 0);
         const cost = Number(uploadedPersistedCostByCode[String(x.code || '').trim()] || 0);
@@ -16658,6 +16669,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           return_qty: 0,
           acquiring_sum: 0,
           tax_sum: 0,
+          wb_commission_vat: 0,
+          wb_commission_net: 0,
           acquiring_percent_sum: 0,
           acquiring_percent_count: 0,
           size_stats: {},
@@ -16681,6 +16694,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         cur.sold_qty += Number(r?.sold_qty || r?.sold_net_qty || 0);
         cur.return_qty += Number(r?.return_qty || 0);
         cur.acquiring_sum += Number(r?.acquiring_sum || 0);
+        cur.wb_commission_vat += Number(r?.wb_commission_vat || 0);
+        cur.wb_commission_net += Number(r?.wb_commission_net || 0);
         cur.tax_sum += Number(r?.tax_sum ?? (Number(r?.sales_net || 0) * sourceTaxRate));
 
         const ap = Number(r?.acquiring_percent || 0);
@@ -16809,6 +16824,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         ? (analytics.reduce((acc: number, x: any) => acc + Number(x.acquiring_sum || 0), 0) / analytics.reduce((acc: number, x: any) => acc + Number(x.sales_net || 0), 0)) * 100
         : 0,
       tax_sum: analytics.reduce((acc: number, x: any) => acc + Number(x.tax_sum || 0), 0),
+      wb_commission_vat: analytics.reduce((acc: number, x: any) => acc + Number(x.wb_commission_vat || 0), 0),
+      wb_commission_net: analytics.reduce((acc: number, x: any) => acc + Number(x.wb_commission_net || 0), 0),
       profit_total: analytics.reduce((acc: number, x: any) => {
         const sold = Number(x.sold_qty || 0);
         const cost = Number(uploadedPersistedCostByCode[String(x.code || '').trim()] || 0);
@@ -16958,6 +16975,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           acquiring_sum: Number(row?.acquiring_sum || 0),
           acquiring_percent: Number(row?.acquiring_percent || 0),
           tax_sum: Number(row?.tax_sum || 0),
+          wb_commission_vat: Number(row?.wb_commission_vat || 0),
+          wb_commission_net: Number(row?.wb_commission_net || 0),
           log_kinds: { ...(row?.log_kinds || {}) },
           size_breakdown: row?.size_breakdown || '',
           size_breakdown_list: sizeRows.map((sz: any) => ({
@@ -25718,7 +25737,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       const salesGross = Number(x.sales_gross || 0);
                       const retSum = Number(x.returns_gross || 0);
                       const costSum = cost * sold;
-                      return { code: x.code, name: x.name, vendorCode: x.vendor_code || '', ordered: Number(x.ordered_qty || 0), orderedSum: Number(x.ordered_retail_sum || 0), sales: sNet, profit, sold, cost, costSum, ret: Number(x.return_qty || 0), retSum, salesGross, logistics: Number(x.logistics_sum || 0), logisticsFwd: Number(x.logistics_forward || 0), logisticsLogi: Number(x.logistics_logi || 0), logisticsRet: Number(x.logistics_return || 0), payoutNet: Number(x.payout_net || 0), toPay: Number(x.to_pay_total || 0), storage: Number(x.storage_sum || 0), withhold: Number(x.withhold_sum || 0), fine: Number(x.fine_sum || 0), acquiring: Number(x.acquiring_sum || 0), logKinds: (x.log_kinds || {}), tax: Number(x.tax_sum || 0), sizes: buildReconciledSizeRows(x), sizesStr: x.size_breakdown || '', margin: sNet > 0 ? profit / sNet * 100 : 0, roi: costSum > 0 ? profit / costSum * 100 : 0, perDay: sold / periodDays, retPct: sold > 0 ? Number(x.return_qty || 0) / sold * 100 : 0, share: sales > 0 ? sNet / sales * 100 : 0, abc: 'C', abcOrd: 3 };
+                      return { code: x.code, name: x.name, vendorCode: x.vendor_code || '', ordered: Number(x.ordered_qty || 0), orderedSum: Number(x.ordered_retail_sum || 0), sales: sNet, profit, sold, cost, costSum, ret: Number(x.return_qty || 0), retSum, salesGross, logistics: Number(x.logistics_sum || 0), logisticsFwd: Number(x.logistics_forward || 0), logisticsLogi: Number(x.logistics_logi || 0), logisticsRet: Number(x.logistics_return || 0), payoutNet: Number(x.payout_net || 0), toPay: Number(x.to_pay_total || 0), storage: Number(x.storage_sum || 0), withhold: Number(x.withhold_sum || 0), fine: Number(x.fine_sum || 0), acquiring: Number(x.acquiring_sum || 0), commissionVat: Number(x.wb_commission_vat || 0), logKinds: (x.log_kinds || {}), tax: Number(x.tax_sum || 0), sizes: buildReconciledSizeRows(x), sizesStr: x.size_breakdown || '', margin: sNet > 0 ? profit / sNet * 100 : 0, roi: costSum > 0 ? profit / costSum * 100 : 0, perDay: sold / periodDays, retPct: sold > 0 ? Number(x.return_qty || 0) / sold * 100 : 0, share: sales > 0 ? sNet / sales * 100 : 0, abc: 'C', abcOrd: 3 };
                     });
                     // Фильтр прибыльности (+/−) применяется ко ВСЕЙ сводке: товары, инфографика и дашборд.
                     const profitFilterActive = summaryProfitFilter !== 'all';
@@ -25740,6 +25759,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       sales_net: sumP('sales'), returns_gross: sumP('retSum'), logistics_sum: sumP('logistics'),
                       payout_net: sumP('payoutNet'), to_pay_total: sumP('toPay'), fine_sum: sumP('fine'),
                       storage_sum: storageAlloc, withhold_sum: withholdAlloc, acquiring_sum: sumP('acquiring'),
+                      wb_commission_vat: sumP('commissionVat'),
                       sold_qty: sumP('sold'), return_qty: sumP('ret'), return_legs_qty: sumP('ret'),
                       ordered_qty: sumP('ordered'), ordered_retail_sum: sumP('orderedSum'), tax_sum: sumP('tax'),
                     } : s;
@@ -26050,8 +26070,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     const vatInGoods = uploadedVatMode ? vatOf(costSumTotal) : 0;
                     // Входной НДС с услуг WB: комиссия, логистика, реклама, хранение.
                     // Штрафы НДС не облагаются, эквайринг — финуслуга (без НДС) — не берём.
+                    // НДС комиссии — из колонки «НДС с Вознаграждения Вайлдберриз» (точно).
+                    // Если колонки в отчёте нет (старые записи) — выделяем из разрыва Продажи−Кперечислению.
+                    const commissionVatExact = Number(sx.wb_commission_vat || 0);
+                    const commissionVat = Math.abs(commissionVatExact) > 0.005 ? commissionVatExact : vatExtract(commissionWB);
                     const vatInServices = uploadedVatMode
-                      ? vatExtract(commissionWB) + vatExtract(Number(sx.logistics_sum || 0))
+                      ? commissionVat + vatExtract(Number(sx.logistics_sum || 0))
                         + vatExtract(Number(sx.withhold_sum || 0)) + vatExtract(Number(sx.storage_sum || 0))
                       : 0;
                     const vatIn = vatInGoods + vatInServices;
