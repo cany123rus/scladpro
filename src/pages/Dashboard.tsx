@@ -25217,11 +25217,41 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   if (!c) return;
                   upd(id, { category: key, dutyType: c.type, dutyPct: c.pct, dutySpec: c.spec, dutyUnit: c.unit, vatPct: c.vat });
                 };
+                // Снимок условий продажи/логистики, чтобы они сохранялись вместе с товаром.
+                const currentCalcSettings = () => ({
+                  commissionPct: calcCommissionPct, adsOsno: calcAdsPctOsno, adsUsn: calcAdsPctUsn,
+                  assembly: calcAssembly, deliveryToWb: calcDeliveryToWb, cargoPerKg: calcCargoPerKg,
+                  usnRate: calcUsnRate, noVatRefund: calcNoVatRefund,
+                  buyoutPct: wbBuyoutPct, warehouseCoef: wbWarehouseCoef, localIndex: wbLocalIndex,
+                  base1L: wbBase1L, extraL: wbExtraL, tiers: wbTiers,
+                  storageTariff: wbStorageTariff, storageCoef: wbStorageCoef, storageDays: wbStorageDays,
+                });
+                const applyCalcSettingsObj = (s: any) => {
+                  if (!s || typeof s !== 'object') return;
+                  const n = (v: any, d: number) => Number.isFinite(Number(v)) ? Number(v) : d;
+                  setCalcCommissionPct(n(s.commissionPct, calcCommissionPct));
+                  setCalcAdsPctOsno(n(s.adsOsno, calcAdsPctOsno));
+                  setCalcAdsPctUsn(n(s.adsUsn, calcAdsPctUsn));
+                  setCalcAssembly(n(s.assembly, calcAssembly));
+                  setCalcDeliveryToWb(n(s.deliveryToWb, calcDeliveryToWb));
+                  setCalcCargoPerKg(n(s.cargoPerKg, calcCargoPerKg));
+                  setCalcUsnRate(n(s.usnRate, calcUsnRate));
+                  if (typeof s.noVatRefund === 'boolean') setCalcNoVatRefund(s.noVatRefund);
+                  setWbBuyoutPct(n(s.buyoutPct, wbBuyoutPct));
+                  setWbWarehouseCoef(n(s.warehouseCoef, wbWarehouseCoef));
+                  setWbLocalIndex(n(s.localIndex, wbLocalIndex));
+                  setWbBase1L(n(s.base1L, wbBase1L));
+                  setWbExtraL(n(s.extraL, wbExtraL));
+                  setWbStorageTariff(n(s.storageTariff, wbStorageTariff));
+                  setWbStorageCoef(n(s.storageCoef, wbStorageCoef));
+                  setWbStorageDays(n(s.storageDays, wbStorageDays));
+                  if (Array.isArray(s.tiers) && s.tiers.length === 5) setWbTiers(s.tiers.map((x: any) => n(x, 0)));
+                };
                 const saveProduct = async (it: any, nameOverride?: string) => {
                   const nm = String(nameOverride ?? it.name ?? '').trim();
                   if (!nm) { showToast('Введите название товара', 'error'); return; }
                   const { id, ...rest } = it;
-                  const entry = { ...rest, name: nm, savedAt: new Date().toISOString() };
+                  const entry = { ...rest, name: nm, savedAt: new Date().toISOString(), settings: currentCalcSettings() };
                   const next = [...calcSavedProducts.filter((x) => String(x?.name || '').trim() !== nm), entry];
                   try {
                     setCalcSavedProducts(next);
@@ -25231,9 +25261,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   } catch (e: any) { console.error('saveProduct error', e); showToast('Не удалось сохранить товар', 'error'); }
                 };
                 const applySaved = (s: any) => {
-                  setCalcItems((prev) => [...prev, { ...s, id: `${Date.now()}-${Math.round(Math.random() * 1e6)}` }]);
+                  const { settings, ...item } = s || {};
+                  setCalcItems((prev) => [...prev, { ...item, id: `${Date.now()}-${Math.round(Math.random() * 1e6)}` }]);
+                  if (settings) applyCalcSettingsObj(settings);
                   setCalcPickerOpen(false);
-                  showToast(`Добавлен «${s?.name || 'товар'}»`, 'success');
+                  showToast(settings ? `Загружен «${s?.name || 'товар'}» с условиями` : `Добавлен «${s?.name || 'товар'}»`, 'success');
                 };
                 const deleteSaved = async (nm: string) => {
                   const next = calcSavedProducts.filter((x) => String(x?.name || '').trim() !== nm);
