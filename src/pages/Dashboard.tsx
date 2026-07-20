@@ -1291,6 +1291,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     price: 1500,            // цена для покупателя
     qty: 100,               // размер партии, шт — для просчёта закупки целиком
     turnoverDays: 30,       // срок оборачиваемости партии — за сколько дней распродаётся
+    ruTurnoverDays: 30,     // свой оборот для «Закупки в РФ» (обычно быстрее ввоза)
     pricePoints: [],        // доп. ценовые сценарии {price, qty, turnoverDays} сверх основной цены
     importVariants: [],     // доп. варианты ввоза {purchase, currency, country, deliveryToBorder} для сравнения
     obnalSum: 0,            // ОСНО: сумма «бумажного» счёта на партию (с НДС) для доп. вычета
@@ -25601,17 +25602,24 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         { key: 'import', label: 'Текущий', purchase: it.purchase, currency: it.currency, country: it.country, delivery: it.deliveryToBorder, turn: it.turnoverDays },
                         ...((it.importVariants || []).map((v: any, i: number) => ({ key: `imp${i}`, label: `#${i + 2}`, purchase: v.purchase, currency: v.currency, country: v.country, delivery: v.deliveryToBorder, turn: v.turnoverDays }))),
                       ];
-                      const osnoCmp = importOpts.map((o) => ({
-                        label: 'Офиц. ввоз',
-                        sub: `${o.currency} · ${countryLabel(o.country)} · ${o.turn ?? 30} дн`,
-                        prof: computeItem({ ...it, osnoSource: 'import', purchase: o.purchase, currency: o.currency, country: o.country, deliveryToBorder: o.delivery, turnoverDays: o.turn ?? it.turnoverDays }).batch.profO,
-                        active: osnoSrc === 'import' && o.key === 'import',
-                        onClick: () => upd(it.id, { osnoSource: 'import', purchase: o.purchase, currency: o.currency, country: o.country, deliveryToBorder: o.delivery, turnoverDays: o.turn ?? it.turnoverDays }),
-                      }));
-                      osnoCmp.push({ label: 'Закупка в РФ', sub: '', prof: computeItem({ ...it, osnoSource: 'ru' }).batch.profO, active: osnoSrc === 'ru', onClick: () => upd(it.id, { osnoSource: 'ru' }) });
+                      const ruTurn = it.ruTurnoverDays ?? 30;
+                      const osnoCmp = importOpts.map((o) => {
+                        const b = computeItem({ ...it, osnoSource: 'import', purchase: o.purchase, currency: o.currency, country: o.country, deliveryToBorder: o.delivery, turnoverDays: o.turn ?? it.turnoverDays }).batch;
+                        return {
+                          label: 'Офиц. ввоз',
+                          sub: `${o.currency} · ${countryLabel(o.country)} · ${o.turn ?? 30} дн`,
+                          prof: b.profO, annual: b.annualO,
+                          active: osnoSrc === 'import' && o.key === 'import',
+                          onClick: () => upd(it.id, { osnoSource: 'import', purchase: o.purchase, currency: o.currency, country: o.country, deliveryToBorder: o.delivery, turnoverDays: o.turn ?? it.turnoverDays }),
+                        };
+                      });
+                      const osnoRuB = computeItem({ ...it, osnoSource: 'ru', turnoverDays: ruTurn }).batch;
+                      osnoCmp.push({ label: 'Закупка в РФ', sub: `${ruTurn} дн`, prof: osnoRuB.profO, annual: osnoRuB.annualO, active: osnoSrc === 'ru', onClick: () => upd(it.id, { osnoSource: 'ru', turnoverDays: ruTurn }) });
+                      const usnCargoB = computeItem({ ...it, usnSource: 'cargo' }).batch;
+                      const usnRuB = computeItem({ ...it, usnSource: 'ru', turnoverDays: ruTurn }).batch;
                       const usnCmp = [
-                        { label: 'Карго', sub: needForeign ? `${it.currency}` : '', prof: computeItem({ ...it, usnSource: 'cargo' }).batch.profU, active: usnSrc === 'cargo', onClick: () => upd(it.id, { usnSource: 'cargo' }) },
-                        { label: 'Закупка в РФ', sub: '', prof: computeItem({ ...it, usnSource: 'ru' }).batch.profU, active: usnSrc === 'ru', onClick: () => upd(it.id, { usnSource: 'ru' }) },
+                        { label: 'Карго', sub: `${needForeign ? it.currency + ' · ' : ''}${it.turnoverDays ?? 30} дн`, prof: usnCargoB.profU, annual: usnCargoB.annualU, active: usnSrc === 'cargo', onClick: () => upd(it.id, { usnSource: 'cargo' }) },
+                        { label: 'Закупка в РФ', sub: `${ruTurn} дн`, prof: usnRuB.profU, annual: usnRuB.annualU, active: usnSrc === 'ru', onClick: () => upd(it.id, { usnSource: 'ru', turnoverDays: ruTurn }) },
                       ];
                       return (
                         <div key={it.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
@@ -25824,6 +25832,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                         <option value={0}>0% — поставщик без НДС</option>
                                       </select>
                                     </div>
+                                    <CalcField label="Оборот закупки РФ" value={it.ruTurnoverDays ?? 30} onChange={(v: number) => upd(it.id, { ruTurnoverDays: v })} suffix="дн" step="1" />
                                   </div>
                                 </>)}
 
@@ -25833,6 +25842,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                     <div className="text-[11px] font-semibold text-indigo-700 mb-1">УСН · закупка в РФ</div>
                                     <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                                       <CalcField label="Себестоимость УСН (с НДС)" value={it.costRuUsn} onChange={(v: number) => upd(it.id, { costRuUsn: v })} suffix="₽" />
+                                      {osnoSrc !== 'ru' && <CalcField label="Оборот закупки РФ" value={it.ruTurnoverDays ?? 30} onChange={(v: number) => upd(it.id, { ruTurnoverDays: v })} suffix="дн" step="1" />}
                                     </div>
                                   </div>
                                 )}
@@ -25924,7 +25934,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                                 <span className="text-slate-600 truncate">{row.label}{row.sub ? <span className="text-slate-400"> · {row.sub}</span> : null}</span>
                                                 {isBest && <span className="text-[9px] font-bold text-emerald-600 bg-emerald-100 rounded px-1 shrink-0">выгоднее</span>}
                                               </span>
-                                              <span className={`font-bold tabular-nums shrink-0 ${row.prof < 0 ? 'text-rose-600' : 'text-slate-800'}`}>{money(row.prof)} ₽</span>
+                                              <span className="shrink-0 text-right">
+                                                <span className={`block font-bold tabular-nums ${row.prof < 0 ? 'text-rose-600' : 'text-slate-800'}`}>{money(row.prof)} ₽</span>
+                                                <span className="block text-[10px] text-slate-400 tabular-nums">год {money(row.annual)}</span>
+                                              </span>
                                             </button>
                                           );
                                         })}
