@@ -25592,24 +25592,29 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               </div>
                             </div>
 
-                            {/* Партия */}
-                            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                              <div className="text-xs font-bold text-slate-700 mb-2">Партия {r.batch.qty} шт</div>
-                              <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
-                                {[
-                                  { l: 'Выручка', v: r.batch.rev, c: 'text-slate-900' },
-                                  { l: 'Вложения ОСНО', v: r.batch.investO, c: 'text-slate-900', h: 'товар + НДС + нал.' },
-                                  { l: 'Вложения УСН', v: r.batch.investU, c: 'text-slate-900', h: 'товар + нал.' },
-                                  { l: 'Прибыль ОСНО', v: r.batch.profO, c: r.batch.profO < 0 ? 'text-rose-600' : 'text-emerald-600', h: `ROI ${pctOf(r.batch.profO, r.batch.investO)}` },
-                                  { l: 'Прибыль УСН', v: r.batch.profU, c: r.batch.profU < 0 ? 'text-rose-600' : 'text-indigo-700', h: `ROI ${pctOf(r.batch.profU, r.batch.investU)}` },
-                                ].map((x) => (
-                                  <div key={x.l}>
-                                    <div className="text-[10px] uppercase tracking-wide text-slate-500">{x.l}</div>
-                                    <div className={`font-extrabold tabular-nums ${x.c}`}>{money(x.v)} ₽</div>
-                                    {x.h && <div className="text-[10px] text-slate-400">{x.h}</div>}
+                            {/* Итоги партии */}
+                            <div className="rounded-xl border border-slate-200 bg-white p-3">
+                              <div className="flex flex-wrap items-baseline justify-between gap-2 mb-2">
+                                <div className="text-xs font-bold text-slate-700">Партия {r.batch.qty} шт</div>
+                                <div className="text-xs text-slate-500">Выручка <b className="text-slate-900 tabular-nums">{money(r.batch.rev)} ₽</b></div>
+                              </div>
+                              <div className="grid grid-cols-2 gap-3">
+                                {([
+                                  { key: 'osno', title: 'ОСНО', bc: 'border-emerald-200 bg-emerald-50/40', tc: 'text-emerald-700', invest: r.batch.investO, prof: r.batch.profO, pc: r.batch.profO < 0 ? 'text-rose-600' : 'text-emerald-700' },
+                                  { key: 'usn', title: 'УСН', bc: 'border-indigo-200 bg-indigo-50/40', tc: 'text-indigo-700', invest: r.batch.investU, prof: r.batch.profU, pc: r.batch.profU < 0 ? 'text-rose-600' : 'text-indigo-700' },
+                                ]).map((g) => (
+                                  <div key={g.key} className={`rounded-lg border ${g.bc} p-2.5`}>
+                                    <div className={`text-[11px] font-bold ${g.tc} mb-1.5`}>{g.title}</div>
+                                    <div className="space-y-1 text-xs">
+                                      <div className="flex justify-between"><span className="text-slate-500">Вложения</span><span className="font-semibold tabular-nums text-slate-800">{money(g.invest)} ₽</span></div>
+                                      <div className="flex justify-between"><span className="text-slate-500">Прибыль</span><span className={`font-extrabold tabular-nums ${g.pc}`}>{money(g.prof)} ₽</span></div>
+                                      <div className="flex justify-between"><span className="text-slate-400">Маржа</span><span className="tabular-nums text-slate-500">{pctOf(g.prof, r.batch.rev)}</span></div>
+                                      <div className="flex justify-between"><span className="text-slate-400">ROI</span><span className="tabular-nums text-slate-500">{pctOf(g.prof, g.invest)}</span></div>
+                                    </div>
                                   </div>
                                 ))}
                               </div>
+                              <div className="mt-2 text-[10px] text-slate-400 leading-snug">Вложения — деньги на закупку и завоз всей партии до первой продажи (ОСНО: товар + пошлина + ввозной НДС + сборка; УСН: товар + карго + сборка). Маржа — % прибыли от выручки, ROI — от вложений.</div>
                             </div>
                           </div>
                         </div>
