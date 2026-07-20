@@ -1059,6 +1059,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [uploadedCheckDuplicates, setUploadedCheckDuplicates] = useState<boolean>(() => {
     try { return localStorage.getItem('uploaded_check_duplicates_v1') !== '0'; } catch { return true; }
   });
+  // Режим «с НДС» (ОСНО): считаем НДС входной/выходной + налог на прибыль 25% вместо УСН.
+  const [uploadedVatMode, setUploadedVatMode] = useState<boolean>(() => {
+    try { return localStorage.getItem('uploaded_vat_mode_v1') === '1'; } catch { return false; }
+  });
+  // true — НДС уже сидит В СУММЕ (выделяем ×22/122, как на WB); false — начисляем СВЕРХУ (×22%).
+  const [uploadedVatIncluded, setUploadedVatIncluded] = useState<boolean>(() => {
+    try { return localStorage.getItem('uploaded_vat_included_v1') !== '0'; } catch { return true; }
+  });
   const [uploadedPhotoMap, setUploadedPhotoMap] = useState<Record<string, string>>({});
   const [uploadedPhotoLoading, setUploadedPhotoLoading] = useState(false);
   const MAX_UPLOAD_ROWS = 250000;
@@ -26029,7 +26037,20 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     //  Эквайринг НЕ вычитаем: в родной формуле to_pay_total (см. ~15556) его нет —
                     //  он уже учтён в комиссии, иначе прибыль задваивалась бы (поле даёт ~4% — нереально).
                     const wbOtherFees = Number(sx.logistics_sum || 0) + Number(sx.fine_sum || 0);
-                    const yourCosts = costSumTotal + taxValHero + Number(sx.withhold_sum || 0) + Number(sx.storage_sum || 0) + Number(uploadedExtraCosts || 0);
+                    // Режим «с НДС» (ОСНО): НДС выходной с продаж, входной с себестоимости (к вычету),
+                    // к уплате = разница; УСН-налог заменяется налогом на прибыль 25%.
+                    const VAT_RATE = 0.22;
+                    const PROFIT_TAX_RATE = 0.25;
+                    const vatOf = (amt: number) => uploadedVatIncluded ? (amt * VAT_RATE) / (1 + VAT_RATE) : amt * VAT_RATE;
+                    const baseCosts = costSumTotal + Number(sx.withhold_sum || 0) + Number(sx.storage_sum || 0) + Number(uploadedExtraCosts || 0);
+                    const vatOut = uploadedVatMode ? vatOf(salesX) : 0;
+                    const vatIn = uploadedVatMode ? vatOf(costSumTotal) : 0;
+                    const vatToPay = vatOut - vatIn;                       // < 0 — к возмещению
+                    const profitBeforeTax = payoutHero - wbOtherFees - baseCosts - (uploadedVatMode ? vatToPay : 0);
+                    const profitTax = uploadedVatMode ? Math.max(0, profitBeforeTax) * PROFIT_TAX_RATE : 0;
+                    const yourCosts = uploadedVatMode
+                      ? baseCosts + vatToPay + profitTax
+                      : baseCosts + taxValHero;
                     // Без обрезки в 0: если К перечислению > Продаж (компенсации/корректировки),
                     // комиссия отрицательная — показываем как есть, иначе ломается тождество
                     // Продажи − УдержалWB − ТвоиРасходы = Прибыль.
@@ -26047,12 +26068,23 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             <StatCard label="Заказано" value={`${orderedQty.toLocaleString('ru-RU')} шт`} sub={rub(orderedSumHero)} color="#818cf8" />
                             <StatCard label="Возвраты" value={`${retQtyHero.toLocaleString('ru-RU')} шт`} sub={rub(returnsSumHero)} color="#fb7185" />
                             <StatCard label="Комиссия WB" value={rub(commissionWB)} sub={salesX > 0 ? `${pct(commissionWB / salesX * 100)} от продаж` : '—'} color="#22d3ee" />
-                            <StatCard label="Налог" value={rub(taxValHero)} sub="ставка" color="#94a3b8" right={<button type="button" onClick={() => setUploadedTaxRateOverride((prev) => prev === 0.01 ? 0.06 : prev === 0.06 ? 0.15 : 0.01)} className="shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full bg-white/10 text-indigo-300 hover:bg-white/20">{Math.round(getCurrentUploadedTaxRate() * 100)}%</button>} />
+                            {uploadedVatMode ? (
+                              <StatCard label="Налог на прибыль" value={rub(profitTax)} sub="25% · ОСНО" color="#94a3b8" />
+                            ) : (
+                              <StatCard label="Налог" value={rub(taxValHero)} sub="ставка" color="#94a3b8" right={<button type="button" onClick={() => setUploadedTaxRateOverride((prev) => prev === 0.01 ? 0.06 : prev === 0.06 ? 0.15 : 0.01)} className="shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full bg-white/10 text-indigo-300 hover:bg-white/20">{Math.round(getCurrentUploadedTaxRate() * 100)}%</button>} />
+                            )}
                             <StatCard label="Себестоимость" value={rub(costSumTotal)} sub={salesX > 0 ? `${pct(costSumTotal / salesX * 100)} от продаж` : '—'} color="#fb923c" />
                             <StatCard label="Средний чек" value={`${avgCheck.toLocaleString('ru-RU', { maximumFractionDigits: 1 })} ₽`} color="#a78bfa" />
                             <StatCard label="Логистика" value={rub(Number(sx.logistics_sum || 0))} sub={salesX > 0 ? `${pct(Number(sx.logistics_sum || 0) / salesX * 100)} от продаж` : '—'} color="#60a5fa" />
                             <StatCard label="Реклама WB" value={rub(Number(sx.withhold_sum || 0))} sub={salesX > 0 ? `${pct(Number(sx.withhold_sum || 0) / salesX * 100)} от продаж` : '—'} color="#e879f9" />
                             <StatCard label="Хранение" value={rub(Number(sx.storage_sum || 0))} sub={salesX > 0 ? `${pct(Number(sx.storage_sum || 0) / salesX * 100)} от продаж` : '—'} color="#22d3ee" />
+                            {uploadedVatMode && (
+                              <>
+                                <StatCard label="НДС выходной" value={rub(vatOut)} sub={`с продаж · ${uploadedVatIncluded ? '22/122' : '×22%'}`} color="#f472b6" />
+                                <StatCard label="НДС входной" value={rub(vatIn)} sub="в себестоимости · к вычету" color="#c084fc" />
+                                <StatCard label="НДС к уплате" value={rub(vatToPay)} sub={vatToPay < 0 ? 'к возмещению' : 'выходной − входной'} signOf={-vatToPay} />
+                              </>
+                            )}
                             <StatCard label="Чистая прибыль" value={rub(profitFromPayout)} sub={salesX > 0 ? `маржа ${pct(profitFromPayout / salesX * 100)}` : '—'} signOf={profitFromPayout} />
                             <StatCard label="Рентабельность (ROI)" value={costSumTotal > 0 ? pct(profitFromPayout / costSumTotal * 100) : '—'} sub="прибыль / себест." signOf={profitFromPayout} />
                             <StatCard label="Твои расходы" value={rub(yourCosts)} sub={salesX > 0 ? `себест+реклама+налог · ${pct(yourCosts / salesX * 100)}` : 'себест+реклама+налог'} color="#fbbf24" />
@@ -26063,6 +26095,34 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               <span className="text-slate-400">Доп. траты:</span>
                               <input type="number" min="0" step="0.01" value={uploadedExtraCosts} onChange={(e) => setUploadedExtraCosts(Number(e.target.value || 0))} className="w-36 px-2 py-1 text-sm rounded-lg bg-white/10 border border-white/15 text-white placeholder-slate-500" />
                             </div>
+                            <label className="flex items-center gap-2 cursor-pointer select-none" title="ОСНО: НДС 22% входной (в себестоимости) и выходной (с продаж), налог на прибыль 25% вместо УСН.">
+                              <input
+                                type="checkbox"
+                                checked={uploadedVatMode}
+                                onChange={(e) => {
+                                  const v = e.target.checked;
+                                  setUploadedVatMode(v);
+                                  try { localStorage.setItem('uploaded_vat_mode_v1', v ? '1' : '0'); } catch {}
+                                }}
+                                className="w-4 h-4 accent-indigo-500"
+                              />
+                              <span className="text-slate-400">Считать НДС (22%)</span>
+                            </label>
+                            {uploadedVatMode && (
+                              <select
+                                value={uploadedVatIncluded ? 'in' : 'on'}
+                                onChange={(e) => {
+                                  const v = e.target.value === 'in';
+                                  setUploadedVatIncluded(v);
+                                  try { localStorage.setItem('uploaded_vat_included_v1', v ? '1' : '0'); } catch {}
+                                }}
+                                className="px-2 py-1 text-xs rounded-lg bg-white/10 border border-white/15 text-white"
+                                title="Как считать НДС от суммы"
+                              >
+                                <option value="in" className="text-slate-800">НДС в сумме (×22/122)</option>
+                                <option value="on" className="text-slate-800">НДС сверху (×22%)</option>
+                              </select>
+                            )}
                             <div className="flex items-center gap-2">
                               <span className="text-slate-400">Сравнить с:</span>
                               <select value={compareReportId} onChange={(e) => loadCompareSummary(e.target.value)} className="px-2 py-1 text-xs rounded-lg bg-white/10 border border-white/15 text-white max-w-[230px]">
