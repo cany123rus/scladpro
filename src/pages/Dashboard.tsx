@@ -25590,6 +25590,19 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       const osnoSrc = it.osnoSource || (it.source === 'ru' ? 'ru' : 'import');
                       const usnSrc = it.usnSource || (it.source === 'ru' ? 'ru' : 'cargo');
                       const needForeign = osnoSrc === 'import' || usnSrc === 'cargo';
+                      // Оба метода сразу — чтобы видеть разницу без переключения.
+                      const vOsnoImport = computeItem({ ...it, osnoSource: 'import' }).batch.profO;
+                      const vOsnoRu = computeItem({ ...it, osnoSource: 'ru' }).batch.profO;
+                      const vUsnCargo = computeItem({ ...it, usnSource: 'cargo' }).batch.profU;
+                      const vUsnRu = computeItem({ ...it, usnSource: 'ru' }).batch.profU;
+                      const osnoCmp = [
+                        { key: 'import', label: 'Офиц. ввоз', prof: vOsnoImport },
+                        { key: 'ru', label: 'Закупка в РФ', prof: vOsnoRu },
+                      ];
+                      const usnCmp = [
+                        { key: 'cargo', label: 'Карго', prof: vUsnCargo },
+                        { key: 'ru', label: 'Закупка в РФ', prof: vUsnRu },
+                      ];
                       return (
                         <div key={it.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                           <div className="flex flex-wrap items-center gap-2 px-4 py-3 bg-slate-50 border-b border-slate-200">
@@ -25803,6 +25816,43 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                 </div>
                                 <div className="text-[11px] text-slate-400 mt-1">Логистика: {money(r.fwd)} прямая / {(B * 100).toFixed(0)}% + {money(r.back)} возврат</div>
                               </div>
+                            </div>
+
+                            {/* Сравнение методов — оба варианта сразу */}
+                            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                              <div className="text-xs font-bold text-slate-700 mb-2">Сравнение методов · прибыль партии</div>
+                              <div className="grid grid-cols-2 gap-3">
+                                {([
+                                  { title: 'ОСНО', tc: 'text-emerald-700', active: osnoSrc, set: (v: string) => upd(it.id, { osnoSource: v }), rows: osnoCmp },
+                                  { title: 'УСН', tc: 'text-indigo-700', active: usnSrc, set: (v: string) => upd(it.id, { usnSource: v }), rows: usnCmp },
+                                ]).map((g) => {
+                                  const best = g.rows.reduce((a, b) => (b.prof > a.prof ? b : a), g.rows[0]);
+                                  return (
+                                    <div key={g.title}>
+                                      <div className={`text-[11px] font-bold ${g.tc} mb-1`}>{g.title}</div>
+                                      <div className="space-y-1">
+                                        {g.rows.map((row) => {
+                                          const isActive = g.active === row.key;
+                                          const isBest = best.key === row.key && Math.abs(g.rows[0].prof - g.rows[1].prof) > 0.5;
+                                          return (
+                                            <button key={row.key} type="button" onClick={() => g.set(row.key)}
+                                              className={`w-full flex items-center justify-between gap-2 text-xs rounded-lg px-2 py-1.5 border transition-colors ${isActive ? 'bg-white border-slate-300 shadow-sm' : 'border-transparent hover:bg-white/60'}`}>
+                                              <span className="flex items-center gap-1.5">
+                                                <span className={`w-2 h-2 rounded-full ${isActive ? (g.title === 'ОСНО' ? 'bg-emerald-500' : 'bg-indigo-500') : 'bg-slate-300'}`} />
+                                                <span className="text-slate-600">{row.label}</span>
+                                                {isBest && <span className="text-[9px] font-bold text-emerald-600 bg-emerald-100 rounded px-1">выгоднее</span>}
+                                              </span>
+                                              <span className={`font-bold tabular-nums ${row.prof < 0 ? 'text-rose-600' : 'text-slate-800'}`}>{money(row.prof)} ₽</span>
+                                            </button>
+                                          );
+                                        })}
+                                      </div>
+                                      <div className="text-[10px] text-slate-400 mt-1">разница {money(Math.abs(g.rows[0].prof - g.rows[1].prof))} ₽</div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                              <div className="text-[10px] text-slate-400 mt-2">Клик по методу — выбрать его для детального расчёта в колонках выше.</div>
                             </div>
 
                             {/* Итоги партии */}
