@@ -1310,6 +1310,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   // Сохранённые карточки товаров калькулятора (в app_settings — доступны с любого устройства).
   const [calcSavedProducts, setCalcSavedProducts] = useState<any[]>([]);
   const [calcPickerOpen, setCalcPickerOpen] = useState(false);
+  const [calcSaveModal, setCalcSaveModal] = useState<{ open: boolean; itemId: string | null; name: string }>({ open: false, itemId: null, name: '' });
   const loadCalcSavedProducts = useCallback(async () => {
     try {
       const { data } = await supabase.from('app_settings').select('value').eq('key', 'calc_saved_products_v1').maybeSingle();
@@ -25206,8 +25207,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 const B = Math.max(0.01, num(wbBuyoutPct) / 100);
 
                 const upd = (id: string, patch: any) => setCalcItems((prev) => prev.map((x) => x.id === id ? { ...x, ...patch } : x));
-                const saveProduct = async (it: any) => {
-                  const nm = String(it.name || '').trim();
+                const saveProduct = async (it: any, nameOverride?: string) => {
+                  const nm = String(nameOverride ?? it.name ?? '').trim();
                   if (!nm) { showToast('Введите название товара', 'error'); return; }
                   const { id, ...rest } = it;
                   const entry = { ...rest, name: nm, savedAt: new Date().toISOString() };
@@ -25215,6 +25216,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   try {
                     setCalcSavedProducts(next);
                     await persistCalcSavedProducts(next);
+                    if (id) upd(id, { name: nm });   // название карточки синхронизируем с сохранённым
                     showToast(`Товар «${nm}» сохранён`, 'success');
                   } catch (e: any) {
                     console.error('saveProduct error', e);
@@ -25455,7 +25457,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               <button type="button" onClick={() => upd(it.id, { source: 'ru' })} className={`px-3 py-1.5 font-medium ${it.source === 'ru' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>Закупка в РФ</button>
                             </div>
                             <span className="text-xs px-2 py-1 rounded-lg bg-white border border-slate-200 text-slate-600 tabular-nums">{r.liters.toFixed(2)} л · логистика {money(r.logistics)} ₽</span>
-                            <button type="button" onClick={() => saveProduct(it)} className="px-2.5 py-1.5 text-xs font-semibold rounded-lg border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100">
+                            <button type="button" onClick={() => setCalcSaveModal({ open: true, itemId: it.id, name: String(it.name || '') })} className="px-2.5 py-1.5 text-xs font-semibold rounded-lg border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100">
                               Сохранить
                             </button>
                             <div className="ml-auto flex items-center gap-2">
@@ -25622,6 +25624,39 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         Выбрать сохранённый {calcSavedProducts.length > 0 ? `(${calcSavedProducts.length})` : ''}
                       </button>
                     </div>
+
+                    {calcSaveModal.open && (() => {
+                      const target = calcItems.find((x) => x.id === calcSaveModal.itemId);
+                      const nm = calcSaveModal.name.trim();
+                      const exists = calcSavedProducts.some((x) => String(x?.name || '').trim() === nm);
+                      const doSave = async () => {
+                        if (!target || !nm) return;
+                        await saveProduct(target, nm);
+                        setCalcSaveModal({ open: false, itemId: null, name: '' });
+                      };
+                      return (
+                        <div className="fixed inset-0 z-[130] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setCalcSaveModal({ open: false, itemId: null, name: '' })}>
+                          <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-200 p-5" onClick={(e) => e.stopPropagation()}>
+                            <div className="text-base font-bold text-slate-900 mb-1">Сохранить товар</div>
+                            <div className="text-xs text-slate-500 mb-4">Сохранятся все параметры карточки: закупка, пошлина, габариты и цена.</div>
+                            <label className="block text-xs font-medium text-slate-600 mb-1">Название товара</label>
+                            <input
+                              autoFocus
+                              value={calcSaveModal.name}
+                              onChange={(e) => setCalcSaveModal((p) => ({ ...p, name: e.target.value }))}
+                              onKeyDown={(e) => { if (e.key === 'Enter' && nm) doSave(); }}
+                              placeholder="Например: Худи оверсайз, хлопок"
+                              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm mb-2"
+                            />
+                            {exists && <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5 mb-2">Товар с таким названием уже есть — он будет перезаписан.</div>}
+                            <div className="flex justify-end gap-2 mt-3">
+                              <button type="button" onClick={() => setCalcSaveModal({ open: false, itemId: null, name: '' })} className="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-50 text-sm">Отмена</button>
+                              <button type="button" disabled={!nm} onClick={doSave} className="px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 text-sm font-semibold disabled:opacity-50">Сохранить</button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
 
                     {calcPickerOpen && (
                       <div className="fixed inset-0 z-[130] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setCalcPickerOpen(false)}>
