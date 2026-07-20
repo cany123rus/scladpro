@@ -1308,6 +1308,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [calcAdsPctOsno, setCalcAdsPctOsno] = useState<number>(14);
   const [calcAdsPctUsn, setCalcAdsPctUsn] = useState<number>(14);
   const [calcUsnRate, setCalcUsnRate] = useState<number>(0.06);
+  // Целевая наценка: прибыль / цена продажи. Идеальная цена — при которой прибыль = этому % от цены.
+  const [calcTargetMargin, setCalcTargetMargin] = useState<number>(25);
   // Сохранённые карточки товаров калькулятора (в app_settings — доступны с любого устройства).
   const [calcSavedProducts, setCalcSavedProducts] = useState<any[]>([]);
   const [calcPickerOpen, setCalcPickerOpen] = useState(false);
@@ -1349,6 +1351,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       setCalcDeliveryToWb(n(s.deliveryToWb, 0));
       setCalcCargoPerKg(n(s.cargoPerKg, 0));
       setCalcUsnRate(n(s.usnRate, 0.06));
+      setCalcTargetMargin(n(s.targetMargin, 25));
       setCalcNoVatRefund(!!s.noVatRefund);
       setWbBuyoutPct(n(s.buyoutPct, 70));
       setWbWarehouseCoef(n(s.warehouseCoef, 100));
@@ -1367,7 +1370,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       const payload = JSON.stringify({
         commissionPct: calcCommissionPct, adsOsno: calcAdsPctOsno, adsUsn: calcAdsPctUsn,
         assembly: calcAssembly, deliveryToWb: calcDeliveryToWb, cargoPerKg: calcCargoPerKg,
-        usnRate: calcUsnRate, noVatRefund: calcNoVatRefund,
+        usnRate: calcUsnRate, targetMargin: calcTargetMargin, noVatRefund: calcNoVatRefund,
         buyoutPct: wbBuyoutPct, warehouseCoef: wbWarehouseCoef, localIndex: wbLocalIndex,
         base1L: wbBase1L, extraL: wbExtraL, tiers: wbTiers,
         storageTariff: wbStorageTariff, storageCoef: wbStorageCoef, storageDays: wbStorageDays,
@@ -25221,7 +25224,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 const currentCalcSettings = () => ({
                   commissionPct: calcCommissionPct, adsOsno: calcAdsPctOsno, adsUsn: calcAdsPctUsn,
                   assembly: calcAssembly, deliveryToWb: calcDeliveryToWb, cargoPerKg: calcCargoPerKg,
-                  usnRate: calcUsnRate, noVatRefund: calcNoVatRefund,
+                  usnRate: calcUsnRate, targetMargin: calcTargetMargin, noVatRefund: calcNoVatRefund,
                   buyoutPct: wbBuyoutPct, warehouseCoef: wbWarehouseCoef, localIndex: wbLocalIndex,
                   base1L: wbBase1L, extraL: wbExtraL, tiers: wbTiers,
                   storageTariff: wbStorageTariff, storageCoef: wbStorageCoef, storageDays: wbStorageDays,
@@ -25236,6 +25239,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   setCalcDeliveryToWb(n(s.deliveryToWb, calcDeliveryToWb));
                   setCalcCargoPerKg(n(s.cargoPerKg, calcCargoPerKg));
                   setCalcUsnRate(n(s.usnRate, calcUsnRate));
+                  setCalcTargetMargin(n(s.targetMargin, calcTargetMargin));
                   if (typeof s.noVatRefund === 'boolean') setCalcNoVatRefund(s.noVatRefund);
                   setWbBuyoutPct(n(s.buyoutPct, wbBuyoutPct));
                   setWbWarehouseCoef(n(s.warehouseCoef, wbWarehouseCoef));
@@ -25353,16 +25357,22 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     vatOut, vatInServices, vatToPay, vatToPayRaw, vatRefundCut, beforeO, taxO, osno, taxU, usn, qty, batch };
                 };
 
-                const breakevenFor = (it: any, pick: (r: any) => number) => {
+                // Цена, при которой прибыль = m·цена (m — доля). m=0 → безубыток; m>0 → идеальная цена под наценку.
+                const priceForMargin = (it: any, pick: (r: any) => number, m: number) => {
                   const c = computeItem(it);
                   let lo = 0;
-                  let hi = Math.max(c.costOsno, c.costUsn, 100) * 30 + 10000;
-                  const at = (p: number) => pick(computeItem({ ...it, price: p }));
-                  if (at(hi) < 0) return null;
-                  for (let i = 0; i < 50; i += 1) { const mid = (lo + hi) / 2; if (at(mid) >= 0) hi = mid; else lo = mid; }
+                  let hi = Math.max(c.costOsno, c.costUsn, 100) * 60 + 20000;
+                  const at = (p: number) => pick(computeItem({ ...it, price: p })) - m * p;
+                  if (at(hi) < 0) return null;              // при такой марже цена недостижима (издержки съедают всё)
+                  for (let i = 0; i < 60; i += 1) { const mid = (lo + hi) / 2; if (at(mid) >= 0) hi = mid; else lo = mid; }
                   return hi;
                 };
-                const rows = calcItems.map((it) => ({ it, r: computeItem(it), beO: breakevenFor(it, (x) => x.osno), beU: breakevenFor(it, (x) => x.usn) }));
+                const targetM = Math.min(0.95, Math.max(0, num(calcTargetMargin) / 100));
+                const rows = calcItems.map((it) => ({
+                  it, r: computeItem(it),
+                  beO: priceForMargin(it, (x) => x.osno, 0), beU: priceForMargin(it, (x) => x.usn, 0),
+                  idO: priceForMargin(it, (x) => x.osno, targetM), idU: priceForMargin(it, (x) => x.usn, targetM),
+                }));
                 const tot = rows.reduce((a, x) => ({
                   qty: a.qty + x.r.batch.qty,
                   rev: a.rev + x.r.batch.rev, osno: a.osno + x.r.batch.profO, usn: a.usn + x.r.batch.profU,
@@ -25413,6 +25423,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               <CalcField label="Реклама УСН" value={calcAdsPctUsn} onChange={setCalcAdsPctUsn} suffix="%" />
                               <CalcField label="Сборка (нал.)" value={calcAssembly} onChange={setCalcAssembly} suffix="₽" />
                               <CalcField label="Отвоз до WB (нал.)" value={calcDeliveryToWb} onChange={setCalcDeliveryToWb} suffix="₽" />
+                              <CalcField label="Целевая маржа" value={calcTargetMargin} onChange={setCalcTargetMargin} suffix="%" step="1" />
                               <div>
                                 <label className="block text-xs font-medium text-slate-600 mb-1">Ставка УСН</label>
                                 <select value={usnRate} onChange={(e) => setCalcUsnRate(Number(e.target.value))} className="w-full px-2 py-2 border border-slate-300 rounded-lg text-sm">
@@ -25467,7 +25478,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     </div>
 
                     {/* Позиции */}
-                    {rows.map(({ it, r, beO, beU }, idx) => {
+                    {rows.map(({ it, r, beO, beU, idO, idU }, idx) => {
                       const cat = IMPORT_CATEGORIES.find((c) => c.key === it.category);
                       const country = IMPORT_COUNTRIES.find((c) => c.key === it.country);
                       const win = r.osno >= r.usn;
@@ -25600,6 +25611,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                 {r.cash > 0 && <CalcRow label="Сборка и отвоз" value={-r.cash} base={r.p} hint="нал." />}
                                 <CalcRow label="Прибыль" value={r.osno} base={r.p} strong tone={`border-emerald-300 ${r.osno < 0 ? 'text-rose-600' : 'text-emerald-700'}`} />
                                 <div className="text-[11px] text-slate-500 mt-1">ROI {pctOf(r.osno, r.costOsnoFull)} · безубыток <b className="text-slate-700">{beO == null ? '—' : `${money(Math.ceil(beO))} ₽`}</b></div>
+                                <div className="text-[11px] mt-1 flex items-center justify-between gap-2 rounded-lg bg-emerald-50 border border-emerald-100 px-2 py-1">
+                                  <span className="text-emerald-700">Идеальная цена <span className="text-emerald-500">·{calcTargetMargin}% маржи</span></span>
+                                  <b className="text-emerald-800 tabular-nums">{idO == null ? '—' : `${money(Math.ceil(idO))} ₽`}</b>
+                                </div>
                               </div>
 
                               <div className="rounded-xl border-2 border-indigo-200 bg-indigo-50/30 p-4">
@@ -25620,6 +25635,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                 {r.cash > 0 && <CalcRow label="Сборка и отвоз" value={-r.cash} base={r.p} hint="нал." />}
                                 <CalcRow label="Прибыль" value={r.usn} base={r.p} strong tone={`border-indigo-300 ${r.usn < 0 ? 'text-rose-600' : 'text-indigo-700'}`} />
                                 <div className="text-[11px] text-slate-500 mt-1">ROI {pctOf(r.usn, r.costUsn)} · безубыток <b className="text-slate-700">{beU == null ? '—' : `${money(Math.ceil(beU))} ₽`}</b></div>
+                                <div className="text-[11px] mt-1 flex items-center justify-between gap-2 rounded-lg bg-indigo-50 border border-indigo-100 px-2 py-1">
+                                  <span className="text-indigo-700">Идеальная цена <span className="text-indigo-400">·{calcTargetMargin}% маржи</span></span>
+                                  <b className="text-indigo-800 tabular-nums">{idU == null ? '—' : `${money(Math.ceil(idU))} ₽`}</b>
+                                </div>
                                 <div className="text-[11px] text-slate-400 mt-1">Логистика: {money(r.fwd)} прямая / {(B * 100).toFixed(0)}% + {money(r.back)} возврат</div>
                               </div>
                             </div>
