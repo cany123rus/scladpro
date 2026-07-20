@@ -1307,6 +1307,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [calcAdsPctOsno, setCalcAdsPctOsno] = useState<number>(14);
   const [calcAdsPctUsn, setCalcAdsPctUsn] = useState<number>(14);
   const [calcUsnRate, setCalcUsnRate] = useState<number>(0.06);
+  // Консервативный режим: отрицательный НДС (возмещение из бюджета) не засчитываем в прибыль.
+  const [calcNoVatRefund, setCalcNoVatRefund] = useState<boolean>(() => {
+    try { return localStorage.getItem('calc_no_vat_refund_v1') === '1'; } catch { return false; }
+  });
   // Курсы ЦБ РФ для закупки в валюте (можно переопределить вручную).
   const [cbrRates, setCbrRates] = useState<Record<string, number>>({ RUB: 1 });
   const [cbrDate, setCbrDate] = useState<string>('');
@@ -25174,7 +25178,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                   const vatOut = vS(p);
                   const vatInServices = ex(feesO);
-                  const vatToPay = vatOut - importVat - vatInServices;
+                  const vatToPayRaw = vatOut - importVat - vatInServices;
+                  // Возмещение (отрицательный НДС) приходит из бюджета через камеральную проверку.
+                  // В консервативном режиме его в прибыль не берём — обрезаем в ноль.
+                  const vatToPay = calcNoVatRefund ? Math.max(0, vatToPayRaw) : vatToPayRaw;
+                  const vatRefundCut = calcNoVatRefund && vatToPayRaw < 0 ? -vatToPayRaw : 0;
                   const beforeO = fromO - costOsno - vatToPay;
                   const taxO = Math.max(0, beforeO) * 0.25;
                   const osno = beforeO - taxO;
@@ -25184,7 +25192,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                   return { isRu, rate, purchaseRub, customs, duty, dutyAdv, dutySpecRub, dutyByWeight, importVat, costOsno, costUsn,
                     liters, baseLog, fwd, back, logistics, storage, p, commission, adsO, adsU, feesO, feesU, fromO, fromU,
-                    vatOut, vatInServices, vatToPay, beforeO, taxO, osno, taxU, usn };
+                    vatOut, vatInServices, vatToPay, vatToPayRaw, vatRefundCut, beforeO, taxO, osno, taxU, usn };
                 };
 
                 // Цена безубытка: подбираем цену продажи бинарным поиском до нулевой прибыли.
@@ -25249,6 +25257,22 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               </select>
                             </div>
                           </div>
+                          <label className="mt-3 flex items-start gap-2 cursor-pointer select-none" title="Если входной НДС больше выходного, разницу возвращают из бюджета через камеральную проверку (2–3 месяца). Включите, чтобы не считать её прибылью.">
+                            <input
+                              type="checkbox"
+                              checked={calcNoVatRefund}
+                              onChange={(e) => {
+                                const v = e.target.checked;
+                                setCalcNoVatRefund(v);
+                                try { localStorage.setItem('calc_no_vat_refund_v1', v ? '1' : '0'); } catch {}
+                              }}
+                              className="w-4 h-4 accent-indigo-600 mt-0.5"
+                            />
+                            <span className="text-xs text-slate-600">
+                              Не учитывать возмещение НДС
+                              <span className="block text-[11px] text-slate-400">Отрицательный НДС обрезается в ноль — консервативный безубыток без расчёта на возврат из бюджета</span>
+                            </span>
+                          </label>
                         </Sec>
                       </div>
 
@@ -25425,6 +25449,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                 <CalcRow label="Пришло от WB" value={r.fromO} base={r.p} />
                                 <CalcRow label="Себестоимость" value={-r.costOsno} base={r.p} />
                                 <CalcRow label="НДС к уплате" value={-r.vatToPay} base={r.p} />
+                                {r.vatRefundCut > 0 && (
+                                  <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 my-1">
+                                    Возмещение {money(r.vatRefundCut)} ₽ не учтено — включён консервативный режим
+                                  </div>
+                                )}
                                 <CalcRow label="Налог 25%" value={-r.taxO} base={r.p} />
                                 <CalcRow label="Прибыль" value={r.osno} base={r.p} strong tone={`border-emerald-200 ${r.osno < 0 ? 'text-rose-600' : 'text-emerald-700'}`} />
                                 <div className="text-[11px] text-slate-500">ROI {pctOf(r.osno, r.costOsno)} · безубыток <b className="text-slate-700">{beO == null ? '—' : `${money(Math.ceil(beO))} ₽`}</b></div>
