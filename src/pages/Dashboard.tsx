@@ -1227,6 +1227,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const makeCalcItem = (n: number) => ({
     id: `${n}-${Math.round(Math.random() * 1e6)}`,
     name: `Товар ${n}`,
+    source: 'import',       // 'import' — ввоз с пошлиной, 'ru' — куплено в РФ
+    costRu: 700,            // себестоимость с НДС при покупке в РФ
     country: 'cn',
     category: 'apparel_knit',
     purchase: 6,            // цена закупки за единицу в валюте
@@ -25071,21 +25073,35 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                 // Полный расчёт позиции: ввоз → себестоимость → продажа → налоги.
                 const computeItem = (it: any) => {
-                  const rate = num(it.rateManual) > 0 ? num(it.rateManual) : num(cbrRates[it.currency] || (it.currency === 'RUB' ? 1 : 0));
-                  const purchaseRub = num(it.purchase) * rate;
-                  const customs = purchaseRub + num(it.deliveryToBorder);          // таможенная стоимость за ед.
-                  const countryMult = IMPORT_COUNTRIES.find((c) => c.key === it.country)?.mult ?? 1;
-                  const dutyAdv = customs * num(it.dutyPct) / 100;
-                  const specQty = it.dutyUnit === 'kg' ? num(it.weightKg) : 1;
-                  const dutySpecRub = num(it.dutySpec) * eurRate * specQty;
-                  const dutyBase = it.dutyType === 'adv' ? dutyAdv : it.dutyType === 'spec' ? dutySpecRub : Math.max(dutyAdv, dutySpecRub);
-                  const duty = dutyBase * countryMult;
-                  const dutyByWeight = it.dutyType === 'comb' && dutySpecRub > dutyAdv;
-                  const vatBase = customs + duty;                                   // база ввозного НДС
-                  const importVat = vatBase * num(it.vatPct) / 100;
-                  // На ОСНО ввозной НДС идёт к вычету, на УСН — в себестоимость.
-                  const costOsno = customs + duty;
-                  const costUsn = customs + duty + importVat;
+                  const isRu = it.source === 'ru';
+                  let rate = 1, purchaseRub = 0, customs = 0, dutyAdv = 0, dutySpecRub = 0, duty = 0;
+                  let dutyByWeight = false, vatBase = 0, importVat = 0, costOsno = 0, costUsn = 0;
+                  if (isRu) {
+                    // Куплено в РФ: себестоимость вводится с НДС. На ОСНО НДС выделяем и берём
+                    // к вычету (себестоимость становится без НДС), на УСН он остаётся в цене.
+                    const gross = num(it.costRu);
+                    const vr = num(it.vatPct) / 100;
+                    importVat = vr > 0 ? gross * vr / (1 + vr) : 0;   // 0% — поставщик без НДС (УСН)
+                    purchaseRub = gross;
+                    costOsno = gross - importVat;
+                    costUsn = gross;
+                  } else {
+                    rate = num(it.rateManual) > 0 ? num(it.rateManual) : num(cbrRates[it.currency] || (it.currency === 'RUB' ? 1 : 0));
+                    purchaseRub = num(it.purchase) * rate;
+                    customs = purchaseRub + num(it.deliveryToBorder);              // таможенная стоимость за ед.
+                    const countryMult = IMPORT_COUNTRIES.find((c) => c.key === it.country)?.mult ?? 1;
+                    dutyAdv = customs * num(it.dutyPct) / 100;
+                    const specQty = it.dutyUnit === 'kg' ? num(it.weightKg) : 1;
+                    dutySpecRub = num(it.dutySpec) * eurRate * specQty;
+                    const dutyBase = it.dutyType === 'adv' ? dutyAdv : it.dutyType === 'spec' ? dutySpecRub : Math.max(dutyAdv, dutySpecRub);
+                    duty = dutyBase * countryMult;
+                    dutyByWeight = it.dutyType === 'comb' && dutySpecRub > dutyAdv;
+                    vatBase = customs + duty;                                       // база ввозного НДС
+                    importVat = vatBase * num(it.vatPct) / 100;
+                    // На ОСНО ввозной НДС идёт к вычету, на УСН — в себестоимость.
+                    costOsno = customs + duty;
+                    costUsn = customs + duty + importVat;
+                  }
 
                   const p = num(it.price);
                   const commission = p * cPct / 100;
@@ -25109,7 +25125,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   const taxU = usnRate === 0.06 ? p * 0.06 : Math.max(0, fromU - costUsn) * usnRate;
                   const usn = fromU - costUsn - taxU;
 
-                  return { rate, purchaseRub, customs, duty, dutyAdv, dutySpecRub, dutyByWeight, vatBase, importVat, costOsno, costUsn, p, commission, logistics, adsO, adsU, stO, stU, fromO, fromU, vatOut, vatInServices, vatToPay, beforeO, taxO, osno, taxU, usn };
+                  return { isRu, rate, purchaseRub, customs, duty, dutyAdv, dutySpecRub, dutyByWeight, vatBase, importVat, costOsno, costUsn, p, commission, logistics, adsO, adsU, stO, stU, fromO, fromU, vatOut, vatInServices, vatToPay, beforeO, taxO, osno, taxU, usn };
                 };
 
                 const rows = calcItems.map((it) => ({ it, r: computeItem(it) }));
@@ -25170,6 +25186,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <div key={it.id} className="bg-white rounded-xl border border-slate-200 p-4">
                           <div className="flex flex-wrap items-center gap-2 mb-3">
                             <input value={it.name} onChange={(e) => upd(it.id, { name: e.target.value })} className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm font-semibold min-w-[180px]" />
+                            <div className="inline-flex rounded-lg border border-slate-300 overflow-hidden text-xs">
+                              <button type="button" onClick={() => upd(it.id, { source: 'import' })} className={`px-3 py-1.5 font-medium ${it.source !== 'ru' ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>Импорт</button>
+                              <button type="button" onClick={() => upd(it.id, { source: 'ru' })} className={`px-3 py-1.5 font-medium ${it.source === 'ru' ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>Закупка в РФ</button>
+                            </div>
                             <span className="text-xs text-slate-400">позиция {idx + 1}</span>
                             <div className="ml-auto flex items-center gap-2">
                               <span className={`text-sm font-bold ${r.osno >= r.usn ? 'text-emerald-600' : 'text-indigo-600'}`}>
@@ -25181,6 +25201,22 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             </div>
                           </div>
 
+                          {it.source === 'ru' ? (
+                            /* Куплено в РФ — только себестоимость, НДС поставщика и цена */
+                            <div className="grid grid-cols-2 md:grid-cols-3 gap-2 mb-3 pb-3 border-b border-slate-200">
+                              <CalcField label="Себестоимость (с НДС), ₽" value={it.costRu} onChange={(v: number) => upd(it.id, { costRu: v })} suffix="₽" />
+                              <div>
+                                <label className="block text-xs font-medium text-slate-600 mb-1">НДС в закупке</label>
+                                <select value={it.vatPct} onChange={(e) => upd(it.id, { vatPct: Number(e.target.value) })} className="w-full px-2 py-2 border border-slate-300 rounded-lg text-sm">
+                                  <option value={22}>22% — обычный поставщик</option>
+                                  <option value={10}>10% — льготный товар</option>
+                                  <option value={0}>0% — поставщик без НДС (УСН)</option>
+                                </select>
+                              </div>
+                              <CalcField label="Цена продажи, ₽" value={it.price} onChange={(v: number) => upd(it.id, { price: v })} suffix="₽" />
+                            </div>
+                          ) : (
+                          <>
                           {/* Ввоз */}
                           <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-2 mb-2">
                             <div>
@@ -25248,18 +25284,23 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               {cat?.note ? <>{cat.note}. </> : null}{country?.note}
                             </div>
                           )}
+                          </>
+                          )}
 
                           {/* Результат позиции */}
                           <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 text-sm">
                             <div className="rounded-lg bg-slate-50 p-3">
-                              <div className="text-xs font-semibold text-slate-500 mb-1">ВВОЗ</div>
-                              <div className="flex justify-between py-0.5"><span className="text-slate-600">Закупка</span><span>{money(r.purchaseRub)} ₽</span></div>
-                              <div className="flex justify-between py-0.5"><span className="text-slate-600">Таможенная стоимость</span><span>{money(r.customs)} ₽</span></div>
-                              <div className="flex justify-between py-0.5">
-                                <span className="text-slate-600">Пошлина{r.dutyByWeight ? ' (по весу)' : ''}</span>
-                                <span className="font-medium">{money(r.duty)} ₽</span>
-                              </div>
-                              <div className="flex justify-between py-0.5"><span className="text-slate-600">НДС ввозной</span><span>{money(r.importVat)} ₽</span></div>
+                              <div className="text-xs font-semibold text-slate-500 mb-1">{r.isRu ? 'ЗАКУПКА В РФ' : 'ВВОЗ'}</div>
+                              <div className="flex justify-between py-0.5"><span className="text-slate-600">{r.isRu ? 'Себестоимость с НДС' : 'Закупка'}</span><span>{money(r.purchaseRub)} ₽</span></div>
+                              {!r.isRu && <div className="flex justify-between py-0.5"><span className="text-slate-600">Таможенная стоимость</span><span>{money(r.customs)} ₽</span></div>}
+                              {!r.isRu && (
+                                <div className="flex justify-between py-0.5">
+                                  <span className="text-slate-600">Пошлина{r.dutyByWeight ? ' (по весу)' : ''}</span>
+                                  <span className="font-medium">{money(r.duty)} ₽</span>
+                                </div>
+                              )}
+                              <div className="flex justify-between py-0.5"><span className="text-slate-600">{r.isRu ? 'НДС в закупке' : 'НДС ввозной'}</span><span>{money(r.importVat)} ₽</span></div>
+                              {r.isRu && <div className="text-[11px] text-slate-500 mt-1">На ОСНО этот НДС к вычету, на УСН остаётся в себестоимости</div>}
                               {r.dutyByWeight && <div className="text-[11px] text-amber-700 mt-1">Сработала весовая ставка: {money(r.dutySpecRub)} ₽ &gt; {money(r.dutyAdv)} ₽</div>}
                             </div>
                             <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 p-3">
