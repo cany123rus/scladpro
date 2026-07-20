@@ -25408,29 +25408,37 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                 {!r.isRu && <CalcRow label="Там. стоимость" value={r.customs} base={r.p} />}
                                 {!r.isRu && Math.abs(r.duty) > 0.005 && <CalcRow label={`Пошлина${r.dutyByWeight ? ' (вес)' : ''}`} value={r.duty} base={r.p} />}
                                 <CalcRow label={r.isRu ? 'НДС в закупке' : 'НДС ввозной'} value={r.importVat} base={r.p} />
-                                <CalcRow label="Хранение" value={r.storage} base={r.p} hint={`${wbStorageDays} дн`} />
-                                <div className="mt-2 pt-2 border-t border-slate-200 text-[11px] text-slate-500">
-                                  Логистика УСН: {money(r.fwd)} прямая / {(B * 100).toFixed(0)}% + {money(r.back)} возврат → <b className="text-slate-700">{money(r.logistics)} ₽</b>
+                                <div className="mt-2 pt-2 border-t border-slate-200 text-[11px] text-slate-500 space-y-0.5">
+                                  <div>Логистика УСН: {money(r.fwd)} прямая / {(B * 100).toFixed(0)}% + {money(r.back)} возврат → <b className="text-slate-700">{money(r.logistics)} ₽</b></div>
+                                  <div>Хранение: {money(wbStorageTariff)} × {r.liters.toFixed(2)} л × {wbStorageCoef}% × {wbStorageDays} дн → <b className="text-slate-700">{money(r.storage)} ₽</b></div>
                                 </div>
                                 {r.dutyByWeight && <div className="text-[11px] text-amber-700 mt-1">Весовая ставка выиграла: {money(r.dutySpecRub)} &gt; {money(r.dutyAdv)} ₽</div>}
                               </div>
 
                               <div className="rounded-xl border-2 border-emerald-200 bg-emerald-50/40 p-3">
                                 <div className="text-[11px] font-bold uppercase tracking-wide text-emerald-700 mb-2">ОСНО · НДС 22% + 25%</div>
-                                <CalcRow label="Себестоимость" value={r.costOsno} base={r.p} />
+                                <CalcRow label="Цена продажи" value={r.p} base={r.p} />
+                                <CalcRow label="Комиссия WB" value={-r.commission} base={r.p} />
+                                <CalcRow label="Реклама" value={-r.adsO} base={r.p} />
+                                <CalcRow label="Хранение" value={-r.storage} base={r.p} hint={`${wbStorageDays} дн`} />
                                 <CalcRow label="Пришло от WB" value={r.fromO} base={r.p} />
-                                <CalcRow label="НДС к уплате" value={r.vatToPay} base={r.p} />
-                                <CalcRow label="Налог 25%" value={r.taxO} base={r.p} />
+                                <CalcRow label="Себестоимость" value={-r.costOsno} base={r.p} />
+                                <CalcRow label="НДС к уплате" value={-r.vatToPay} base={r.p} />
+                                <CalcRow label="Налог 25%" value={-r.taxO} base={r.p} />
                                 <CalcRow label="Прибыль" value={r.osno} base={r.p} strong tone={`border-emerald-200 ${r.osno < 0 ? 'text-rose-600' : 'text-emerald-700'}`} />
                                 <div className="text-[11px] text-slate-500">ROI {pctOf(r.osno, r.costOsno)} · безубыток <b className="text-slate-700">{beO == null ? '—' : `${money(Math.ceil(beO))} ₽`}</b></div>
                               </div>
 
                               <div className="rounded-xl border-2 border-indigo-200 bg-indigo-50/40 p-3">
                                 <div className="text-[11px] font-bold uppercase tracking-wide text-indigo-700 mb-2">УСН {usnRate === 0.06 ? '6%' : '15%'} · без НДС</div>
-                                <CalcRow label="Себестоимость" value={r.costUsn} base={r.p} />
-                                <CalcRow label="Логистика" value={r.logistics} base={r.p} />
+                                <CalcRow label="Цена продажи" value={r.p} base={r.p} />
+                                <CalcRow label="Комиссия WB" value={-r.commission} base={r.p} />
+                                <CalcRow label="Реклама" value={-r.adsU} base={r.p} />
+                                <CalcRow label="Логистика" value={-r.logistics} base={r.p} />
+                                <CalcRow label="Хранение" value={-r.storage} base={r.p} hint={`${wbStorageDays} дн`} />
                                 <CalcRow label="Пришло от WB" value={r.fromU} base={r.p} />
-                                <CalcRow label="Налог" value={r.taxU} base={r.p} />
+                                <CalcRow label="Себестоимость" value={-r.costUsn} base={r.p} />
+                                <CalcRow label="Налог" value={-r.taxU} base={r.p} />
                                 <CalcRow label="Прибыль" value={r.usn} base={r.p} strong tone={`border-indigo-200 ${r.usn < 0 ? 'text-rose-600' : 'text-indigo-700'}`} />
                                 <div className="text-[11px] text-slate-500">ROI {pctOf(r.usn, r.costUsn)} · безубыток <b className="text-slate-700">{beU == null ? '—' : `${money(Math.ceil(beU))} ₽`}</b></div>
                               </div>
