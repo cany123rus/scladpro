@@ -17907,11 +17907,36 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     return profitAfterTax - storage - withhold;
   };
   const getUploadedHeadlineProfitNet = (summary: any) => getUploadedHeadlineProfit(summary) - Number(uploadedExtraCosts || 0);
+  // Входной НДС с услуг WB по строке: комиссия — из колонки отчёта, остальное выделяем ×22/122.
+  // Штрафы НДС не облагаются, эквайринг — финуслуга (без НДС), их не берём.
+  const getUploadedRowServicesVat = (row: any) => {
+    const ex = (a: number) => (a * 0.22) / 1.22;
+    return Number(row?.wb_commission_vat || 0)
+      + ex(Number(row?.logistics_sum || 0))
+      + ex(Number(row?.withhold_sum || 0))
+      + ex(Number(row?.storage_sum || 0));
+  };
+  // Прибыль строки по текущему режиму налогообложения:
+  //  УСН        — минус налог с выручки (ставка 1/6/15%);
+  //  ОСНО + НДС — минус НДС к уплате (выходной − входной) и налог на прибыль 25%.
+  const getUploadedRowProfitAfterTaxes = (toPay: number, salesNet: number, costTotal: number, servicesVat: number) => {
+    const base = toPay - costTotal;
+    if (!uploadedVatMode) return base - salesNet * getCurrentUploadedTaxRate();
+    const VAT = 0.22;
+    const vOf = (a: number) => uploadedVatIncluded ? (a * VAT) / (1 + VAT) : a * VAT;
+    const vatToPay = vOf(salesNet) - vOf(costTotal) - servicesVat;
+    const before = base - vatToPay;
+    return before - Math.max(0, before) * 0.25;
+  };
   const getUploadedProfitAfterTax = (row: any) => {
     const sold = Number(row?.sold_qty || 0);
     const cost = getUploadedCostValue(row);
-    const baseProfit = (sold > 0 ? (Number(row?.to_pay_total || 0) / sold) - cost : 0) * sold;
-    return baseProfit - getUploadedRowTax(row);
+    return getUploadedRowProfitAfterTaxes(
+      Number(row?.to_pay_total || 0),
+      Number(row?.sales_net || 0),
+      cost * sold,
+      getUploadedRowServicesVat(row),
+    );
   };
   const getUploadedAvgProfitAfterTax = (row: any) => {
     const sold = Number(row?.sold_qty || 0);
@@ -25730,9 +25755,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     const prodsAll = (sortedFilteredUploadedAnalytics || []).map((x: any) => {
                       const sold = Number(x.sold_qty || 0);
                       const cost = Number(getUploadedCostValue(x) || 0);
-                      // Налог берём по ТЕКУЩЕЙ ставке (переключатель 1/6/15%), как в строках размеров,
-                      // а не замороженный x.tax_sum — иначе прибыль товара/ИТОГО ≠ сумма по размерам.
-                      const profit = (Number(x.to_pay_total || 0)) - cost * sold - (Number(x.sales_net || 0) * getCurrentUploadedTaxRate());
+                      // Налог по ТЕКУЩЕМУ режиму (УСН 1/6/15% или ОСНО: НДС + 25% с прибыли),
+                      // как в строках размеров — иначе прибыль товара/ИТОГО ≠ сумма по размерам.
+                      const profit = getUploadedRowProfitAfterTaxes(
+                        Number(x.to_pay_total || 0),
+                        Number(x.sales_net || 0),
+                        cost * sold,
+                        getUploadedRowServicesVat(x),
+                      );
                       const sNet = Number(x.sales_net || 0);
                       const salesGross = Number(x.sales_gross || 0);
                       const retSum = Number(x.returns_gross || 0);
@@ -26259,12 +26289,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                               })()}
                                               {(() => {
                                                 // Применяем сортировку детализации размеров.
-                                                const rate = getCurrentUploadedTaxRate();
                                                 const cost = Number(p.cost || 0);
                                                 const metric = (z: any, key: string) => {
                                                   const zs = Number(z.sold_qty ?? z.sold ?? 0);
                                                   const tp = Number(z.to_pay_total ?? 0);
-                                                  const pr = tp - cost * zs - Number(z.sales_net || 0) * rate;
+                                                  const pr = getUploadedRowProfitAfterTaxes(tp, Number(z.sales_net || 0), cost * zs, getUploadedRowServicesVat(z));
                                                   if (key === '__profit') return pr;
                                                   if (key === '__ppu') return zs > 0 ? pr / zs : 0;
                                                   if (key === 'size') return null;
@@ -26282,9 +26311,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                                 const zsold = Number(z.sold_qty ?? z.sold ?? 0);          // валовое продано — сходится с «Продано»
                                                 const ztopay = Number(z.to_pay_total ?? 0);
                                                 const zlog = Number(z.logistics_sum ?? 0);
-                                                // Налог считаем как в таблице: продажи нетто × текущая ставка (а не сохранённый tax_sum).
-                                                const ztax = Number(z.sales_net || 0) * getCurrentUploadedTaxRate();
-                                                const zprofit = ztopay - Number(p.cost || 0) * zsold - ztax;
+                                                // Налог по текущему режиму (УСН или ОСНО+НДС) — как в строке товара.
+                                                const zprofit = getUploadedRowProfitAfterTaxes(
+                                                  ztopay,
+                                                  Number(z.sales_net || 0),
+                                                  Number(p.cost || 0) * zsold,
+                                                  getUploadedRowServicesVat(z),
+                                                );
                                                 const zppu = zsold > 0 ? zprofit / zsold : 0;
                                                 return (
                                                   <tr key={zi} className="border-t border-slate-100">
@@ -26529,7 +26562,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
                     <div className="bg-slate-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-slate-500">Номенклатур</div><div className="font-bold">{uploadedSummaryForView.items}</div></div>
                     <div className="bg-slate-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-slate-500">Продажи</div><div className="font-bold">{Number(uploadedSummaryForView.sales_net || 0).toLocaleString('ru-RU')}</div></div>
-                    <div className="bg-slate-50 rounded-lg p-2 min-w-[170px] shrink-0"><div className="flex items-center justify-between gap-2"><div className="text-xs text-slate-500">Налоги</div><button type="button" onClick={() => setUploadedTaxRateOverride((prev) => prev === 0.01 ? 0.06 : prev === 0.06 ? 0.15 : 0.01)} className="text-[11px] px-2 py-0.5 rounded-full border border-indigo-200 text-indigo-700 bg-white hover:bg-indigo-50">{Math.round(getCurrentUploadedTaxRate() * 100)}%</button></div><div className="font-bold">{Number(getUploadedTaxValue(uploadedSummaryForView)).toLocaleString('ru-RU', { maximumFractionDigits: 2 })}</div></div>
+                    {uploadedVatMode ? (
+                      <div className="bg-slate-50 rounded-lg p-2 min-w-[170px] shrink-0"><div className="flex items-center justify-between gap-2"><div className="text-xs text-slate-500">НДС к уплате</div><span className="text-[11px] px-2 py-0.5 rounded-full border border-indigo-200 text-indigo-700 bg-white">22%</span></div><div className="font-bold">{(() => { const VAT = 0.22; const vOf = (a: number) => uploadedVatIncluded ? (a * VAT) / (1 + VAT) : a * VAT; const s = uploadedSummaryForView; const inServ = Number(s?.wb_commission_vat || 0) + ((Number(s?.logistics_sum || 0) + Number(s?.withhold_sum || 0) + Number(s?.storage_sum || 0)) * VAT) / (1 + VAT); return (vOf(Number(s?.sales_net || 0)) - vOf(Number(s?.cost_total || 0)) - inServ).toLocaleString('ru-RU', { maximumFractionDigits: 2 }); })()}</div></div>
+                    ) : (
+                      <div className="bg-slate-50 rounded-lg p-2 min-w-[170px] shrink-0"><div className="flex items-center justify-between gap-2"><div className="text-xs text-slate-500">Налоги</div><button type="button" onClick={() => setUploadedTaxRateOverride((prev) => prev === 0.01 ? 0.06 : prev === 0.06 ? 0.15 : 0.01)} className="text-[11px] px-2 py-0.5 rounded-full border border-indigo-200 text-indigo-700 bg-white hover:bg-indigo-50">{Math.round(getCurrentUploadedTaxRate() * 100)}%</button></div><div className="font-bold">{Number(getUploadedTaxValue(uploadedSummaryForView)).toLocaleString('ru-RU', { maximumFractionDigits: 2 })}</div></div>
+                    )}
                     <div className="bg-slate-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-slate-500">Возвраты</div><div className="font-bold">{Number(uploadedSummaryForView.returns_gross || 0).toLocaleString('ru-RU')}</div></div>
                     <div className="bg-slate-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-slate-500">Логистика</div><div className="font-bold">{Number(uploadedSummaryForView.logistics_sum || 0).toLocaleString('ru-RU')}</div></div>
                     <div className="bg-slate-50 rounded-lg p-2 min-w-[150px] shrink-0"><div className="text-xs text-slate-500">К перечислению</div><div className="font-bold">{Number(uploadedSummaryForView.payout_net || 0).toLocaleString('ru-RU')}</div></div>
@@ -26613,7 +26650,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               if (key === 'avg_profit' || key === 'profit_total') {
                                 const sold = Number(x?.sold_qty ?? 0);
                                 const profitTotal = sold > 0
-                                  ? (((Number(x?.to_pay_total || 0) / sold) - getUploadedCostValue(row)) * sold - (Number(x?.sales_net || 0) * getCurrentUploadedTaxRate()))
+                                  ? getUploadedRowProfitAfterTaxes(Number(x?.to_pay_total || 0), Number(x?.sales_net || 0), getUploadedCostValue(row) * sold, getUploadedRowServicesVat(x))
                                   : 0;
                                 if (key === 'profit_total') return profitTotal;
                                 return sold > 0 ? profitTotal / sold : 0;
@@ -26783,8 +26820,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                 </tr>
                                 {visibleSizeRows.map((sz: any, sidx: number) => {
                                   const soldForCalc = Number(sz?.sold_qty ?? 0);
-                                  const avgProfitSize = soldForCalc > 0 ? ((((Number(sz?.to_pay_total || 0) / soldForCalc) - getUploadedCostValue(row)) * soldForCalc - (Number(sz?.sales_net || 0) * getCurrentUploadedTaxRate())) / soldForCalc) : 0;
-                                  const profitTotalSize = soldForCalc > 0 ? (((Number(sz?.to_pay_total || 0) / soldForCalc) - getUploadedCostValue(row)) * soldForCalc - (Number(sz?.sales_net || 0) * getCurrentUploadedTaxRate())) : 0;
+                                  const profitTotalSize = soldForCalc > 0 ? getUploadedRowProfitAfterTaxes(
+                                    Number(sz?.to_pay_total || 0),
+                                    Number(sz?.sales_net || 0),
+                                    getUploadedCostValue(row) * soldForCalc,
+                                    getUploadedRowServicesVat(sz),
+                                  ) : 0;
+                                  const avgProfitSize = soldForCalc > 0 ? profitTotalSize / soldForCalc : 0;
                                   return (
                                     <tr key={`size-${row.code}-${idx}-${sidx}`} className="border-t border-slate-100 bg-slate-50/70">
                                       <td className="px-3 py-2 sticky left-0 bg-slate-50 z-20 w-[140px] min-w-[140px] max-w-[140px] border-r border-slate-200" />
