@@ -25392,8 +25392,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   rev: a.rev + x.r.batch.rev, osno: a.osno + x.r.batch.profO, usn: a.usn + x.r.batch.profU,
                   cost: a.cost + x.r.batch.costO, duty: a.duty + x.r.batch.duty, vat: a.vat + x.r.batch.vat, log: a.log + x.r.batch.log,
                   investO: a.investO + x.r.batch.investO, investU: a.investU + x.r.batch.investU,
-                  obnal: a.obnal + x.r.batch.obnalNet, osnoObnal: a.osnoObnal + x.r.batch.profOObnal,
-                }), { qty: 0, rev: 0, osno: 0, usn: 0, cost: 0, duty: 0, vat: 0, log: 0, investO: 0, investU: 0, obnal: 0, osnoObnal: 0 });
+                  obnal: a.obnal + x.r.batch.obnalNet, osnoObnal: a.osnoObnal + x.r.batch.profOObnal, obnalCash: a.obnalCash + x.r.batch.obnalCash,
+                }), { qty: 0, rev: 0, osno: 0, usn: 0, cost: 0, duty: 0, vat: 0, log: 0, investO: 0, investU: 0, obnal: 0, osnoObnal: 0, obnalCash: 0 });
 
                 const Sec = CalcSection;
                 const saveBtn = (
@@ -25805,9 +25805,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <div className="text-xs text-slate-400 mt-1">
                           ROI партии: ОСНО {pctOf(tot.osno, tot.investO)} · УСН {pctOf(tot.usn, tot.investU)}
                         </div>
-                        {Math.abs(tot.obnal) > 0.005 && (
-                          <div className="text-xs text-amber-300 mt-1">
-                            С обналом: прибыль ОСНО <b>{money(tot.osnoObnal)} ₽</b> (выгода {tot.obnal >= 0 ? '+' : ''}{money(tot.obnal)} ₽)
+                        {(Math.abs(tot.obnal) > 0.005 || tot.obnalCash > 0.005) && (
+                          <div className="mt-2 pt-2 border-t border-amber-400/20 flex flex-wrap gap-x-5 gap-y-1 text-xs">
+                            <span className="text-amber-300">Прибыль ОСНО с обналом: <b>{money(tot.osnoObnal)} ₽</b></span>
+                            <span className="text-amber-300/80">выгода {tot.obnal >= 0 ? '+' : ''}{money(tot.obnal)} ₽</span>
+                            <span className="text-emerald-300">наличными на руки: <b>{money(tot.obnalCash)} ₽</b></span>
                           </div>
                         )}
                       </div>
