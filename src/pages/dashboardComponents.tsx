@@ -5,7 +5,7 @@ import { ensureExcelFileSize, ensureExcelRowLimit } from '../utils/safeExcel';
 import { readFirstSheetAsJsonFast } from '../utils/excelWorkerClient';
 import { ensureBwip, lazyLibs } from './dashboardLazyLibs';
 
-export const ExcelUploader = ({ onUpload, disabled = false, maxFileBytes }: { onUpload: (data: any[], fileName?: string, sourceFile?: File) => void | Promise<void>; disabled?: boolean; maxFileBytes?: number }) => {
+export const ExcelUploader = ({ onUpload, disabled = false, maxFileBytes, onBatchStart, onBatchDone }: { onUpload: (data: any[], fileName?: string, sourceFile?: File) => void | Promise<void>; disabled?: boolean; maxFileBytes?: number; onBatchStart?: (count: number) => void; onBatchDone?: () => void }) => {
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<string>('');
   return (
@@ -23,6 +23,7 @@ export const ExcelUploader = ({ onUpload, disabled = false, maxFileBytes }: { on
 
             const errors: string[] = [];
             setBusy(true);
+            try { onBatchStart?.(files.length); } catch (_) {}
 
             try {
               for (let fi = 0; fi < files.length; fi += 1) {
@@ -61,6 +62,7 @@ export const ExcelUploader = ({ onUpload, disabled = false, maxFileBytes }: { on
               setBusy(false);
               setProgress('');
               if (e.target) e.target.value = '';
+              try { onBatchDone?.(); } catch (_) {}
             }
           }}
           className="hidden"
@@ -71,7 +73,7 @@ export const ExcelUploader = ({ onUpload, disabled = false, maxFileBytes }: { on
             {busy ? <Loader2 className="h-8 w-8 text-indigo-600 animate-spin" /> : <Upload className="h-8 w-8 text-indigo-600" />}
           </div>
           <span className="text-slate-900 font-medium">{busy ? 'Обработка файла…' : disabled ? 'Сначала выберите поставщика' : 'Нажмите для загрузки'}</span>
-          <span className="text-sm text-slate-500 mt-1">{busy ? (progress || 'Парсинг в фоне, интерфейс не зависнет') : disabled ? 'Загрузка недоступна без выбранного поставщика' : 'можно выбрать один или несколько файлов Excel'}</span>
+          <span className="text-sm text-slate-500 mt-1">{busy ? (progress || 'Парсинг в фоне, интерфейс не зависнет') : disabled ? 'Загрузка недоступна без выбранного поставщика' : 'один файл — обычная загрузка; несколько — тихий пакетный режим (без вопросов, сводка в конце)'}</span>
         </label>
       </div>
     </div>

@@ -1180,6 +1180,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [uploadedCheckDuplicates, setUploadedCheckDuplicates] = useState<boolean>(() => {
     try { return localStorage.getItem('uploaded_check_duplicates_v1') !== '0'; } catch { return true; }
   });
+  // Тихий пакетный режим: при загрузке нескольких файлов — без вопросов, дубли авто-пропуск, в конце сводка.
+  const uploadBatchRef = useRef<{ active: boolean; loaded: number; skipped: number; noPeriod: number; failed: number }>({ active: false, loaded: 0, skipped: 0, noPeriod: 0, failed: 0 });
   // Режим «с НДС» (ОСНО): считаем НДС входной/выходной + налог на прибыль 25% вместо УСН.
   const [uploadedVatMode, setUploadedVatMode] = useState<boolean>(() => {
     try { return localStorage.getItem('uploaded_vat_mode_v1') === '1'; } catch { return false; }
@@ -1215,6 +1217,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [uploadedHistoryLoading, setUploadedHistoryLoading] = useState(false);
   const [uploadedHistoryYear, setUploadedHistoryYear] = useState<number | null>(null);
   const [uploadedHistorySelectedIds, setUploadedHistorySelectedIds] = useState<Record<string, boolean>>({});
+  // Диапазон дат для сводного отчёта — выбираем недельные отчёты, попадающие в период.
+  const [uploadedHistoryRange, setUploadedHistoryRange] = useState<{ from: string; to: string }>({ from: '', to: '' });
   const [uploadedHistoryCollapsedMonths, setUploadedHistoryCollapsedMonths] = useState<Record<number, boolean>>({});
   // Ручной выбор недели для отчёта без столбца «Дата продажи».
   const [manualWeekModal, setManualWeekModal] = useState<{ open: boolean; weekStart: string; pending: null | { fileName: string; rows: any[]; summary: any; analytics: any[]; sourceFile: File | null } }>({ open: false, weekStart: mskTodayYmd(), pending: null });
@@ -26247,25 +26251,45 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   <ExcelUploader
                     disabled={!uploadedSelectedSupplierId}
                     maxFileBytes={60 * 1024 * 1024}
+                    onBatchStart={(count) => {
+                      // Пачка (несколько файлов) → тихий режим без вопросов.
+                      uploadBatchRef.current = { active: count > 1, loaded: 0, skipped: 0, noPeriod: 0, failed: 0 };
+                    }}
+                    onBatchDone={() => {
+                      const b = uploadBatchRef.current;
+                      if (b.active) {
+                        const parts = [`загружено ${b.loaded}`];
+                        if (b.skipped) parts.push(`дублей пропущено ${b.skipped}`);
+                        if (b.noPeriod) parts.push(`без даты ${b.noPeriod}`);
+                        if (b.failed) parts.push(`ошибок ${b.failed}`);
+                        showToast(`Пачка отчётов: ${parts.join(', ')}`, b.failed ? 'warning' : 'success');
+                        loadUploadedReportHistory(uploadedSelectedSupplierId);
+                      }
+                      uploadBatchRef.current = { active: false, loaded: 0, skipped: 0, noPeriod: 0, failed: 0 };
+                    }}
                     onUpload={async (data, fileName, sourceFile) => {
+                      const batch = uploadBatchRef.current.active;
                       if (!uploadedSelectedSupplierId) {
+                        if (batch) { uploadBatchRef.current.failed += 1; return; }
                         showToast('Сначала выберите поставщика', 'error');
                         return;
                       }
                       const rows = Array.isArray(data) ? data : [];
                       if (rows.length > MAX_UPLOAD_ROWS) {
+                        if (batch) { uploadBatchRef.current.failed += 1; return; }
                         showToast(`Файл слишком большой: ${rows.length.toLocaleString('ru-RU')} строк. Лимит: ${MAX_UPLOAD_ROWS.toLocaleString('ru-RU')}`, 'error');
                         return;
                       }
                       const turbo = rows.length >= TURBO_MODE_ROWS;
                       setUploadedTurboMode(turbo);
-                      if (turbo) {
+                      if (turbo && !batch) {
                         showToast(`Включён турбо-режим (${rows.length.toLocaleString('ru-RU')} строк)`, 'info');
                       }
                       // «Любой поставщик» — без привязки: пропускаем проверку принадлежности.
                       if (uploadedSelectedSupplierId !== ANY_SUPPLIER_ID) {
                         const belongs = await validateUploadedReportSupplier(rows, uploadedSelectedSupplierId);
                         if (!belongs) {
+                          if (batch) { uploadBatchRef.current.failed += 1; return; }
                           showToast('Отчет не принадлежит данному поставщику', 'error');
                           return;
                         }
@@ -26292,6 +26316,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       }
                       // Период строго по «Дата продажи». Если столбца/дат нет — ручной выбор недели.
                       if (!sm?.period_start) {
+                        if (batch) { uploadBatchRef.current.noPeriod += 1; return; }  // в пачке пропускаем файлы без даты
                         showToast('В отчёте нет столбца «Дата продажи» — выберите неделю вручную', 'info');
                         const d = new Date(); const dow = (d.getDay() + 6) % 7; d.setDate(d.getDate() - dow - 7);
                         const guess = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -26325,6 +26350,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       } catch (_) {}
 
                       if (alreadyExists) {
+                        if (batch) { uploadBatchRef.current.skipped += 1; return; }  // в пачке дубли пропускаем без вопроса
                         const doUpdate = await confirmDialog({ title: 'Отчёт уже есть', message: 'Такой отчёт уже есть в истории. Обновить его данными из этого файла?', tone: 'primary', confirmText: 'Обновить', cancelText: 'Не обновлять' });
                         if (!doUpdate) {
                           showToast('Отчёт открыт. В истории он уже есть — повторно не сохраняем.', 'info');
@@ -26338,6 +26364,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       if (result?.summary && Array.isArray(result?.analytics) && result.analytics.length > 0) {
                         await saveUploadedReportHistory(fileName || 'uploaded_report.xlsx', result.summary, result.analytics);
                       }
+                      if (batch) { uploadBatchRef.current.loaded += 1; return; }
                       if (alreadyExists) showToast('Отчёт обновлён в истории.', 'success');
                     }}
                   />
@@ -26611,6 +26638,32 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         </button>
                       ))}
                     </div>
+
+                    {/* Диапазон дат — выбрать недельные отчёты, попадающие в период */}
+                    {(() => {
+                      const norm = (v: any) => v ? String(new Date(v).toISOString()).slice(0, 10) : '';
+                      const { from, to } = uploadedHistoryRange;
+                      const inRange = (uploadedHistory || []).filter((h: any) => {
+                        const ps = norm(h?.summary_json?.period_start), pe = norm(h?.summary_json?.period_end);
+                        if (!ps || !pe) return false;
+                        return (!from || pe >= from) && (!to || ps <= to);
+                      });
+                      return (
+                        <div className="mb-3 flex flex-wrap items-end gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2">
+                          <div>
+                            <label className="block text-[11px] font-medium text-slate-500 mb-0.5">С даты</label>
+                            <input type="date" value={from} onChange={(e) => setUploadedHistoryRange((p) => ({ ...p, from: e.target.value }))} className="px-2 py-1.5 text-sm border border-slate-300 rounded-lg" />
+                          </div>
+                          <div>
+                            <label className="block text-[11px] font-medium text-slate-500 mb-0.5">По дату</label>
+                            <input type="date" value={to} onChange={(e) => setUploadedHistoryRange((p) => ({ ...p, to: e.target.value }))} className="px-2 py-1.5 text-sm border border-slate-300 rounded-lg" />
+                          </div>
+                          <button type="button" disabled={!from && !to} onClick={() => { setUploadedHistorySelectedIds((prev) => { const next = { ...prev }; inRange.forEach((h: any) => { next[String(h.id)] = true; }); return next; }); }} className="px-3 py-1.5 text-xs font-semibold rounded-xl border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50">Отметить ({inRange.length})</button>
+                          <button type="button" disabled={inRange.length === 0} onClick={() => { openUploadedHistoryMonth(inRange as any[]); setUploadedHistoryPickerOpen(false); }} className="px-3 py-1.5 text-xs font-semibold rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50">Сводный отчёт за период</button>
+                          {(from || to) && <button type="button" onClick={() => setUploadedHistoryRange({ from: '', to: '' })} className="px-2 py-1.5 text-xs text-slate-500 hover:text-slate-700">Сброс</button>}
+                        </div>
+                      );
+                    })()}
 
                     <div className="mb-3 flex flex-wrap items-center gap-2">
                       <button
