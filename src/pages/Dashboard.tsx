@@ -26797,20 +26797,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                   )}
                                   {(() => {
                                     const s = h?.summary_json || {};
-                                    const num = (v: any) => Number(v || 0);
-                                    // Заработок = «К перечислению»; у старых отчётов поля нет — фолбэк на payout_net.
-                                    const hasPay = s?.to_pay_total != null || s?.payout_net != null;
-                                    const pay = s?.to_pay_total != null ? num(s.to_pay_total) : num(s.payout_net);
-                                    const prof = num(s?.profit_total);
-                                    const sales = num(s?.sales_net);
-                                    if (!hasPay && !sales) return null;
+                                    // Показываем только чистую прибыль отчёта.
+                                    if (s?.profit_total == null) return null;
+                                    const prof = Number(s.profit_total || 0);
                                     const fmt = (v: number) => Math.round(v).toLocaleString('ru-RU');
                                     return (
                                       <div className="text-[11px] mt-0.5">
-                                        {hasPay
-                                          ? <span className={`font-semibold ${pay < 0 ? 'text-rose-600' : 'text-emerald-700'}`}>Заработок {fmt(pay)} ₽</span>
-                                          : <span className="font-semibold text-slate-500">Продажи {fmt(sales)} ₽</span>}
-                                        {hasPay && Math.abs(prof) > 0.5 && Math.abs(prof - pay) > 0.5 && <span className="text-slate-400"> · прибыль {fmt(prof)} ₽</span>}
+                                        <span className={`font-semibold ${prof < 0 ? 'text-rose-600' : 'text-emerald-700'}`}>Чистая прибыль {fmt(prof)} ₽</span>
                                       </div>
                                     );
                                   })()}
