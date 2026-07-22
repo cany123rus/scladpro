@@ -26686,29 +26686,25 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     {/* Диапазон дат — выбрать недельные отчёты, попадающие в период */}
                     {(() => {
                       const norm = (v: any) => v ? String(new Date(v).toISOString()).slice(0, 10) : '';
-                      const { from, to } = uploadedHistoryRange;
-                      const inRange = (uploadedHistory || []).filter((h: any) => {
+                      const day = uploadedHistoryRange.from;                        // выбранный день
+                      // Отчёты, чья неделя покрывает выбранный день.
+                      const covering = (uploadedHistory || []).filter((h: any) => {
                         const ps = norm(h?.summary_json?.period_start), pe = norm(h?.summary_json?.period_end);
-                        if (!ps || !pe) return false;
-                        return (!from || pe >= from) && (!to || ps <= to);
+                        if (!ps || !pe || !day) return false;
+                        return ps <= day && pe >= day;
                       });
                       return (
                         <>
                         <div className="mb-1 flex flex-wrap items-end gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2">
                           <div>
-                            <label className="block text-[11px] font-medium text-slate-500 mb-0.5">С даты</label>
-                            <input type="date" value={from} onChange={(e) => setUploadedHistoryRange((p) => ({ ...p, from: e.target.value }))} className="px-2 py-1.5 text-sm border border-slate-300 rounded-lg" />
+                            <label className="block text-[11px] font-medium text-slate-500 mb-0.5">Выбрать день</label>
+                            <input type="date" value={day} onChange={(e) => setUploadedHistoryRange({ from: e.target.value, to: e.target.value })} className="px-2 py-1.5 text-sm border border-slate-300 rounded-lg" />
                           </div>
-                          <div>
-                            <label className="block text-[11px] font-medium text-slate-500 mb-0.5">По дату</label>
-                            <input type="date" value={to} onChange={(e) => setUploadedHistoryRange((p) => ({ ...p, to: e.target.value }))} className="px-2 py-1.5 text-sm border border-slate-300 rounded-lg" />
-                          </div>
-                          <button type="button" disabled={!from && !to} onClick={() => { setUploadedHistorySelectedIds((prev) => { const next = { ...prev }; inRange.forEach((h: any) => { next[String(h.id)] = true; }); return next; }); }} className="px-3 py-1.5 text-xs font-semibold rounded-xl border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50">Отметить ({inRange.length})</button>
-                          <button type="button" disabled={inRange.length === 0} onClick={() => { openUploadedHistoryMonth(inRange as any[]); setUploadedHistoryPickerOpen(false); }} className="px-3 py-1.5 text-xs font-semibold rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50" title="Быстро: суммирует целые недельные отчёты, попадающие в период">Сводный (недели)</button>
-                          <button type="button" disabled={inRange.length === 0 || !from || !to} onClick={() => { buildDayRangeReport(inRange as any[], from, to); setUploadedHistoryPickerOpen(false); }} className="px-3 py-1.5 text-xs font-semibold rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50" title="Точно: пересчитывает из исходников только строки за выбранные дни">Точно по дням</button>
-                          {(from || to) && <button type="button" onClick={() => setUploadedHistoryRange({ from: '', to: '' })} className="px-2 py-1.5 text-xs text-slate-500 hover:text-slate-700">Сброс</button>}
+                          <button type="button" disabled={!day || covering.length === 0} onClick={() => { buildDayRangeReport(covering as any[], day, day); setUploadedHistoryPickerOpen(false); }} className="px-3 py-1.5 text-xs font-semibold rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50" title="Точный отчёт за этот день (пересчёт из исходника отчёта)">Отчёт за день</button>
+                          {day && covering.length === 0 && <span className="text-[11px] text-amber-600">Нет отчёта, покрывающего этот день</span>}
+                          {day && <button type="button" onClick={() => setUploadedHistoryRange({ from: '', to: '' })} className="px-2 py-1.5 text-xs text-slate-500 hover:text-slate-700">Сброс</button>}
                         </div>
-                        <div className="w-full text-[10px] text-slate-400 mb-3">«Точно по дням» перечитывает исходные отчёты из хранилища и берёт только продажи за выбранные дни (может занять время; складские/недельные удержания без даты в него не попадают).</div>
+                        <div className="w-full text-[10px] text-slate-400 mb-3">Отчёт за день собирается из исходного файла отчёта (только продажи за этот день). Работает для отчётов, загруженных с сохранённым исходником; складские/недельные удержания без даты в дневной срез не попадают.</div>
                         </>
                       );
                     })()}
@@ -26788,14 +26784,20 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                   )}
                                   {(() => {
                                     const s = h?.summary_json || {};
-                                    const pay = Number(s?.to_pay_total || 0);
-                                    const prof = Number(s?.profit_total || 0);
-                                    if (!pay && !prof) return null;
+                                    const num = (v: any) => Number(v || 0);
+                                    // Заработок = «К перечислению»; у старых отчётов поля нет — фолбэк на payout_net.
+                                    const hasPay = s?.to_pay_total != null || s?.payout_net != null;
+                                    const pay = s?.to_pay_total != null ? num(s.to_pay_total) : num(s.payout_net);
+                                    const prof = num(s?.profit_total);
+                                    const sales = num(s?.sales_net);
+                                    if (!hasPay && !sales) return null;
                                     const fmt = (v: number) => Math.round(v).toLocaleString('ru-RU');
                                     return (
                                       <div className="text-[11px] mt-0.5">
-                                        <span className={`font-semibold ${pay < 0 ? 'text-rose-600' : 'text-emerald-700'}`}>Заработок {fmt(pay)} ₽</span>
-                                        {Math.abs(prof) > 0.5 && Math.abs(prof - pay) > 0.5 && <span className="text-slate-400"> · прибыль {fmt(prof)} ₽</span>}
+                                        {hasPay
+                                          ? <span className={`font-semibold ${pay < 0 ? 'text-rose-600' : 'text-emerald-700'}`}>Заработок {fmt(pay)} ₽</span>
+                                          : <span className="font-semibold text-slate-500">Продажи {fmt(sales)} ₽</span>}
+                                        {hasPay && Math.abs(prof) > 0.5 && Math.abs(prof - pay) > 0.5 && <span className="text-slate-400"> · прибыль {fmt(prof)} ₽</span>}
                                       </div>
                                     );
                                   })()}
