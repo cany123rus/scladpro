@@ -16746,7 +16746,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       // полные данные подгружаются при открытии конкретного отчёта.
       let histQuery = supabase
         .from('analytics_upload_history')
-        .select('id, supplier_id, supplier_name, file_name, created_at, rn:summary_json->>report_number, ps:summary_json->>period_start, pe:summary_json->>period_end, tp:summary_json->>to_pay_total, pn:summary_json->>payout_net, pf:summary_json->>profit_total, sn:summary_json->>sales_net');
+        .select('id, supplier_id, supplier_name, file_name, created_at, rn:summary_json->>report_number, ps:summary_json->>period_start, pe:summary_json->>period_end, tp:summary_json->>to_pay_total, pn:summary_json->>payout_net, pf:summary_json->>profit_total, sn:summary_json->>sales_net, ls:summary_json->>logistics_sum, fn:summary_json->>fine_sum, st:summary_json->>storage_sum, wh:summary_json->>withhold_sum, cv:summary_json->>wb_commission_vat, ts:summary_json->>tax_sum');
       histQuery = supplierId === ANY_SUPPLIER_ID ? histQuery.is('supplier_id', null) : histQuery.eq('supplier_id', supplierId);
       const { data, error } = await histQuery
         .order('created_at', { ascending: false })
@@ -16759,7 +16759,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         supplier_name: row.supplier_name,
         file_name: row.file_name,
         created_at: row.created_at,
-        summary_json: { report_number: row.rn || null, period_start: row.ps || null, period_end: row.pe || null, to_pay_total: numOrNull(row.tp), payout_net: numOrNull(row.pn), profit_total: numOrNull(row.pf), sales_net: numOrNull(row.sn) },
+        summary_json: { report_number: row.rn || null, period_start: row.ps || null, period_end: row.pe || null, to_pay_total: numOrNull(row.tp), payout_net: numOrNull(row.pn), profit_total: numOrNull(row.pf), sales_net: numOrNull(row.sn), logistics_sum: numOrNull(row.ls), fine_sum: numOrNull(row.fn), storage_sum: numOrNull(row.st), withhold_sum: numOrNull(row.wh), wb_commission_vat: numOrNull(row.cv), tax_sum: numOrNull(row.ts) },
       }));
       const sorted = light.sort((a: any, b: any) => {
         const da = new Date(a?.summary_json?.period_start || a?.created_at || 0).getTime();
@@ -16773,6 +16773,38 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     } finally {
       setUploadedHistoryLoading(false);
     }
+  };
+
+  // Чистая прибыль отчёта в режиме ОСНО с НДС 22% (та же формула, что в hero открытого отчёта).
+  const reportProfitVat = (s: any): number => {
+    const num = (v: any) => Number(v || 0);
+    const sales = num(s?.sales_net), payout = num(s?.payout_net), toPay = num(s?.to_pay_total);
+    const logistics = num(s?.logistics_sum), fine = num(s?.fine_sum), storage = num(s?.storage_sum), withhold = num(s?.withhold_sum);
+    const taxSum = num(s?.tax_sum), profitBase = num(s?.profit_total);
+    // Восстанавливаем себестоимость из расчёта: costSum = К перечислению − налог − базовая прибыль.
+    const costSum = Math.max(0, toPay - taxSum - profitBase);
+    const VAT = 0.22, PT = 0.25, ex = (a: number) => (a * VAT) / (1 + VAT);
+    const commissionWB = sales - payout;
+    const commVatExact = num(s?.wb_commission_vat);
+    const commissionVat = Math.abs(commVatExact) > 0.005 ? commVatExact : ex(commissionWB);
+    const vatOut = ex(sales);
+    const vatIn = ex(costSum) + commissionVat + ex(logistics) + ex(withhold) + ex(storage);
+    const vatToPay = vatOut - vatIn;
+    const wbOtherFees = logistics + fine;
+    const baseCosts = costSum + withhold + storage;
+    const profitBeforeTax = payout - wbOtherFees - baseCosts - vatToPay;
+    const profitTax = Math.max(0, profitBeforeTax) * PT;
+    return payout - wbOtherFees - (baseCosts + vatToPay + profitTax);
+  };
+  // Прибыль для отображения: у «Любой поставщик» — с НДС 22% (ОСНО), иначе базовая profit_total.
+  const reportNetProfit = (h: any): number | null => {
+    const s = h?.summary_json || {};
+    const isAny = h?.supplier_id == null;
+    if (isAny) {
+      if (s?.payout_net == null && s?.to_pay_total == null) return s?.profit_total ?? null;
+      return reportProfitVat(s);
+    }
+    return s?.profit_total ?? null;
   };
 
   const recalcAnalyticsToPayWithoutAcquiring = (arr: any[]) => {
@@ -26763,10 +26795,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           <div className="flex items-center justify-between mb-2 gap-2">
                             <label className="flex items-center gap-2 text-sm font-semibold text-slate-800"><input type="checkbox" checked={(items as any[]).length > 0 && (items as any[]).every((h: any) => uploadedHistorySelectedIds[String(h.id)])} onChange={(e) => { const ch = e.target.checked; setUploadedHistorySelectedIds((prev) => { const next = { ...prev }; (items as any[]).forEach((h: any) => { next[String(h.id)] = ch; }); return next; }); }} />{uploadedHistoryMonthNames[month]}
                               {(() => {
-                                const withProfit = (items as any[]).filter((h: any) => h?.summary_json?.profit_total != null);
-                                if (!withProfit.length) return null;
-                                const total = withProfit.reduce((s: number, h: any) => s + Number(h.summary_json.profit_total || 0), 0);
-                                const partial = withProfit.length < (items as any[]).length;
+                                const vals = (items as any[]).map((h: any) => reportNetProfit(h)).filter((v: any) => v != null) as number[];
+                                if (!vals.length) return null;
+                                const total = vals.reduce((s: number, v: number) => s + v, 0);
+                                const partial = vals.length < (items as any[]).length;
                                 return <span className={`ml-1 text-xs font-bold ${total < 0 ? 'text-rose-600' : 'text-emerald-700'}`}>· {Math.round(total).toLocaleString('ru-RU')} ₽{partial ? '*' : ''}</span>;
                               })()}
                             </label>
@@ -26804,14 +26836,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                     <div className="text-[11px] text-indigo-600">Отчёт № {h.summary_json.report_number}</div>
                                   )}
                                   {(() => {
-                                    const s = h?.summary_json || {};
-                                    // Показываем только чистую прибыль отчёта.
-                                    if (s?.profit_total == null) return null;
-                                    const prof = Number(s.profit_total || 0);
+                                    const prof = reportNetProfit(h);
+                                    if (prof == null) return null;
+                                    const isAny = h?.supplier_id == null;
                                     const fmt = (v: number) => Math.round(v).toLocaleString('ru-RU');
                                     return (
                                       <div className="text-[11px] mt-0.5">
                                         <span className={`font-semibold ${prof < 0 ? 'text-rose-600' : 'text-emerald-700'}`}>Чистая прибыль {fmt(prof)} ₽</span>
+                                        {isAny && <span className="text-slate-400"> · НДС 22%</span>}
                                       </div>
                                     );
                                   })()}
