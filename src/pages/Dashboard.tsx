@@ -26761,7 +26761,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       {uploadedHistoryGrouped.map(([month, items]) => (
                         <div key={month} className="border border-slate-200 rounded-xl p-2 bg-slate-50">
                           <div className="flex items-center justify-between mb-2 gap-2">
-                            <label className="flex items-center gap-2 text-sm font-semibold text-slate-800"><input type="checkbox" checked={(items as any[]).length > 0 && (items as any[]).every((h: any) => uploadedHistorySelectedIds[String(h.id)])} onChange={(e) => { const ch = e.target.checked; setUploadedHistorySelectedIds((prev) => { const next = { ...prev }; (items as any[]).forEach((h: any) => { next[String(h.id)] = ch; }); return next; }); }} />{uploadedHistoryMonthNames[month]}</label>
+                            <label className="flex items-center gap-2 text-sm font-semibold text-slate-800"><input type="checkbox" checked={(items as any[]).length > 0 && (items as any[]).every((h: any) => uploadedHistorySelectedIds[String(h.id)])} onChange={(e) => { const ch = e.target.checked; setUploadedHistorySelectedIds((prev) => { const next = { ...prev }; (items as any[]).forEach((h: any) => { next[String(h.id)] = ch; }); return next; }); }} />{uploadedHistoryMonthNames[month]}
+                              {(() => {
+                                const withProfit = (items as any[]).filter((h: any) => h?.summary_json?.profit_total != null);
+                                if (!withProfit.length) return null;
+                                const total = withProfit.reduce((s: number, h: any) => s + Number(h.summary_json.profit_total || 0), 0);
+                                const partial = withProfit.length < (items as any[]).length;
+                                return <span className={`ml-1 text-xs font-bold ${total < 0 ? 'text-rose-600' : 'text-emerald-700'}`}>· {Math.round(total).toLocaleString('ru-RU')} ₽{partial ? '*' : ''}</span>;
+                              })()}
+                            </label>
                             <div className="flex items-center gap-2">
                               <button
                                 type="button"
