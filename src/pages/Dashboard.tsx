@@ -17167,6 +17167,50 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     showToast('Открыт объединённый отчёт за месяц', 'success');
   };
 
+  // Точный отчёт по КОНКРЕТНЫМ дням: перечитываем исходные строки отчётов из Storage
+  // и фильтруем по «Дата продажи» в диапазоне, затем считаем тем же движком, что и при загрузке.
+  const buildDayRangeReport = async (items: any[], fromYmd: string, toYmd: string) => {
+    if (!Array.isArray(items) || !items.length) return;
+    const parseAny = (v: any): Date | null => {
+      if (v == null || String(v).trim() === '') return null;
+      if (v instanceof Date && !Number.isNaN(v.getTime())) return v;
+      if (typeof v === 'number' && Number.isFinite(v)) { const dt = new Date(Date.UTC(1899, 11, 30).valueOf() + v * 86400000); return Number.isNaN(dt.getTime()) ? null : dt; }
+      const str = String(v).trim();
+      let m = str.match(/^(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{4})/); if (m) return new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]));
+      m = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/); if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+      const iso = new Date(str); return Number.isNaN(iso.getTime()) ? null : iso;
+    };
+    const toKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    try {
+      showToast('Собираю точный отчёт по дням…', 'info');
+      const allRows: any[] = [];
+      let missed = 0;
+      for (const it of items) {
+        let rows: any[] = [];
+        try { rows = await getRowsForRawItem(it); } catch { rows = []; }
+        if (Array.isArray(rows) && rows.length) allRows.push(...rows); else missed += 1;
+      }
+      if (!allRows.length) { showToast('Не удалось получить строки отчётов (исходники недоступны)', 'error'); return; }
+      const keys = Object.keys(allRows[0] || {});
+      const saleKeys = keys.filter((k) => { const n = String(k || '').toLowerCase().replace(/\s+/g, ' ').trim(); return n === 'дата продажи' || n.includes('дата продажи'); });
+      if (!saleKeys.length) { showToast('В исходниках нет столбца «Дата продажи» — по дням не собрать', 'error'); return; }
+      const filtered = allRows.filter((r) => {
+        for (const k of saleKeys) { const d = parseAny(r?.[k]); if (d) { const y = toKey(d); return (!fromYmd || y >= fromYmd) && (!toYmd || y <= toYmd); } }
+        return false;
+      });
+      if (!filtered.length) { showToast('За выбранные дни строк продаж нет', 'info'); return; }
+      const result = processUploadedWbReport(filtered, {});
+      if (result?.summary) {
+        setUploadedReportAnalytics(Array.isArray(result?.analytics) ? result.analytics : []);
+        setUploadedReportSummary({ ...result.summary, period_start: fromYmd || result.summary.period_start, period_end: toYmd || result.summary.period_end });
+        setUploadedDailySeries({});
+        setUploadedChartKey('');
+        setUploadedViewTab('table');
+        showToast(`Отчёт по дням ${fromYmd || '…'} — ${toYmd || '…'}: товаров ${(result.analytics || []).length}${missed ? `, без исходника ${missed}` : ''}`, missed ? 'warning' : 'success');
+      }
+    } catch (e: any) { console.error('buildDayRangeReport', e); showToast('Ошибка сборки по дням: ' + (e?.message || 'неизвестно'), 'error'); }
+  };
+
 
   const openUploadedHistorySelected = () => {
     const selected = (uploadedHistory || []).filter((h: any) => uploadedHistorySelectedIds[String(h.id)]);
@@ -26649,7 +26693,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         return (!from || pe >= from) && (!to || ps <= to);
                       });
                       return (
-                        <div className="mb-3 flex flex-wrap items-end gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2">
+                        <>
+                        <div className="mb-1 flex flex-wrap items-end gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2">
                           <div>
                             <label className="block text-[11px] font-medium text-slate-500 mb-0.5">С даты</label>
                             <input type="date" value={from} onChange={(e) => setUploadedHistoryRange((p) => ({ ...p, from: e.target.value }))} className="px-2 py-1.5 text-sm border border-slate-300 rounded-lg" />
@@ -26659,9 +26704,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             <input type="date" value={to} onChange={(e) => setUploadedHistoryRange((p) => ({ ...p, to: e.target.value }))} className="px-2 py-1.5 text-sm border border-slate-300 rounded-lg" />
                           </div>
                           <button type="button" disabled={!from && !to} onClick={() => { setUploadedHistorySelectedIds((prev) => { const next = { ...prev }; inRange.forEach((h: any) => { next[String(h.id)] = true; }); return next; }); }} className="px-3 py-1.5 text-xs font-semibold rounded-xl border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50">Отметить ({inRange.length})</button>
-                          <button type="button" disabled={inRange.length === 0} onClick={() => { openUploadedHistoryMonth(inRange as any[]); setUploadedHistoryPickerOpen(false); }} className="px-3 py-1.5 text-xs font-semibold rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50">Сводный отчёт за период</button>
+                          <button type="button" disabled={inRange.length === 0} onClick={() => { openUploadedHistoryMonth(inRange as any[]); setUploadedHistoryPickerOpen(false); }} className="px-3 py-1.5 text-xs font-semibold rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50" title="Быстро: суммирует целые недельные отчёты, попадающие в период">Сводный (недели)</button>
+                          <button type="button" disabled={inRange.length === 0 || !from || !to} onClick={() => { buildDayRangeReport(inRange as any[], from, to); setUploadedHistoryPickerOpen(false); }} className="px-3 py-1.5 text-xs font-semibold rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50" title="Точно: пересчитывает из исходников только строки за выбранные дни">Точно по дням</button>
                           {(from || to) && <button type="button" onClick={() => setUploadedHistoryRange({ from: '', to: '' })} className="px-2 py-1.5 text-xs text-slate-500 hover:text-slate-700">Сброс</button>}
                         </div>
+                        <div className="w-full text-[10px] text-slate-400 mb-3">«Точно по дням» перечитывает исходные отчёты из хранилища и берёт только продажи за выбранные дни (может занять время; складские/недельные удержания без даты в него не попадают).</div>
+                        </>
                       );
                     })()}
 
@@ -26738,6 +26786,19 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                   {h?.summary_json?.report_number && (
                                     <div className="text-[11px] text-indigo-600">Отчёт № {h.summary_json.report_number}</div>
                                   )}
+                                  {(() => {
+                                    const s = h?.summary_json || {};
+                                    const pay = Number(s?.to_pay_total || 0);
+                                    const prof = Number(s?.profit_total || 0);
+                                    if (!pay && !prof) return null;
+                                    const fmt = (v: number) => Math.round(v).toLocaleString('ru-RU');
+                                    return (
+                                      <div className="text-[11px] mt-0.5">
+                                        <span className={`font-semibold ${pay < 0 ? 'text-rose-600' : 'text-emerald-700'}`}>Заработок {fmt(pay)} ₽</span>
+                                        {Math.abs(prof) > 0.5 && Math.abs(prof - pay) > 0.5 && <span className="text-slate-400"> · прибыль {fmt(prof)} ₽</span>}
+                                      </div>
+                                    );
+                                  })()}
                                 </div>
                                 <div className="flex items-center gap-2">
                                   <button
