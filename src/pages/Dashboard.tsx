@@ -16746,19 +16746,20 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       // полные данные подгружаются при открытии конкретного отчёта.
       let histQuery = supabase
         .from('analytics_upload_history')
-        .select('id, supplier_id, supplier_name, file_name, created_at, rn:summary_json->>report_number, ps:summary_json->>period_start, pe:summary_json->>period_end');
+        .select('id, supplier_id, supplier_name, file_name, created_at, rn:summary_json->>report_number, ps:summary_json->>period_start, pe:summary_json->>period_end, tp:summary_json->>to_pay_total, pn:summary_json->>payout_net, pf:summary_json->>profit_total, sn:summary_json->>sales_net');
       histQuery = supplierId === ANY_SUPPLIER_ID ? histQuery.is('supplier_id', null) : histQuery.eq('supplier_id', supplierId);
       const { data, error } = await histQuery
         .order('created_at', { ascending: false })
         .limit(200);
       if (error) throw error;
+      const numOrNull = (v: any) => (v == null || v === '') ? null : Number(v);
       const light = (Array.isArray(data) ? data : []).map((row: any) => ({
         id: row.id,
         supplier_id: row.supplier_id,
         supplier_name: row.supplier_name,
         file_name: row.file_name,
         created_at: row.created_at,
-        summary_json: { report_number: row.rn || null, period_start: row.ps || null, period_end: row.pe || null },
+        summary_json: { report_number: row.rn || null, period_start: row.ps || null, period_end: row.pe || null, to_pay_total: numOrNull(row.tp), payout_net: numOrNull(row.pn), profit_total: numOrNull(row.pf), sales_net: numOrNull(row.sn) },
       }));
       const sorted = light.sort((a: any, b: any) => {
         const da = new Date(a?.summary_json?.period_start || a?.created_at || 0).getTime();
@@ -17183,11 +17184,23 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     const toKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     try {
       showToast('Собираю точный отчёт по дням…', 'info');
+      // Исходники лежат в таблице analytics_upload_reports_raw (source_file_path в её summary_json),
+      // а не в analytics_upload_history. Матчим по номеру отчёта.
+      const nums = Array.from(new Set(items.map((it: any) => String(it?.summary_json?.report_number || '').trim()).filter(Boolean)));
+      const rawByNum = new Map<string, any>();
+      if (nums.length) {
+        try {
+          const { data: rr } = await supabase.from('analytics_upload_reports_raw').select('id, report_number, summary_json').in('report_number', nums).limit(nums.length * 2);
+          (rr || []).forEach((r: any) => { const n = String(r?.report_number || '').trim(); if (n && !rawByNum.has(n)) rawByNum.set(n, r); });
+        } catch (e) { console.error('day report: raw lookup', e); }
+      }
       const allRows: any[] = [];
       let missed = 0;
       for (const it of items) {
+        const n = String(it?.summary_json?.report_number || '').trim();
+        const src = rawByNum.get(n) || it;
         let rows: any[] = [];
-        try { rows = await getRowsForRawItem(it); } catch { rows = []; }
+        try { rows = await getRowsForRawItem(src); } catch { rows = []; }
         if (Array.isArray(rows) && rows.length) allRows.push(...rows); else missed += 1;
       }
       if (!allRows.length) { showToast('Не удалось получить строки отчётов (исходники недоступны)', 'error'); return; }
