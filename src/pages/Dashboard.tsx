@@ -1186,6 +1186,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [uploadedVatMode, setUploadedVatMode] = useState<boolean>(() => {
     try { return localStorage.getItem('uploaded_vat_mode_v1') === '1'; } catch { return false; }
   });
+  // НДС с эквайринга к вычету (с 01.01.2026 эквайринг облагается НДС 22%, вычет разрешён).
+  const [uploadedAcquiringVat, setUploadedAcquiringVat] = useState<boolean>(() => {
+    try { return localStorage.getItem('uploaded_acquiring_vat_v1') === '1'; } catch { return false; }
+  });
   // База НДС задаётся отдельно для продаж и для себестоимости:
   // true — НДС уже В СУММЕ (выделяем ×22/122); false — начисляем СВЕРХУ (×22%).
   const [uploadedVatSalesIncluded, setUploadedVatSalesIncluded] = useState<boolean>(() => {
@@ -16746,7 +16750,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       // полные данные подгружаются при открытии конкретного отчёта.
       let histQuery = supabase
         .from('analytics_upload_history')
-        .select('id, supplier_id, supplier_name, file_name, created_at, rn:summary_json->>report_number, ps:summary_json->>period_start, pe:summary_json->>period_end, tp:summary_json->>to_pay_total, pn:summary_json->>payout_net, pf:summary_json->>profit_total, sn:summary_json->>sales_net, ls:summary_json->>logistics_sum, fn:summary_json->>fine_sum, st:summary_json->>storage_sum, wh:summary_json->>withhold_sum, cv:summary_json->>wb_commission_vat, ts:summary_json->>tax_sum, pfv:summary_json->>profit_total_vat, cs:summary_json->>cost_sum');
+        .select('id, supplier_id, supplier_name, file_name, created_at, rn:summary_json->>report_number, ps:summary_json->>period_start, pe:summary_json->>period_end, tp:summary_json->>to_pay_total, pn:summary_json->>payout_net, pf:summary_json->>profit_total, sn:summary_json->>sales_net, ls:summary_json->>logistics_sum, fn:summary_json->>fine_sum, st:summary_json->>storage_sum, wh:summary_json->>withhold_sum, cv:summary_json->>wb_commission_vat, ts:summary_json->>tax_sum, pfv:summary_json->>profit_total_vat, cs:summary_json->>cost_sum, aq:summary_json->>acquiring_sum');
       histQuery = supplierId === ANY_SUPPLIER_ID ? histQuery.is('supplier_id', null) : histQuery.eq('supplier_id', supplierId);
       const { data, error } = await histQuery
         .order('created_at', { ascending: false })
@@ -16759,7 +16763,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         supplier_name: row.supplier_name,
         file_name: row.file_name,
         created_at: row.created_at,
-        summary_json: { report_number: row.rn || null, period_start: row.ps || null, period_end: row.pe || null, to_pay_total: numOrNull(row.tp), payout_net: numOrNull(row.pn), profit_total: numOrNull(row.pf), sales_net: numOrNull(row.sn), logistics_sum: numOrNull(row.ls), fine_sum: numOrNull(row.fn), storage_sum: numOrNull(row.st), withhold_sum: numOrNull(row.wh), wb_commission_vat: numOrNull(row.cv), tax_sum: numOrNull(row.ts), profit_total_vat: numOrNull(row.pfv), cost_sum: numOrNull(row.cs) },
+        summary_json: { report_number: row.rn || null, period_start: row.ps || null, period_end: row.pe || null, to_pay_total: numOrNull(row.tp), payout_net: numOrNull(row.pn), profit_total: numOrNull(row.pf), sales_net: numOrNull(row.sn), logistics_sum: numOrNull(row.ls), fine_sum: numOrNull(row.fn), storage_sum: numOrNull(row.st), withhold_sum: numOrNull(row.wh), wb_commission_vat: numOrNull(row.cv), tax_sum: numOrNull(row.ts), profit_total_vat: numOrNull(row.pfv), cost_sum: numOrNull(row.cs), acquiring_sum: numOrNull(row.aq) },
       }));
       const sorted = light.sort((a: any, b: any) => {
         const da = new Date(a?.summary_json?.period_start || a?.created_at || 0).getTime();
@@ -16778,11 +16782,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   // Чистая прибыль отчёта в режиме ОСНО с НДС 22% (та же формула, что в hero открытого отчёта).
   // costSumOverride — актуальная себестоимость (Σ текущая_цена × продано); если не задан,
   // восстанавливаем зашитую при сохранении.
-  const reportProfitVat = (s: any, costSumOverride?: number | null): number => {
+  const reportProfitVat = (s: any, costSumOverride?: number | null, includeAcqVat?: boolean): number => {
     const num = (v: any) => Number(v || 0);
     const sales = num(s?.sales_net), payout = num(s?.payout_net), toPay = num(s?.to_pay_total);
     const logistics = num(s?.logistics_sum), fine = num(s?.fine_sum), storage = num(s?.storage_sum), withhold = num(s?.withhold_sum);
-    const taxSum = num(s?.tax_sum), profitBase = num(s?.profit_total);
+    const taxSum = num(s?.tax_sum), profitBase = num(s?.profit_total), acquiring = num(s?.acquiring_sum);
     // Себестоимость: актуальная (override) либо восстановленная (К перечислению − налог − базовая прибыль).
     const costSum = (costSumOverride != null) ? Math.max(0, costSumOverride) : Math.max(0, toPay - taxSum - profitBase);
     const VAT = 0.22, PT = 0.25, ex = (a: number) => (a * VAT) / (1 + VAT);
@@ -16790,7 +16794,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     const commVatExact = num(s?.wb_commission_vat);
     const commissionVat = Math.abs(commVatExact) > 0.005 ? commVatExact : ex(commissionWB);
     const vatOut = ex(sales);
-    const vatIn = ex(costSum) + commissionVat + ex(logistics) + ex(withhold) + ex(storage);
+    const vatIn = ex(costSum) + commissionVat + ex(logistics) + ex(withhold) + ex(storage) + (includeAcqVat ? ex(acquiring) : 0);
     const vatToPay = vatOut - vatIn;
     const wbOtherFees = logistics + fine;
     const baseCosts = costSum + withhold + storage;
@@ -16805,6 +16809,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     const s = h?.summary_json || {};
     const isAny = h?.supplier_id == null;
     if (isAny) {
+      // Если включён НДС с эквайринга — пересчитываем на лету от сохранённой себестоимости (cost_sum).
+      if (uploadedAcquiringVat) {
+        const cs = s?.cost_sum != null ? Number(s.cost_sum) : (uploadedHistoryLiveCost[String(h?.id || '')] ?? null);
+        if (s?.payout_net == null && s?.to_pay_total == null) return s?.profit_total ?? null;
+        return reportProfitVat(s, cs, true);
+      }
       // 1) сохранённая при загрузке VAT-прибыль (быстро); 2) построчная подгрузка; 3) восстановление.
       if (s?.profit_total_vat != null) return Number(s.profit_total_vat);
       if (s?.payout_net == null && s?.to_pay_total == null) return s?.profit_total ?? null;
@@ -16841,6 +16851,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     if (uploadedHistoryPickerOpen && (uploadedHistory || []).length) loadUploadedHistoryLiveCosts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uploadedHistoryPickerOpen, uploadedHistory, uploadedPersistedCostByCode]);
+
 
   // Пересчитывает и сохраняет VAT-прибыль всех загруженных отчётов по ТЕКУЩЕЙ себестоимости.
   const [recomputeProfitsBusy, setRecomputeProfitsBusy] = useState<string>('');
@@ -27664,9 +27675,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     // Если колонки в отчёте нет (старые записи) — выделяем из разрыва Продажи−Кперечислению.
                     const commissionVatExact = Number(sx.wb_commission_vat || 0);
                     const commissionVat = Math.abs(commissionVatExact) > 0.005 ? commissionVatExact : vatExtract(commissionWB);
+                    // Эквайринг с 2026 облагается НДС 22% — по галочке берём его НДС к вычету.
+                    const acquiringVatIn = (uploadedVatMode && uploadedAcquiringVat) ? vatExtract(Number(sx.acquiring_sum || 0)) : 0;
                     const vatInServices = uploadedVatMode
                       ? commissionVat + vatExtract(Number(sx.logistics_sum || 0))
-                        + vatExtract(Number(sx.withhold_sum || 0)) + vatExtract(Number(sx.storage_sum || 0))
+                        + vatExtract(Number(sx.withhold_sum || 0)) + vatExtract(Number(sx.storage_sum || 0)) + acquiringVatIn
                       : 0;
                     const vatIn = vatInGoods + vatInServices;
                     const vatToPay = vatOut - vatIn;                       // < 0 — к возмещению
@@ -27766,6 +27779,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                     <option value="on" className="text-slate-800">×22% сверху</option>
                                   </select>
                                 </div>
+                                <label className="flex items-center gap-2 cursor-pointer select-none" title="С 01.01.2026 эквайринг облагается НДС 22%. Берём его входной НДС к вычету (сам эквайринг уже в комиссии — повторно не вычитаем).">
+                                  <input
+                                    type="checkbox"
+                                    checked={uploadedAcquiringVat}
+                                    onChange={(e) => { const v = e.target.checked; setUploadedAcquiringVat(v); try { localStorage.setItem('uploaded_acquiring_vat_v1', v ? '1' : '0'); } catch {} }}
+                                    className="w-4 h-4 accent-indigo-500"
+                                  />
+                                  <span className="text-slate-400 text-xs">НДС с эквайринга к вычету</span>
+                                </label>
                               </>
                             )}
                             <div className="flex items-center gap-2">
