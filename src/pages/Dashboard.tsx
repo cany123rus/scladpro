@@ -16776,13 +16776,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   };
 
   // Чистая прибыль отчёта в режиме ОСНО с НДС 22% (та же формула, что в hero открытого отчёта).
-  const reportProfitVat = (s: any): number => {
+  // costSumOverride — актуальная себестоимость (Σ текущая_цена × продано); если не задан,
+  // восстанавливаем зашитую при сохранении.
+  const reportProfitVat = (s: any, costSumOverride?: number | null): number => {
     const num = (v: any) => Number(v || 0);
     const sales = num(s?.sales_net), payout = num(s?.payout_net), toPay = num(s?.to_pay_total);
     const logistics = num(s?.logistics_sum), fine = num(s?.fine_sum), storage = num(s?.storage_sum), withhold = num(s?.withhold_sum);
     const taxSum = num(s?.tax_sum), profitBase = num(s?.profit_total);
-    // Восстанавливаем себестоимость из расчёта: costSum = К перечислению − налог − базовая прибыль.
-    const costSum = Math.max(0, toPay - taxSum - profitBase);
+    // Себестоимость: актуальная (override) либо восстановленная (К перечислению − налог − базовая прибыль).
+    const costSum = (costSumOverride != null) ? Math.max(0, costSumOverride) : Math.max(0, toPay - taxSum - profitBase);
     const VAT = 0.22, PT = 0.25, ex = (a: number) => (a * VAT) / (1 + VAT);
     const commissionWB = sales - payout;
     const commVatExact = num(s?.wb_commission_vat);
@@ -16796,16 +16798,44 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     const profitTax = Math.max(0, profitBeforeTax) * PT;
     return payout - wbOtherFees - (baseCosts + vatToPay + profitTax);
   };
-  // Прибыль для отображения: у «Любой поставщик» — с НДС 22% (ОСНО), иначе базовая profit_total.
+  // Живая себестоимость по каждому отчёту (Σ текущая_цена × продано), подгружается для точной прибыли.
+  const [uploadedHistoryLiveCost, setUploadedHistoryLiveCost] = useState<Record<string, number>>({});
+  // Прибыль для отображения: у «Любой поставщик» — с НДС 22% (ОСНО) по актуальной себестоимости, иначе базовая.
   const reportNetProfit = (h: any): number | null => {
     const s = h?.summary_json || {};
     const isAny = h?.supplier_id == null;
     if (isAny) {
       if (s?.payout_net == null && s?.to_pay_total == null) return s?.profit_total ?? null;
-      return reportProfitVat(s);
+      const live = uploadedHistoryLiveCost[String(h?.id || '')];
+      return reportProfitVat(s, live != null ? live : null);
     }
     return s?.profit_total ?? null;
   };
+  // Подгружает построчные данные отчётов и считает актуальную себестоимость каждого (по текущим ценам).
+  const loadUploadedHistoryLiveCosts = async () => {
+    const ids = (uploadedHistory || []).map((h: any) => String(h?.id || '')).filter(Boolean);
+    if (!ids.length) return;
+    try {
+      const details = await fetchUploadedHistoryDetailsByIds(ids);
+      const map: Record<string, number> = {};
+      (details || []).forEach((d: any) => {
+        const arr = Array.isArray(d?.analytics_json) ? d.analytics_json : [];
+        let costSum = 0;
+        arr.forEach((x: any) => {
+          const code = String(x?.code || '').trim();
+          const sold = Number(x?.sold_qty || 0);
+          const cost = Number(uploadedPersistedCostByCode[code] || 0);
+          costSum += cost * sold;
+        });
+        map[String(d?.id || '')] = costSum;
+      });
+      setUploadedHistoryLiveCost(map);
+    } catch (e) { console.error('loadUploadedHistoryLiveCosts', e); }
+  };
+  useEffect(() => {
+    if (uploadedHistoryPickerOpen && (uploadedHistory || []).length) loadUploadedHistoryLiveCosts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uploadedHistoryPickerOpen, uploadedHistory, uploadedPersistedCostByCode]);
 
   const recalcAnalyticsToPayWithoutAcquiring = (arr: any[]) => {
     return (Array.isArray(arr) ? arr : []).map((x: any) => {
