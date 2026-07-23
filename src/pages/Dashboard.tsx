@@ -26274,7 +26274,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       <label className="block text-sm font-medium text-slate-700 mb-2">Поставщик для загружаемого отчёта</label>
                       <select
                         value={uploadedSelectedSupplierId}
-                        onChange={(e) => setUploadedSelectedSupplierId(e.target.value)}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setUploadedSelectedSupplierId(v);
+                          // «Любой поставщик» — это ОСНО с НДС 22%: включаем режим «с НДС»,
+                          // чтобы прибыль в отчёте/сводном совпадала со списком и месяцем.
+                          if (v === ANY_SUPPLIER_ID) { setUploadedVatMode(true); try { localStorage.setItem('uploaded_vat_mode_v1', '1'); } catch {} }
+                        }}
                         className="w-full md:w-[420px] px-3 py-2 border border-slate-300 rounded-lg bg-white"
                       >
                         <option value="">- Выберите поставщика -</option>
