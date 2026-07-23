@@ -16746,7 +16746,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       // полные данные подгружаются при открытии конкретного отчёта.
       let histQuery = supabase
         .from('analytics_upload_history')
-        .select('id, supplier_id, supplier_name, file_name, created_at, rn:summary_json->>report_number, ps:summary_json->>period_start, pe:summary_json->>period_end, tp:summary_json->>to_pay_total, pn:summary_json->>payout_net, pf:summary_json->>profit_total, sn:summary_json->>sales_net, ls:summary_json->>logistics_sum, fn:summary_json->>fine_sum, st:summary_json->>storage_sum, wh:summary_json->>withhold_sum, cv:summary_json->>wb_commission_vat, ts:summary_json->>tax_sum');
+        .select('id, supplier_id, supplier_name, file_name, created_at, rn:summary_json->>report_number, ps:summary_json->>period_start, pe:summary_json->>period_end, tp:summary_json->>to_pay_total, pn:summary_json->>payout_net, pf:summary_json->>profit_total, sn:summary_json->>sales_net, ls:summary_json->>logistics_sum, fn:summary_json->>fine_sum, st:summary_json->>storage_sum, wh:summary_json->>withhold_sum, cv:summary_json->>wb_commission_vat, ts:summary_json->>tax_sum, pfv:summary_json->>profit_total_vat, cs:summary_json->>cost_sum');
       histQuery = supplierId === ANY_SUPPLIER_ID ? histQuery.is('supplier_id', null) : histQuery.eq('supplier_id', supplierId);
       const { data, error } = await histQuery
         .order('created_at', { ascending: false })
@@ -16759,7 +16759,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         supplier_name: row.supplier_name,
         file_name: row.file_name,
         created_at: row.created_at,
-        summary_json: { report_number: row.rn || null, period_start: row.ps || null, period_end: row.pe || null, to_pay_total: numOrNull(row.tp), payout_net: numOrNull(row.pn), profit_total: numOrNull(row.pf), sales_net: numOrNull(row.sn), logistics_sum: numOrNull(row.ls), fine_sum: numOrNull(row.fn), storage_sum: numOrNull(row.st), withhold_sum: numOrNull(row.wh), wb_commission_vat: numOrNull(row.cv), tax_sum: numOrNull(row.ts) },
+        summary_json: { report_number: row.rn || null, period_start: row.ps || null, period_end: row.pe || null, to_pay_total: numOrNull(row.tp), payout_net: numOrNull(row.pn), profit_total: numOrNull(row.pf), sales_net: numOrNull(row.sn), logistics_sum: numOrNull(row.ls), fine_sum: numOrNull(row.fn), storage_sum: numOrNull(row.st), withhold_sum: numOrNull(row.wh), wb_commission_vat: numOrNull(row.cv), tax_sum: numOrNull(row.ts), profit_total_vat: numOrNull(row.pfv), cost_sum: numOrNull(row.cs) },
       }));
       const sorted = light.sort((a: any, b: any) => {
         const da = new Date(a?.summary_json?.period_start || a?.created_at || 0).getTime();
@@ -16805,6 +16805,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     const s = h?.summary_json || {};
     const isAny = h?.supplier_id == null;
     if (isAny) {
+      // 1) сохранённая при загрузке VAT-прибыль (быстро); 2) построчная подгрузка; 3) восстановление.
+      if (s?.profit_total_vat != null) return Number(s.profit_total_vat);
       if (s?.payout_net == null && s?.to_pay_total == null) return s?.profit_total ?? null;
       const live = uploadedHistoryLiveCost[String(h?.id || '')];
       return reportProfitVat(s, live != null ? live : null);
@@ -16813,7 +16815,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   };
   // Подгружает построчные данные отчётов и считает актуальную себестоимость каждого (по текущим ценам).
   const loadUploadedHistoryLiveCosts = async () => {
-    const ids = (uploadedHistory || []).map((h: any) => String(h?.id || '')).filter(Boolean);
+    // Грузим построчно только те отчёты, где нет сохранённой VAT-прибыли (старые записи).
+    const ids = (uploadedHistory || [])
+      .filter((h: any) => h?.supplier_id == null && h?.summary_json?.profit_total_vat == null)
+      .map((h: any) => String(h?.id || '')).filter(Boolean);
     if (!ids.length) return;
     try {
       const details = await fetchUploadedHistoryDetailsByIds(ids);
@@ -17453,7 +17458,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         byCountry: compactGeoArr(geoSrc.byCountry),
         dailyTotals: (Array.isArray(geoSrc.dailyTotals) ? geoSrc.dailyTotals : []).map((d: any) => ({ key: d?.key, sales_net: Number(d?.sales_net || 0), sold_qty: Number(d?.sold_qty || 0), ordered_qty: Number(d?.ordered_qty || 0), ordered_retail_sum: Number(d?.ordered_retail_sum || 0) })),
       } : null;
-      const summarySafe = { ...(summaryToSave || {}), geo_snapshot: geoSafe, analytics_truncated: analyticsTruncated, analytics_rows_saved: analyticsSafe.length, analytics_rows_original: Array.isArray(analyticsToSave) ? analyticsToSave.length : 0 } as any;
+      // Чистая прибыль с НДС 22% (ОСНО) по текущей себестоимости — сохраняем, чтобы список/месяц
+      // не пересчитывали построчно при каждом открытии.
+      const vatCostSum = (Array.isArray(analyticsToSave) ? analyticsToSave : []).reduce((acc: number, x: any) => {
+        const code = String(x?.code || '').trim();
+        return acc + Number(uploadedPersistedCostByCode[code] || 0) * Number(x?.sold_qty || 0);
+      }, 0);
+      const profitTotalVat = reportProfitVat(summaryToSave, vatCostSum);
+      const summarySafe = { ...(summaryToSave || {}), geo_snapshot: geoSafe, analytics_truncated: analyticsTruncated, analytics_rows_saved: analyticsSafe.length, analytics_rows_original: Array.isArray(analyticsToSave) ? analyticsToSave.length : 0, cost_sum: vatCostSum, profit_total_vat: profitTotalVat } as any;
 
       const payload = {
         supplier_id: supplierDbId,
