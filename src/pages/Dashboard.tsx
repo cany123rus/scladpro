@@ -16842,6 +16842,37 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uploadedHistoryPickerOpen, uploadedHistory, uploadedPersistedCostByCode]);
 
+  // Пересчитывает и сохраняет VAT-прибыль всех загруженных отчётов по ТЕКУЩЕЙ себестоимости.
+  const [recomputeProfitsBusy, setRecomputeProfitsBusy] = useState<string>('');
+  const recomputeUploadedProfits = async () => {
+    const items = (uploadedHistory || []).filter((h: any) => h?.supplier_id == null);
+    const ids = items.map((h: any) => String(h?.id || '')).filter(Boolean);
+    if (!ids.length) { showToast('Нет отчётов «Любой поставщик» в списке', 'info'); return; }
+    setRecomputeProfitsBusy('Пересчёт…');
+    try {
+      const chunk = 20;
+      let updated = 0;
+      for (let i = 0; i < ids.length; i += chunk) {
+        setRecomputeProfitsBusy(`Пересчёт ${Math.min(i + chunk, ids.length)}/${ids.length}…`);
+        const details = await fetchUploadedHistoryDetailsByIds(ids.slice(i, i + chunk));
+        for (const d of details || []) {
+          const s = d?.summary_json || {};
+          const arr = Array.isArray(d?.analytics_json) ? d.analytics_json : [];
+          let costSum = 0;
+          arr.forEach((x: any) => { const code = String(x?.code || '').trim(); costSum += Number(uploadedPersistedCostByCode[code] || 0) * Number(x?.sold_qty || 0); });
+          const pfv = reportProfitVat(s, costSum);
+          const merged = { ...s, cost_sum: costSum, profit_total_vat: pfv };
+          const { error } = await supabase.from('analytics_upload_history').update({ summary_json: merged }).eq('id', d.id);
+          if (!error) updated += 1;
+        }
+      }
+      showToast(`Прибыль пересчитана: ${updated} отчётов`, 'success');
+      setUploadedHistoryLiveCost({});
+      await loadUploadedReportHistory(uploadedSelectedSupplierId);
+    } catch (e) { console.error('recomputeUploadedProfits', e); showToast('Ошибка пересчёта прибыли', 'error'); }
+    finally { setRecomputeProfitsBusy(''); }
+  };
+
   const recalcAnalyticsToPayWithoutAcquiring = (arr: any[]) => {
     return (Array.isArray(arr) ? arr : []).map((x: any) => {
       const payoutFallback = Number(x?.payout_sales_sum || 0) - Number(x?.payout_returns_sum || 0);
@@ -26759,9 +26790,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
               {uploadedHistoryPickerOpen && (
                 <div className="fixed inset-0 z-[120] bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
                   <div className="w-full max-w-2xl bg-white rounded-2xl shadow-2xl border border-slate-200 p-4">
-                    <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center justify-between mb-3 gap-2">
                       <div className="text-base font-semibold text-slate-900">Отчёты</div>
-                      <button type="button" onClick={() => setUploadedHistoryPickerOpen(false)} className="px-3 py-1.5 text-xs font-medium rounded-xl border border-slate-200 bg-white hover:bg-slate-50 shadow-sm">Закрыть</button>
+                      <div className="flex items-center gap-2">
+                        {recomputeProfitsBusy && <span className="text-[11px] text-indigo-600 font-medium animate-pulse">{recomputeProfitsBusy}</span>}
+                        <button type="button" disabled={!!recomputeProfitsBusy} onClick={recomputeUploadedProfits} className="px-3 py-1.5 text-xs font-semibold rounded-xl border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 shadow-sm disabled:opacity-50" title="Пересчитать чистую прибыль (НДС 22%) по текущей себестоимости и сохранить">Пересчитать прибыль</button>
+                        <button type="button" onClick={() => setUploadedHistoryPickerOpen(false)} className="px-3 py-1.5 text-xs font-medium rounded-xl border border-slate-200 bg-white hover:bg-slate-50 shadow-sm">Закрыть</button>
+                      </div>
                     </div>
                     <div className="mb-3 flex flex-wrap items-center gap-2">
                       {uploadedHistoryYears.map((y) => (
