@@ -17268,6 +17268,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
   // Точный отчёт по КОНКРЕТНЫМ дням: перечитываем исходные строки отчётов из Storage
   // и фильтруем по «Дата продажи» в диапазоне, затем считаем тем же движком, что и при загрузке.
+  // Кэш распарсенных строк исходников по номеру отчёта и кэш готовых дневных отчётов — чтобы
+  // повторные открытия (другие дни той же недели / тот же день) были мгновенными.
+  const dayRowsCacheRef = useRef<Map<string, any[]>>(new Map());
+  const dayReportCacheRef = useRef<Map<string, { analytics: any[]; summary: any }>>(new Map());
   const buildDayRangeReport = async (items: any[], fromYmd: string, toYmd: string) => {
     if (!Array.isArray(items) || !items.length) return;
     const parseAny = (v: any): Date | null => {
@@ -17280,15 +17284,28 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       const iso = new Date(str); return Number.isNaN(iso.getTime()) ? null : iso;
     };
     const toKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    // Кэш готового дневного отчёта — тот же день/те же отчёты открываются мгновенно.
+    const nums = Array.from(new Set(items.map((it: any) => String(it?.summary_json?.report_number || '').trim()).filter(Boolean)));
+    const resultKey = `${nums.slice().sort().join(',')}|${fromYmd}|${toYmd}`;
+    const cached = dayReportCacheRef.current.get(resultKey);
+    if (cached) {
+      setUploadedReportAnalytics(cached.analytics);
+      setUploadedReportSummary(cached.summary);
+      setUploadedDailySeries({});
+      setUploadedChartKey('');
+      setUploadedViewTab('table');
+      showToast(`Отчёт за день ${fromYmd || '…'}${fromYmd !== toYmd ? ` — ${toYmd}` : ''} (из кэша)`, 'success');
+      return;
+    }
     try {
       showToast('Собираю точный отчёт по дням…', 'info');
-      // Исходники лежат в таблице analytics_upload_reports_raw (source_file_path в её summary_json),
-      // а не в analytics_upload_history. Матчим по номеру отчёта.
-      const nums = Array.from(new Set(items.map((it: any) => String(it?.summary_json?.report_number || '').trim()).filter(Boolean)));
+      // Строки исходников кэшируем по номеру отчёта — качаем/парсим xlsx только раз.
+      const rowsCache = dayRowsCacheRef.current;
+      const missingNums = nums.filter((n) => !rowsCache.has(n));
       const rawByNum = new Map<string, any>();
-      if (nums.length) {
+      if (missingNums.length) {
         try {
-          const { data: rr } = await supabase.from('analytics_upload_reports_raw').select('id, report_number, summary_json').in('report_number', nums).limit(nums.length * 2);
+          const { data: rr } = await supabase.from('analytics_upload_reports_raw').select('id, report_number, summary_json').in('report_number', missingNums).limit(missingNums.length * 2);
           (rr || []).forEach((r: any) => { const n = String(r?.report_number || '').trim(); if (n && !rawByNum.has(n)) rawByNum.set(n, r); });
         } catch (e) { console.error('day report: raw lookup', e); }
       }
@@ -17296,9 +17313,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       let missed = 0;
       for (const it of items) {
         const n = String(it?.summary_json?.report_number || '').trim();
-        const src = rawByNum.get(n) || it;
-        let rows: any[] = [];
-        try { rows = await getRowsForRawItem(src); } catch { rows = []; }
+        let rows = rowsCache.get(n);
+        if (!rows) {
+          const src = rawByNum.get(n) || it;
+          try { rows = await getRowsForRawItem(src); } catch { rows = []; }
+          if (Array.isArray(rows) && rows.length) rowsCache.set(n, rows);
+        }
         if (Array.isArray(rows) && rows.length) allRows.push(...rows); else missed += 1;
       }
       if (!allRows.length) { showToast('Не удалось получить строки отчётов (исходники недоступны)', 'error'); return; }
@@ -17312,12 +17332,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       if (!filtered.length) { showToast('За выбранные дни строк продаж нет', 'info'); return; }
       const result = processUploadedWbReport(filtered, {});
       if (result?.summary) {
-        setUploadedReportAnalytics(Array.isArray(result?.analytics) ? result.analytics : []);
-        setUploadedReportSummary({ ...result.summary, period_start: fromYmd || result.summary.period_start, period_end: toYmd || result.summary.period_end });
+        const analyticsOut = Array.isArray(result?.analytics) ? result.analytics : [];
+        const summaryOut = { ...result.summary, period_start: fromYmd || result.summary.period_start, period_end: toYmd || result.summary.period_end };
+        dayReportCacheRef.current.set(resultKey, { analytics: analyticsOut, summary: summaryOut });
+        setUploadedReportAnalytics(analyticsOut);
+        setUploadedReportSummary(summaryOut);
         setUploadedDailySeries({});
         setUploadedChartKey('');
         setUploadedViewTab('table');
-        showToast(`Отчёт по дням ${fromYmd || '…'} — ${toYmd || '…'}: товаров ${(result.analytics || []).length}${missed ? `, без исходника ${missed}` : ''}`, missed ? 'warning' : 'success');
+        showToast(`Отчёт по дням ${fromYmd || '…'} — ${toYmd || '…'}: товаров ${analyticsOut.length}${missed ? `, без исходника ${missed}` : ''}`, missed ? 'warning' : 'success');
       }
     } catch (e: any) { console.error('buildDayRangeReport', e); showToast('Ошибка сборки по дням: ' + (e?.message || 'неизвестно'), 'error'); }
   };
