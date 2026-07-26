@@ -279,6 +279,16 @@ const restoreDataMatrixGs = (raw: string) => {
   return `${head}${GS_SEPARATOR}${tail.slice(0, 6)}${GS_SEPARATOR}${tail.slice(6)}`;
 };
 
+/**
+ * Кодирует GS для ячейки Excel.
+ *
+ * Символ 29 в XML недопустим, и ExcelJS вырезает его, если положить в ячейку
+ * напрямую — файл уходил в WB без разделителей. Escape-форму `_x001D_` (ту же,
+ * что использует сам Excel) ExcelJS при записи разворачивает обратно в байт.
+ * Проверено чтением готового файла сторонней библиотекой.
+ */
+const encodeGsForExcel = (value: string) => String(value || '').split(GS_SEPARATOR).join('_x001D_');
+
 const normalizeScanStickerText = (raw: string) => String(raw || '')
   .replace(/[\r\n\t]+/g, ' ')
   .replace(/\s+/g, ' ')
@@ -2908,15 +2918,20 @@ export const WBSupplyManager = ({
         ws.addRow([
           String(row.orderId || ''),
           String(row.stickerText || '').replace(/_/g, ' '),
-          String(findFbsScanSavedEntry(row, savedMap)?.item?.honestSignCode || ''),
+          // GS обязателен для WB, но в ячейку он кладётся только через escape.
+          encodeGsForExcel(restoreDataMatrixGs(String(findFbsScanSavedEntry(row, savedMap)?.item?.honestSignCode || ''))),
         ]);
       });
       ws.columns = [
         { width: 18 },
         { width: 18 },
-        { width: 42 },
+        { width: 60 },
       ];
       ws.getRow(1).font = { bold: true } as any;
+
+      const restored = rowsWithKiz.filter((row) => restoreDataMatrixGs(
+        String(findFbsScanSavedEntry(row, savedMap)?.item?.honestSignCode || ''),
+      ).includes(GS_SEPARATOR)).length;
 
       const buffer = await wb.xlsx.writeBuffer();
       const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
@@ -2926,7 +2941,9 @@ export const WBSupplyManager = ({
       a.download = `scan-file-${String(activeSupplyId || 'supply')}.xlsx`;
       a.click();
       URL.revokeObjectURL(url);
-      setFbsScanNotice({ type: 'success', text: `Скан файл выгружен: ${rowsWithKiz.length} строк с заполненным КИЗ, данные по поставке полные (${completeness.totalRows}/${completeness.totalRows}).` });
+      setFbsScanNotice(restored === rowsWithKiz.length
+        ? { type: 'success', text: `Скан файл выгружен: ${rowsWithKiz.length} строк, GS-разделители проставлены во всех кодах. Файл не открывайте в Excel перед загрузкой — он вырежет разделители.` }
+        : { type: 'error', text: `Скан файл выгружен: ${rowsWithKiz.length} строк, но разделители удалось проставить только в ${restored}. Остальные коды имеют нестандартную структуру.` });
     } catch (e: any) {
       setFbsScanNotice({ type: 'error', text: e?.message || 'Не удалось скачать скан файл' });
     }
@@ -5571,19 +5588,19 @@ export const WBSupplyManager = ({
                   </button>
                   <button
                     type="button"
-                    onClick={downloadFbsScanResultCsv}
-                    title="CSV с GS-разделителями — этот файл принимает WB"
+                    onClick={downloadFbsScanResultExcel}
+                    title="Excel с GS-разделителями. Не открывайте его перед загрузкой — Excel вырежет разделители"
                     className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-emerald-400 bg-emerald-100 hover:bg-emerald-200 text-sm font-semibold text-emerald-800"
                   >
-                    <Download className="w-4 h-4" /> Скан файл для WB (CSV)
+                    <Download className="w-4 h-4" /> Скачать скан файл
                   </button>
                   <button
                     type="button"
-                    onClick={downloadFbsScanResultExcel}
-                    title="Excel для просмотра. Для загрузки в WB не годится: xlsx теряет GS-разделители"
+                    onClick={downloadFbsScanResultCsv}
+                    title="Запасной формат на случай, если WB не примет xlsx"
                     className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-sm font-medium text-slate-600"
                   >
-                    <Download className="w-4 h-4" /> Скан файл Excel
+                    <Download className="w-4 h-4" /> CSV
                   </button>
                   <label className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 cursor-pointer text-sm font-medium text-slate-700">
                     <Upload className="w-4 h-4" /> Загрузить файл поставки
