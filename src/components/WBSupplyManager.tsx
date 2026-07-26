@@ -249,6 +249,36 @@ const normalizeDataMatrixText = (raw: string) => {
   return value;
 };
 
+/** Разделитель GS1 (ASCII 29) — WB принимает КИЗ только с ним. */
+const GS_SEPARATOR = String.fromCharCode(29);
+
+/**
+ * Возвращает GS-разделители в код Честного знака.
+ *
+ * Сканер часто не передаёт символ 29, а normalizeDataMatrixText вырезает его
+ * намеренно — чтобы один и тот же код всегда сравнивался одинаково. Для WB
+ * разделители обязательны, поэтому их восстанавливаем перед выгрузкой.
+ *
+ * Хвост кода фиксирован: 91 + ключ проверки (4) + 92 + значение проверки (44),
+ * итого 52 символа. По нему однозначно видно, где кончается серийный номер,
+ * — угадывать длину серийника не нужно.
+ */
+const restoreDataMatrixGs = (raw: string) => {
+  const value = String(raw || '').trim().replace(/[]/g, '');
+  const TAIL = 52;
+  // 16 (01+GTIN) + 2 (AI 21) + минимум 1 знак серийника + хвост.
+  if (!value.startsWith('01') || value.length < 16 + 2 + 1 + TAIL) return value;
+
+  const head = value.slice(0, value.length - TAIL);
+  const tail = value.slice(value.length - TAIL);
+
+  // Форма не та — отдаём как есть: поставить разделитель наугад хуже, чем не поставить.
+  if (!head.slice(16).startsWith('21')) return value;
+  if (!tail.startsWith('91') || !tail.slice(6).startsWith('92')) return value;
+
+  return `${head}${GS_SEPARATOR}${tail.slice(0, 6)}${GS_SEPARATOR}${tail.slice(6)}`;
+};
+
 const normalizeScanStickerText = (raw: string) => String(raw || '')
   .replace(/[\r\n\t]+/g, ' ')
   .replace(/\s+/g, ' ')
@@ -2217,7 +2247,7 @@ export const WBSupplyManager = ({
 
   const sanitizeFbsScanRows = (rows: any[]): FbsSupplyScanOrderRow[] => {
     if (!Array.isArray(rows)) return [];
-    return rows.map((row: any) => {
+    return rows.map((row: any, index: number) => {
       const stickerDigits = normalizeStickerDigits(String(row?.stickerDigits || row?.stickerText || ''));
       const stickerText = getSafeStickerText({
         stickerDigits,
@@ -2225,9 +2255,16 @@ export const WBSupplyManager = ({
       });
       const rawStickerScanText = normalizeScanStickerText(String(row?.stickerScanText || ''));
       const stickerScanText = isGarbageStickerScanText(rawStickerScanText) ? '' : rawStickerScanText;
-      const orderId = String(row?.orderId || '').trim();
+      // «-» приходит из старых файлов и означает «номера нет». Как идентификатор
+      // он бесполезен и опасен: одинаков у всех строк поставки.
+      const rawOrderId = String(row?.orderId || '').trim();
+      const orderId = rawOrderId === '-' ? '' : rawOrderId;
+
+      const storageKey = normalizeFbsStorageKey({ stickerDigits, stickerScanText, orderId });
       const cleanRow: FbsSupplyScanOrderRow = {
-        storageKey: normalizeFbsStorageKey({ stickerDigits, stickerScanText, orderId }),
+        // Если опознать строку нечем, ключ должен остаться уникальным: иначе все
+        // такие строки делят одну запись скана и один скан «закрывает» всю поставку.
+        storageKey: storageKey === 'order:' ? `row:${index}` : storageKey,
         orderId,
         title: String(row?.title || '').trim(),
         article: String(row?.article || '').trim(),
@@ -2237,7 +2274,7 @@ export const WBSupplyManager = ({
         stickerScanText,
       };
       return cleanRow;
-    }).filter((row) => Boolean(row.orderId || row.stickerText || row.stickerScanText));
+    }).filter((row) => Boolean(row.orderId || row.stickerText || row.stickerScanText || row.article || row.title));
   };
 
   const parseFbsSupplyScanSheetMeta = (raw: any): FbsSupplyScanSheetMeta | null => {
@@ -2321,11 +2358,29 @@ export const WBSupplyManager = ({
     return null;
   };
 
+  /**
+   * Схлопывает только те строки, которые действительно об одном и том же товаре.
+   *
+   * Раньше ключом был голый orderId, а он мог прийти заглушкой «-» — тогда вся
+   * поставка сжималась в одну позицию. Теперь ключ составной, а строка без
+   * опознавательных признаков получает собственный ключ по номеру: потерять
+   * позицию из списка на сканирование хуже, чем показать возможный дубль.
+   */
   const getUniqueFbsScanRows = (rows: FbsSupplyScanOrderRow[]) => {
     const map = new Map<string, FbsSupplyScanOrderRow>();
-    sanitizeFbsScanRows(rows || []).forEach((row) => {
-      const key = String(row.orderId || '').trim() || getFbsScanRowMatchKey(row) || String(row.storageKey || '').trim();
-      if (key) map.set(key, row);
+    sanitizeFbsScanRows(rows || []).forEach((row, index) => {
+      const orderId = String(row.orderId || '').trim();
+      const sticker = normalizeStickerDigits(String(row.stickerDigits || ''));
+      const scan = normalizeScanStickerText(String(row.stickerScanText || ''));
+
+      const parts = [
+        orderId && orderId !== '-' ? `order:${orderId}` : '',
+        sticker ? `sticker:${sticker}` : '',
+        scan ? `scan:${scan}` : '',
+      ].filter(Boolean);
+
+      const key = parts.length ? parts.join('|') : `row:${index}:${row.article}:${row.size}`;
+      map.set(key, row);
     });
     return Array.from(map.values());
   };
@@ -2563,7 +2618,9 @@ export const WBSupplyManager = ({
         const fromApi = meta?.stickerDigits || '';
         const fromOrder = extractStickerLabel(o);
         const stickerDigits = normalizeStickerDigits(fromApi || fromOrder || localStickerById.get(orderIdNum) || '');
-        const orderId = String(o.id ?? o.orderId ?? o.order_id ?? '-');
+        // Заглушку «-» здесь ставить нельзя: она одинакова для всех строк,
+        // и дальше вся поставка схлопывается в одну позицию по общему ключу.
+        const orderId = String(o.id ?? o.orderId ?? o.order_id ?? '').trim();
         const stickerText = formatStickerDigits(stickerDigits);
         const stickerScanText = meta?.stickerScanText || extractAutoStickerScanText(o);
         return {
@@ -2634,8 +2691,20 @@ export const WBSupplyManager = ({
       if (source !== 'cache' && (apiRows.length || JSON.stringify(rows) !== JSON.stringify(getUniqueFbsScanRows(mergedRows))) && completeness.isFullyReady) {
         void saveFbsSupplyScanSheetRows(activeSupplyId, rows, selectedSupplierId, 'wb').catch(() => undefined);
       }
+      // Видно, что именно произошло: WB отдал мало строк или мы их схлопнули.
+      if (apiRows.length && rows.length < apiRows.length) {
+        console.warn('[WBSupplyManager] строки поставки схлопнулись при дедупликации', {
+          supplyId: activeSupplyId,
+          apiRows: apiRows.length,
+          mergedRows: mergedRows.length,
+          uniqueRows: rows.length,
+        });
+      }
+
       if (!rows.length) {
         setFbsScanNotice({ type: 'info', text: 'В поставке пока нет строк для сканирования. Попробую добирать их из WB автоматически, а пока можно скачать шаблон Excel по текущим данным.' });
+      } else if (apiRows.length > rows.length) {
+        setFbsScanNotice({ type: 'error', text: `WB отдал ${apiRows.length} заданий, а в списке осталось ${rows.length}: часть строк совпала по номеру задания и стикеру. Проверьте поставку — возможно, WB вернул неполные данные.` });
       } else if (!completeness.isFullyReady) {
         setFbsScanNotice({ type: 'error', text: `Поставка загружена не полностью: стикеров ${completeness.rowsWithSticker}/${completeness.totalRows}, «Стикер при считывании» ${completeness.rowsWithScanText}/${completeness.totalRows}. Частичный файл больше не будет скачиваться, пока WB не отдаст полный набор.` });
       } else if (source === 'cache') {
@@ -2742,6 +2811,69 @@ export const WBSupplyManager = ({
         : `Excel сформирован по актуальным данным WB: ${stats.totalRows} строк, стикеры ${completeness.rowsWithSticker}/${completeness.totalRows}, «Стикер при считывании» ${completeness.rowsWithScanText}/${completeness.totalRows}.` });
     } catch (e: any) {
       setFbsScanNotice({ type: 'error', text: e?.message || 'Не удалось скачать Excel по поставке' });
+    }
+  };
+
+  /**
+   * Скан-файл для загрузки в WB.
+   *
+   * Именно CSV, а не Excel: ExcelJS вырезает символ 29 при записи xlsx (XML его
+   * не допускает), поэтому из Excel-файла КИЗ уходит без GS-разделителей и WB
+   * отвечает «Нет GS-разделителя». В CSV разделитель остаётся байтом как есть.
+   */
+  const downloadFbsScanResultCsv = async () => {
+    if (!activeSupplyId) return;
+    try {
+      const [{ rows }, savedMap] = await Promise.all([
+        loadPreparedFbsScanRows(activeSupplyId, selectedSupplierId),
+        loadFbsSupplyScanMap(activeSupplyId, selectedSupplierId),
+      ]);
+      if (!rows.length) {
+        setFbsScanNotice({ type: 'error', text: 'Не удалось сформировать скан файл: в поставке нет строк.' });
+        return;
+      }
+      assertFbsScanRowsReadyForExport(rows, 'скан файл');
+      setFbsScanRows(rows);
+      setFbsScansBySticker(savedMap);
+
+      const rowsWithKiz = getUniqueFbsScanRows(rows).filter((row) => Boolean(findFbsScanSavedEntry(row, savedMap)?.item?.honestSignCode));
+      if (!rowsWithKiz.length) {
+        setFbsScanNotice({ type: 'error', text: 'Скан файл пока пустой: нет строк с заполненным КИЗ.' });
+        return;
+      }
+
+      const escapeCsv = (value: string) => {
+        const text = String(value ?? '');
+        return /[";\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+      };
+
+      let restored = 0;
+      const lines = [['№ задания', 'Стикер', 'КИЗ'].join(';')];
+      rowsWithKiz.forEach((row) => {
+        const rawCode = String(findFbsScanSavedEntry(row, savedMap)?.item?.honestSignCode || '');
+        const code = restoreDataMatrixGs(rawCode);
+        if (code.includes(GS_SEPARATOR)) restored += 1;
+        lines.push([
+          escapeCsv(String(row.orderId || '')),
+          escapeCsv(String(row.stickerText || '').replace(/_/g, ' ')),
+          escapeCsv(code),
+        ].join(';'));
+      });
+
+      // BOM — чтобы Excel открыл кириллицу правильно, если файл захотят посмотреть.
+      const blob = new Blob(['﻿' + lines.join('\r\n') + '\r\n'], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `scan-file-${String(activeSupplyId || 'supply')}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+
+      setFbsScanNotice(restored === rowsWithKiz.length
+        ? { type: 'success', text: `Скан файл для WB выгружен: ${rowsWithKiz.length} строк, GS-разделители восстановлены во всех кодах.` }
+        : { type: 'error', text: `Скан файл выгружен: ${rowsWithKiz.length} строк, но разделители удалось восстановить только в ${restored}. Остальные коды имеют нестандартную структуру — проверьте их вручную.` });
+    } catch (e: any) {
+      setFbsScanNotice({ type: 'error', text: e?.message || 'Не удалось скачать скан файл' });
     }
   };
 
@@ -5439,10 +5571,19 @@ export const WBSupplyManager = ({
                   </button>
                   <button
                     type="button"
-                    onClick={downloadFbsScanResultExcel}
-                    className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-sm font-medium text-emerald-700"
+                    onClick={downloadFbsScanResultCsv}
+                    title="CSV с GS-разделителями — этот файл принимает WB"
+                    className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-emerald-400 bg-emerald-100 hover:bg-emerald-200 text-sm font-semibold text-emerald-800"
                   >
-                    <Download className="w-4 h-4" /> Скачать скан файл
+                    <Download className="w-4 h-4" /> Скан файл для WB (CSV)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={downloadFbsScanResultExcel}
+                    title="Excel для просмотра. Для загрузки в WB не годится: xlsx теряет GS-разделители"
+                    className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-sm font-medium text-slate-600"
+                  >
+                    <Download className="w-4 h-4" /> Скан файл Excel
                   </button>
                   <label className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 cursor-pointer text-sm font-medium text-slate-700">
                     <Upload className="w-4 h-4" /> Загрузить файл поставки
