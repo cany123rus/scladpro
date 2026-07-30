@@ -1031,7 +1031,17 @@ export const WBSupplyManager = ({
 
         if (!res.ok) {
           const text = await res.text();
-          throw new Error(`WB API Error: ${res.status} ${text}`);
+          const err = new Error(`WB API Error: ${res.status} ${text}`);
+          (err as any).status = res.status;
+          /*
+           * Клиентские ошибки не лечатся повтором: 404 и 400 будут теми же и
+           * через секунду. Повторяем только сетевые сбои, 429 и 5xx — иначе на
+           * каждый мёртвый эндпоинт уходит по три запроса и две секунды ожидания.
+           */
+          if (res.status >= 400 && res.status < 500 && res.status !== 429 && res.status !== 408) {
+            throw Object.assign(err, { noRetry: true });
+          }
+          throw err;
         }
 
         if (res.status === 204) return {};
@@ -1041,12 +1051,18 @@ export const WBSupplyManager = ({
         clearTimeout(timeout);
         lastError = error;
 
+        if ((error as any)?.noRetry) break;
+
         if (attempt < 2) {
           await new Promise((resolve) => setTimeout(resolve, 700 * (attempt + 1)));
           continue;
         }
       }
     }
+
+    // Ответ WB отдаём как есть: «404 path not found» — это не проблема сети,
+    // и подменять его советом проверить VPN значит уводить от причины.
+    if ((lastError as any)?.noRetry) throw lastError;
 
     const msg = lastError instanceof Error ? lastError.message : String(lastError || 'Unknown network error');
     throw new Error(`Ошибка сети WB API (Failed to fetch): ${msg}. Проверьте интернет/VPN/доступ к marketplace-api.wildberries.ru`);
@@ -1678,6 +1694,9 @@ export const WBSupplyManager = ({
       }
   };
 
+  /** Жив ли персональный эндпоинт заказов поставки: WB его убрал, но проверяем сами. */
+  const directSupplyEndpointDeadRef = useRef(false);
+
   const fetchOrdersForSupply = async (supplyId: string, options?: { enrich?: boolean; fresh?: boolean }) => {
     const supply = supplies.find(s => s.id === supplyId);
     const dateFrom = supply
@@ -1773,17 +1792,29 @@ export const WBSupplyManager = ({
       return matched;
     };
 
-    // Try dedicated supply endpoint first for any supply id (including WB-GI-*)
+    /*
+     * Персональный эндпоинт поставки /api/v3/supplies/{id}/orders WB убрал —
+     * он отвечает 404 «path not found» (проверено 30.07.2026 на живом токене).
+     * Пробуем его один раз за сессию: если пути нет, дальше идём сразу списком
+     * заказов, а не тратим запрос на каждую поставку.
+     */
     let supplyOrders: any[] = [];
     let directCount = 0;
-    try {
-      const direct = await wbFetch(withFresh(`https://marketplace-api.wildberries.ru/api/v3/supplies/${supplyId}/orders`));
-      if (Array.isArray(direct?.orders)) {
-        directCount = direct.orders.length;
-        supplyOrders = direct.orders.map(normalizeSupplyOrder);
+    if (!directSupplyEndpointDeadRef.current) {
+      try {
+        const direct = await wbFetch(withFresh(`https://marketplace-api.wildberries.ru/api/v3/supplies/${supplyId}/orders`));
+        if (Array.isArray(direct?.orders)) {
+          directCount = direct.orders.length;
+          supplyOrders = direct.orders.map(normalizeSupplyOrder);
+        }
+      } catch (e) {
+        if ((e as any)?.status === 404) {
+          directSupplyEndpointDeadRef.current = true;
+          console.warn('[WBSupplyManager] WB убрал /supplies/{id}/orders (404) — работаем через список заказов');
+        } else {
+          console.warn('Direct supply orders endpoint failed, fallback to /orders list');
+        }
       }
-    } catch (e) {
-      console.warn('Direct supply orders endpoint failed, fallback to /orders list');
     }
 
     // If endpoint returned sparse items (missing nmId/title/article), enrich by fallback list and merge
@@ -2646,8 +2677,13 @@ export const WBSupplyManager = ({
       }));
   };
 
-  const loadPreparedFbsScanRows = async (supplyId: string, supplierId?: string, options?: { forceRefresh?: boolean }) => {
+  const loadPreparedFbsScanRows = async (
+    supplyId: string,
+    supplierId?: string,
+    options?: { forceRefresh?: boolean; ignoreCache?: boolean },
+  ) => {
     const forceRefresh = Boolean(options?.forceRefresh);
+    const ignoreCache = Boolean(options?.ignoreCache);
     const [sheetRows, sheetMeta] = await Promise.all([
       loadFbsSupplyScanSheetRows(supplyId, supplierId),
       loadFbsSupplyScanSheetMeta(supplyId, supplierId),
@@ -2655,7 +2691,8 @@ export const WBSupplyManager = ({
 
     const cachedCompleteness = getFbsScanCompletenessStats(sheetRows);
     const canUseCachedSheet = Boolean(
-      sheetRows.length
+      !ignoreCache
+      && sheetRows.length
       && sheetMeta?.isFullyReady
       && cachedCompleteness.isFullyReady
       && sheetMeta.totalRows === cachedCompleteness.totalRows
@@ -2668,9 +2705,22 @@ export const WBSupplyManager = ({
         return { rows: sheetRows, sheetRows, apiRows: [] as FbsSupplyScanOrderRow[], mergedRows: sheetRows, sheetMeta, source: 'cache' as const };
       }
 
+      /*
+       * Сверяем кеш с WB по количеству заказов. Поставка живёт: её собрали из
+       * шести заказов, а к отгрузке в ней стало пятьдесят семь. Без этой сверки
+       * экран сканирования показывал старую шестёрку и человек уезжал с
+       * недособранной поставкой.
+       */
       const freshCount = await getFreshSupplyOrdersCount(supplyId);
       if (freshCount > 0 && freshCount === cachedCompleteness.totalRows) {
         return { rows: sheetRows, sheetRows, apiRows: [] as FbsSupplyScanOrderRow[], mergedRows: sheetRows, sheetMeta, source: 'cache' as const, freshCount };
+      }
+      if (freshCount > 0) {
+        console.warn('[WBSupplyManager] кеш поставки устарел', {
+          supplyId,
+          cached: cachedCompleteness.totalRows,
+          wb: freshCount,
+        });
       }
     }
 
@@ -2691,8 +2741,10 @@ export const WBSupplyManager = ({
     setFbsPendingStickerRow(null);
     setFbsScanNotice(null);
     try {
+      // forceRefresh: сверяем сохранённый лист с WB по количеству заказов.
+      // Это один запрос, а цена ошибки — недособранная поставка.
       const [{ rows, sheetRows, apiRows, mergedRows, sheetMeta, source }, savedMap] = await Promise.all([
-        loadPreparedFbsScanRows(activeSupplyId, selectedSupplierId),
+        loadPreparedFbsScanRows(activeSupplyId, selectedSupplierId, { forceRefresh: true }),
         loadFbsSupplyScanMap(activeSupplyId, selectedSupplierId),
       ]);
       setFbsScanRows(rows);
@@ -2727,6 +2779,68 @@ export const WBSupplyManager = ({
       }
     } catch (e: any) {
       setFbsScanNotice({ type: 'error', text: e?.message || 'Ошибка загрузки данных для сканирования ЧЗ' });
+    } finally {
+      setFbsScanLoading(false);
+    }
+  };
+
+  /**
+   * Перезабрать состав поставки из WB, минуя сохранённый лист.
+   *
+   * Нужна отдельной кнопкой: поставка пополняется после того, как лист уже
+   * сохранён, и человеку надо иметь способ обновить его в момент сборки, не
+   * закрывая экран и не гадая, свежие данные перед ним или нет.
+   */
+  const refreshFbsScanRowsFromWb = async () => {
+    if (!activeSupplyId) return;
+    const before = fbsScanRows.length;
+    setFbsScanLoading(true);
+    setFbsScanNotice({ type: 'info', text: 'Забираю состав поставки из WB…' });
+    try {
+      const [{ rows, apiRows }, savedMap] = await Promise.all([
+        loadPreparedFbsScanRows(activeSupplyId, selectedSupplierId, { ignoreCache: true }),
+        loadFbsSupplyScanMap(activeSupplyId, selectedSupplierId),
+      ]);
+
+      if (!rows.length) {
+        setFbsScanNotice({ type: 'error', text: 'WB не отдал ни одного заказа по этой поставке. Проверьте, что поставка не закрыта.' });
+        return;
+      }
+
+      setFbsScanRows(rows);
+      setFbsScansBySticker(savedMap);
+
+      const completeness = getFbsScanCompletenessStats(rows);
+      // Сохраняем только полный набор: недособранный лист затёр бы прежний.
+      if (completeness.isFullyReady) {
+        await saveFbsSupplyScanSheetRows(activeSupplyId, rows, selectedSupplierId, 'wb').catch(() => undefined);
+      }
+
+      const added = rows.length - before;
+      const scanned = Object.keys(savedMap || {}).length;
+      if (!completeness.isFullyReady) {
+        setFbsScanNotice({
+          type: 'error',
+          text: `WB отдал ${rows.length} заданий, но не по всем есть стикер: ${completeness.rowsWithSticker}/${completeness.totalRows}. Список обновлён, но файл до полного набора не собрать — повторите обновление позже.`,
+        });
+      } else if (added > 0) {
+        setFbsScanNotice({
+          type: 'success',
+          text: `Обновлено: было ${before} заданий, стало ${rows.length} (+${added}). Отсканировано ${scanned} — сканы сохранились.`,
+        });
+      } else if (added < 0) {
+        setFbsScanNotice({
+          type: 'success',
+          text: `Обновлено: было ${before} заданий, стало ${rows.length} — часть заказов из поставки убрали.`,
+        });
+      } else {
+        setFbsScanNotice({
+          type: 'success',
+          text: `Данные актуальны: ${rows.length} заданий, изменений в WB нет.${apiRows.length ? '' : ' Список взят из сохранённого листа.'}`,
+        });
+      }
+    } catch (e: any) {
+      setFbsScanNotice({ type: 'error', text: e?.message || 'Не удалось обновить состав поставки из WB' });
     } finally {
       setFbsScanLoading(false);
     }
@@ -5579,6 +5693,17 @@ export const WBSupplyManager = ({
                   )}
                 </div>
                 <div className="flex flex-wrap gap-2">
+                  {/* Первой кнопкой: поставку пополняют во время сборки, и
+                      обновление состава нужнее любой выгрузки. */}
+                  <button
+                    type="button"
+                    onClick={refreshFbsScanRowsFromWb}
+                    disabled={fbsScanLoading}
+                    title="Забрать актуальный состав поставки из WB. Отсканированные ЧЗ сохранятся"
+                    className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-blue-400 bg-blue-100 hover:bg-blue-200 disabled:opacity-50 text-sm font-semibold text-blue-800"
+                  >
+                    <RefreshCw className={`w-4 h-4 ${fbsScanLoading ? 'animate-spin' : ''}`} /> Обновить данные
+                  </button>
                   <button
                     type="button"
                     onClick={downloadFbsScanTemplateExcel}
