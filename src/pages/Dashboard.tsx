@@ -14424,12 +14424,20 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       const authToken = createPermanentAuthToken();
       const qrData = `AUTH:${authToken}`;
 
-      const { data, error } = await supabase
+      /*
+       * Пароль ставим ВТОРЫМ шагом, а не в той же вставке.
+       *
+       * Триггер хэширования срабатывает BEFORE INSERT и пишет в
+       * employee_credentials ссылку на сотрудника, которого ещё нет, — внешний
+       * ключ такую вставку отклоняет («violates foreign key constraint
+       * employee_credentials_employee_id_fkey»). При обновлении строка уже
+       * существует, и хэш ложится нормально.
+       */
+      const { data: created, error } = await supabase
         .from('employees')
         .upsert([{
           full_name: newEmployee.fullName,
           login: normalizedLogin,
-          password: normalizedPassword,
           telegram_chat_id: newEmployee.chatId,
           role: newEmployee.role,
           qr_code: qrData,
@@ -14442,6 +14450,21 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         .single();
 
       if (error) throw error;
+
+      const { data: withPassword, error: passwordError } = await supabase
+        .from('employees')
+        .update({ password: normalizedPassword })
+        .eq('id', created.id)
+        .select()
+        .single();
+
+      // Без пароля запись бесполезна: логин занят, а войти нельзя.
+      if (passwordError) {
+        await supabase.from('employees').delete().eq('id', created.id);
+        throw new Error(`пароль не сохранился, сотрудник не создан: ${passwordError.message}`);
+      }
+
+      const data = withPassword;
 
       await logEmployeeChange('create', null, data);
       await generateAndSendQR(data, true, normalizedPassword);
