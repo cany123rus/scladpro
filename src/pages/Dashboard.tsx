@@ -37,6 +37,7 @@ const Tasks = lazyNamed(() => import('../components/Tasks'), 'Tasks', 'tasks-cmp
 const WarehouseTab = lazyNamed(() => import('../components/WarehouseTab'), 'WarehouseTab', 'warehouse');
 const AdvertisingInsights = lazyNamed(() => import('../components/AdvertisingInsights'), 'AdvertisingInsights', 'adv');
 const CamerasTab = lazyNamed(() => import('../components/CamerasTab'), 'CamerasTab', 'cameras');
+const FbsSearch = lazyNamed(() => import('../components/FbsSearch'), 'FbsSearch', 'fbssearch');
 const AdminPanel = lazyNamed(() => import('./AdminPanel'), 'AdminPanel', 'adminpanel');
 const InstructionTab = lazyNamed(() => import('./InstructionTab'), 'InstructionTab', 'instruction');
 const SalesMap = React.lazy(() => import('../components/SalesMap'));
@@ -11796,6 +11797,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       products: true,
       wb_products: true,
       fbs: true,
+      fbs_search: true,
       supplies: true,
       reception: true,
       suppliers: true,
@@ -11834,6 +11836,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         { id: 'warehouse', label: 'Склад' },
         { id: 'cameras', label: 'Камеры' },
         { id: 'fbs', label: 'Поставки FBS' },
+        { id: 'fbs_search', label: 'Поиск ФБС' },
         { id: 'supplies', label: 'Поставки FBO' },
         { id: 'suppliers', label: 'Поставщики' },
       ]
@@ -19486,6 +19489,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     { id: 'map', icon: MapIcon, label: 'Конструктор этикеток' },
     { id: 'wb_products', icon: ShoppingBag, label: 'Товары WB' },
     { id: 'fbs', icon: Truck, label: 'Поставки FBS' },
+    { id: 'fbs_search', icon: Search, label: 'Поиск ФБС' },
     { id: 'supplies', icon: Truck, label: 'Поставки FBO' },
     { id: 'orders', icon: ShoppingCart, label: 'Заказ товара' },
     { id: 'reception', icon: ClipboardCheck, label: 'Приемка товара' },
@@ -22770,6 +22774,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 handleEditShelfItem={handleEditShelfItem}
                 handleDeleteShelfItem={handleDeleteShelfItem}
               />
+            </React.Suspense>
+          )}
+
+          {/* FBS SEARCH TAB */}
+          {activeTab === 'fbs_search' && (
+            <React.Suspense fallback={<SectionSkeleton />}>
+              <FbsSearch currentEmployee={currentEmployee} showToast={showToast} />
             </React.Suspense>
           )}
 

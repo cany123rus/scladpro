@@ -5,6 +5,7 @@ export const DASHBOARD_TAB_IDS = [
   'map',
   'wb_products',
   'fbs',
+  'fbs_search',
   'supplies',
   'orders',
   'reception',
