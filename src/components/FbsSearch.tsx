@@ -1,7 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Search, Upload, Trash2, Package, Download, RefreshCw, ClipboardList } from 'lucide-react';
+import { Search, Upload, Trash2, Package, Download, RefreshCw, ClipboardList, ScanLine, RotateCcw } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { planPicking } from '../utils/boxPicking';
+import {
+  encodeGsForExcel,
+  normalizeDataMatrixText,
+  restoreDataMatrixGs,
+  stickerKey,
+} from '../utils/honestSign';
 
 /**
  * Поиск ФБС — где лежит товар из загруженной сюда поставки.
@@ -19,6 +25,17 @@ import { planPicking } from '../utils/boxPicking';
 /** Ключ хранения. Как и паллеты FBO, лежим снимком в app_settings. */
 const STORE_KEY = 'fbs_search_supplies_v1';
 const PICK_KEY = 'fbs_search_pickings_v1';
+const SCAN_KEY = 'fbs_search_scans_v1';
+
+/** Отсканированный ЧЗ: ключ — лист подбора и номер задания. */
+interface ScanRecord {
+  pickingId: string;
+  task: string;
+  sticker: string;
+  code: string;
+  at: string;
+  by: string;
+}
 
 interface ScanRow {
   barcode: string;
@@ -133,6 +150,20 @@ export function FbsSearch({
   const [products, setProducts] = useState<Record<string, ProductInfo>>({});
   const fileRef = useRef<HTMLInputElement>(null);
 
+  /*
+   * Скан ЧЗ в два шага, как в разделе поставок FBS: сначала стикер — он
+   * находит задание, потом код Честного знака. Наоборот нельзя: по ЧЗ не
+   * понять, к какому именно заданию он относится, когда в листе десять
+   * одинаковых товаров.
+   */
+  const [scans, setScans] = useState<ScanRecord[]>([]);
+  const [scanOn, setScanOn] = useState(false);
+  const [scanStep, setScanStep] = useState<'sticker' | 'code'>('sticker');
+  const [pendingTask, setPendingTask] = useState<PickTask | null>(null);
+  const [scanValue, setScanValue] = useState('');
+  const [scanNote, setScanNote] = useState<{ kind: 'ok' | 'err' | 'info'; text: string } | null>(null);
+  const scanRef = useRef<HTMLInputElement>(null);
+
   const readKey = async <T,>(key: string): Promise<T[]> => {
     const { data, error } = await supabase.from('app_settings').select('value').eq('key', key).maybeSingle();
     if (error) throw error;
@@ -144,9 +175,14 @@ export function FbsSearch({
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [s, p] = await Promise.all([readKey<ScanSupply>(STORE_KEY), readKey<PickingList>(PICK_KEY)]);
+      const [s, p, sc] = await Promise.all([
+        readKey<ScanSupply>(STORE_KEY),
+        readKey<PickingList>(PICK_KEY),
+        readKey<ScanRecord>(SCAN_KEY),
+      ]);
       setSupplies(s);
       setPickings(p);
+      setScans(sc);
       setActivePick((cur) => cur ?? p[0]?.id ?? null);
     } catch (e: any) {
       showToast(`Не удалось загрузить: ${e?.message || e}`, 'error');
@@ -320,11 +356,177 @@ export function FbsSearch({
     }
   }
 
+  const saveScans = useCallback(async (next: ScanRecord[]) => {
+    const { error } = await supabase
+      .from('app_settings')
+      .upsert({ key: SCAN_KEY, value: next }, { onConflict: 'key' });
+    if (error) throw new Error(error.message);
+    setScans(next);
+  }, []);
+
+  /** Сканы активного листа: задание → запись. */
+  const scanByTask = useMemo(() => {
+    const map = new Map<string, ScanRecord>();
+    for (const s of scans) if (s.pickingId === activePick) map.set(s.task, s);
+    return map;
+  }, [scans, activePick]);
+
+  /**
+   * Обработка одного «выстрела» сканера.
+   *
+   * Сканер шлёт строку и Enter, поэтому вся логика висит на отправке формы:
+   * никаких кнопок в процессе — руки заняты товаром.
+   */
+  async function handleScan(raw: string) {
+    const value = raw.trim();
+    if (!value) return;
+
+    const list = pickings.find((p) => p.id === activePick);
+    if (!list) {
+      setScanNote({ kind: 'err', text: 'Сначала выберите лист подбора' });
+      return;
+    }
+
+    if (scanStep === 'sticker') {
+      const key = stickerKey(value);
+      const found = list.tasks.find((t) => stickerKey(t.sticker) === key)
+        // Часть сканеров отдаёт номер задания, а не стикер — принимаем и его.
+        ?? list.tasks.find((t) => t.task === value);
+
+      if (!found) {
+        setScanNote({ kind: 'err', text: `Стикер ${value} в этом листе не найден` });
+        setScanValue('');
+        return;
+      }
+
+      const already = scanByTask.get(found.task);
+      if (already) {
+        setScanNote({
+          kind: 'err',
+          text: `Задание ${found.task} уже отсканировано (${new Date(already.at).toLocaleTimeString('ru-RU')}). Сбросьте, если нужно переснять.`,
+        });
+        setScanValue('');
+        return;
+      }
+
+      setPendingTask(found);
+      setScanStep('code');
+      setScanValue('');
+      setScanNote({ kind: 'info', text: `Задание ${found.task}: ${found.name || found.barcode}. Теперь сканируйте ЧЗ.` });
+      return;
+    }
+
+    if (!pendingTask) {
+      setScanStep('sticker');
+      return;
+    }
+
+    const code = normalizeDataMatrixText(value);
+    if (!code) {
+      setScanNote({ kind: 'err', text: 'Пустой код ЧЗ' });
+      return;
+    }
+
+    /*
+     * Один и тот же ЧЗ на двух заданиях — это отгрузка одного кода дважды.
+     * WB такой файл примет, а маркировка потом не сойдётся, поэтому ловим
+     * здесь: по всем листам подбора этого раздела, а не только по текущему.
+     */
+    const dup = scans.find((s) => s.code === code);
+    if (dup) {
+      const where = pickings.find((p) => p.id === dup.pickingId)?.name ?? 'другой лист';
+      setScanNote({ kind: 'err', text: `Этот ЧЗ уже отсканирован: задание ${dup.task}, ${where}. Скан отменён.` });
+      setScanValue('');
+      return;
+    }
+
+    try {
+      await saveScans([
+        ...scans,
+        {
+          pickingId: list.id,
+          task: pendingTask.task,
+          sticker: pendingTask.sticker,
+          code,
+          at: new Date().toISOString(),
+          by: norm(currentEmployee?.full_name) || 'Сотрудник',
+        },
+      ]);
+      setScanNote({ kind: 'ok', text: `ЧЗ принят для задания ${pendingTask.task}` });
+    } catch (e: any) {
+      setScanNote({ kind: 'err', text: `Не сохранилось: ${e?.message || e}` });
+      return;
+    } finally {
+      setScanValue('');
+    }
+
+    setPendingTask(null);
+    setScanStep('sticker');
+  }
+
+  async function resetScan(task: string) {
+    try {
+      await saveScans(scans.filter((s) => !(s.pickingId === activePick && s.task === task)));
+      setScanNote({ kind: 'info', text: `Задание ${task} сброшено, можно сканировать заново` });
+    } catch (e: any) {
+      showToast(`Не удалось сбросить: ${e?.message || e}`, 'error');
+    }
+  }
+
+  /**
+   * Скан-файл для WB: № задания, стикер, КИЗ.
+   *
+   * Пишем через ExcelJS и с восстановленными GS-разделителями — как в разделе
+   * поставок FBS. Библиотека xlsx для этого не годится: символ 29 в XML
+   * недопустим, и файл уходит в WB без разделителей.
+   */
+  async function exportScanFile() {
+    const list = pickings.find((p) => p.id === activePick);
+    if (!list) return;
+
+    const rows = list.tasks
+      .map((t) => ({ task: t, scan: scanByTask.get(t.task) }))
+      .filter((r) => r.scan);
+
+    if (rows.length === 0) {
+      showToast('Пока нечего выгружать: ни одного ЧЗ не отсканировано', 'error');
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const ExcelJS = (await import('exceljs')).default;
+      const book = new ExcelJS.Workbook();
+      const ws = book.addWorksheet('Scan');
+      ws.addRow(['№ задания', 'Стикер', 'КИЗ']);
+      for (const r of rows) {
+        ws.addRow([r.task.task, r.task.sticker, encodeGsForExcel(restoreDataMatrixGs(r.scan!.code))]);
+      }
+      ws.columns = [{ width: 16 }, { width: 18 }, { width: 90 }];
+
+      const buffer = await book.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `scan-file-${list.name}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      showToast(`Скан-файл: ${rows.length} строк`, 'success');
+    } catch (e: any) {
+      showToast(`Не удалось собрать файл: ${e?.message || e}`, 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function removePicking(id: string) {
     setBusy(true);
     try {
       const next = pickings.filter((p) => p.id !== id);
       await savePickings(next);
+      // Сканы уходят вместе с листом: иначе они живут вечно и мешают дедупу.
+      const keptScans = scans.filter((s) => s.pickingId !== id);
+      if (keptScans.length !== scans.length) await saveScans(keptScans);
       if (activePick === id) setActivePick(next[0]?.id ?? null);
       showToast('Лист подбора убран', 'success');
     } catch (e: any) {
@@ -630,6 +832,81 @@ export function FbsSearch({
                   Коробки подобраны так, чтобы вскрыть их как можно меньше. Ищем только по{' '}
                   {activeId === 'all' ? 'всем загруженным поставкам' : 'выбранной поставке'}.
                 </p>
+
+                <div className="flex flex-wrap items-center gap-2 mt-3 pt-3 border-t border-slate-100 dark:border-slate-800">
+                  <span className="text-sm">
+                    ЧЗ отсканировано{' '}
+                    <b className={scanByTask.size === picking.list.tasks.length ? 'text-emerald-600' : 'text-slate-800 dark:text-slate-100'}>
+                      {scanByTask.size}
+                    </b>
+                    <span className="text-slate-500"> из {picking.list.tasks.length}</span>
+                  </span>
+                  <button
+                    type="button"
+                    className={scanOn ? 'btn-danger' : 'btn-primary'}
+                    onClick={() => {
+                      const next = !scanOn;
+                      setScanOn(next);
+                      setScanStep('sticker');
+                      setPendingTask(null);
+                      setScanValue('');
+                      setScanNote(next ? { kind: 'info', text: 'Сканируйте стикер задания' } : null);
+                      if (next) setTimeout(() => scanRef.current?.focus(), 50);
+                    }}
+                  >
+                    <ScanLine className="w-4 h-4" /> {scanOn ? 'Закончить скан' : 'Скан ЧЗ'}
+                  </button>
+                  <button type="button" className="btn-ghost" onClick={() => void exportScanFile()} disabled={busy || scanByTask.size === 0}>
+                    <Download className="w-4 h-4" /> Скан-файл для WB
+                  </button>
+                </div>
+
+                {scanOn ? (
+                  <div className="mt-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 p-3">
+                    <div className="text-sm font-semibold mb-1.5">
+                      {scanStep === 'sticker' ? 'Шаг 1. Сканируйте стикер' : `Шаг 2. Сканируйте ЧЗ — задание ${pendingTask?.task}`}
+                    </div>
+                    <form
+                      onSubmit={(e) => { e.preventDefault(); void handleScan(scanValue); }}
+                      className="flex flex-wrap items-center gap-2"
+                    >
+                      <input
+                        ref={scanRef}
+                        className="oc-input flex-1 min-w-[260px] font-mono"
+                        value={scanValue}
+                        onChange={(e) => setScanValue(e.target.value)}
+                        placeholder={scanStep === 'sticker' ? 'Стикер или № задания' : 'Код Честного знака'}
+                        autoFocus
+                      />
+                      <button type="submit" className="btn-primary">
+                        {scanStep === 'sticker' ? 'Найти задание' : 'Сохранить ЧЗ'}
+                      </button>
+                      {scanStep === 'code' ? (
+                        <button
+                          type="button"
+                          className="btn-ghost"
+                          onClick={() => {
+                            setPendingTask(null);
+                            setScanStep('sticker');
+                            setScanValue('');
+                            setScanNote({ kind: 'info', text: 'Отменено, сканируйте стикер' });
+                          }}
+                        >
+                          <RotateCcw className="w-4 h-4" /> Отмена
+                        </button>
+                      ) : null}
+                    </form>
+                    {scanNote ? (
+                      <div
+                        className={`mt-2 text-sm ${
+                          scanNote.kind === 'ok' ? 'text-emerald-600' : scanNote.kind === 'err' ? 'text-rose-600' : 'text-slate-500'
+                        }`}
+                      >
+                        {scanNote.text}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
 
               <div className="oc-card overflow-hidden">
@@ -641,6 +918,7 @@ export function FbsSearch({
                         <th className="p-3 text-left font-medium">Товар</th>
                         <th className="p-3 text-left font-medium w-32">Стикер</th>
                         <th className="p-3 text-left font-medium w-40">Коробка</th>
+                        <th className="p-3 text-left font-medium w-44">ЧЗ</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -674,6 +952,30 @@ export function FbsSearch({
                                 нет в поставке
                               </span>
                             )}
+                          </td>
+                          <td className="p-3">
+                            {(() => {
+                              const scan = scanByTask.get(task.task);
+                              if (!scan) return <span className="text-xs text-slate-400">не отсканирован</span>;
+                              return (
+                                <div className="flex items-center gap-2">
+                                  <span
+                                    className="px-2 py-0.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 text-xs font-mono"
+                                    title={scan.code}
+                                  >
+                                    …{scan.code.slice(-8)}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => void resetScan(task.task)}
+                                    title={`Сбросить ЧЗ · ${scan.by}, ${new Date(scan.at).toLocaleString('ru-RU')}`}
+                                    className="text-slate-400 hover:text-rose-600"
+                                  >
+                                    <RotateCcw className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              );
+                            })()}
                           </td>
                         </tr>
                       ))}

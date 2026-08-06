@@ -30,6 +30,13 @@ import html2canvas from 'html2canvas';
 import bwipjs from 'bwip-js';
 import ExcelJS from 'exceljs/dist/exceljs.min.js';
 import { supabase } from '../lib/supabase';
+import {
+  GS_SEPARATOR,
+  encodeGsForExcel,
+  normalizeDataMatrixText,
+  normalizeScanStickerText,
+  restoreDataMatrixGs,
+} from '../utils/honestSign';
 
 // --- Types ---
 
@@ -236,64 +243,10 @@ const formatStickerDigits = (digits: string) => {
   return `${clean.slice(0, -4)}_${clean.slice(-4)}`;
 };
 
-const normalizeDataMatrixText = (raw: string) => {
-  let value = String(raw || '').trim();
-  value = value.replace(/[\u001d\u001e\u001f]/g, '');
-  if (value.startsWith('01') && value.length > 18) {
-    const gtinPart = value.slice(0, 16);
-    const tail = value.slice(16);
-    if (!tail.startsWith('21')) {
-      value = `${gtinPart}21${tail}`;
-    }
-  }
-  return value;
-};
-
-/** Разделитель GS1 (ASCII 29) — WB принимает КИЗ только с ним. */
-const GS_SEPARATOR = String.fromCharCode(29);
-
-/**
- * Возвращает GS-разделители в код Честного знака.
- *
- * Сканер часто не передаёт символ 29, а normalizeDataMatrixText вырезает его
- * намеренно — чтобы один и тот же код всегда сравнивался одинаково. Для WB
- * разделители обязательны, поэтому их восстанавливаем перед выгрузкой.
- *
- * Хвост кода фиксирован: 91 + ключ проверки (4) + 92 + значение проверки (44),
- * итого 52 символа. По нему однозначно видно, где кончается серийный номер,
- * — угадывать длину серийника не нужно.
+/*
+ * Функции Честного знака живут в src/utils/honestSign.ts: тем же кодом
+ * сканирует раздел «Поиск ФБС». Две копии разъехались бы на первой правке.
  */
-const restoreDataMatrixGs = (raw: string) => {
-  const value = String(raw || '').trim().replace(/[]/g, '');
-  const TAIL = 52;
-  // 16 (01+GTIN) + 2 (AI 21) + минимум 1 знак серийника + хвост.
-  if (!value.startsWith('01') || value.length < 16 + 2 + 1 + TAIL) return value;
-
-  const head = value.slice(0, value.length - TAIL);
-  const tail = value.slice(value.length - TAIL);
-
-  // Форма не та — отдаём как есть: поставить разделитель наугад хуже, чем не поставить.
-  if (!head.slice(16).startsWith('21')) return value;
-  if (!tail.startsWith('91') || !tail.slice(6).startsWith('92')) return value;
-
-  return `${head}${GS_SEPARATOR}${tail.slice(0, 6)}${GS_SEPARATOR}${tail.slice(6)}`;
-};
-
-/**
- * Кодирует GS для ячейки Excel.
- *
- * Символ 29 в XML недопустим, и ExcelJS вырезает его, если положить в ячейку
- * напрямую — файл уходил в WB без разделителей. Escape-форму `_x001D_` (ту же,
- * что использует сам Excel) ExcelJS при записи разворачивает обратно в байт.
- * Проверено чтением готового файла сторонней библиотекой.
- */
-const encodeGsForExcel = (value: string) => String(value || '').split(GS_SEPARATOR).join('_x001D_');
-
-const normalizeScanStickerText = (raw: string) => String(raw || '')
-  .replace(/[\r\n\t]+/g, ' ')
-  .replace(/\s+/g, ' ')
-  .trim();
-
 const normalizeScannedStickerLookupText = (raw: string) => normalizeScanStickerText(raw)
   .replace(/^\][A-Za-z0-9]{2}/, '')
   .trim();
