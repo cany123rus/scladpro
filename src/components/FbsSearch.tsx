@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Search, Upload, Trash2, Package, Download, RefreshCw, ClipboardList, ScanLine, RotateCcw, FileDown } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { planPicking } from '../utils/boxPicking';
+import { compareSizes } from '../utils/sizeOrder';
+import { loadPhotoDataUrls } from '../utils/productPhotos';
 import { ensureExcel, ensurePdfLibs, lazyLibs } from '../pages/dashboardLazyLibs';
 import {
   encodeGsForExcel,
@@ -86,7 +88,7 @@ type NomenclatureMap = Record<string, number>;
 const norm = (v: unknown) => String(v ?? '').trim();
 
 /**
- * Сортировка коробок по убыванию.
+ * Сортировка коробок по возрастанию.
  *
  * Адреса вида WB_1553573331 отличаются только хвостом, и обычная строковая
  * сортировка ставит …9 после …10. Сравниваем по числу в конце, а при равенстве
@@ -94,9 +96,9 @@ const norm = (v: unknown) => String(v ?? '').trim();
  */
 const boxNumber = (box: string) => {
   const m = String(box).match(/(\d+)\s*$/);
-  return m ? Number(m[1]) : -1;
+  return m ? Number(m[1]) : Number.MAX_SAFE_INTEGER;
 };
-const byBoxDesc = (a: string, b: string) => boxNumber(b) - boxNumber(a) || b.localeCompare(a, 'ru');
+const byBoxAsc = (a: string, b: string) => boxNumber(a) - boxNumber(b) || a.localeCompare(b, 'ru');
 
 /**
  * Колонки терминала бывают в разном написании — ищем по смыслу.
@@ -166,6 +168,7 @@ export function FbsSearch({
   const [mode, setMode] = useState<'stock' | 'picking'>('stock');
   const [products, setProducts] = useState<Record<string, ProductInfo>>({});
   const [nomenclature, setNomenclature] = useState<NomenclatureMap>({});
+  const [photoByBarcode, setPhotoByBarcode] = useState<Record<string, string>>({});
   /*
    * Два входа вместо одного.
    *
@@ -285,24 +288,48 @@ export function FbsSearch({
 
     let cancelled = false;
     (async () => {
-      const { data, error } = await supabase
-        .from('wb_products_cache')
-        .select('nm_id, product_json')
-        .limit(20000);
-      if (error || cancelled) return;
-
+      /*
+       * Страницами по тысяче.
+       *
+       * PostgREST режет ответ на 1000 строк независимо от .limit() — молча.
+       * Из-за этого в кэш попадала половина карточек (1000 из 2111), и у
+       * половины товаров номенклатура оказывалась пустой. Читаем через
+       * .range(), пока страница приходит полной.
+       */
+      const PAGE = 1000;
       const map: NomenclatureMap = {};
-      for (const row of (data ?? []) as any[]) {
-        const nmId = Number(row?.nm_id);
-        if (!nmId) continue;
-        for (const size of row?.product_json?.sizes ?? []) {
-          for (const sku of size?.skus ?? []) {
-            const code = norm(sku);
-            if (code) map[code] = nmId;
+      const photos: Record<string, string> = {};
+
+      for (let from = 0; from < 50_000; from += PAGE) {
+        const { data, error } = await supabase
+          .from('wb_products_cache')
+          .select('nm_id, product_json')
+          .range(from, from + PAGE - 1);
+        if (error || cancelled) return;
+
+        const rows = (data ?? []) as any[];
+        for (const row of rows) {
+          const nmId = Number(row?.nm_id);
+          if (!nmId) continue;
+          const photo = row?.product_json?.photos?.[0];
+          const url = norm(photo?.big || photo?.c516x688 || photo?.c246x328 || photo?.tm || photo?.small);
+          for (const size of row?.product_json?.sizes ?? []) {
+            for (const sku of size?.skus ?? []) {
+              const code = norm(sku);
+              if (!code) continue;
+              map[code] = nmId;
+              if (url) photos[code] = url;
+            }
           }
         }
+
+        if (rows.length < PAGE) break;
       }
-      if (!cancelled) setNomenclature(map);
+
+      if (!cancelled) {
+        setNomenclature(map);
+        setPhotoByBarcode(photos);
+      }
     })();
 
     return () => { cancelled = true; };
@@ -627,28 +654,44 @@ export function FbsSearch({
         // Без сети останемся на встроенном шрифте: латиница и цифры читаются.
       }
 
-      // Сортируем по коробке (по убыванию), внутри коробки — по названию.
+      /*
+       * Порядок обхода: коробка → артикул → размер.
+       *
+       * Внутри коробки все штуки одного артикула должны идти подряд, а размеры
+       * — по возрастанию: сборщик берёт пачку одинаковых, а не ищет один и тот
+       * же товар в трёх местах листа. Ненайденные позиции уходят в конец.
+       */
       const rows = [...picking.rows].sort((a, b) => {
         const boxA = a.plan.from[0]?.box ?? '';
         const boxB = b.plan.from[0]?.box ?? '';
         if (boxA !== boxB) {
           if (!boxA) return 1;
           if (!boxB) return -1;
-          return byBoxDesc(boxA, boxB);
+          return byBoxAsc(boxA, boxB);
         }
-        return (a.task.name || '').localeCompare(b.task.name || '', 'ru');
+
+        const artA = a.task.article || a.task.name || '';
+        const artB = b.task.article || b.task.name || '';
+        if (artA !== artB) return artA.localeCompare(artB, 'ru');
+
+        return compareSizes(a.task.size, b.task.size);
       });
+
+      // Фото — по одному на артикул, поэтому качаем уникальные и переиспользуем.
+      const photoUrls = [...new Set(rows.map((r) => photoByBarcode[r.task.barcode]).filter(Boolean))];
+      const photoData = photoUrls.length > 0 ? await loadPhotoDataUrls(photoUrls) : new Map<string, string>();
 
       const body = rows.map((r) => [
         r.plan.from.map((f) => f.box).join(', ') || 'нет в поставке',
-        String(nomenclature[r.task.barcode] ?? '—'),
-        r.task.name || '—',
-        r.task.size || '—',
-        r.task.color || '—',
-        r.task.article || '—',
+        photoData.get(photoByBarcode[r.task.barcode] ?? '') ?? '',
+        String(nomenclature[r.task.barcode] ?? ''),
+        r.task.name || '',
+        r.task.size || '',
+        r.task.color || '',
+        r.task.article || '',
         r.task.barcode,
         r.task.task,
-        r.task.sticker || '—',
+        r.task.sticker || '',
         scanByTask.get(r.task.task) ? 'да' : '',
       ]);
 
@@ -659,7 +702,7 @@ export function FbsSearch({
         `Дата: ${new Date().toLocaleDateString('ru-RU')} · заданий ${picking.plan.totalNeed}`
           + ` · нашлось ${picking.plan.totalPicked}`
           + (picking.plan.totalMissing ? ` · нет в поставке ${picking.plan.totalMissing}` : '')
-          + ` · коробок ${picking.boxesDesc.length}`,
+          + ` · коробок ${picking.boxesAsc.length}`,
         14,
         20,
       );
@@ -671,31 +714,47 @@ export function FbsSearch({
 
       (autoTable as any)(doc, {
         startY: 30,
-        head: [['Коробка', 'Номенкл.', 'Наименование', 'Размер', 'Цвет', 'Артикул', 'Баркод', '№ задания', 'Стикер', 'ЧЗ']],
+        head: [['Коробка', 'Фото', 'Номенкл.', 'Наименование', 'Размер', 'Цвет', 'Артикул', 'Баркод', '№ задания', 'Стикер', 'ЧЗ']],
         body,
+        /*
+         * Roboto во ВСЕХ колонках.
+         *
+         * Раньше цифровые поля печатались встроенным helvetica «для ровности»,
+         * и любой не-латинский символ в них превращался в кашу — так побился
+         * текст у бейсболки. Кириллицы во встроенных шрифтах jsPDF нет вовсе.
+         */
         styles: { fontSize: 8, cellPadding: 1.6, valign: 'middle', font: 'Roboto' },
         headStyles: { font: 'Roboto', fontStyle: 'normal', fillColor: [79, 70, 229] },
         bodyStyles: { font: 'Roboto', fontStyle: 'normal' },
         rowPageBreak: 'avoid',
         columnStyles: {
-          0: { cellWidth: 32, fontStyle: 'bold' },
-          1: { cellWidth: 22 },
-          2: { cellWidth: 78 },
-          3: { cellWidth: 16, halign: 'center' },
-          4: { cellWidth: 18, halign: 'center' },
-          5: { cellWidth: 30 },
-          6: { cellWidth: 26 },
-          7: { cellWidth: 24 },
-          8: { cellWidth: 24 },
-          9: { cellWidth: 10, halign: 'center' },
+          0: { cellWidth: 30, fontStyle: 'bold' },
+          1: { cellWidth: 22, minCellHeight: 28 },
+          2: { cellWidth: 20 },
+          3: { cellWidth: 62 },
+          4: { cellWidth: 16, halign: 'center' },
+          5: { cellWidth: 18, halign: 'center' },
+          6: { cellWidth: 28 },
+          7: { cellWidth: 25 },
+          8: { cellWidth: 22 },
+          9: { cellWidth: 22 },
+          10: { cellWidth: 10, halign: 'center' },
         },
         didParseCell: (data: any) => {
-          // Цифровые поля печатаем базовым шрифтом: он ровнее и уже.
-          if (data.section === 'body' && [1, 6, 7, 8].includes(data.column.index)) {
-            data.cell.styles.font = 'helvetica';
-          }
+          // В ячейке фото лежит data-URL: как текст его печатать нельзя.
+          if (data.column.index === 1 && data.section === 'body') data.cell.text = [];
           if (data.section === 'body' && data.column.index === 0 && String(data.cell.raw) === 'нет в поставке') {
             data.cell.styles.textColor = [190, 30, 60];
+          }
+        },
+        didDrawCell: (data: any) => {
+          if (data.column.index !== 1 || data.cell.section !== 'body') return;
+          const img = data.cell.raw;
+          if (!img) return;
+          try {
+            doc.addImage(img, 'JPEG', data.cell.x + 1.5, data.cell.y + 1.5, 19, 25);
+          } catch {
+            // Одна не вставшая картинка не должна ронять весь лист.
           }
         },
       });
@@ -767,7 +826,7 @@ export function FbsSearch({
       barcode,
       total: v.total,
       // Коробки — по убыванию номера: так их и обходят на складе.
-      boxes: [...v.boxes].sort((a, b) => byBoxDesc(a[0], b[0])),
+      boxes: [...v.boxes].sort((a, b) => byBoxAsc(a[0], b[0])),
       supplies: [...v.supplies],
       info: products[barcode],
     }));
@@ -814,10 +873,28 @@ export function FbsSearch({
       list.tasks.map((t) => ({ barcode: t.barcode, qty: 1, name: t.name, article: t.article })),
     );
 
-    const rows = list.tasks.map((t, i) => ({ task: t, plan: plan.lines[i]! }));
+    /*
+     * На экране тот же порядок, что и в PDF: коробка → артикул → размер.
+     * Иначе сборщик, сверяясь с листом, каждый раз ищет строку заново.
+     */
+    const rows = list.tasks
+      .map((t, i) => ({ task: t, plan: plan.lines[i]! }))
+      .sort((a, b) => {
+        const boxA = a.plan.from[0]?.box ?? '';
+        const boxB = b.plan.from[0]?.box ?? '';
+        if (boxA !== boxB) {
+          if (!boxA) return 1;
+          if (!boxB) return -1;
+          return byBoxAsc(boxA, boxB);
+        }
+        const artA = a.task.article || a.task.name || '';
+        const artB = b.task.article || b.task.name || '';
+        if (artA !== artB) return artA.localeCompare(artB, 'ru');
+        return compareSizes(a.task.size, b.task.size);
+      });
     // Коробки к вскрытию — по убыванию номера, в том же порядке их и обходят.
-    const boxesDesc = [...plan.boxes].sort((a, b) => byBoxDesc(a.box, b.box));
-    return { list, plan, rows, boxesDesc };
+    const boxesAsc = [...plan.boxes].sort((a, b) => byBoxAsc(a.box, b.box));
+    return { list, plan, rows, boxesAsc };
   }, [pickings, activePick, scope]);
 
   const totals = useMemo(() => {
@@ -1038,7 +1115,7 @@ export function FbsSearch({
                   <span>
                     вскрыть коробок <b className="text-slate-800 dark:text-slate-100">{picking.plan.boxes.length}</b>
                     {picking.plan.boxes.length > 0 ? (
-                      <span className="text-slate-500"> — {picking.boxesDesc.map((b) => b.box).join(', ')}</span>
+                      <span className="text-slate-500"> — {picking.boxesAsc.map((b) => b.box).join(', ')}</span>
                     ) : null}
                   </span>
                 </div>
@@ -1131,6 +1208,7 @@ export function FbsSearch({
                   <table className="w-full text-sm">
                     <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-500">
                       <tr>
+                        <th className="p-3 text-left font-medium w-24">Фото</th>
                         <th className="p-3 text-left font-medium w-28">№ задания</th>
                         <th className="p-3 text-left font-medium">Товар</th>
                         <th className="p-3 text-left font-medium w-28">Номенклатура</th>
@@ -1142,6 +1220,26 @@ export function FbsSearch({
                     <tbody>
                       {picking.rows.map(({ task, plan }, i) => (
                         <tr key={`${task.task}-${i}`} className="border-t border-slate-100 dark:border-slate-800">
+                          <td className="p-2">
+                            {photoByBarcode[task.barcode] ? (
+                              <a
+                                href={nomenclature[task.barcode]
+                                  ? `https://www.wildberries.ru/catalog/${nomenclature[task.barcode]}/detail.aspx`
+                                  : photoByBarcode[task.barcode]}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                <img
+                                  src={photoByBarcode[task.barcode]}
+                                  alt=""
+                                  loading="lazy"
+                                  className="h-24 w-[72px] rounded-lg object-cover border border-slate-200 dark:border-slate-700"
+                                />
+                              </a>
+                            ) : (
+                              <div className="h-24 w-[72px] rounded-lg bg-slate-100 dark:bg-slate-800" />
+                            )}
+                          </td>
                           <td className="p-3 font-mono text-xs">{task.task}</td>
                           <td className="p-3">
                             <div className="font-medium text-slate-800 dark:text-slate-100">{task.name || '—'}</div>
