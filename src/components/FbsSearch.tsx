@@ -172,6 +172,7 @@ export function FbsSearch({
   const [products, setProducts] = useState<Record<string, ProductInfo>>({});
   const [nomenclature, setNomenclature] = useState<NomenclatureMap>({});
   const [photoByBarcode, setPhotoByBarcode] = useState<Record<string, string>>({});
+  const [ownerByBarcode, setOwnerByBarcode] = useState<Record<string, string>>({});
   /*
    * Два входа вместо одного.
    *
@@ -249,7 +250,17 @@ export function FbsSearch({
    * по тринадцати цифрам.
    */
   useEffect(() => {
-    const codes = [...new Set(supplies.flatMap((s) => s.rows.map((r) => r.barcode)))];
+    /*
+     * Баркоды берём и со складских сканов, и из листов подбора.
+     *
+     * Сначала брал только со сканов — и «Скачать стикеры» падало с «не понял,
+     * какому кабинету принадлежат товары»: кабинет определяется по товару
+     * листа, а товары листа в поиск не попадали вовсе.
+     */
+    const codes = [...new Set([
+      ...supplies.flatMap((s) => s.rows.map((r) => r.barcode)),
+      ...pickings.flatMap((p) => p.tasks.map((t) => t.barcode)),
+    ])].filter(Boolean);
     const missing = codes.filter((c) => !products[c]);
     if (missing.length === 0) return;
 
@@ -260,6 +271,9 @@ export function FbsSearch({
         const { data } = await supabase
           .from('products')
           .select('barcode, name, size, color, wb_sku, supplier_id')
+          // Удалённые товары не берём: у них может стоять чужой кабинет,
+          // а по кабинету мы потом запрашиваем стикеры.
+          .is('deleted_at', null)
           .in('barcode', missing.slice(i, i + 200));
         for (const p of (data ?? []) as any[]) {
           found[norm(p.barcode)] = {
@@ -278,7 +292,7 @@ export function FbsSearch({
 
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [supplies]);
+  }, [supplies, pickings]);
 
   /*
    * Номенклатура (nmID) лежит только в кэше карточек WB, и связь с баркодом —
@@ -303,11 +317,13 @@ export function FbsSearch({
       const PAGE = 1000;
       const map: NomenclatureMap = {};
       const photos: Record<string, string> = {};
+      // Кабинет по баркоду — запасной путь для стикеров, если товара нет в products.
+      const owners: Record<string, string> = {};
 
       for (let from = 0; from < 50_000; from += PAGE) {
         const { data, error } = await supabase
           .from('wb_products_cache')
-          .select('nm_id, product_json')
+          .select('nm_id, supplier_id, product_json')
           .range(from, from + PAGE - 1);
         if (error || cancelled) return;
 
@@ -317,12 +333,14 @@ export function FbsSearch({
           if (!nmId) continue;
           const photo = row?.product_json?.photos?.[0];
           const url = norm(photo?.big || photo?.c516x688 || photo?.c246x328 || photo?.tm || photo?.small);
+          const owner = norm(row?.supplier_id);
           for (const size of row?.product_json?.sizes ?? []) {
             for (const sku of size?.skus ?? []) {
               const code = norm(sku);
               if (!code) continue;
               map[code] = nmId;
               if (url) photos[code] = url;
+              if (owner) owners[code] = owner;
             }
           }
         }
@@ -333,6 +351,7 @@ export function FbsSearch({
       if (!cancelled) {
         setNomenclature(map);
         setPhotoByBarcode(photos);
+        setOwnerByBarcode(owners);
       }
     })();
 
@@ -797,12 +816,15 @@ export function FbsSearch({
      * токен нужен именно его. Если в листе товары разных кабинетов — честно
      * говорим об этом, потому что одним токеном их стикеры не получить.
      */
-    const supplierIds = [...new Set(
-      picking.list.tasks.map((t) => products[t.barcode]?.supplierId).filter(Boolean) as string[],
-    )];
+    const ownerOf = (barcode: string) => products[barcode]?.supplierId || ownerByBarcode[barcode] || '';
+    const supplierIds = [...new Set(picking.list.tasks.map((t) => ownerOf(t.barcode)).filter(Boolean))];
 
     if (supplierIds.length === 0) {
-      showToast('Не понял, какому кабинету принадлежат товары — стикеры не запросить', 'error');
+      const unknown = picking.list.tasks.filter((t) => !ownerOf(t.barcode)).length;
+      showToast(
+        `Не нашёл кабинет ни для одного товара (${unknown} шт). Баркодов нет ни в товарах, ни в кэше карточек WB`,
+        'error',
+      );
       return;
     }
     if (supplierIds.length > 1) {
