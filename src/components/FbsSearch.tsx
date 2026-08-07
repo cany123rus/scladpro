@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Search, Upload, Trash2, Package, Download, RefreshCw, ClipboardList, ScanLine, RotateCcw, FileDown } from 'lucide-react';
+import { Search, Upload, Trash2, Package, Download, RefreshCw, ClipboardList, ScanLine, RotateCcw, FileDown, Tag } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { planPicking } from '../utils/boxPicking';
 import { compareSizes } from '../utils/sizeOrder';
 import { loadPhotoDataUrls } from '../utils/productPhotos';
+import { buildStickersPdf, fetchStickers, type StickerImage } from '../utils/stickers';
 import { ensureExcel, ensurePdfLibs, lazyLibs } from '../pages/dashboardLazyLibs';
 import {
   encodeGsForExcel,
@@ -80,6 +81,8 @@ interface ProductInfo {
   size: string;
   color: string;
   wbSku: string;
+  /** Кабинет, которому принадлежит товар: по нему берём токен для стикеров. */
+  supplierId: string;
 }
 
 /** Номенклатура WB (nmID) по баркоду — из кэша карточек. */
@@ -256,7 +259,7 @@ export function FbsSearch({
       for (let i = 0; i < missing.length; i += 200) {
         const { data } = await supabase
           .from('products')
-          .select('barcode, name, size, color, wb_sku')
+          .select('barcode, name, size, color, wb_sku, supplier_id')
           .in('barcode', missing.slice(i, i + 200));
         for (const p of (data ?? []) as any[]) {
           found[norm(p.barcode)] = {
@@ -264,6 +267,7 @@ export function FbsSearch({
             size: norm(p.size),
             color: norm(p.color),
             wbSku: norm(p.wb_sku),
+            supplierId: norm(p.supplier_id),
           };
         }
       }
@@ -768,6 +772,80 @@ export function FbsSearch({
     }
   }
 
+  /**
+   * Стикеры заданий — одним PDF, в порядке листа подбора.
+   *
+   * Порядок здесь и есть смысл кнопки: стопка стикеров должна лежать так же,
+   * как собран лист, иначе сборщик берёт товар из одной коробки, а клеит
+   * стикер от другой. Поэтому идём по тем же отсортированным строкам, что
+   * уходят в PDF листа, а не по порядку из файла WB.
+   */
+  async function exportStickers() {
+    if (!picking) return;
+
+    const ordered = picking.rows
+      .map((r) => ({ id: Number(r.task.task), task: r.task }))
+      .filter((r) => Number.isFinite(r.id) && r.id > 0);
+
+    if (ordered.length === 0) {
+      showToast('В листе нет номеров заданий', 'error');
+      return;
+    }
+
+    /*
+     * Кабинет определяем по товарам листа: раздел не привязан к поставщику, а
+     * токен нужен именно его. Если в листе товары разных кабинетов — честно
+     * говорим об этом, потому что одним токеном их стикеры не получить.
+     */
+    const supplierIds = [...new Set(
+      picking.list.tasks.map((t) => products[t.barcode]?.supplierId).filter(Boolean) as string[],
+    )];
+
+    if (supplierIds.length === 0) {
+      showToast('Не понял, какому кабинету принадлежат товары — стикеры не запросить', 'error');
+      return;
+    }
+    if (supplierIds.length > 1) {
+      showToast(`В листе товары ${supplierIds.length} кабинетов — стикеры одним файлом не собрать`, 'error');
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const { data: supplier, error } = await supabase
+        .from('suppliers')
+        .select('name, wb_api_token')
+        .eq('id', supplierIds[0])
+        .maybeSingle();
+      if (error) throw new Error(error.message);
+
+      const token = norm((supplier as any)?.wb_api_token);
+      if (!token) throw new Error(`У кабинета «${norm((supplier as any)?.name) || '—'}» нет токена WB`);
+
+      showToast(`Запрашиваем ${ordered.length} стикеров у WB…`, 'info');
+      const byId = await fetchStickers(token, ordered.map((o) => o.id));
+
+      const found = ordered.map((o) => byId.get(o.id)).filter(Boolean) as StickerImage[];
+      if (found.length === 0) throw new Error('WB не вернул ни одного стикера');
+
+      const { jsPDF } = await ensurePdfLibs();
+      const pdf = await buildStickersPdf(jsPDF, found);
+      pdf.save(`Стикеры — ${picking.list.name}.pdf`);
+
+      const missing = ordered.length - found.length;
+      showToast(
+        missing > 0
+          ? `Стикеров ${found.length} из ${ordered.length}, не нашлось ${missing}`
+          : `Стикеров: ${found.length}, порядок как в листе подбора`,
+        missing > 0 ? 'info' : 'success',
+      );
+    } catch (e: any) {
+      showToast(`Стикеры не скачались: ${e?.message || e}`, 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function removePicking(id: string) {
     setBusy(true);
     try {
@@ -1149,6 +1227,15 @@ export function FbsSearch({
                   </button>
                   <button type="button" className="btn-ghost" onClick={() => void exportPickingPdf()} disabled={busy}>
                     <FileDown className="w-4 h-4" /> Скачать PDF
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-ghost"
+                    onClick={() => void exportStickers()}
+                    disabled={busy}
+                    title="Стикеры заданий одним PDF, в том же порядке, что и лист подбора"
+                  >
+                    <Tag className="w-4 h-4" /> Скачать стикеры
                   </button>
                   <button type="button" className="btn-ghost" onClick={() => void exportScanFile()} disabled={busy || scanByTask.size === 0}>
                     <Download className="w-4 h-4" /> Скан-файл для WB
