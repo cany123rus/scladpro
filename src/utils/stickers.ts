@@ -46,6 +46,16 @@ export async function fetchStickers(
   const chunks: number[][] = [];
   for (let i = 0; i < orderIds.length; i += 100) chunks.push(orderIds.slice(i, i + 100));
 
+  /*
+   * Последняя ошибка от WB.
+   *
+   * Раньше неудачный ответ просто пропускался ради второго формата, и наверх
+   * уходило «WB не вернул ни одного стикера» — а на деле там лежал 401 с
+   * «access token expired». Причину надо показывать словами WB, иначе её
+   * ищут в коде, которого она не касается.
+   */
+  let lastError = '';
+
   let done = 0;
   for (const chunk of chunks) {
     for (const type of ['png', 'svg'] as const) {
@@ -59,7 +69,24 @@ export async function fetchStickers(
         `Таймаут WB при запросе стикеров (${type})`,
       );
 
-      if (!res.ok) continue;
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        let detail = '';
+        try {
+          const parsed = JSON.parse(body);
+          detail = String(parsed?.detail || parsed?.title || '').trim();
+        } catch {
+          detail = body.slice(0, 160);
+        }
+
+        if (res.status === 401) {
+          throw new Error(
+            `WB не принял токен (401): ${detail || 'unauthorized'}. Перевыпустите ключ с категорией «Маркетплейс» в кабинете продавца.`,
+          );
+        }
+        lastError = `HTTP ${res.status}${detail ? `: ${detail}` : ''}`;
+        continue;
+      }
 
       const data = await res.json();
       const list = Array.isArray(data?.stickers) ? data.stickers : [];
@@ -74,6 +101,8 @@ export async function fetchStickers(
     done += chunk.length;
     onProgress?.(Math.min(done, orderIds.length), orderIds.length);
   }
+
+  if (out.size === 0 && lastError) throw new Error(`WB отказал: ${lastError}`);
 
   return out;
 }
