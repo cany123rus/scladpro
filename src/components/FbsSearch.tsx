@@ -850,8 +850,9 @@ export function FbsSearch({
       const found = ordered.map((o) => byId.get(o.id)).filter(Boolean) as StickerImage[];
       if (found.length === 0) throw new Error('WB не вернул ни одного стикера');
 
-      const { jsPDF } = await ensurePdfLibs();
-      const pdf = await buildStickersPdf(jsPDF, found);
+      // ensurePdfLibs ничего не возвращает: библиотеки берутся из lazyLibs после await.
+      await ensurePdfLibs();
+      const pdf = await buildStickersPdf(lazyLibs.jsPDF, found);
       pdf.save(`Стикеры — ${picking.list.name}.pdf`);
 
       const missing = ordered.length - found.length;
