@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Search, Upload, Trash2, Package, Download, RefreshCw, ClipboardList, ScanLine, RotateCcw } from 'lucide-react';
+import { Search, Upload, Trash2, Package, Download, RefreshCw, ClipboardList, ScanLine, RotateCcw, FileDown } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { planPicking } from '../utils/boxPicking';
+import { ensureExcel, ensurePdfLibs, lazyLibs } from '../pages/dashboardLazyLibs';
 import {
   encodeGsForExcel,
   normalizeDataMatrixText,
@@ -79,7 +80,23 @@ interface ProductInfo {
   wbSku: string;
 }
 
+/** Номенклатура WB (nmID) по баркоду — из кэша карточек. */
+type NomenclatureMap = Record<string, number>;
+
 const norm = (v: unknown) => String(v ?? '').trim();
+
+/**
+ * Сортировка коробок по убыванию.
+ *
+ * Адреса вида WB_1553573331 отличаются только хвостом, и обычная строковая
+ * сортировка ставит …9 после …10. Сравниваем по числу в конце, а при равенстве
+ * — по строке, чтобы порядок не прыгал.
+ */
+const boxNumber = (box: string) => {
+  const m = String(box).match(/(\d+)\s*$/);
+  return m ? Number(m[1]) : -1;
+};
+const byBoxDesc = (a: string, b: string) => boxNumber(b) - boxNumber(a) || b.localeCompare(a, 'ru');
 
 /**
  * Колонки терминала бывают в разном написании — ищем по смыслу.
@@ -148,7 +165,16 @@ export function FbsSearch({
   const [activePick, setActivePick] = useState<string | null>(null);
   const [mode, setMode] = useState<'stock' | 'picking'>('stock');
   const [products, setProducts] = useState<Record<string, ProductInfo>>({});
-  const fileRef = useRef<HTMLInputElement>(null);
+  const [nomenclature, setNomenclature] = useState<NomenclatureMap>({});
+  /*
+   * Два входа вместо одного.
+   *
+   * Раньше тип файла определялся сам, и это работало, но кладовщик не видел,
+   * что именно он грузит. Кнопки называют вещи своими именами; распознавание
+   * осталось — оно ловит, если файл положили не в ту кнопку.
+   */
+  const stockRef = useRef<HTMLInputElement>(null);
+  const pickRef = useRef<HTMLInputElement>(null);
 
   /*
    * Скан ЧЗ в два шага, как в разделе поставок FBS: сначала стикер — он
@@ -184,6 +210,8 @@ export function FbsSearch({
       setPickings(p);
       setScans(sc);
       setActivePick((cur) => cur ?? p[0]?.id ?? null);
+      // Загружен только лист подбора — открываем сразу его, а не пустой поиск.
+      if (p.length > 0 && s.length === 0) setMode('picking');
     } catch (e: any) {
       showToast(`Не удалось загрузить: ${e?.message || e}`, 'error');
     } finally {
@@ -245,7 +273,48 @@ export function FbsSearch({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [supplies]);
 
-  async function handleFiles(files: FileList | null) {
+  /*
+   * Номенклатура (nmID) лежит только в кэше карточек WB, и связь с баркодом —
+   * внутри product_json.sizes[].skus[]. Отфильтровать это запросом нельзя,
+   * поэтому тянем кэш один раз и строим карту на клиенте — и только когда
+   * открыт лист подбора, ради которого номенклатура и нужна.
+   */
+  useEffect(() => {
+    if (mode !== 'picking' || pickings.length === 0) return;
+    if (Object.keys(nomenclature).length > 0) return;
+
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase
+        .from('wb_products_cache')
+        .select('nm_id, product_json')
+        .limit(20000);
+      if (error || cancelled) return;
+
+      const map: NomenclatureMap = {};
+      for (const row of (data ?? []) as any[]) {
+        const nmId = Number(row?.nm_id);
+        if (!nmId) continue;
+        for (const size of row?.product_json?.sizes ?? []) {
+          for (const sku of size?.skus ?? []) {
+            const code = norm(sku);
+            if (code) map[code] = nmId;
+          }
+        }
+      }
+      if (!cancelled) setNomenclature(map);
+    })();
+
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, pickings.length]);
+
+  /**
+   * @param expected какую кнопку нажали. Тип файла всё равно определяем по
+   *   содержимому — кнопка лишь говорит, чего ждали, чтобы предупредить, если
+   *   склад положили в лист подбора и наоборот.
+   */
+  async function handleFiles(files: FileList | null, expected: 'stock' | 'picking') {
     const list = [...(files ?? [])].filter((f) => /\.xlsx?$/i.test(f.name));
     if (list.length === 0) return;
 
@@ -283,6 +352,9 @@ export function FbsSearch({
         const wbHead = findWbHeader(matrix);
 
         if (wbHead) {
+          if (expected === 'stock') {
+            showToast(`${file.name} — это лист подбора, беру его как лист подбора`, 'info');
+          }
           const tasks: PickTask[] = [];
           for (const row of matrix.slice(wbHead.row + 1)) {
             const at = (i: number) => (i >= 0 ? norm((row ?? [])[i]) : '');
@@ -315,8 +387,11 @@ export function FbsSearch({
         const cBox = pickColumn(headers, COLS.box);
 
         if (!cBarcode || !cQty) {
-          showToast(`${file.name}: не похоже ни на скан поставки, ни на лист подбора WB`, 'error');
+          showToast(`${file.name}: не похоже ни на данные склада, ни на лист подбора WB`, 'error');
           continue;
+        }
+        if (expected === 'picking') {
+          showToast(`${file.name} — это данные склада, беру их как склад`, 'info');
         }
 
         const rows: ScanRow[] = [];
@@ -352,7 +427,8 @@ export function FbsSearch({
       showToast(`Не получилось прочитать файл: ${e?.message || e}`, 'error');
     } finally {
       setBusy(false);
-      if (fileRef.current) fileRef.current.value = '';
+      if (stockRef.current) stockRef.current.value = '';
+      if (pickRef.current) pickRef.current.value = '';
     }
   }
 
@@ -495,8 +571,8 @@ export function FbsSearch({
 
     setBusy(true);
     try {
-      const ExcelJS = (await import('exceljs')).default;
-      const book = new ExcelJS.Workbook();
+      await ensureExcel();
+      const book = new lazyLibs.ExcelJS.Workbook();
       const ws = book.addWorksheet('Scan');
       ws.addRow(['№ задания', 'Стикер', 'КИЗ']);
       for (const r of rows) {
@@ -514,6 +590,120 @@ export function FbsSearch({
       showToast(`Скан-файл: ${rows.length} строк`, 'success');
     } catch (e: any) {
       showToast(`Не удалось собрать файл: ${e?.message || e}`, 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * Лист подбора в PDF — с ним ходят по складу.
+   *
+   * Строки идут по коробкам от старших номеров к младшим, а не в порядке
+   * файла WB: сборщик обходит стеллаж один раз, а не мечется между коробками.
+   * Шрифт Roboto подгружаем так же, как остальные отчёты приложения, —
+   * встроенные шрифты jsPDF кириллицу не умеют.
+   */
+  async function exportPickingPdf() {
+    const list = pickings.find((p) => p.id === activePick);
+    if (!list || !picking) return;
+
+    setBusy(true);
+    try {
+      // Через общий ленивый загрузчик: свой import() положил бы jsPDF во второй чанк.
+      await ensurePdfLibs();
+      const { jsPDF: JsPDF, autoTable } = lazyLibs;
+
+      const doc = new JsPDF({ orientation: 'landscape' });
+      try {
+        const res = await fetch('https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.66/fonts/Roboto/Roboto-Regular.ttf');
+        const buf = await res.arrayBuffer();
+        let binary = '';
+        const bytes = new Uint8Array(buf);
+        for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]!);
+        doc.addFileToVFS('Roboto-Regular.ttf', btoa(binary));
+        doc.addFont('Roboto-Regular.ttf', 'Roboto', 'normal');
+        doc.setFont('Roboto', 'normal');
+      } catch {
+        // Без сети останемся на встроенном шрифте: латиница и цифры читаются.
+      }
+
+      // Сортируем по коробке (по убыванию), внутри коробки — по названию.
+      const rows = [...picking.rows].sort((a, b) => {
+        const boxA = a.plan.from[0]?.box ?? '';
+        const boxB = b.plan.from[0]?.box ?? '';
+        if (boxA !== boxB) {
+          if (!boxA) return 1;
+          if (!boxB) return -1;
+          return byBoxDesc(boxA, boxB);
+        }
+        return (a.task.name || '').localeCompare(b.task.name || '', 'ru');
+      });
+
+      const body = rows.map((r) => [
+        r.plan.from.map((f) => f.box).join(', ') || 'нет в поставке',
+        String(nomenclature[r.task.barcode] ?? '—'),
+        r.task.name || '—',
+        r.task.size || '—',
+        r.task.color || '—',
+        r.task.article || '—',
+        r.task.barcode,
+        r.task.task,
+        r.task.sticker || '—',
+        scanByTask.get(r.task.task) ? 'да' : '',
+      ]);
+
+      doc.setFontSize(14);
+      doc.text(`Лист подбора — ${list.name}`, 14, 14);
+      doc.setFontSize(9);
+      doc.text(
+        `Дата: ${new Date().toLocaleDateString('ru-RU')} · заданий ${picking.plan.totalNeed}`
+          + ` · нашлось ${picking.plan.totalPicked}`
+          + (picking.plan.totalMissing ? ` · нет в поставке ${picking.plan.totalMissing}` : '')
+          + ` · коробок ${picking.boxesDesc.length}`,
+        14,
+        20,
+      );
+      doc.text(
+        `Склад: ${activeId === 'all' ? 'все загруженные поставки' : (supplies.find((s) => s.id === activeId)?.name ?? '')}`,
+        14,
+        25,
+      );
+
+      (autoTable as any)(doc, {
+        startY: 30,
+        head: [['Коробка', 'Номенкл.', 'Наименование', 'Размер', 'Цвет', 'Артикул', 'Баркод', '№ задания', 'Стикер', 'ЧЗ']],
+        body,
+        styles: { fontSize: 8, cellPadding: 1.6, valign: 'middle', font: 'Roboto' },
+        headStyles: { font: 'Roboto', fontStyle: 'normal', fillColor: [79, 70, 229] },
+        bodyStyles: { font: 'Roboto', fontStyle: 'normal' },
+        rowPageBreak: 'avoid',
+        columnStyles: {
+          0: { cellWidth: 32, fontStyle: 'bold' },
+          1: { cellWidth: 22 },
+          2: { cellWidth: 78 },
+          3: { cellWidth: 16, halign: 'center' },
+          4: { cellWidth: 18, halign: 'center' },
+          5: { cellWidth: 30 },
+          6: { cellWidth: 26 },
+          7: { cellWidth: 24 },
+          8: { cellWidth: 24 },
+          9: { cellWidth: 10, halign: 'center' },
+        },
+        didParseCell: (data: any) => {
+          // Цифровые поля печатаем базовым шрифтом: он ровнее и уже.
+          if (data.section === 'body' && [1, 6, 7, 8].includes(data.column.index)) {
+            data.cell.styles.font = 'helvetica';
+          }
+          if (data.section === 'body' && data.column.index === 0 && String(data.cell.raw) === 'нет в поставке') {
+            data.cell.styles.textColor = [190, 30, 60];
+          }
+        },
+      });
+
+      doc.save(`Лист подбора ${list.name}.pdf`);
+      showToast('PDF готов', 'success');
+    } catch (e: any) {
+      showToast(`Не удалось собрать PDF: ${e?.message || e}`, 'error');
     } finally {
       setBusy(false);
     }
@@ -576,7 +766,8 @@ export function FbsSearch({
     const all = [...index].map(([barcode, v]) => ({
       barcode,
       total: v.total,
-      boxes: [...v.boxes].sort((a, b) => b[1] - a[1]),
+      // Коробки — по убыванию номера: так их и обходят на складе.
+      boxes: [...v.boxes].sort((a, b) => byBoxDesc(a[0], b[0])),
       supplies: [...v.supplies],
       info: products[barcode],
     }));
@@ -624,7 +815,9 @@ export function FbsSearch({
     );
 
     const rows = list.tasks.map((t, i) => ({ task: t, plan: plan.lines[i]! }));
-    return { list, plan, rows };
+    // Коробки к вскрытию — по убыванию номера, в том же порядке их и обходят.
+    const boxesDesc = [...plan.boxes].sort((a, b) => byBoxDesc(a.box, b.box));
+    return { list, plan, rows, boxesDesc };
   }, [pickings, activePick, scope]);
 
   const totals = useMemo(() => {
@@ -681,12 +874,20 @@ export function FbsSearch({
           </div>
 
           <input
-            ref={fileRef}
+            ref={stockRef}
             type="file"
             accept=".xlsx,.xls"
             multiple
             className="hidden"
-            onChange={(e) => void handleFiles(e.target.files)}
+            onChange={(e) => void handleFiles(e.target.files, 'stock')}
+          />
+          <input
+            ref={pickRef}
+            type="file"
+            accept=".xlsx,.xls"
+            multiple
+            className="hidden"
+            onChange={(e) => void handleFiles(e.target.files, 'picking')}
           />
           <button type="button" className="btn-ghost" onClick={() => void load()} disabled={busy || loading}>
             <RefreshCw className="w-4 h-4" /> Обновить
@@ -694,22 +895,35 @@ export function FbsSearch({
           <button
             type="button"
             className="btn-primary"
-            onClick={() => fileRef.current?.click()}
+            onClick={() => stockRef.current?.click()}
             disabled={busy}
+            title="Файл терминала: что и в какой коробке лежит на складе"
           >
-            <Upload className="w-4 h-4" /> {busy ? 'Читаем…' : 'Загрузить поставку'}
+            <Package className="w-4 h-4" /> {busy ? 'Читаем…' : 'Данные со склада'}
+          </button>
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={() => pickRef.current?.click()}
+            disabled={busy}
+            title="Файл WB со сборочными заданиями"
+          >
+            <ClipboardList className="w-4 h-4" /> Лист подбора
           </button>
         </div>
       </div>
 
       {loading ? (
         <div className="oc-card p-8 text-center text-slate-500">Загружаем…</div>
-      ) : supplies.length === 0 ? (
+      ) : supplies.length === 0 && pickings.length === 0 ? (
         <div className="oc-card p-10 text-center">
           <Package className="w-10 h-10 mx-auto text-slate-300 mb-3" />
-          <div className="font-medium text-slate-700 dark:text-slate-200">Поставок пока нет</div>
+          <div className="font-medium text-slate-700 dark:text-slate-200">Пока пусто</div>
           <p className="text-sm text-slate-500 mt-1">
-            Загрузите файл терминала: столбцы «Штрих-код», «Кол-во» и «Адрес» — адрес и есть коробка.
+            «Данные со склада» — файл терминала со столбцами «Штрих-код», «Кол-во», «Адрес»
+            (адрес и есть коробка).
+            <br />
+            «Лист подбора» — файл WB со сборочными заданиями.
           </p>
         </div>
       ) : (
@@ -824,7 +1038,7 @@ export function FbsSearch({
                   <span>
                     вскрыть коробок <b className="text-slate-800 dark:text-slate-100">{picking.plan.boxes.length}</b>
                     {picking.plan.boxes.length > 0 ? (
-                      <span className="text-slate-500"> — {picking.plan.boxes.map((b) => b.box).join(', ')}</span>
+                      <span className="text-slate-500"> — {picking.boxesDesc.map((b) => b.box).join(', ')}</span>
                     ) : null}
                   </span>
                 </div>
@@ -855,6 +1069,9 @@ export function FbsSearch({
                     }}
                   >
                     <ScanLine className="w-4 h-4" /> {scanOn ? 'Закончить скан' : 'Скан ЧЗ'}
+                  </button>
+                  <button type="button" className="btn-ghost" onClick={() => void exportPickingPdf()} disabled={busy}>
+                    <FileDown className="w-4 h-4" /> Скачать PDF
                   </button>
                   <button type="button" className="btn-ghost" onClick={() => void exportScanFile()} disabled={busy || scanByTask.size === 0}>
                     <Download className="w-4 h-4" /> Скан-файл для WB
@@ -916,6 +1133,7 @@ export function FbsSearch({
                       <tr>
                         <th className="p-3 text-left font-medium w-28">№ задания</th>
                         <th className="p-3 text-left font-medium">Товар</th>
+                        <th className="p-3 text-left font-medium w-28">Номенклатура</th>
                         <th className="p-3 text-left font-medium w-32">Стикер</th>
                         <th className="p-3 text-left font-medium w-40">Коробка</th>
                         <th className="p-3 text-left font-medium w-44">ЧЗ</th>
@@ -933,6 +1151,20 @@ export function FbsSearch({
                               {task.color ? ` · ${task.color}` : ''}
                               {task.article ? ` · ${task.article}` : ''}
                             </div>
+                          </td>
+                          <td className="p-3 font-mono text-xs">
+                            {nomenclature[task.barcode] ? (
+                              <a
+                                href={`https://www.wildberries.ru/catalog/${nomenclature[task.barcode]}/detail.aspx`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-indigo-600 hover:underline"
+                              >
+                                {nomenclature[task.barcode]}
+                              </a>
+                            ) : (
+                              <span className="text-slate-400">—</span>
+                            )}
                           </td>
                           <td className="p-3 font-mono text-xs text-slate-500">{task.sticker || '—'}</td>
                           <td className="p-3">
