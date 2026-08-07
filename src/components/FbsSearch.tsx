@@ -110,20 +110,45 @@ const byBoxAsc = (a: string, b: string) => boxNumber(a) - boxNumber(b) || a.loca
 const COLS = {
   barcode: ['штрих-код', 'штрихкод', 'штрих код', 'баркод', 'barcode'],
   qty: ['кол-во', 'количество', 'колво', 'qty'],
-  box: ['адрес', 'коробка', 'короб', 'ячейка', 'место'],
+  box: ['адрес', 'коробка', 'короб', 'ячейка', 'место', 'ящик'],
 };
 
-function pickColumn(headers: string[], variants: string[]): string | null {
+/**
+ * Столбцы, которые похожи на нужные, но ими не являются.
+ *
+ * «Коробок» — это счётчик коробок, а не адрес, и по подстроке «короб» он
+ * подхватывался как адрес: у товара из семи коробок «адресом» становилась
+ * семёрка. В листе подбора потом оказывалось, что в «коробке 1» лежит всё
+ * подряд — потому что единица там означала «лежит в одной коробке».
+ */
+const NOT_A_BOX = ['коробок', 'коробки, шт', 'кол-во коробок', 'boxes'];
+
+function pickColumn(headers: string[], variants: string[], exclude: string[] = []): string | null {
   const lower = headers.map((h) => h.toLowerCase().replace(/\s+/g, ' ').trim());
+  const banned = (h: string) => exclude.some((e) => h.includes(e));
+
   for (const v of variants) {
-    const i = lower.findIndex((h) => h === v);
+    const i = lower.findIndex((h) => h === v && !banned(h));
     if (i >= 0) return headers[i]!;
   }
   for (const v of variants) {
-    const i = lower.findIndex((h) => h.includes(v));
+    const i = lower.findIndex((h) => h.includes(v) && !banned(h));
     if (i >= 0) return headers[i]!;
   }
   return null;
+}
+
+/**
+ * Похоже ли это на настоящие адреса коробок.
+ *
+ * Адрес с терминала выглядит как WB_1553573331 — буквы, подчёркивание, длинное
+ * число. Если во всём столбце стоят короткие числа, это счётчик, а не адрес, и
+ * лучше отказаться от загрузки, чем разложить лист по выдуманным коробкам.
+ */
+function looksLikeBoxCodes(values: readonly string[]): boolean {
+  const seen = values.filter(Boolean);
+  if (seen.length === 0) return false;
+  return seen.some((v) => /[^\d]/.test(v) || v.length >= 6);
 }
 
 /**
@@ -434,10 +459,30 @@ export function FbsSearch({
         const headers = Object.keys(json[0] ?? {});
         const cBarcode = pickColumn(headers, COLS.barcode);
         const cQty = pickColumn(headers, COLS.qty);
-        const cBox = pickColumn(headers, COLS.box);
+        const cBox = pickColumn(headers, COLS.box, NOT_A_BOX);
 
         if (!cBarcode || !cQty) {
           showToast(`${file.name}: не похоже ни на данные склада, ни на лист подбора WB`, 'error');
+          continue;
+        }
+
+        /*
+         * Отказываемся, если «адреса» на адреса не похожи.
+         *
+         * Так в раздел попал мой же файл «итого по артикулам»: столбец
+         * «Коробок» подхватился как адрес, и лист разложился по коробкам
+         * 1…7, которых не существует. Молча принять такой файл хуже, чем
+         * не принять вовсе.
+         */
+        if (cBox && !looksLikeBoxCodes(json.map((r) => norm(r[cBox])))) {
+          showToast(
+            `${file.name}: в столбце «${cBox}» не адреса коробок, а числа. Нужен файл терминала со столбцом «Адрес»`,
+            'error',
+          );
+          continue;
+        }
+        if (!cBox) {
+          showToast(`${file.name}: нет столбца с адресом коробки — искать будет негде`, 'error');
           continue;
         }
         if (expected === 'picking') {
@@ -705,7 +750,11 @@ export function FbsSearch({
       const photoData = photoUrls.length > 0 ? await loadPhotoDataUrls(photoUrls) : new Map<string, string>();
 
       const body = rows.map((r) => [
-        r.plan.from.map((f) => f.box).join(', ') || 'нет в поставке',
+        // При нескольких поставках подписываем, из какой коробка: коды адресов
+        // у разных поставок совпадают, и без подписи их не различить.
+        r.plan.from
+          .map((f) => (scope.length > 1 && f.place ? `${f.box} (${f.place})` : f.box))
+          .join(', ') || 'нет в поставке',
         photoData.get(photoByBarcode[r.task.barcode] ?? '') ?? '',
         String(nomenclature[r.task.barcode] ?? ''),
         r.task.name || '',
@@ -956,23 +1005,45 @@ export function FbsSearch({
     const list = pickings.find((p) => p.id === activePick);
     if (!list) return null;
 
-    const content = new Map<string, Map<string, number>>();
+    /*
+     * Коробка опознаётся парой «поставка + адрес», а не одним адресом.
+     *
+     * Раньше ключом был только адрес, и при выборе «Все поставки» коробки с
+     * одинаковым кодом из разных поставок сливались в одну: в такой склейке
+     * оказывались баркоды, которых в реальной коробке нет. Поставку тащим в
+     * place — planPicking носит её до самого ответа.
+     */
+    const content = new Map<string, { supply: string; box: string; items: Map<string, number> }>();
     for (const s of scope) {
       for (const r of s.rows) {
         const box = r.box || '—';
-        const inner = content.get(box) ?? new Map<string, number>();
-        inner.set(r.barcode, (inner.get(r.barcode) ?? 0) + r.qty);
-        content.set(box, inner);
+        const key = `${s.id}|${box}`;
+        const cur = content.get(key) ?? { supply: s.name, box, items: new Map<string, number>() };
+        cur.items.set(r.barcode, (cur.items.get(r.barcode) ?? 0) + r.qty);
+        content.set(key, cur);
       }
     }
 
-    const plan = planPicking(
-      [...content].map(([box, items]) => ({
-        box,
-        items: [...items].map(([barcode, qty]) => ({ barcode, qty })),
+    const rawPlan = planPicking(
+      [...content].map(([key, v]) => ({
+        box: key,
+        place: v.supply,
+        items: [...v.items].map(([barcode, qty]) => ({ barcode, qty })),
       })),
       list.tasks.map((t) => ({ barcode: t.barcode, qty: 1, name: t.name, article: t.article })),
     );
+
+    /*
+     * Ключи обратно в человеческие адреса: сборщику нужен код с наклейки, а не
+     * «идентификатор поставки + адрес». Поставка остаётся в place и попадает в
+     * подпись, когда загружено больше одной.
+     */
+    const label = (key: string) => content.get(key)?.box ?? key;
+    const plan = {
+      ...rawPlan,
+      lines: rawPlan.lines.map((l) => ({ ...l, from: l.from.map((f) => ({ ...f, box: label(f.box) })) })),
+      boxes: rawPlan.boxes.map((b) => ({ ...b, box: label(b.box) })),
+    };
 
     /*
      * На экране тот же порядок, что и в PDF: коробка → артикул → размер.
@@ -1016,8 +1087,10 @@ export function FbsSearch({
           : {
               'Штрих-код': r.barcode,
               'Кол-во': r.total,
-              'Коробок': r.boxes.length,
-              'Коробки': r.boxes.map(([b, q]) => `${b} ×${q}`).join(', '),
+              // Заголовки нарочно не похожи на «Адрес»: этот файл не должен
+              // приниматься за скан терминала, если его загрузят обратно.
+              'Коробок, шт': r.boxes.length,
+              'Где лежит': r.boxes.map(([b, q]) => `${b} ×${q}`).join(', '),
               'Наименование': r.info?.name ?? '',
               'Размер': r.info?.size ?? '',
               'Цвет': r.info?.color ?? '',
@@ -1384,6 +1457,9 @@ export function FbsSearch({
                                     className="px-2 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 font-semibold"
                                   >
                                     {f.box}
+                                    {scope.length > 1 && f.place ? (
+                                      <span className="ml-1 font-normal opacity-70">· {f.place}</span>
+                                    ) : null}
                                   </span>
                                 ))}
                               </div>
