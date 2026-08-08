@@ -67,6 +67,20 @@ interface PickTask {
   sticker: string;
 }
 
+/**
+ * Что фактически вынули из коробки по одному заданию.
+ *
+ * Одно задание — одна штука, поэтому количество не храним. Поставку храним
+ * рядом с адресом: коды коробок между поставками повторяются, и списывать
+ * только по адресу значит списать из чужой коробки.
+ */
+interface TakenUnit {
+  task: string;
+  supplyId: string;
+  box: string;
+  barcode: string;
+}
+
 interface PickingList {
   id: string;
   name: string;
@@ -74,6 +88,18 @@ interface PickingList {
   uploadedAt: string;
   uploadedBy: string;
   tasks: PickTask[];
+  /**
+   * Лист собран — товар из коробок вынут.
+   *
+   * Храним не флаг, а СНИМОК того, что забрали. Пересчитывать раскладку задним
+   * числом нельзя: остатки к тому времени уже другие, и списалось бы не то,
+   * что реально унесли. Снимок же позволяет снять галочку и вернуть всё назад.
+   */
+  picked?: {
+    at: string;
+    by: string;
+    units: TakenUnit[];
+  };
 }
 
 interface ProductInfo {
@@ -149,6 +175,29 @@ function pickColumn(headers: string[], variants: string[], exclude: string[] = [
  * «Адрес», а в сводке по артикулам такого столбца нет вовсе — там «Коробок»
  * (счётчик), и он отсекается списком NOT_A_BOX.
  */
+
+/**
+ * Порядок обхода: коробка → артикул → размер.
+ *
+ * Один и тот же порядок на экране и в PDF — иначе сборщик, сверяясь с листом,
+ * каждый раз ищет строку заново. Ненайденное уходит в конец.
+ */
+const byPickingOrder = (
+  a: { task: PickTask; plan: { from: Array<{ box: string }> } },
+  b: { task: PickTask; plan: { from: Array<{ box: string }> } },
+): number => {
+  const boxA = a.plan.from[0]?.box ?? '';
+  const boxB = b.plan.from[0]?.box ?? '';
+  if (boxA !== boxB) {
+    if (!boxA) return 1;
+    if (!boxB) return -1;
+    return byBoxAsc(boxA, boxB);
+  }
+  const artA = a.task.article || a.task.name || '';
+  const artB = b.task.article || b.task.name || '';
+  if (artA !== artB) return artA.localeCompare(artB, 'ru');
+  return compareSizes(a.task.size, b.task.size);
+};
 
 /**
  * Шапка листа подбора WB стоит не в первой строке: сверху дата, номер листа и
@@ -910,6 +959,51 @@ export function FbsSearch({
     }
   }
 
+  /**
+   * Отметить лист собранным — и списать его товар из коробок.
+   *
+   * Снимаем снимок текущей раскладки: что и откуда взяли. Дальше остатки
+   * считаются за вычетом этого снимка, и следующий лист раскладывается уже по
+   * тому, что реально осталось на складе.
+   */
+  async function togglePicked(next: boolean) {
+    if (!picking) return;
+
+    setBusy(true);
+    try {
+      const list = picking.list;
+      const updated: PickingList = next
+        ? {
+            ...list,
+            picked: {
+              at: new Date().toISOString(),
+              by: norm(currentEmployee?.full_name) || 'Сотрудник',
+              units: picking.rows.flatMap((r) =>
+                r.raw.map((f) => ({
+                  task: r.task.task,
+                  supplyId: f.supplyId,
+                  box: f.box,
+                  barcode: r.task.barcode,
+                })),
+              ),
+            },
+          }
+        : { ...list, picked: undefined };
+
+      await savePickings(pickings.map((p) => (p.id === list.id ? updated : p)));
+      showToast(
+        next
+          ? `Лист «${list.name}» собран: списано ${updated.picked!.units.length} шт из коробок`
+          : `Отметка снята — ${(list.picked?.units.length ?? 0)} шт вернулись в коробки`,
+        'success',
+      );
+    } catch (e: any) {
+      showToast(`Не получилось: ${e?.message || e}`, 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function removePicking(id: string) {
     setBusy(true);
     try {
@@ -941,9 +1035,46 @@ export function FbsSearch({
   }
 
   /** Поставки, по которым ищем: одна выбранная или все загруженные. */
+  /**
+   * Поставки за вычетом того, что уже собрали.
+   *
+   * Списываем не из файла, а поверх него: файл остаётся как загружен, а
+   * собранные листы вычитаются на лету. Поэтому галочку «Собран» можно снять
+   * — товар вернётся в коробки, и ничего восстанавливать вручную не нужно.
+   */
+  const suppliesLeft = useMemo(() => {
+    const gone = new Map<string, number>();
+    for (const p of pickings) {
+      for (const u of p.picked?.units ?? []) {
+        const k = `${u.supplyId}|${u.box}|${u.barcode}`;
+        gone.set(k, (gone.get(k) ?? 0) + 1);
+      }
+    }
+    if (gone.size === 0) return supplies;
+
+    return supplies.map((s) => ({
+      ...s,
+      rows: s.rows
+        .map((r) => {
+          const k = `${s.id}|${r.box || '—'}|${r.barcode}`;
+          const left = gone.get(k) ?? 0;
+          if (left <= 0) return r;
+          /*
+           * Одна пара «коробка + товар» может встречаться в файле несколькими
+           * строками (сканы шли порциями). Снимаем с каждой по чуть-чуть,
+           * пока списание не исчерпано, иначе вычтем одно и то же дважды.
+           */
+          const take = Math.min(r.qty, left);
+          gone.set(k, left - take);
+          return { ...r, qty: r.qty - take };
+        })
+        .filter((r) => r.qty > 0),
+    }));
+  }, [supplies, pickings]);
+
   const scope = useMemo(
-    () => (activeId === 'all' ? supplies : supplies.filter((s) => s.id === activeId)),
-    [supplies, activeId],
+    () => (activeId === 'all' ? suppliesLeft : suppliesLeft.filter((s) => s.id === activeId)),
+    [suppliesLeft, activeId],
   );
 
   /** Свод: баркод → сколько всего и по каким коробкам. */
@@ -998,6 +1129,48 @@ export function FbsSearch({
     if (!list) return null;
 
     /*
+     * Собранный лист показываем по снимку, а не пересчитываем.
+     *
+     * Его товар из остатков уже вычтен, и повторный расчёт развёл бы задания
+     * по другим коробкам или объявил их ненайденными. Снимок — это то, что
+     * реально унесли, им и отвечаем.
+     */
+    if (list.picked) {
+      const byTask = new Map(list.picked.units.map((u) => [u.task, u]));
+      const rows = list.tasks
+        .map((t) => {
+          const u = byTask.get(t.task);
+          return {
+            task: t,
+            plan: {
+              barcode: t.barcode,
+              need: 1,
+              missing: u ? 0 : 1,
+              from: u ? [{ box: u.box, qty: 1 }] : [],
+            },
+            raw: u ? [{ supplyId: u.supplyId, box: u.box }] : [],
+          };
+        })
+        .sort(byPickingOrder);
+
+      const boxes = [...new Set(list.picked.units.map((u) => u.box))]
+        .sort(byBoxAsc)
+        .map((box) => ({ box, units: list.picked!.units.filter((u) => u.box === box).length, lines: 0 }));
+
+      return {
+        list,
+        rows,
+        boxesAsc: boxes,
+        plan: {
+          totalNeed: list.tasks.length,
+          totalPicked: list.picked.units.length,
+          totalMissing: list.tasks.length - list.picked.units.length,
+          boxes,
+        },
+      };
+    }
+
+    /*
      * Коробка опознаётся парой «поставка + адрес», а не одним адресом.
      *
      * Раньше ключом был только адрес, и при выборе «Все поставки» коробки с
@@ -1042,20 +1215,16 @@ export function FbsSearch({
      * Иначе сборщик, сверяясь с листом, каждый раз ищет строку заново.
      */
     const rows = list.tasks
-      .map((t, i) => ({ task: t, plan: plan.lines[i]! }))
-      .sort((a, b) => {
-        const boxA = a.plan.from[0]?.box ?? '';
-        const boxB = b.plan.from[0]?.box ?? '';
-        if (boxA !== boxB) {
-          if (!boxA) return 1;
-          if (!boxB) return -1;
-          return byBoxAsc(boxA, boxB);
-        }
-        const artA = a.task.article || a.task.name || '';
-        const artB = b.task.article || b.task.name || '';
-        if (artA !== artB) return artA.localeCompare(artB, 'ru');
-        return compareSizes(a.task.size, b.task.size);
-      });
+      .map((t, i) => ({
+        task: t,
+        plan: plan.lines[i]!,
+        // Составные ключи (поставка + адрес) — по ним потом списываем остаток.
+        raw: rawPlan.lines[i]!.from.map((f) => ({
+          supplyId: f.box.split('|')[0]!,
+          box: label(f.box),
+        })),
+      }))
+      .sort(byPickingOrder);
     // Коробки к вскрытию — по убыванию номера, в том же порядке их и обходят.
     const boxesAsc = [...plan.boxes].sort((a, b) => byBoxAsc(a.box, b.box));
     return { list, plan, rows, boxesAsc };
@@ -1289,6 +1458,38 @@ export function FbsSearch({
                   Коробки подобраны так, чтобы вскрыть их как можно меньше. Ищем только по{' '}
                   {activeId === 'all' ? 'всем загруженным поставкам' : 'выбранной поставке'}.
                 </p>
+
+                {/*
+                  Галочка сборки. Пока она стоит, товар этого листа вычтен из
+                  коробок, и следующий лист раскладывается по остатку. Снять
+                  можно в любой момент — вернётся ровно то, что списали.
+                */}
+                <label
+                  className={`flex flex-wrap items-center gap-2 mt-3 px-3 py-2 rounded-xl cursor-pointer transition-colors ${
+                    picking.list.picked
+                      ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-200'
+                      : 'bg-slate-50 dark:bg-slate-800/60'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    className="w-4 h-4"
+                    checked={Boolean(picking.list.picked)}
+                    disabled={busy}
+                    onChange={(e) => void togglePicked(e.target.checked)}
+                  />
+                  <span className="text-sm font-medium">Лист собран — списать товар из коробок</span>
+                  {picking.list.picked ? (
+                    <span className="text-xs opacity-80">
+                      {picking.list.picked.units.length} шт списано ·{' '}
+                      {picking.list.picked.by}, {new Date(picking.list.picked.at).toLocaleString('ru-RU')}
+                    </span>
+                  ) : (
+                    <span className="text-xs text-slate-500">
+                      после отметки следующий лист будет раскладываться по остатку
+                    </span>
+                  )}
+                </label>
 
                 <div className="flex flex-wrap items-center gap-2 mt-3 pt-3 border-t border-slate-100 dark:border-slate-800">
                   <span className="text-sm">
