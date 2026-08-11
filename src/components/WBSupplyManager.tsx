@@ -1007,7 +1007,14 @@ export const WBSupplyManager = ({
         if ((error as any)?.noRetry) break;
 
         if (attempt < 2) {
-          await new Promise((resolve) => setTimeout(resolve, 700 * (attempt + 1)));
+          /*
+           * Сбою на стороне WB даём отлежаться подольше: 700 мс лечат дрожание
+           * сети, но не 500 от их сервера. Дольше держать человека у экрана
+           * тоже нельзя — если не поднялось за пару секунд, честнее сказать.
+           */
+          const status = Number((error as any)?.status ?? 0);
+          const pause = status >= 500 ? 1500 * (attempt + 1) : 700 * (attempt + 1);
+          await new Promise((resolve) => setTimeout(resolve, pause));
           continue;
         }
       }
@@ -1016,6 +1023,25 @@ export const WBSupplyManager = ({
     // Ответ WB отдаём как есть: «404 path not found» — это не проблема сети,
     // и подменять его советом проверить VPN значит уводить от причины.
     if ((lastError as any)?.noRetry) throw lastError;
+
+    /*
+     * 5xx — это ответ сервера WB, а не обрыв связи.
+     *
+     * Раньше всё, что не 4xx, заворачивалось в «Ошибка сети (Failed to fetch),
+     * проверьте интернет/VPN». Человек шёл проверять роутер, хотя WB отдавал
+     * честный 500: 07.08.2026 /api/v3/orders так падал у пяти кабинетов из
+     * шести, а у шестого работал. Чинить там нечего — надо переждать.
+     */
+    const status = Number((lastError as any)?.status ?? 0);
+    if (status >= 500) {
+      throw new Error(
+        `Wildberries отвечает ошибкой ${status} — это сбой на их стороне, не у вас. `
+        + 'Мы повторили запрос трижды. Попробуйте через несколько минут.',
+      );
+    }
+    if (status === 429) {
+      throw new Error('Wildberries ограничил частоту запросов (429). Подождите минуту и повторите.');
+    }
 
     const msg = lastError instanceof Error ? lastError.message : String(lastError || 'Unknown network error');
     throw new Error(`Ошибка сети WB API (Failed to fetch): ${msg}. Проверьте интернет/VPN/доступ к marketplace-api.wildberries.ru`);
