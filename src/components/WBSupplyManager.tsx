@@ -37,6 +37,7 @@ import {
   normalizeScanStickerText,
   restoreDataMatrixGs,
 } from '../utils/honestSign';
+import { explainWbAccess } from '../utils/wbTokenScopes';
 
 // --- Types ---
 
@@ -961,6 +962,19 @@ export const WBSupplyManager = ({
   const wbFetch = async (url: string, options: RequestInit = {}) => {
     const token = getSupplierToken();
     if (!token) throw new Error('Токен API не найден');
+
+    /*
+     * Обречённый запрос не отправляем.
+     *
+     * Категории доступа лежат в самом токене, поэтому «нет Маркетплейса» видно
+     * заранее. Иначе WB отвечает сырым «401 token scope not allowed», и по
+     * такому тексту непонятно даже, какой кабинет виноват: 11.08.2026 ошибку
+     * от «Постельки» искали в кабинете Власенко, где всё работало.
+     */
+    if (url.includes('marketplace-api.wildberries.ru')) {
+      const problem = explainWbAccess(token, 'marketplace', selectedSupplier?.name);
+      if (problem) throw Object.assign(new Error(problem), { noRetry: true });
+    }
 
     let lastError: unknown;
 
