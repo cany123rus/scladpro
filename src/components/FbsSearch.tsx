@@ -26,10 +26,18 @@ import {
  * их из products по баркоду.
  */
 
-/** Ключ хранения. Как и паллеты FBO, лежим снимком в app_settings. */
+/**
+ * Ключи хранения. Как и паллеты FBO, лежим снимком в app_settings.
+ *
+ * С суффиксом кабинета: у каждого поставщика свои поставки и листы подбора, и
+ * общий на всех список означал бы, что сборщик Власенко видит коробки Градова.
+ * Данные, накопленные до разделения, перенесены в кабинет «ИП Власенко_И_А».
+ */
 const STORE_KEY = 'fbs_search_supplies_v1';
 const PICK_KEY = 'fbs_search_pickings_v1';
 const SCAN_KEY = 'fbs_search_scans_v1';
+
+const keyFor = (base: string, supplierId: string) => `${base}:${supplierId}`;
 
 /** Отсканированный ЧЗ: ключ — лист подбора и номер задания. */
 interface ScanRecord {
@@ -234,6 +242,19 @@ export function FbsSearch({
   currentEmployee: any;
   showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
 }) {
+  /*
+   * Кабинет. Выбор запоминается: кладовщик работает с одним и тем же, и
+   * выбирать его каждое утро заново — лишний шаг перед сканером.
+   */
+  const [suppliers, setSuppliers] = useState<Array<{ id: string; name: string }>>([]);
+  const [supplierId, setSupplierId] = useState<string>(() => {
+    try {
+      return localStorage.getItem('fbs_search_supplier') || '';
+    } catch {
+      return '';
+    }
+  });
+
   const [supplies, setSupplies] = useState<ScanSupply[]>([]);
   const [pickings, setPickings] = useState<PickingList[]>([]);
   const [loading, setLoading] = useState(true);
@@ -279,43 +300,73 @@ export function FbsSearch({
   };
 
   const load = useCallback(async () => {
+    if (!supplierId) return;
     setLoading(true);
     try {
       const [s, p, sc] = await Promise.all([
-        readKey<ScanSupply>(STORE_KEY),
-        readKey<PickingList>(PICK_KEY),
-        readKey<ScanRecord>(SCAN_KEY),
+        readKey<ScanSupply>(keyFor(STORE_KEY, supplierId)),
+        readKey<PickingList>(keyFor(PICK_KEY, supplierId)),
+        readKey<ScanRecord>(keyFor(SCAN_KEY, supplierId)),
       ]);
       setSupplies(s);
       setPickings(p);
       setScans(sc);
-      setActivePick((cur) => cur ?? p[0]?.id ?? null);
+      // Активный лист сбрасываем: у нового кабинета листы свои.
+      setActivePick(p[0]?.id ?? null);
       // Загружен только лист подбора — открываем сразу его, а не пустой поиск.
-      if (p.length > 0 && s.length === 0) setMode('picking');
+      setMode(p.length > 0 && s.length === 0 ? 'picking' : 'stock');
     } catch (e: any) {
       showToast(`Не удалось загрузить: ${e?.message || e}`, 'error');
     } finally {
       setLoading(false);
     }
-  }, [showToast]);
+  }, [showToast, supplierId]);
+
+  /** Список кабинетов. Берём все живые — раздел не привязан к рекламе. */
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase
+        .from('suppliers')
+        .select('id, name')
+        .is('deleted_at', null)
+        .order('name');
+      if (error || cancelled) return;
+
+      const list = (data ?? []) as Array<{ id: string; name: string }>;
+      setSuppliers(list);
+      // Ничего не выбрано — берём первый, иначе раздел выглядит сломанным.
+      setSupplierId((cur) => (cur && list.some((s) => s.id === cur) ? cur : list[0]?.id ?? ''));
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (!supplierId) return;
+    try {
+      localStorage.setItem('fbs_search_supplier', supplierId);
+    } catch {
+      // Приватный режим — просто не запомним.
+    }
+  }, [supplierId]);
 
   useEffect(() => { void load(); }, [load]);
 
   const save = useCallback(async (next: ScanSupply[]) => {
     const { error } = await supabase
       .from('app_settings')
-      .upsert({ key: STORE_KEY, value: next }, { onConflict: 'key' });
+      .upsert({ key: keyFor(STORE_KEY, supplierId), value: next }, { onConflict: 'key' });
     if (error) throw new Error(error.message);
     setSupplies(next);
-  }, []);
+  }, [supplierId]);
 
   const savePickings = useCallback(async (next: PickingList[]) => {
     const { error } = await supabase
       .from('app_settings')
-      .upsert({ key: PICK_KEY, value: next }, { onConflict: 'key' });
+      .upsert({ key: keyFor(PICK_KEY, supplierId), value: next }, { onConflict: 'key' });
     if (error) throw new Error(error.message);
     setPickings(next);
-  }, []);
+  }, [supplierId]);
 
   /*
    * Названия товаров подтягиваем один раз на все загруженные поставки: в файле
@@ -571,10 +622,10 @@ export function FbsSearch({
   const saveScans = useCallback(async (next: ScanRecord[]) => {
     const { error } = await supabase
       .from('app_settings')
-      .upsert({ key: SCAN_KEY, value: next }, { onConflict: 'key' });
+      .upsert({ key: keyFor(SCAN_KEY, supplierId), value: next }, { onConflict: 'key' });
     if (error) throw new Error(error.message);
     setScans(next);
-  }, []);
+  }, [supplierId]);
 
   /** Сканы активного листа: задание → запись. */
   const scanByTask = useMemo(() => {
@@ -906,19 +957,16 @@ export function FbsSearch({
      * токен нужен именно его. Если в листе товары разных кабинетов — честно
      * говорим об этом, потому что одним токеном их стикеры не получить.
      */
+    /*
+     * Токен берём у выбранного кабинета — гадать по товарам больше не нужно.
+     * Но если товары листа принадлежат другому кабинету, лист загрузили не
+     * туда: WB отдаст пустой ответ, и лучше сказать об этом заранее.
+     */
     const ownerOf = (barcode: string) => products[barcode]?.supplierId || ownerByBarcode[barcode] || '';
-    const supplierIds = [...new Set(picking.list.tasks.map((t) => ownerOf(t.barcode)).filter(Boolean))];
-
-    if (supplierIds.length === 0) {
-      const unknown = picking.list.tasks.filter((t) => !ownerOf(t.barcode)).length;
-      showToast(
-        `Не нашёл кабинет ни для одного товара (${unknown} шт). Баркодов нет ни в товарах, ни в кэше карточек WB`,
-        'error',
-      );
-      return;
-    }
-    if (supplierIds.length > 1) {
-      showToast(`В листе товары ${supplierIds.length} кабинетов — стикеры одним файлом не собрать`, 'error');
+    const owners = [...new Set(picking.list.tasks.map((t) => ownerOf(t.barcode)).filter(Boolean))];
+    if (owners.length > 0 && !owners.includes(supplierId)) {
+      const name = suppliers.find((s) => s.id === owners[0])?.name ?? 'другому кабинету';
+      showToast(`Товары этого листа принадлежат «${name}» — переключите кабинет`, 'error');
       return;
     }
 
@@ -927,7 +975,7 @@ export function FbsSearch({
       const { data: supplier, error } = await supabase
         .from('suppliers')
         .select('name, wb_api_token')
-        .eq('id', supplierIds[0])
+        .eq('id', supplierId)
         .maybeSingle();
       if (error) throw new Error(error.message);
 
@@ -1283,6 +1331,27 @@ export function FbsSearch({
             <p className="text-sm text-slate-500 mt-0.5">
               Ищет только по поставкам, загруженным сюда. Общий склад и поставки FBO не участвуют.
             </p>
+          </div>
+
+          {/*
+            Кабинет. У каждого свои поставки и листы: общий на всех список
+            означал бы, что сборщик Власенко видит коробки Градова.
+          */}
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-slate-500">Кабинет</span>
+            <select
+              className="oc-select min-w-[200px]"
+              value={supplierId}
+              onChange={(e) => setSupplierId(e.target.value)}
+              disabled={busy || suppliers.length === 0}
+            >
+              {suppliers.length === 0 ? <option value="">загружаем…</option> : null}
+              {suppliers.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
           </div>
 
           <input
