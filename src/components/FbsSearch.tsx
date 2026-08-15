@@ -39,6 +39,16 @@ const SCAN_KEY = 'fbs_search_scans_v1';
 
 const keyFor = (base: string, supplierId: string) => `${base}:${supplierId}`;
 
+/**
+ * Ключ «артикул + размер».
+ *
+ * Пробелы и регистр выбрасываем: в карточке размер записан «XS-S(100см)», а в
+ * листе подбора «XS-S (100 см)» — это один и тот же размер, и по строгому
+ * сравнению они бы не сошлись.
+ */
+const sizeKey = (article: string, size: string) =>
+  `${article.toLowerCase().trim()}|${size.toLowerCase().replace(/\s+/g, '')}`;
+
 /** Отсканированный ЧЗ: ключ — лист подбора и номер задания. */
 interface ScanRecord {
   pickingId: string;
@@ -218,7 +228,16 @@ function findWbHeader(matrix: unknown[][]): { row: number; col: Record<string, n
     const has = (t: string) => cells.findIndex((c) => c.includes(t));
     const task = has('задани');
     const barcode = has('баркод');
-    if (task < 0 || barcode < 0) continue;
+    const article = has('артикул');
+    /*
+     * Баркода в листе может не быть вовсе.
+     *
+     * У «Бекировой» WB отдаёт восемь колонок без «Баркода» — только артикул
+     * продавца и размер. Раньше такой файл отвергался целиком, хотя связать
+     * его со складом можно: артикул плюс размер однозначно дают баркод из
+     * карточки. Требуем задание и хоть один опознавательный столбец.
+     */
+    if (task < 0 || (barcode < 0 && article < 0)) continue;
     return {
       row: i,
       col: {
@@ -267,6 +286,8 @@ export function FbsSearch({
   const [nomenclature, setNomenclature] = useState<NomenclatureMap>({});
   const [photoByBarcode, setPhotoByBarcode] = useState<Record<string, string>>({});
   const [ownerByBarcode, setOwnerByBarcode] = useState<Record<string, string>>({});
+  /** «артикул + размер» → баркод: для листов подбора без колонки «Баркод». */
+  const [skuByArticle, setSkuByArticle] = useState<Record<string, string>>({});
   /*
    * Два входа вместо одного.
    *
@@ -290,6 +311,20 @@ export function FbsSearch({
   const [scanValue, setScanValue] = useState('');
   const [scanNote, setScanNote] = useState<{ kind: 'ok' | 'err' | 'info'; text: string } | null>(null);
   const scanRef = useRef<HTMLInputElement>(null);
+
+  /*
+   * showToast приходит из Dashboard новой функцией на каждый его рендер.
+   *
+   * Пока load зависел от неё, useCallback пересоздавался постоянно, эффект
+   * загрузки срабатывал по кругу и страница дёргалась — это и было «моргание».
+   * Держим в ref: вызывать можно, а перерисовывать из-за неё нечего.
+   */
+  const toastRef = useRef(showToast);
+  toastRef.current = showToast;
+  const toast = useCallback(
+    (m: string, t?: 'success' | 'error' | 'info') => toastRef.current(m, t),
+    [],
+  );
 
   const readKey = async <T,>(key: string): Promise<T[]> => {
     const { data, error } = await supabase.from('app_settings').select('value').eq('key', key).maybeSingle();
@@ -316,11 +351,11 @@ export function FbsSearch({
       // Загружен только лист подбора — открываем сразу его, а не пустой поиск.
       setMode(p.length > 0 && s.length === 0 ? 'picking' : 'stock');
     } catch (e: any) {
-      showToast(`Не удалось загрузить: ${e?.message || e}`, 'error');
+      toast(`Не удалось загрузить: ${e?.message || e}`, 'error');
     } finally {
       setLoading(false);
     }
-  }, [showToast, supplierId]);
+  }, [toast, supplierId]);
 
   /** Список кабинетов. Берём все живые — раздел не привязан к рекламе. */
   useEffect(() => {
@@ -441,6 +476,7 @@ export function FbsSearch({
       const PAGE = 1000;
       const map: NomenclatureMap = {};
       const photos: Record<string, string> = {};
+      const skuByArticle: Record<string, string> = {};
       // Кабинет по баркоду — запасной путь для стикеров, если товара нет в products.
       const owners: Record<string, string> = {};
 
@@ -458,7 +494,17 @@ export function FbsSearch({
           const photo = row?.product_json?.photos?.[0];
           const url = norm(photo?.big || photo?.c516x688 || photo?.c246x328 || photo?.tm || photo?.small);
           const owner = norm(row?.supplier_id);
+          const vendorCode = norm(row?.product_json?.vendorCode);
           for (const size of row?.product_json?.sizes ?? []) {
+            /*
+             * Ключ «артикул + размер» — им достаём баркод для листов подбора,
+             * где колонки «Баркод» нет вовсе. Размер нормализуем: в карточке
+             * «XS-S(100см)», в листе «XS-S (100 см)» — это один размер.
+             */
+            const techSize = norm(size?.techSize);
+            const first = norm(size?.skus?.[0]);
+            if (vendorCode && first) skuByArticle[sizeKey(vendorCode, techSize)] = first;
+
             for (const sku of size?.skus ?? []) {
               const code = norm(sku);
               if (!code) continue;
@@ -476,6 +522,7 @@ export function FbsSearch({
         setNomenclature(map);
         setPhotoByBarcode(photos);
         setOwnerByBarcode(owners);
+        setSkuByArticle(skuByArticle);
       }
     })();
 
@@ -534,7 +581,8 @@ export function FbsSearch({
             const at = (i: number) => (i >= 0 ? norm((row ?? [])[i]) : '');
             const barcode = at(wbHead.col.barcode);
             const task = at(wbHead.col.task);
-            if (!barcode || !task) continue;
+            // Задание обязательно, баркод — нет: его достанем по артикулу и размеру.
+            if (!task) continue;
             tasks.push({
               task,
               barcode,
@@ -1173,8 +1221,24 @@ export function FbsSearch({
    * — сборщик идёт по листу сверху вниз.
    */
   const picking = useMemo(() => {
-    const list = pickings.find((p) => p.id === activePick);
-    if (!list) return null;
+    const raw = pickings.find((p) => p.id === activePick);
+    if (!raw) return null;
+
+    /*
+     * Баркод для листов, где его колонки нет.
+     *
+     * WB отдаёт такие листы (у «Бекировой» их восемь колонок без «Баркода»).
+     * Достаём из карточки по паре «артикул продавца + размер»: она однозначна,
+     * а без баркода лист не с чем сопоставить — в коробках лежат баркоды.
+     */
+    const list: PickingList = raw.tasks.some((t) => !t.barcode)
+      ? {
+          ...raw,
+          tasks: raw.tasks.map((t) =>
+            t.barcode ? t : { ...t, barcode: skuByArticle[sizeKey(t.article, t.size)] ?? '' },
+          ),
+        }
+      : raw;
 
     /*
      * Собранный лист показываем по снимку, а не пересчитываем.
@@ -1276,7 +1340,7 @@ export function FbsSearch({
     // Коробки к вскрытию — по убыванию номера, в том же порядке их и обходят.
     const boxesAsc = [...plan.boxes].sort((a, b) => byBoxAsc(a.box, b.box));
     return { list, plan, rows, boxesAsc };
-  }, [pickings, activePick, scope]);
+  }, [pickings, activePick, scope, skuByArticle]);
 
   const totals = useMemo(() => {
     const units = [...index.values()].reduce((a, v) => a + v.total, 0);
