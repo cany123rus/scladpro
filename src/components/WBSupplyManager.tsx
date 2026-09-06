@@ -470,14 +470,23 @@ type FbsCueKind = 'sticker' | 'chz' | 'ready' | 'error';
  */
 const FBS_CUES: Record<
   FbsCueKind,
-  { notes: ReadonlyArray<{ freq: number; ms: number; at: number }>; volume: number; phrase?: string }
+  {
+    /** Записанный голос — основной звук. */
+    sound: string;
+    /** Запасной вариант, если файл не проигрался: тон плюс синтезированная речь. */
+    notes: ReadonlyArray<{ freq: number; ms: number; at: number }>;
+    volume: number;
+    phrase?: string;
+  }
 > = {
   sticker: {
+    sound: '/sounds/scan-sticker.mp3',
     notes: [{ freq: 587, ms: 90, at: 0 }],
     volume: 0.22,
-    phrase: 'Сканируйте товар',
+    phrase: 'Сканируйте стикер',
   },
   chz: {
+    sound: '/sounds/scan-chz.mp3',
     notes: [
       { freq: 523, ms: 80, at: 0 },
       { freq: 784, ms: 110, at: 90 },
@@ -486,6 +495,7 @@ const FBS_CUES: Record<
     phrase: 'Сканируйте честный знак',
   },
   ready: {
+    sound: '/sounds/scanned.mp3',
     // Мажорное трезвучие — узнаваемое «готово», как на кассе.
     notes: [
       { freq: 659, ms: 70, at: 0 },
@@ -493,13 +503,16 @@ const FBS_CUES: Record<
       { freq: 1175, ms: 150, at: 150 },
     ],
     volume: 0.2,
+    phrase: 'Товар отсканирован',
   },
   error: {
+    sound: '/sounds/error.mp3',
     notes: [
       { freq: 320, ms: 150, at: 0 },
       { freq: 200, ms: 260, at: 150 },
     ],
     volume: 0.28,
+    phrase: 'Ошибка, неправильное сканирование',
   },
 };
 
@@ -683,11 +696,42 @@ export const WBSupplyManager = ({
    * дублируется: фраза перебила бы инструкцию к следующему товару, а сборщику
    * на этом месте нужно короткое «принято».
    */
-  const fbsCue = (kind: FbsCueKind) => {
-    if (!fbsSoundOn) return;
+  /** Запасной путь: файл не загрузился или браузер отказался его играть. */
+  const fbsCueFallback = (kind: FbsCueKind) => {
     playChime(FBS_CUES[kind].notes, FBS_CUES[kind].volume);
     const phrase = FBS_CUES[kind].phrase;
     if (phrase) speakRu(phrase);
+  };
+
+  const cueAudioRef = useRef<Partial<Record<FbsCueKind, HTMLAudioElement>>>({});
+  const cuePlayingRef = useRef<HTMLAudioElement | null>(null);
+
+  const fbsCue = (kind: FbsCueKind) => {
+    if (!fbsSoundOn) return;
+    try {
+      let el = cueAudioRef.current[kind];
+      if (!el) {
+        el = new Audio(FBS_CUES[kind].sound);
+        el.preload = 'auto';
+        cueAudioRef.current[kind] = el;
+      }
+
+      // Предыдущую фразу обрываем: сканер работает быстрее, чем проигрывается
+      // голос, и подсказки иначе наложились бы друг на друга.
+      const playing = cuePlayingRef.current;
+      if (playing && playing !== el) {
+        try { playing.pause(); playing.currentTime = 0; } catch { /* уже остановлен */ }
+      }
+
+      el.currentTime = 0;
+      cuePlayingRef.current = el;
+      const started = el.play();
+      if (started && typeof started.catch === 'function') {
+        started.catch(() => fbsCueFallback(kind));
+      }
+    } catch {
+      fbsCueFallback(kind);
+    }
   };
 
   /**
@@ -3491,7 +3535,8 @@ export const WBSupplyManager = ({
     setFbsScanNotice({ type: 'success', text: `ЧЗ принят для заказа ${pendingRow.orderId}, сохраняю…` });
     setFbsPendingStickerRow(null);
     setFbsScanMode('sticker');
-    fbsCue('sticker');
+    // Голос здесь не даём: через мгновение придёт подтверждение записи с
+    // «товар отсканирован», и две фразы наложились бы друг на друга.
     clearScanInput();
     setTimeout(() => { try { fbsScanInputRef.current?.focus(); } catch {} }, 0);
 
@@ -6147,7 +6192,7 @@ export const WBSupplyManager = ({
                 {fbsScanMode === 'honest_sign' && (
                   <button
                     type="button"
-                    onClick={() => { setFbsPendingStickerRow(null); setFbsScanMode('sticker'); clearScanInput(); setFbsScanNotice({ type: 'info', text: 'Скан ЧЗ сброшен. Можно сканировать следующий стикер.' }); }}
+                    onClick={() => { setFbsPendingStickerRow(null); setFbsScanMode('sticker'); fbsCue('sticker'); clearScanInput(); setFbsScanNotice({ type: 'info', text: 'Скан ЧЗ сброшен. Можно сканировать следующий стикер.' }); }}
                     className="px-4 py-2 rounded-xl border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
                   >
                     Сбросить
@@ -6195,7 +6240,14 @@ export const WBSupplyManager = ({
                         // работает ли звук на этом рабочем месте.
                         // Напрямую, а не через fbsCue: состояние ещё не
                         // обновилось, и проверка флага съела бы пробный сигнал.
-                        if (next) { playChime(FBS_CUES.ready.notes, FBS_CUES.ready.volume); speakRu('Звук включён'); }
+                        if (next) {
+                          try {
+                            const probe = new Audio(FBS_CUES.ready.sound);
+                            probe.play().catch(() => fbsCueFallback('ready'));
+                          } catch {
+                            fbsCueFallback('ready');
+                          }
+                        }
                       }}
                       title="Голосовые подсказки: что сканировать на текущем шаге"
                       className={`ml-auto px-3 py-1.5 rounded-xl text-sm border transition ${
