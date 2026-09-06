@@ -3038,6 +3038,19 @@ export const WBSupplyManager = ({
       return;
     }
 
+    /*
+     * Вкладку открываем сейчас, до запроса в WB.
+     *
+     * Браузер разрешает window.open только пока идёт обработка клика. Если
+     * открывать после await, жест уже «истёк» и блокировщик режет окно —
+     * поэтому сначала открываем пустую вкладку, а готовый PDF подставляем в неё.
+     */
+    const tab = window.open('', '_blank');
+    if (tab) {
+      tab.document.write('<title>Стикер задания</title><p style="font:14px sans-serif;padding:16px">Готовлю стикер…</p>');
+      tab.document.close();
+    }
+
     setFbsStickerPrintingId(String(row.orderId));
     setFbsScanNotice({ type: 'info', text: `Запрашиваю стикер задания ${row.orderId} у WB…` });
     try {
@@ -3046,9 +3059,21 @@ export const WBSupplyManager = ({
       if (!sticker) throw new Error('WB не вернул стикер для этого задания');
 
       const pdf = await buildStickersPdf(jsPDF, [sticker]);
-      pdf.save(`Стикер ${row.orderId}.pdf`);
-      setFbsScanNotice({ type: 'success', text: `Стикер задания ${row.orderId} скачан — печатайте и клейте.` });
+
+      if (tab) {
+        const blobUrl = String(pdf.output('bloburl'));
+        tab.location.href = blobUrl;
+        // Ссылку держим живой, пока вкладка её открывает: ранний revoke даёт
+        // пустую страницу.
+        setTimeout(() => { try { URL.revokeObjectURL(blobUrl); } catch {} }, 60000);
+        setFbsScanNotice({ type: 'success', text: `Стикер задания ${row.orderId} открыт в новой вкладке.` });
+      } else {
+        // Блокировщик всплывающих окон — тогда просто отдаём файл.
+        pdf.save(`Стикер ${row.orderId}.pdf`);
+        setFbsScanNotice({ type: 'success', text: `Браузер запретил новую вкладку — стикер ${row.orderId} скачан файлом.` });
+      }
     } catch (e: any) {
+      try { tab?.close(); } catch {}
       setFbsScanNotice({ type: 'error', text: e?.message || 'Не удалось получить стикер' });
     } finally {
       setFbsStickerPrintingId('');
