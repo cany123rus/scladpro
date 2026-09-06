@@ -38,6 +38,7 @@ import {
   restoreDataMatrixGs,
 } from '../utils/honestSign';
 import { explainWbAccess } from '../utils/wbTokenScopes';
+import { buildStickersPdf, fetchStickers } from '../utils/stickers';
 
 // --- Types ---
 
@@ -492,6 +493,10 @@ export const WBSupplyManager = ({
   // загорается до подтверждения от базы.
   const [fbsScanSavingKeys, setFbsScanSavingKeys] = useState<Record<string, true>>({});
   const [fbsScanFailedKeys, setFbsScanFailedKeys] = useState<Record<string, string>>({});
+  // Что показывать в листе: всё, только несобранное или только собранное.
+  const [fbsScanFilter, setFbsScanFilter] = useState<'all' | 'pending' | 'done'>('all');
+  // Номер задания, для которого сейчас тянем стикер (потерянный переклеивают).
+  const [fbsStickerPrintingId, setFbsStickerPrintingId] = useState<string>('');
 
   /** Единственная точка правки карты сканов: ref и состояние не должны разъезжаться. */
   const applyFbsScans = (map: Record<string, FbsSupplyScanSavedItem>) => {
@@ -620,6 +625,36 @@ export const WBSupplyManager = ({
   const [calcCostEditorValues, setCalcCostEditorValues] = useState<Record<string, string>>({});
   const [calcMissingCostOnly, setCalcMissingCostOnly] = useState(false);
   const [calcPhotoByNmId, setCalcPhotoByNmId] = useState<Record<string, string>>({});
+  // Фото ещё и по артикулу продавца: в листе сканирования ФБС нет nmId —
+  // строки приходят из Excel-файла поставки, где есть только артикул.
+  const [calcPhotoByArticle, setCalcPhotoByArticle] = useState<Record<string, string>>({});
+
+  /** Из строк wb_products_cache собираем обе карты фото за один проход. */
+  const buildPhotoMaps = (cacheRows: any[]) => {
+    const byNm: Record<string, string> = {};
+    const byArticle: Record<string, string> = {};
+    (cacheRows || []).forEach((r: any) => {
+      const p = r?.product_json || {};
+      const nm = String(r?.nm_id || p?.nmID || '').trim();
+      const first = (Array.isArray(p?.photos) && p.photos[0]) || '';
+      let src = typeof first === 'string' ? first : (first?.big || first?.tm || first?.c246x328 || '');
+      src = String(src || '').trim();
+      if (src.startsWith('//')) src = `https:${src}`;
+      if (!/^https?:\/\//i.test(src)) return;
+      if (nm) byNm[nm] = src;
+      const vendorCode = String(p?.vendorCode || '').trim().toLowerCase();
+      if (vendorCode) byArticle[vendorCode] = src;
+    });
+    return { byNm, byArticle };
+  };
+
+  /** Фото строки листа: сперва по nmId, если он есть, иначе по артикулу. */
+  const getFbsRowPhoto = (row: { article?: string; nmId?: string | number }) => {
+    const nm = String(row?.nmId || '').trim();
+    if (nm && calcPhotoByNmId[nm]) return calcPhotoByNmId[nm];
+    const article = String(row?.article || '').trim().toLowerCase();
+    return (article && calcPhotoByArticle[article]) || '';
+  };
 
   const getCalcCostKeyCandidates = (row: any) => {
     const nmId = String(row?.nmId || '').trim();
@@ -873,19 +908,12 @@ export const WBSupplyManager = ({
           .eq('supplier_id', selectedSupplierId)
           .limit(10000);
 
-        const next: Record<string, string> = {};
-        (cacheRows || []).forEach((r: any) => {
-          const nm = String(r?.nm_id || r?.product_json?.nmID || '').trim();
-          const p = r?.product_json || {};
-          const first = (Array.isArray(p?.photos) && p.photos[0]) || '';
-          let src = typeof first === 'string' ? first : (first?.big || first?.tm || first?.c246x328 || '');
-          src = String(src || '').trim();
-          if (src.startsWith('//')) src = `https:${src}`;
-          if (nm && /^https?:\/\//i.test(src)) next[nm] = src;
-        });
-        setCalcPhotoByNmId(next);
+        const { byNm, byArticle } = buildPhotoMaps(cacheRows || []);
+        setCalcPhotoByNmId(byNm);
+        setCalcPhotoByArticle(byArticle);
       } catch {
         setCalcPhotoByNmId({});
+        setCalcPhotoByArticle({});
       }
     };
 
@@ -2924,6 +2952,42 @@ export const WBSupplyManager = ({
     }
   };
 
+  /**
+   * Стикер одного задания — когда наклейку потеряли или испортили.
+   *
+   * Берём тот же стикер, что WB отдавал при сборке поставки: перепечатать
+   * «похожий» нельзя, на нём свой код, по которому задание и опознаётся.
+   */
+  const printSingleFbsSticker = async (row: FbsSupplyScanOrderRow) => {
+    const orderId = Number(String(row?.orderId || '').trim());
+    if (!Number.isFinite(orderId) || orderId <= 0) {
+      setFbsScanNotice({ type: 'error', text: 'У строки нет номера задания — стикер запросить не по чему' });
+      return;
+    }
+
+    const token = getSupplierToken();
+    if (!token) {
+      setFbsScanNotice({ type: 'error', text: 'Токен API кабинета не найден' });
+      return;
+    }
+
+    setFbsStickerPrintingId(String(row.orderId));
+    setFbsScanNotice({ type: 'info', text: `Запрашиваю стикер задания ${row.orderId} у WB…` });
+    try {
+      const stickers = await fetchStickers(token, [orderId]);
+      const sticker = stickers.get(orderId);
+      if (!sticker) throw new Error('WB не вернул стикер для этого задания');
+
+      const pdf = await buildStickersPdf(jsPDF, [sticker]);
+      pdf.save(`Стикер ${row.orderId}.pdf`);
+      setFbsScanNotice({ type: 'success', text: `Стикер задания ${row.orderId} скачан — печатайте и клейте.` });
+    } catch (e: any) {
+      setFbsScanNotice({ type: 'error', text: e?.message || 'Не удалось получить стикер' });
+    } finally {
+      setFbsStickerPrintingId('');
+    }
+  };
+
   const downloadFbsScanTemplateExcel = async () => {
     if (!activeSupplyId) return;
     try {
@@ -4288,17 +4352,9 @@ export const WBSupplyManager = ({
               .select('nm_id, product_json')
               .eq('supplier_id', selectedSupplierId)
               .limit(10000);
-            const next: Record<string, string> = {};
-            (cacheRows || []).forEach((r: any) => {
-              const nm = String(r?.nm_id || r?.product_json?.nmID || '').trim();
-              const p = r?.product_json || {};
-              const first = (Array.isArray(p?.photos) && p.photos[0]) || '';
-              let src = typeof first === 'string' ? first : (first?.big || first?.tm || first?.c246x328 || '');
-              src = String(src || '').trim();
-              if (src.startsWith('//')) src = `https:${src}`;
-              if (nm && /^https?:\/\//i.test(src)) next[nm] = src;
-            });
-            setCalcPhotoByNmId(next);
+            const { byNm, byArticle } = buildPhotoMaps(cacheRows || []);
+            setCalcPhotoByNmId(byNm);
+            setCalcPhotoByArticle(byArticle);
           } catch {}
         }
 
@@ -5739,9 +5795,26 @@ export const WBSupplyManager = ({
                       <div className="text-sm opacity-80 mt-1">Ищу строку сначала по колонке `Стикер при считывании`, потом по обычному номеру стикера.</div>
                     </div>
                   ) : (
-                    <div>
-                      <div className="font-semibold">Шаг 2. Сканируйте ЧЗ</div>
-                      <div className="text-sm opacity-80 mt-1">Заказ {fbsPendingStickerRow?.orderId}, стикер <span className="font-mono">{fbsPendingStickerRow?.stickerText || '—'}</span>{fbsPendingStickerRow?.stickerScanText ? `, при считывании: ${fbsPendingStickerRow.stickerScanText}` : ''}</div>
+                    <div className="flex items-start gap-4">
+                      {/* Крупное фото: на этом шаге сборщик держит вещь в руках
+                          и должен успеть заметить, что взял не тот товар. */}
+                      {fbsPendingStickerRow && getFbsRowPhoto(fbsPendingStickerRow) ? (
+                        <img
+                          src={getFbsRowPhoto(fbsPendingStickerRow)}
+                          alt=""
+                          className="h-32 w-24 flex-shrink-0 rounded-lg border border-amber-200 bg-white object-cover"
+                        />
+                      ) : null}
+                      <div>
+                        <div className="font-semibold">Шаг 2. Сканируйте ЧЗ</div>
+                        <div className="text-sm opacity-80 mt-1">Заказ {fbsPendingStickerRow?.orderId}, стикер <span className="font-mono">{fbsPendingStickerRow?.stickerText || '—'}</span>{fbsPendingStickerRow?.stickerScanText ? `, при считывании: ${fbsPendingStickerRow.stickerScanText}` : ''}</div>
+                        {fbsPendingStickerRow?.title ? (
+                          <div className="text-sm font-medium mt-1">{fbsPendingStickerRow.title}</div>
+                        ) : null}
+                        <div className="text-xs opacity-70 mt-0.5">
+                          {[fbsPendingStickerRow?.article, fbsPendingStickerRow?.size].filter(Boolean).join(' · ')}
+                        </div>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -5837,6 +5910,36 @@ export const WBSupplyManager = ({
             </div>
 
             <div className="p-5 overflow-auto">
+              {/* Фильтр по состоянию сборки: на длинной поставке главное —
+                  быстро увидеть, что ещё не отсканировано. */}
+              {!fbsScanLoading && fbsScanRows.length > 0 && (() => {
+                const stats = getFbsScanProgressStats(fbsScanRows, fbsScansBySticker);
+                const pendingCount = Math.max(0, stats.totalRows - stats.scannedCount);
+                const tabs: Array<{ id: 'all' | 'pending' | 'done'; label: string; count: number }> = [
+                  { id: 'all', label: 'Все', count: stats.totalRows },
+                  { id: 'pending', label: 'Не отсканированы', count: pendingCount },
+                  { id: 'done', label: 'Отсканированы', count: stats.scannedCount },
+                ];
+                return (
+                  <div className="mb-3 flex flex-wrap items-center gap-2">
+                    {tabs.map((tab) => (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        onClick={() => setFbsScanFilter(tab.id)}
+                        className={`px-3 py-1.5 rounded-xl text-sm border transition ${
+                          fbsScanFilter === tab.id
+                            ? 'border-indigo-500 bg-indigo-50 text-indigo-700 font-semibold'
+                            : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        {tab.label} <span className="tabular-nums">({tab.count})</span>
+                      </button>
+                    ))}
+                  </div>
+                );
+              })()}
+
               {fbsScanLoading ? (
                 <div className="text-slate-500">Загрузка заказов поставки...</div>
               ) : !fbsScanRows.length ? (
@@ -5846,13 +5949,20 @@ export const WBSupplyManager = ({
                   <table className="w-full text-sm">
                     <thead className="bg-slate-50 text-slate-600">
                       <tr>
+                        <th className="px-3 py-2 text-left w-16">Фото</th>
                         <th className="px-3 py-2 text-left">Номер заказа</th>
                         <th className="px-3 py-2 text-left">Стикер</th>
                         <th className="px-3 py-2 text-left">Стикер при считывании</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {fbsScanRows.map((row) => {
+                      {fbsScanRows
+                        .filter((row) => {
+                          if (fbsScanFilter === 'all') return true;
+                          const done = Boolean(findFbsScanSavedEntry(row, fbsScansBySticker)?.item?.honestSignCode);
+                          return fbsScanFilter === 'done' ? done : !done;
+                        })
+                        .map((row) => {
                         const scan = findFbsScanSavedEntry(row, fbsScansBySticker)?.item;
                         const isActive = fbsPendingStickerRow?.storageKey === row.storageKey;
                         const isSaving = !!fbsScanSavingKeys[row.storageKey];
@@ -5863,8 +5973,37 @@ export const WBSupplyManager = ({
                             key={row.storageKey}
                             className={`${failedReason ? 'bg-rose-50' : isSaving ? 'bg-amber-50/70' : scan?.honestSignCode ? 'bg-emerald-50/60' : isActive ? 'bg-amber-50' : 'bg-white'} border-t border-slate-100`}
                           >
-                            <td className="px-3 py-2 font-medium text-slate-900 whitespace-nowrap">{row.orderId || '—'}</td>
-                            <td className="px-3 py-2 font-mono text-slate-700 whitespace-nowrap">{getSafeStickerText(row)}</td>
+                            <td className="px-3 py-2">
+                              {getFbsRowPhoto(row) ? (
+                                <img
+                                  src={getFbsRowPhoto(row)}
+                                  alt=""
+                                  loading="lazy"
+                                  className="h-14 w-11 rounded border border-slate-200 bg-white object-cover"
+                                />
+                              ) : (
+                                <div className="h-14 w-11 rounded border border-dashed border-slate-200 bg-slate-50" />
+                              )}
+                            </td>
+                            <td className="px-3 py-2 font-medium text-slate-900 whitespace-nowrap">
+                              <div>{row.orderId || '—'}</div>
+                              {row.title ? <div className="mt-0.5 text-[11px] font-normal text-slate-500 max-w-[220px] truncate" title={row.title}>{row.title}</div> : null}
+                              <div className="text-[11px] font-normal text-slate-400">{[row.article, row.size].filter(Boolean).join(' · ')}</div>
+                            </td>
+                            <td className="px-3 py-2 font-mono text-slate-700 whitespace-nowrap">
+                              <div>{getSafeStickerText(row)}</div>
+                              {/* Стикер иногда теряют или рвут при сборке — тогда его печатают заново. */}
+                              <button
+                                type="button"
+                                onClick={() => printSingleFbsSticker(row)}
+                                disabled={fbsStickerPrintingId === String(row.orderId)}
+                                title="Скачать стикер этого задания заново"
+                                className="mt-1 inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2 py-0.5 text-[11px] font-sans text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                              >
+                                <Printer className="w-3 h-3" />
+                                {fbsStickerPrintingId === String(row.orderId) ? 'Готовлю…' : 'Печать стикера'}
+                              </button>
+                            </td>
                             <td className="px-3 py-2">
                               <div className={`font-mono text-[11px] break-all ${scan?.honestSignCode ? 'text-emerald-700' : 'text-slate-700'}`}>{finalReadValue}</div>
                               <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px]">
