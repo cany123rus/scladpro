@@ -3519,11 +3519,16 @@ export const WBSupplyManager = ({
     );
     if (duplicate) {
       fbsCue('error');
+      const where = `${duplicate.orderId || duplicate.storageKey}${duplicate.article ? `, ${duplicate.article}` : ''}`;
+      // Помечаем саму строку, а не только всплывающее сообщение: уведомление
+      // сменится следующим сканом, а разбираться с дублем сборщик будет по списку.
+      setFbsScanFailedKeys((prev) => ({
+        ...prev,
+        [pendingRow.storageKey]: `Дубль ЧЗ — этот код уже стоит на заказе ${where}. Нужен новый код с товара в руках.`,
+      }));
       setFbsScanNotice({
         type: 'error',
-        text: `Этот ЧЗ уже отсканирован в этой поставке — заказ ${duplicate.orderId || duplicate.storageKey}${
-          duplicate.article ? `, ${duplicate.article}` : ''
-        }. Возьмите код с этого товара.`,
+        text: `Дубль ЧЗ: код уже отсканирован на заказе ${where}. Отсканируйте новый честный знак — тот, что на товаре в руках.`,
       });
       clearScanInput();
       return;
@@ -3597,7 +3602,10 @@ export const WBSupplyManager = ({
         // отношения не имеют, и стирать их нельзя.
         dropFbsScanEntry(pendingRow.storageKey);
         fbsCue('error');
-        setFbsScanFailedKeys((prev) => ({ ...prev, [pendingRow.storageKey]: e?.message || 'не сохранён' }));
+        setFbsScanFailedKeys((prev) => ({
+          ...prev,
+          [pendingRow.storageKey]: `ЧЗ НЕ сохранён — сканируйте заново (${e?.message || 'ошибка записи'})`,
+        }));
         setFbsScanNotice({ type: 'error', text: e?.message || 'Ошибка сохранения ЧЗ (скан отменён)' });
       });
   };
@@ -6357,7 +6365,7 @@ export const WBSupplyManager = ({
                               <div className={`font-mono text-[11px] break-all ${scan?.honestSignCode ? 'text-emerald-700' : 'text-slate-700'}`}>{finalReadValue}</div>
                               <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px]">
                                 {failedReason ? (
-                                  <span className="text-rose-600 font-medium">ЧЗ НЕ сохранён — сканируйте заново ({failedReason})</span>
+                                  <span className="text-rose-600 font-medium">{failedReason}</span>
                                 ) : isSaving ? (
                                   <span className="text-amber-600">Сохраняю ЧЗ…</span>
                                 ) : scan?.honestSignCode ? (
