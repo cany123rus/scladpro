@@ -3501,6 +3501,34 @@ export const WBSupplyManager = ({
     const supplyId = activeSupplyId;
     const supplierId = selectedSupplierId;
 
+    /*
+     * Дубль внутри этой же поставки.
+     *
+     * Проверка по базе поставщика есть, но она уходит в фоновую очередь и
+     * успевает ответить уже после того, как второй скан принят. Поэтому один
+     * и тот же ЧЗ можно было повесить на два задания подряд — а это пересорт:
+     * на две вещи уезжает один код маркировки.
+     *
+     * Здесь сверяемся синхронно с картой текущей поставки — до всякой сети.
+     */
+    const duplicate = Object.values(fbsScansRef.current).find(
+      (item) =>
+        item &&
+        item.storageKey !== pendingRow.storageKey &&
+        normalizeDataMatrixText(String(item.honestSignCode || '')) === honestSignCode,
+    );
+    if (duplicate) {
+      fbsCue('error');
+      setFbsScanNotice({
+        type: 'error',
+        text: `Этот ЧЗ уже отсканирован в этой поставке — заказ ${duplicate.orderId || duplicate.storageKey}${
+          duplicate.article ? `, ${duplicate.article}` : ''
+        }. Возьмите код с этого товара.`,
+      });
+      clearScanInput();
+      return;
+    }
+
     // База — ref, а не состояние: при быстром сканере два скана попадают в один
     // рендер, и карта из замыкания не содержит предыдущий код.
     const next = { ...fbsScansRef.current };
