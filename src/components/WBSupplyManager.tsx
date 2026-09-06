@@ -551,11 +551,83 @@ export const WBSupplyManager = ({
   const [fbsScanFilter, setFbsScanFilter] = useState<'all' | 'pending' | 'done'>('all');
   // Номер задания, для которого сейчас тянем стикер (потерянный переклеивают).
   const [fbsStickerPrintingId, setFbsStickerPrintingId] = useState<string>('');
+  // Голосовые подсказки шагов. Выбор запоминаем: на складе он свой у каждого ПК.
+  const [fbsSoundOn, setFbsSoundOn] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('fbs_scan_sound_v1') !== '0';
+    } catch {
+      return true;
+    }
+  });
 
   /** Единственная точка правки карты сканов: ref и состояние не должны разъезжаться. */
   const applyFbsScans = (map: Record<string, FbsSupplyScanSavedItem>) => {
     fbsScansRef.current = map;
     setFbsScansBySticker(map);
+  };
+
+  /*
+   * Звуковые подсказки на складе.
+   *
+   * Сборщик смотрит на товар и сканер, а не в экран, поэтому смену шага нужно
+   * слышать. Короткий тон отличает шаги на слух даже в шуме, фраза говорит,
+   * что именно сканировать. Отключается — в тихом помещении голос мешает.
+   */
+  const audioCtxRef = useRef<AudioContext | null>(null);
+
+  const playTone = (freq: number, ms: number) => {
+    try {
+      const Ctx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!Ctx) return;
+      const ctx = audioCtxRef.current ?? new Ctx();
+      audioCtxRef.current = ctx;
+      if (ctx.state === 'suspended') void ctx.resume();
+
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      // Мгновенный старт и обрыв дают щелчок, поэтому громкость ведём плавно.
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + ms / 1000);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + ms / 1000);
+    } catch {
+      /* без звука работать можно, падать из-за него нельзя */
+    }
+  };
+
+  const speakRu = (text: string) => {
+    try {
+      const synth = window.speechSynthesis;
+      if (!synth) return;
+      // Иначе фразы копятся в очереди и отстают от сканера на несколько шагов.
+      synth.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = 'ru-RU';
+      utterance.rate = 1.15;
+      synth.speak(utterance);
+    } catch {
+      /* голос есть не во всех браузерах */
+    }
+  };
+
+  const fbsCue = (kind: 'sticker' | 'chz' | 'error') => {
+    if (!fbsSoundOn) return;
+    if (kind === 'sticker') {
+      playTone(880, 110);
+      speakRu('Сканируйте товар');
+      return;
+    }
+    if (kind === 'chz') {
+      playTone(1320, 110);
+      speakRu('Сканируйте честный знак');
+      return;
+    }
+    playTone(200, 300);
   };
 
   /**
@@ -3301,6 +3373,7 @@ export const WBSupplyManager = ({
       setFbsScanNotice({ type: 'success', text: `Найден заказ ${row.orderId}. Теперь сканируйте ЧЗ.` });
       setFbsPendingStickerRow(row);
       setFbsScanMode('honest_sign');
+      fbsCue('chz');
       clearScanInput();
       return;
     }
@@ -3358,6 +3431,7 @@ export const WBSupplyManager = ({
     setFbsScanNotice({ type: 'success', text: `ЧЗ принят для заказа ${pendingRow.orderId}, сохраняю…` });
     setFbsPendingStickerRow(null);
     setFbsScanMode('sticker');
+    fbsCue('sticker');
     clearScanInput();
     setTimeout(() => { try { fbsScanInputRef.current?.focus(); } catch {} }, 0);
 
@@ -3368,6 +3442,7 @@ export const WBSupplyManager = ({
         const existsInSupplierScannedBase = await isFbsCodeAlreadyScannedForSupplier(honestSignCode, supplierId);
         if (existsInSupplierScannedBase) {
           dropFbsScanEntry(pendingRow.storageKey);
+          fbsCue('error');
           setFbsScanNotice({ type: 'error', text: 'Этот ЧЗ уже есть в базе отсканированных ЧЗ этого поставщика. Скан отменён.' });
           return;
         }
@@ -3386,6 +3461,7 @@ export const WBSupplyManager = ({
         // Откатываем только свою строку: соседние сканы к этой ошибке
         // отношения не имеют, и стирать их нельзя.
         dropFbsScanEntry(pendingRow.storageKey);
+        fbsCue('error');
         setFbsScanFailedKeys((prev) => ({ ...prev, [pendingRow.storageKey]: e?.message || 'не сохранён' }));
         setFbsScanNotice({ type: 'error', text: e?.message || 'Ошибка сохранения ЧЗ (скан отменён)' });
       });
@@ -6030,7 +6106,9 @@ export const WBSupplyManager = ({
                   { id: 'done', label: 'Отсканированы', count: stats.scannedCount },
                 ];
                 return (
-                  <div className="mb-3 flex flex-wrap items-center gap-2">
+                  // sticky относительно этого скролл-контейнера: список
+                  // длинный, а «что осталось» нужно видеть на любой прокрутке.
+                  <div className="sticky top-0 z-20 -mx-5 mb-3 flex flex-wrap items-center gap-2 border-b border-slate-100 bg-white px-5 py-2">
                     {tabs.map((tab) => (
                       <button
                         key={tab.id}
@@ -6045,6 +6123,25 @@ export const WBSupplyManager = ({
                         {tab.label} <span className="tabular-nums">({tab.count})</span>
                       </button>
                     ))}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = !fbsSoundOn;
+                        setFbsSoundOn(next);
+                        try { localStorage.setItem('fbs_scan_sound_v1', next ? '1' : '0'); } catch {}
+                        // Проверка на слух сразу при включении: иначе непонятно,
+                        // работает ли звук на этом рабочем месте.
+                        if (next) { playTone(880, 110); speakRu('Звук включён'); }
+                      }}
+                      title="Голосовые подсказки: что сканировать на текущем шаге"
+                      className={`ml-auto px-3 py-1.5 rounded-xl text-sm border transition ${
+                        fbsSoundOn
+                          ? 'border-emerald-400 bg-emerald-50 text-emerald-700'
+                          : 'border-slate-300 bg-white text-slate-500'
+                      }`}
+                    >
+                      {fbsSoundOn ? '🔊 Звук включён' : '🔈 Звук выключен'}
+                    </button>
                   </div>
                 );
               })()}
@@ -6056,7 +6153,9 @@ export const WBSupplyManager = ({
               ) : (
                 <div className="overflow-auto rounded-xl border border-slate-200">
                   <table className="w-full text-sm">
-                    <thead className="bg-slate-50 text-slate-600">
+                    {/* Шапка держится наверху: строки высокие из-за фото, и без
+                        неё на середине списка непонятно, где какая колонка. */}
+                    <thead className="sticky top-0 z-10 bg-slate-50 text-slate-600 shadow-[0_1px_0_0_#e2e8f0]">
                       <tr>
                         {/* Колонка должна быть шире картинки: при w-16 ячейка
                             сжимала фото в вертикальную полоску. */}
