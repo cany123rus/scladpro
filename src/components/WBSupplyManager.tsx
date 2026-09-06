@@ -118,6 +118,12 @@ interface FbsSupplyScanOrderRow {
   title: string;
   article: string;
   size: string;
+  /**
+   * Код номенклатуры WB. Нужен ради фото: карточки в wb_products_cache есть не
+   * у всех товаров, а по nmID адрес картинки на CDN вычисляется всегда.
+   * У строк из Excel-файла поставки его нет — там останется пусто.
+   */
+  nmId?: number;
   stickerDigits: string;
   stickerText: string;
   stickerScanText: string;
@@ -157,12 +163,22 @@ const getWBImageUrls = (nmId: number) => {
   const host = `basket-${String(bi + 1).padStart(2, '0')}.wbbasket.ru`;
 
   const base = `https://${host}/vol${vol}/part${part}/${nmId}/images`;
+  /*
+   * Сначала webp, потом jpg.
+   *
+   * WB перевёл CDN на webp: проверено 22.08.2026 — `c516x688/1.jpg` отдаёт 404
+   * и для свежей карточки (nmID 1263826852), и для прошлогодней (413702350),
+   * а `1.webp` в обоих случаях возвращает картинку. Пока список состоял из
+   * одних jpg, запасные адреса были мертвы, и товар без карточки в кэше
+   * оставался с пустой рамкой.
+   */
   return [
+    `${base}/c516x688/1.webp`,
+    `${base}/big/1.webp`,
+    `${base}/c246x328/1.webp`,
+    `${base}/c516x688/2.webp`,
     `${base}/c516x688/1.jpg`,
     `${base}/big/1.jpg`,
-    `${base}/c516x688/2.jpg`,
-    `${base}/big/2.jpg`,
-    `${base}/c246x328/1.jpg`,
   ];
 };
 
@@ -402,6 +418,44 @@ const getImageCandidates = (photoUrl?: string, nmId?: number, extraUrls: string[
   }
 
   return Array.from(new Set(list));
+};
+
+/**
+ * Фото с перебором адресов.
+ *
+ * Первый кандидат — кэш карточек, дальше идут ссылки на CDN Wildberries.
+ * Номер «корзины» CDN вычисляется по диапазону nmID и иногда промахивается на
+ * соседнюю, поэтому на ошибке загрузки берём следующий адрес, а не показываем
+ * пустую рамку.
+ */
+const FbsPhoto = ({
+  urls,
+  className,
+  emptyClassName,
+}: {
+  urls: string[];
+  className: string;
+  emptyClassName: string;
+}) => {
+  const [index, setIndex] = useState(0);
+  const key = urls.join('|');
+
+  useEffect(() => {
+    setIndex(0);
+  }, [key]);
+
+  const src = urls[index];
+  if (!src) return <div className={emptyClassName} />;
+
+  return (
+    <img
+      src={src}
+      alt=""
+      loading="lazy"
+      className={className}
+      onError={() => setIndex((i) => i + 1)}
+    />
+  );
 };
 
 type WBSupplyManagerTab = 'fbs' | 'supply_order' | 'fbs_calc' | 'fbs_orders' | 'fbo_acceptance';
@@ -648,12 +702,21 @@ export const WBSupplyManager = ({
     return { byNm, byArticle };
   };
 
-  /** Фото строки листа: сперва по nmId, если он есть, иначе по артикулу. */
-  const getFbsRowPhoto = (row: { article?: string; nmId?: string | number }) => {
+  /**
+   * Откуда брать фото строки листа, по убыванию надёжности.
+   *
+   * Кэш карточек заполнен не для всех товаров — «ЖилетЧерныйЖнв» и
+   * «Поло3а1кор» в нём просто отсутствуют, поэтому у них были пустые рамки.
+   * Поэтому последним рубежом идёт CDN Wildberries: адрес картинки считается
+   * из самого nmID и не зависит от того, синхронизировали карточки или нет.
+   */
+  const getFbsRowPhotoCandidates = (row: { article?: string; nmId?: string | number }) => {
     const nm = String(row?.nmId || '').trim();
-    if (nm && calcPhotoByNmId[nm]) return calcPhotoByNmId[nm];
     const article = String(row?.article || '').trim().toLowerCase();
-    return (article && calcPhotoByArticle[article]) || '';
+    return getImageCandidates(
+      (nm && calcPhotoByNmId[nm]) || (article && calcPhotoByArticle[article]) || '',
+      Number(nm) > 0 ? Number(nm) : undefined,
+    );
   };
 
   const getCalcCostKeyCandidates = (row: any) => {
@@ -2373,6 +2436,9 @@ export const WBSupplyManager = ({
         title: String(row?.title || '').trim(),
         article: String(row?.article || '').trim(),
         size: String(row?.size || '').trim(),
+        // Без этого номенклатура терялась при сохранении листа, и после
+        // перезагрузки фото пропадали у всех строк.
+        nmId: Number(row?.nmId) > 0 ? Number(row.nmId) : undefined,
         stickerDigits,
         stickerText,
         stickerScanText,
@@ -2733,6 +2799,7 @@ export const WBSupplyManager = ({
           title: String(o.title || 'Без названия'),
           article: String(o.article || o.vendorCode || '-'),
           size: String(o.size || o.techSize || o.wbSize || '-'),
+          nmId: Number(o.nmId ?? (o as any).nmID ?? 0) > 0 ? Number(o.nmId ?? (o as any).nmID) : undefined,
           stickerDigits,
           stickerText,
           stickerScanText,
@@ -5798,11 +5865,11 @@ export const WBSupplyManager = ({
                     <div className="flex items-start gap-4">
                       {/* Крупное фото: на этом шаге сборщик держит вещь в руках
                           и должен успеть заметить, что взял не тот товар. */}
-                      {fbsPendingStickerRow && getFbsRowPhoto(fbsPendingStickerRow) ? (
-                        <img
-                          src={getFbsRowPhoto(fbsPendingStickerRow)}
-                          alt=""
+                      {fbsPendingStickerRow ? (
+                        <FbsPhoto
+                          urls={getFbsRowPhotoCandidates(fbsPendingStickerRow)}
                           className="h-32 w-24 flex-shrink-0 rounded-lg border border-amber-200 bg-white object-cover"
+                          emptyClassName="h-32 w-24 flex-shrink-0 rounded-lg border border-dashed border-amber-200 bg-white/60"
                         />
                       ) : null}
                       <div>
@@ -5974,16 +6041,11 @@ export const WBSupplyManager = ({
                             className={`${failedReason ? 'bg-rose-50' : isSaving ? 'bg-amber-50/70' : scan?.honestSignCode ? 'bg-emerald-50/60' : isActive ? 'bg-amber-50' : 'bg-white'} border-t border-slate-100`}
                           >
                             <td className="px-3 py-2">
-                              {getFbsRowPhoto(row) ? (
-                                <img
-                                  src={getFbsRowPhoto(row)}
-                                  alt=""
-                                  loading="lazy"
-                                  className="h-14 w-11 rounded border border-slate-200 bg-white object-cover"
-                                />
-                              ) : (
-                                <div className="h-14 w-11 rounded border border-dashed border-slate-200 bg-slate-50" />
-                              )}
+                              <FbsPhoto
+                                urls={getFbsRowPhotoCandidates(row)}
+                                className="h-14 w-11 rounded border border-slate-200 bg-white object-cover"
+                                emptyClassName="h-14 w-11 rounded border border-dashed border-slate-200 bg-slate-50"
+                              />
                             </td>
                             <td className="px-3 py-2 font-medium text-slate-900 whitespace-nowrap">
                               <div>{row.orderId || '—'}</div>
