@@ -481,6 +481,39 @@ export const WBSupplyManager = ({
   const fbsScanInputRef = useRef<HTMLInputElement | null>(null);
   // Очередь фоновой записи сканов: сериализует upsert карты, чтобы быстрые сканы не перетирали друг друга.
   const fbsScanSaveQueueRef = useRef<Promise<any>>(Promise.resolve());
+  // Актуальная карта сканов для фоновой записи.
+  //
+  // Состояние React для этого не годится: в замыкании обработчика лежит карта
+  // на момент рендера, а сканер вводит код и Enter мгновенно. Два быстрых
+  // скана попадали в один рендер, второй строил карту без первого — и запись
+  // затирала предыдущий ЧЗ, хотя в интерфейсе он оставался зелёным.
+  const fbsScansRef = useRef<Record<string, FbsSupplyScanSavedItem>>({});
+  // Строки, чья запись ещё идёт или уже провалилась: без этого «ЧЗ сохранён»
+  // загорается до подтверждения от базы.
+  const [fbsScanSavingKeys, setFbsScanSavingKeys] = useState<Record<string, true>>({});
+  const [fbsScanFailedKeys, setFbsScanFailedKeys] = useState<Record<string, string>>({});
+
+  /** Единственная точка правки карты сканов: ref и состояние не должны разъезжаться. */
+  const applyFbsScans = (map: Record<string, FbsSupplyScanSavedItem>) => {
+    fbsScansRef.current = map;
+    setFbsScansBySticker(map);
+  };
+
+  /**
+   * Убрать одну строку из карты — при отказе базы или дубле ЧЗ.
+   * Именно одну: возврат всей карты к состоянию «до скана» стирал соседние
+   * коды, отсканированные, пока запись стояла в очереди.
+   */
+  const dropFbsScanEntry = (storageKey: string) => {
+    const rest = { ...fbsScansRef.current };
+    delete rest[storageKey];
+    applyFbsScans(rest);
+    setFbsScanSavingKeys((prev) => {
+      const next = { ...prev };
+      delete next[storageKey];
+      return next;
+    });
+  };
   const lastFbsFetchRef = useRef<{ supplierId: string; ts: number } | null>(null);
   const cachedPdfFontRef = useRef<string | null>(null);
   const groupedImageCacheRef = useRef<Map<string, string>>(new Map());
@@ -2170,21 +2203,30 @@ export const WBSupplyManager = ({
     return next;
   };
 
+  // Ошибку чтения глотать нельзя: пустая карта вместо реальной выглядит как
+  // «ничего не отсканировано», и следующий же скан перезапишет ключ, стерев
+  // все сохранённые ЧЗ этой поставки.
   const loadFbsSupplyScanMap = async (supplyId: string, supplierId?: string) => {
     const key = getFbsScanStorageKey(supplyId, supplierId);
+    const { data, error } = await supabase.from('app_settings').select('value').eq('key', key).maybeSingle();
+    if (error) throw new Error(`Не удалось прочитать сохранённые ЧЗ поставки: ${error.message}`);
     try {
-      const { data } = await supabase.from('app_settings').select('value').eq('key', key).maybeSingle();
       const parsed = data?.value ? JSON.parse(String(data.value)) : {};
       return parseFbsScanPayload(parsed);
-    } catch {
-      return {} as Record<string, FbsSupplyScanSavedItem>;
+    } catch (e: any) {
+      throw new Error(`Сохранённые ЧЗ поставки повреждены: ${e?.message || e}`);
     }
   };
 
+  // supabase-js не бросает исключение на ошибке — он возвращает { error }.
+  // Раньше результат не проверялся, поэтому упавший upsert (500 от прокси,
+  // RLS, обрыв сети) проходил как успех: в интерфейсе загоралось «ЧЗ
+  // сохранён», а в базе кода не было. Проверяем и падаем явно.
   const saveFbsSupplyScanMap = async (supplyId: string, next: Record<string, FbsSupplyScanSavedItem>, supplierId?: string) => {
     const key = getFbsScanStorageKey(supplyId, supplierId);
     const clean = parseFbsScanPayload(next);
-    await supabase.from('app_settings').upsert([{ key, value: JSON.stringify(clean) }], { onConflict: 'key' });
+    const { error } = await supabase.from('app_settings').upsert([{ key, value: JSON.stringify(clean) }], { onConflict: 'key' });
+    if (error) throw new Error(`ЧЗ не сохранён: ${error.message}`);
     return clean;
   };
 
@@ -2741,7 +2783,7 @@ export const WBSupplyManager = ({
         loadFbsSupplyScanMap(activeSupplyId, selectedSupplierId),
       ]);
       setFbsScanRows(rows);
-      setFbsScansBySticker(savedMap);
+      applyFbsScans(savedMap);
       const completeness = getFbsScanCompletenessStats(rows);
       if (source !== 'cache' && (apiRows.length || JSON.stringify(rows) !== JSON.stringify(getUniqueFbsScanRows(mergedRows))) && completeness.isFullyReady) {
         void saveFbsSupplyScanSheetRows(activeSupplyId, rows, selectedSupplierId, 'wb').catch(() => undefined);
@@ -2801,7 +2843,7 @@ export const WBSupplyManager = ({
       }
 
       setFbsScanRows(rows);
-      setFbsScansBySticker(savedMap);
+      applyFbsScans(savedMap);
 
       const completeness = getFbsScanCompletenessStats(rows);
       // Сохраняем только полный набор: недособранный лист затёр бы прежний.
@@ -2870,7 +2912,7 @@ export const WBSupplyManager = ({
       if (currentEntry?.key) delete next[currentEntry.key];
       else delete next[row.storageKey];
       const saved = await saveFbsSupplyScanMap(activeSupplyId, next, selectedSupplierId);
-      setFbsScansBySticker(saved);
+      applyFbsScans(saved);
       if (fbsPendingStickerRow?.storageKey === row.storageKey) {
         setFbsPendingStickerRow(null);
         setFbsScanMode('sticker');
@@ -2951,7 +2993,7 @@ export const WBSupplyManager = ({
       }
       assertFbsScanRowsReadyForExport(rows, 'скан файл');
       setFbsScanRows(rows);
-      setFbsScansBySticker(savedMap);
+      applyFbsScans(savedMap);
 
       const rowsWithKiz = getUniqueFbsScanRows(rows).filter((row) => Boolean(findFbsScanSavedEntry(row, savedMap)?.item?.honestSignCode));
       if (!rowsWithKiz.length) {
@@ -3007,7 +3049,7 @@ export const WBSupplyManager = ({
       }
       const completeness = assertFbsScanRowsReadyForExport(rows, 'скан файл');
       setFbsScanRows(rows);
-      setFbsScansBySticker(savedMap);
+      applyFbsScans(savedMap);
       if (source !== 'cache' && apiRows.length) {
         void saveFbsSupplyScanSheetRows(activeSupplyId, rows, selectedSupplierId, 'wb').catch(() => undefined);
       }
@@ -3125,9 +3167,10 @@ export const WBSupplyManager = ({
     const pendingRow = fbsPendingStickerRow;
     const supplyId = activeSupplyId;
     const supplierId = selectedSupplierId;
-    const prevMap = fbsScansBySticker;
 
-    const next = { ...fbsScansBySticker };
+    // База — ref, а не состояние: при быстром сканере два скана попадают в один
+    // рендер, и карта из замыкания не содержит предыдущий код.
+    const next = { ...fbsScansRef.current };
     for (const key of Object.keys(next)) {
       const item = next[key];
       const sameOrder = String(item?.orderId || '').trim() && String(item?.orderId || '').trim() === String(pendingRow.orderId || '').trim();
@@ -3147,9 +3190,16 @@ export const WBSupplyManager = ({
       size: pendingRow.size,
     };
 
-    // мгновенный отклик
-    setFbsScansBySticker(next);
-    setFbsScanNotice({ type: 'success', text: `ЧЗ принят для заказа ${pendingRow.orderId}.` });
+    // мгновенный отклик: строка занята, поле свободно для следующего скана,
+    // но статус — «сохраняется», пока база не подтвердит запись.
+    applyFbsScans(next);
+    setFbsScanSavingKeys((prev) => ({ ...prev, [pendingRow.storageKey]: true }));
+    setFbsScanFailedKeys((prev) => {
+      const rest = { ...prev };
+      delete rest[pendingRow.storageKey];
+      return rest;
+    });
+    setFbsScanNotice({ type: 'success', text: `ЧЗ принят для заказа ${pendingRow.orderId}, сохраняю…` });
     setFbsPendingStickerRow(null);
     setFbsScanMode('sticker');
     clearScanInput();
@@ -3161,16 +3211,26 @@ export const WBSupplyManager = ({
       .then(async () => {
         const existsInSupplierScannedBase = await isFbsCodeAlreadyScannedForSupplier(honestSignCode, supplierId);
         if (existsInSupplierScannedBase) {
-          setFbsScansBySticker(prevMap);
+          dropFbsScanEntry(pendingRow.storageKey);
           setFbsScanNotice({ type: 'error', text: 'Этот ЧЗ уже есть в базе отсканированных ЧЗ этого поставщика. Скан отменён.' });
           return;
         }
-        const saved = await saveFbsSupplyScanMap(supplyId, next, supplierId);
+        // Пишем актуальную карту из ref, а не снимок момента скана: пока запрос
+        // стоял в очереди, могли добавиться следующие коды, и снимок стёр бы их.
+        const saved = await saveFbsSupplyScanMap(supplyId, fbsScansRef.current, supplierId);
         await syncFbsScannedCodesToUnifiedBase([honestSignCode], supplierId);
-        setFbsScansBySticker(saved);
+        applyFbsScans(saved);
+        setFbsScanSavingKeys((prev) => {
+          const rest = { ...prev };
+          delete rest[pendingRow.storageKey];
+          return rest;
+        });
       })
       .catch((e: any) => {
-        setFbsScansBySticker(prevMap);
+        // Откатываем только свою строку: соседние сканы к этой ошибке
+        // отношения не имеют, и стирать их нельзя.
+        dropFbsScanEntry(pendingRow.storageKey);
+        setFbsScanFailedKeys((prev) => ({ ...prev, [pendingRow.storageKey]: e?.message || 'не сохранён' }));
         setFbsScanNotice({ type: 'error', text: e?.message || 'Ошибка сохранения ЧЗ (скан отменён)' });
       });
   };
@@ -5795,18 +5855,24 @@ export const WBSupplyManager = ({
                       {fbsScanRows.map((row) => {
                         const scan = findFbsScanSavedEntry(row, fbsScansBySticker)?.item;
                         const isActive = fbsPendingStickerRow?.storageKey === row.storageKey;
+                        const isSaving = !!fbsScanSavingKeys[row.storageKey];
+                        const failedReason = fbsScanFailedKeys[row.storageKey];
                         const finalReadValue = scan?.honestSignCode || row.stickerScanText || '—';
                         return (
                           <tr
                             key={row.storageKey}
-                            className={`${scan?.honestSignCode ? 'bg-emerald-50/60' : isActive ? 'bg-amber-50' : 'bg-white'} border-t border-slate-100`}
+                            className={`${failedReason ? 'bg-rose-50' : isSaving ? 'bg-amber-50/70' : scan?.honestSignCode ? 'bg-emerald-50/60' : isActive ? 'bg-amber-50' : 'bg-white'} border-t border-slate-100`}
                           >
                             <td className="px-3 py-2 font-medium text-slate-900 whitespace-nowrap">{row.orderId || '—'}</td>
                             <td className="px-3 py-2 font-mono text-slate-700 whitespace-nowrap">{getSafeStickerText(row)}</td>
                             <td className="px-3 py-2">
                               <div className={`font-mono text-[11px] break-all ${scan?.honestSignCode ? 'text-emerald-700' : 'text-slate-700'}`}>{finalReadValue}</div>
                               <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px]">
-                                {scan?.honestSignCode ? (
+                                {failedReason ? (
+                                  <span className="text-rose-600 font-medium">ЧЗ НЕ сохранён — сканируйте заново ({failedReason})</span>
+                                ) : isSaving ? (
+                                  <span className="text-amber-600">Сохраняю ЧЗ…</span>
+                                ) : scan?.honestSignCode ? (
                                   <>
                                     <span className="text-emerald-600">ЧЗ сохранён</span>
                                     <button
