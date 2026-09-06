@@ -5854,12 +5854,20 @@ export const WBSupplyManager = ({
             </div>
 
             <div className="p-5 border-b border-slate-100 bg-slate-50 space-y-3">
-              <div className="flex flex-col lg:flex-row gap-3 lg:items-center lg:justify-between">
-                <div className={`rounded-xl border px-4 py-3 flex-1 ${fbsScanMode === 'sticker' ? 'border-blue-200 bg-blue-50 text-blue-900' : 'border-amber-200 bg-amber-50 text-amber-900'}`}>
+              {/* Панель шага — во всю ширину, кнопки под ней.
+                  Раньше они делили строку, и пять длинных кнопок сжимали
+                  подсказку в колонку шириной в одно слово. */}
+              <div className="flex flex-col gap-3">
+                <div className={`rounded-xl border px-4 py-3 ${fbsScanMode === 'sticker' ? 'border-blue-200 bg-blue-50 text-blue-900' : 'border-amber-200 bg-amber-50 text-amber-900'}`}>
                   {fbsScanMode === 'sticker' ? (
-                    <div>
-                      <div className="font-semibold">Шаг 1. Сканируйте стикер при считывании</div>
-                      <div className="text-sm opacity-80 mt-1">Ищу строку сначала по колонке `Стикер при считывании`, потом по обычному номеру стикера.</div>
+                    <div className="flex items-start gap-3">
+                      <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-blue-100 text-blue-700 font-bold">1</div>
+                      <div>
+                        <div className="text-base font-semibold">Сканируйте стикер при считывании</div>
+                        <div className="text-sm opacity-80 mt-0.5">
+                          Строка ищется сначала по колонке «Стикер при считывании», затем по обычному номеру стикера.
+                        </div>
+                      </div>
                     </div>
                   ) : (
                     <div className="flex items-start gap-4">
@@ -5868,18 +5876,27 @@ export const WBSupplyManager = ({
                       {fbsPendingStickerRow ? (
                         <FbsPhoto
                           urls={getFbsRowPhotoCandidates(fbsPendingStickerRow)}
-                          className="h-32 w-24 flex-shrink-0 rounded-lg border border-amber-200 bg-white object-cover"
-                          emptyClassName="h-32 w-24 flex-shrink-0 rounded-lg border border-dashed border-amber-200 bg-white/60"
+                          className="h-64 w-48 flex-shrink-0 rounded-lg border border-amber-200 bg-white object-cover"
+                          emptyClassName="h-64 w-48 flex-shrink-0 rounded-lg border border-dashed border-amber-200 bg-white/60"
                         />
                       ) : null}
-                      <div>
-                        <div className="font-semibold">Шаг 2. Сканируйте ЧЗ</div>
-                        <div className="text-sm opacity-80 mt-1">Заказ {fbsPendingStickerRow?.orderId}, стикер <span className="font-mono">{fbsPendingStickerRow?.stickerText || '—'}</span>{fbsPendingStickerRow?.stickerScanText ? `, при считывании: ${fbsPendingStickerRow.stickerScanText}` : ''}</div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-amber-100 text-amber-800 font-bold">2</div>
+                          <div className="text-base font-semibold">Сканируйте ЧЗ</div>
+                        </div>
                         {fbsPendingStickerRow?.title ? (
-                          <div className="text-sm font-medium mt-1">{fbsPendingStickerRow.title}</div>
+                          <div className="text-lg font-semibold mt-2 leading-snug">{fbsPendingStickerRow.title}</div>
                         ) : null}
-                        <div className="text-xs opacity-70 mt-0.5">
+                        <div className="text-sm opacity-80 mt-1">
                           {[fbsPendingStickerRow?.article, fbsPendingStickerRow?.size].filter(Boolean).join(' · ')}
+                        </div>
+                        <div className="mt-3 grid gap-1 text-sm">
+                          <div>Заказ <span className="font-mono font-medium">{fbsPendingStickerRow?.orderId || '—'}</span></div>
+                          <div>Стикер <span className="font-mono font-medium">{fbsPendingStickerRow?.stickerText || '—'}</span></div>
+                          {fbsPendingStickerRow?.stickerScanText ? (
+                            <div>При считывании <span className="font-mono font-medium">{fbsPendingStickerRow.stickerScanText}</span></div>
+                          ) : null}
                         </div>
                       </div>
                     </div>
@@ -6043,8 +6060,8 @@ export const WBSupplyManager = ({
                             <td className="px-3 py-2">
                               <FbsPhoto
                                 urls={getFbsRowPhotoCandidates(row)}
-                                className="h-14 w-11 rounded border border-slate-200 bg-white object-cover"
-                                emptyClassName="h-14 w-11 rounded border border-dashed border-slate-200 bg-slate-50"
+                                className="h-28 w-20 rounded border border-slate-200 bg-white object-cover"
+                                emptyClassName="h-28 w-20 rounded border border-dashed border-slate-200 bg-slate-50"
                               />
                             </td>
                             <td className="px-3 py-2 font-medium text-slate-900 whitespace-nowrap">
