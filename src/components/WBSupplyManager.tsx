@@ -458,6 +458,51 @@ const FbsPhoto = ({
   );
 };
 
+type FbsCueKind = 'sticker' | 'chz' | 'ready' | 'error';
+
+/**
+ * Сигналы шагов сканирования.
+ *
+ * Восходящие ноты означают «дальше», нисходящие — «стоп»; такой набор
+ * различается на слух в шуме склада, где отдельный писк теряется.
+ * «Готово» не дублируется голосом: фраза перебила бы инструкцию к следующему
+ * товару, а на этом месте нужно короткое «принято».
+ */
+const FBS_CUES: Record<
+  FbsCueKind,
+  { notes: ReadonlyArray<{ freq: number; ms: number; at: number }>; volume: number; phrase?: string }
+> = {
+  sticker: {
+    notes: [{ freq: 587, ms: 90, at: 0 }],
+    volume: 0.22,
+    phrase: 'Сканируйте товар',
+  },
+  chz: {
+    notes: [
+      { freq: 523, ms: 80, at: 0 },
+      { freq: 784, ms: 110, at: 90 },
+    ],
+    volume: 0.22,
+    phrase: 'Сканируйте честный знак',
+  },
+  ready: {
+    // Мажорное трезвучие — узнаваемое «готово», как на кассе.
+    notes: [
+      { freq: 659, ms: 70, at: 0 },
+      { freq: 880, ms: 70, at: 75 },
+      { freq: 1175, ms: 150, at: 150 },
+    ],
+    volume: 0.2,
+  },
+  error: {
+    notes: [
+      { freq: 320, ms: 150, at: 0 },
+      { freq: 200, ms: 260, at: 150 },
+    ],
+    volume: 0.28,
+  },
+};
+
 type WBSupplyManagerTab = 'fbs' | 'supply_order' | 'fbs_calc' | 'fbs_orders' | 'fbo_acceptance';
 
 export const WBSupplyManager = ({
@@ -575,7 +620,15 @@ export const WBSupplyManager = ({
    */
   const audioCtxRef = useRef<AudioContext | null>(null);
 
-  const playTone = (freq: number, ms: number) => {
+  /**
+   * Короткий сигнал из нескольких нот.
+   *
+   * Одиночная синусоида звучит как писк неисправного прибора и теряется в шуме
+   * склада. Треугольная волна богаче обертонами, поэтому слышна лучше на той же
+   * громкости, а пара-тройка нот подряд читается как осмысленный сигнал:
+   * восходящий — «дальше», нисходящий — «стоп».
+   */
+  const playChime = (notes: ReadonlyArray<{ freq: number; ms: number; at: number }>, volume = 0.22) => {
     try {
       const Ctx = window.AudioContext || (window as any).webkitAudioContext;
       if (!Ctx) return;
@@ -583,18 +636,25 @@ export const WBSupplyManager = ({
       audioCtxRef.current = ctx;
       if (ctx.state === 'suspended') void ctx.resume();
 
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = 'sine';
-      osc.frequency.value = freq;
-      // Мгновенный старт и обрыв дают щелчок, поэтому громкость ведём плавно.
-      gain.gain.setValueAtTime(0.0001, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + 0.01);
-      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + ms / 1000);
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start();
-      osc.stop(ctx.currentTime + ms / 1000);
+      for (const note of notes) {
+        const start = ctx.currentTime + note.at / 1000;
+        const end = start + note.ms / 1000;
+
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(note.freq, start);
+
+        // Резкий старт и обрыв дают щелчок: ведём громкость мягко.
+        gain.gain.setValueAtTime(0.0001, start);
+        gain.gain.exponentialRampToValueAtTime(volume, start + 0.012);
+        gain.gain.exponentialRampToValueAtTime(0.0001, end);
+
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(start);
+        osc.stop(end + 0.02);
+      }
     } catch {
       /* без звука работать можно, падать из-за него нельзя */
     }
@@ -615,19 +675,19 @@ export const WBSupplyManager = ({
     }
   };
 
-  const fbsCue = (kind: 'sticker' | 'chz' | 'error') => {
+  /*
+   * Сигналы шагов.
+   *
+   * «Готов» звучит по подтверждению записи, а не по нажатию — до этого товар
+   * ещё может отвалиться на дубле ЧЗ или отказе базы. Голосом он не
+   * дублируется: фраза перебила бы инструкцию к следующему товару, а сборщику
+   * на этом месте нужно короткое «принято».
+   */
+  const fbsCue = (kind: FbsCueKind) => {
     if (!fbsSoundOn) return;
-    if (kind === 'sticker') {
-      playTone(880, 110);
-      speakRu('Сканируйте товар');
-      return;
-    }
-    if (kind === 'chz') {
-      playTone(1320, 110);
-      speakRu('Сканируйте честный знак');
-      return;
-    }
-    playTone(200, 300);
+    playChime(FBS_CUES[kind].notes, FBS_CUES[kind].volume);
+    const phrase = FBS_CUES[kind].phrase;
+    if (phrase) speakRu(phrase);
   };
 
   /**
@@ -3456,6 +3516,8 @@ export const WBSupplyManager = ({
           delete rest[pendingRow.storageKey];
           return rest;
         });
+        // Товар закрыт по-настоящему: код в базе, а не только на экране.
+        fbsCue('ready');
       })
       .catch((e: any) => {
         // Откатываем только свою строку: соседние сканы к этой ошибке
@@ -6131,7 +6193,9 @@ export const WBSupplyManager = ({
                         try { localStorage.setItem('fbs_scan_sound_v1', next ? '1' : '0'); } catch {}
                         // Проверка на слух сразу при включении: иначе непонятно,
                         // работает ли звук на этом рабочем месте.
-                        if (next) { playTone(880, 110); speakRu('Звук включён'); }
+                        // Напрямую, а не через fbsCue: состояние ещё не
+                        // обновилось, и проверка флага съела бы пробный сигнал.
+                        if (next) { playChime(FBS_CUES.ready.notes, FBS_CUES.ready.volume); speakRu('Звук включён'); }
                       }}
                       title="Голосовые подсказки: что сканировать на текущем шаге"
                       className={`ml-auto px-3 py-1.5 rounded-xl text-sm border transition ${
