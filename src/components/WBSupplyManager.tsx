@@ -6033,7 +6033,9 @@ export const WBSupplyManager = ({
                   <table className="w-full text-sm">
                     <thead className="bg-slate-50 text-slate-600">
                       <tr>
-                        <th className="px-3 py-2 text-left w-16">Фото</th>
+                        {/* Колонка должна быть шире картинки: при w-16 ячейка
+                            сжимала фото в вертикальную полоску. */}
+                        <th className="px-3 py-2 text-left w-40">Фото</th>
                         <th className="px-3 py-2 text-left">Номер заказа</th>
                         <th className="px-3 py-2 text-left">Стикер</th>
                         <th className="px-3 py-2 text-left">Стикер при считывании</th>
@@ -6060,8 +6062,8 @@ export const WBSupplyManager = ({
                             <td className="px-3 py-2">
                               <FbsPhoto
                                 urls={getFbsRowPhotoCandidates(row)}
-                                className="h-28 w-20 rounded border border-slate-200 bg-white object-cover"
-                                emptyClassName="h-28 w-20 rounded border border-dashed border-slate-200 bg-slate-50"
+                                className="h-36 w-28 flex-shrink-0 rounded-lg border border-slate-200 bg-white object-contain"
+                                emptyClassName="h-36 w-28 flex-shrink-0 rounded-lg border border-dashed border-slate-200 bg-slate-50"
                               />
                             </td>
                             <td className="px-3 py-2 font-medium text-slate-900 whitespace-nowrap">
