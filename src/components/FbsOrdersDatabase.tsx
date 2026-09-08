@@ -15,10 +15,13 @@ import {
   fetchFbsCodeDuplicates,
   fetchFbsOrderCodeSupplies,
   fetchFbsOrderCodes,
+  fetchFbsScanRejects,
   saveFbsOrderWbData,
+  REJECT_TITLES,
   type FbsCodeDuplicate,
   type FbsOrderCodeRow,
   type FbsOrderCodeSort,
+  type FbsScanReject,
 } from '../utils/fbsOrderCodes';
 
 /**
@@ -31,6 +34,9 @@ import {
  */
 
 const PAGE_SIZE = 100;
+
+/** Насколько статус считаем свежим и не перезапрашиваем при открытии страницы. */
+const STATUS_FRESH_MS = 30 * 60 * 1000;
 
 const SUPPLIER_STATUS_TITLES: Record<string, string> = {
   new: 'Новое',
@@ -97,6 +103,8 @@ export const FbsOrdersDatabase = ({
   const [supplies, setSupplies] = useState<string[]>([]);
   const [duplicates, setDuplicates] = useState<FbsCodeDuplicate[] | null>(null);
   const [duplicatesOpen, setDuplicatesOpen] = useState(false);
+  const [rejects, setRejects] = useState<FbsScanReject[] | null>(null);
+  const [rejectsOpen, setRejectsOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [copiedCode, setCopiedCode] = useState('');
@@ -104,6 +112,8 @@ export const FbsOrdersDatabase = ({
   // Гонка ответов: пока грузилась страница 3, человек уже нажал «дальше».
   // Показываем только последний запрошенный ответ.
   const requestIdRef = useRef(0);
+  // Какой состав страницы уже сходил в WB — чтобы не ходить по кругу.
+  const autoSyncKeyRef = useRef('');
 
   useEffect(() => {
     const timer = setTimeout(() => setSearch(searchInput.trim()), 350);
@@ -185,100 +195,132 @@ export const FbsOrdersDatabase = ({
   };
 
   /**
-   * Статусы заказов из WB.
+   * Дотянуть у WB то, чего в нашей базе быть не может: статус заказа, дату и цену.
    *
-   * Просим только те заказы, что сейчас на экране: /api/v3/orders/status берёт
-   * до 1000 идентификаторов за раз, и гонять всю базу в десять тысяч строк ради
-   * одной таблицы незачем — человек смотрит страницу.
+   * Запускается само при открытии страницы. Спрашиваем только про строки на
+   * экране и только то, чего не хватает: статусы — по номерам заказов (WB берёт
+   * до 1000 за раз), даты и цены — списком за период этих же строк, потому что
+   * по номеру WB их не отдаёт. Ответы сохраняем, поэтому со второго раза
+   * страница открывается уже готовой.
    */
-  const syncStatusesFromWb = async () => {
-    if (!supplierId || !rows.length) return;
-    setSyncing(true);
-    setNotice(null);
-    try {
-      const ids = rows
-        .map((r) => Number(String(r.orderId || '').trim()))
-        .filter((id) => Number.isFinite(id) && id > 0)
-        .slice(0, 1000);
+  const syncPageFromWb = useCallback(
+    async (pageRows: FbsOrderCodeRow[], { force = false }: { force?: boolean } = {}) => {
+      if (!supplierId || !pageRows.length) return;
 
-      if (!ids.length) throw new Error('На странице нет заказов с числовым номером');
+      setSyncing(true);
+      try {
+        const problems: string[] = [];
 
-      const res = await wbFetch('https://marketplace-api.wildberries.ru/api/v3/orders/status', {
-        method: 'POST',
-        body: JSON.stringify({ orders: ids }),
-      });
-
-      const list: any[] = Array.isArray(res?.orders) ? res.orders : [];
-      if (!list.length) throw new Error('WB вернул пустой ответ по статусам');
-
-      const patches = list.map((o) => ({
-        orderId: String(o?.id ?? ''),
-        wbStatus: String(o?.wbStatus || ''),
-        supplierStatus: String(o?.supplierStatus || ''),
-      }));
-
-      const saved = await saveFbsOrderWbData(supplierId, patches);
-      await load();
-      setNotice({ type: 'success', text: `Статусы обновлены: ${saved} из ${ids.length} заказов страницы.` });
-    } catch (e: any) {
-      setNotice({ type: 'error', text: e?.message || 'Не удалось получить статусы из WB' });
-    } finally {
-      setSyncing(false);
-    }
-  };
-
-  /**
-   * Дата и цена заказа. Их нельзя спросить по номеру — WB отдаёт только список
-   * за период, поэтому идём страницами от выбранной даты и раскладываем
-   * пришедшее по нашим строкам. Всё, чего нет в базе, просто игнорируется.
-   */
-  const syncOrderDetailsFromWb = async () => {
-    if (!supplierId) return;
-    setSyncing(true);
-    setNotice(null);
-    try {
-      const from = dateFrom
-        ? new Date(`${dateFrom}T00:00:00`)
-        : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-      const startTs = Math.floor(from.getTime() / 1000);
-
-      const patches: Array<{ orderId: string; orderCreatedAt: string | null; price: number | null }> = [];
-      let next = 0;
-
-      // Больше двадцати страниц не берём: это уже 20 000 заказов, а дальше
-      // человеку проще сузить период, чем ждать полторы минуты.
-      for (let pageIndex = 0; pageIndex < 20; pageIndex++) {
-        const data = await wbFetch(
-          `https://marketplace-api.wildberries.ru/api/v3/orders?limit=1000&next=${next}&dateFrom=${startTs}`,
+        // 1. Статусы. Свежие не перезапрашиваем: заказ не меняет состояние ежеминутно.
+        const freshLimit = Date.now() - STATUS_FRESH_MS;
+        const needStatus = pageRows.filter(
+          (r) => force || !r.wbSyncedAt || new Date(r.wbSyncedAt).getTime() < freshLimit,
         );
-        const list: any[] = Array.isArray(data?.orders) ? data.orders : [];
-        list.forEach((o) => {
-          const id = String(o?.id ?? '').trim();
-          if (!id) return;
-          const price = Number(o?.convertedPrice ?? o?.price ?? 0);
-          patches.push({
-            orderId: id,
-            orderCreatedAt: o?.createdAt ? String(o.createdAt) : null,
-            price: Number.isFinite(price) && price > 0 ? price / 100 : null,
-          });
-        });
+        const ids = needStatus
+          .map((r) => Number(String(r.orderId || '').trim()))
+          .filter((id) => Number.isFinite(id) && id > 0)
+          .slice(0, 1000);
 
-        next = Number(data?.next || 0);
-        if (!next || list.length === 0) break;
+        if (ids.length) {
+          try {
+            const res = await wbFetch('https://marketplace-api.wildberries.ru/api/v3/orders/status', {
+              method: 'POST',
+              body: JSON.stringify({ orders: ids }),
+            });
+            const list: any[] = Array.isArray(res?.orders) ? res.orders : [];
+            if (list.length) {
+              await saveFbsOrderWbData(
+                supplierId,
+                list.map((o) => ({
+                  orderId: String(o?.id ?? ''),
+                  wbStatus: String(o?.wbStatus || ''),
+                  supplierStatus: String(o?.supplierStatus || ''),
+                })),
+              );
+            }
+          } catch (e: any) {
+            problems.push(`статусы: ${e?.message || 'WB не ответил'}`);
+          }
+        }
+
+        // 2. Даты и цены — только если их не хватает. Окно берём по самим строкам:
+        //    заказ появляется незадолго до скана, так что хватает пары суток.
+        const needDates = pageRows.filter((r) => force || !r.orderCreatedAt);
+        if (needDates.length) {
+          try {
+            const times = needDates
+              .map((r) => new Date(r.scannedAt).getTime())
+              .filter((t) => Number.isFinite(t));
+            const minTs = Math.min(...times) - 14 * 24 * 3600 * 1000;
+            const maxTs = Math.max(...times) + 24 * 3600 * 1000;
+
+            const patches: Array<{ orderId: string; orderCreatedAt: string | null; price: number | null }> = [];
+            let next = 0;
+
+            // Пять страниц по тысяче: окно узкое, больше в него не помещается.
+            for (let i = 0; i < 5; i++) {
+              const data = await wbFetch(
+                `https://marketplace-api.wildberries.ru/api/v3/orders?limit=1000&next=${next}`
+                  + `&dateFrom=${Math.floor(minTs / 1000)}&dateTo=${Math.floor(maxTs / 1000)}`,
+              );
+              const list: any[] = Array.isArray(data?.orders) ? data.orders : [];
+              list.forEach((o) => {
+                const id = String(o?.id ?? '').trim();
+                if (!id) return;
+                const price = Number(o?.convertedPrice ?? o?.price ?? 0);
+                patches.push({
+                  orderId: id,
+                  orderCreatedAt: o?.createdAt ? String(o.createdAt) : null,
+                  price: Number.isFinite(price) && price > 0 ? price / 100 : null,
+                });
+              });
+              next = Number(data?.next || 0);
+              if (!next || !list.length) break;
+            }
+
+            // Пишем только по своим строкам: WB отдал весь кабинет за период,
+            // а нам нужны заказы этой страницы.
+            const wanted = new Set(needDates.map((r) => r.orderId));
+            const mine = patches.filter((p) => wanted.has(p.orderId));
+            if (mine.length) await saveFbsOrderWbData(supplierId, mine);
+          } catch (e: any) {
+            problems.push(`даты: ${e?.message || 'WB не ответил'}`);
+          }
+        }
+
+        if (ids.length || needDates.length) await load();
+        setNotice(problems.length ? { type: 'error', text: `WB ответил не полностью — ${problems.join('; ')}` } : null);
+      } finally {
+        setSyncing(false);
       }
+    },
+    [supplierId, wbFetch, load],
+  );
 
-      if (!patches.length) throw new Error('WB не вернул заказов за этот период');
+  /*
+   * Автозапрос при открытии страницы.
+   *
+   * Ключ по составу страницы: после сохранения статусов строки перечитываются,
+   * и без него обновление данных снова считалось бы поводом идти в WB — вышел
+   * бы бесконечный круг.
+   */
+  useEffect(() => {
+    if (!supplierId || loading || !rows.length) return;
+    const key = `${supplierId}|${page}|${rows[0]?.id || ''}|${rows[rows.length - 1]?.id || ''}|${rows.length}`;
+    if (autoSyncKeyRef.current === key) return;
+    autoSyncKeyRef.current = key;
+    void syncPageFromWb(rows);
+  }, [rows, supplierId, page, loading, syncPageFromWb]);
 
-      const saved = await saveFbsOrderWbData(supplierId, patches);
-      await load();
-      setNotice({
-        type: 'success',
-        text: `WB отдал ${patches.length} заказов с ${fmtDate(from.toISOString())}. Обновлено строк базы: ${saved}.`,
-      });
+  /** Что сканер не принял за последнюю неделю — по этому и разбирают жалобы. */
+  const openRejects = async () => {
+    if (!supplierId) return;
+    try {
+      const list = await fetchFbsScanRejects(supplierId, 7);
+      setRejects(list);
+      setRejectsOpen(true);
     } catch (e: any) {
-      setNotice({ type: 'error', text: e?.message || 'Не удалось получить заказы из WB' });
-    } finally {
-      setSyncing(false);
+      setNotice({ type: 'error', text: e?.message || 'Не удалось прочитать журнал отказов' });
     }
   };
 
@@ -453,22 +495,13 @@ export const FbsOrdersDatabase = ({
       {/* Действия */}
       <div className="flex flex-wrap items-center gap-2">
         <button
-          onClick={syncStatusesFromWb}
+          onClick={() => void syncPageFromWb(rows, { force: true })}
           disabled={syncing || loading || !rows.length}
-          className="btn-primary flex items-center gap-2 disabled:opacity-50"
-          title="Спросить у WB статусы заказов, показанных на этой странице"
+          className="px-3 py-2 text-sm rounded border border-indigo-300 text-indigo-700 hover:bg-indigo-50 disabled:opacity-50 flex items-center gap-2"
+          title="Перезапросить у WB статусы, даты и цены по строкам этой страницы"
         >
           {syncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-          Статусы из WB (страница)
-        </button>
-
-        <button
-          onClick={syncOrderDetailsFromWb}
-          disabled={syncing}
-          className="px-3 py-2 text-sm rounded border border-indigo-300 text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"
-          title="Подтянуть дату и цену заказов за период (от даты в фильтре, иначе за 30 дней)"
-        >
-          Даты и цены из WB
+          {syncing ? 'Спрашиваем WB…' : 'Обновить из WB'}
         </button>
 
         <button
@@ -476,6 +509,14 @@ export const FbsOrdersDatabase = ({
           className="px-3 py-2 text-sm rounded border border-amber-300 text-amber-700 hover:bg-amber-50 flex items-center gap-2"
         >
           <AlertTriangle className="w-4 h-4" /> Проверить дубли ЧЗ
+        </button>
+
+        <button
+          onClick={openRejects}
+          className="px-3 py-2 text-sm rounded border border-rose-300 text-rose-700 hover:bg-rose-50 flex items-center gap-2"
+          title="Что сканер не принял за последние 7 дней"
+        >
+          <AlertTriangle className="w-4 h-4" /> Отказы сканера
         </button>
 
         <button
@@ -535,6 +576,71 @@ export const FbsOrdersDatabase = ({
                 </div>
               ))}
             </div>
+          )}
+        </div>
+      )}
+
+      {rejectsOpen && rejects && (
+        <div className="oc-card p-4 border-rose-200">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-rose-600" />
+            <h3 className="font-semibold text-slate-900">
+              {rejects.length === 0
+                ? 'За неделю сканер ничего не отклонял'
+                : `Отказы сканера за 7 дней: ${rejects.length}`}
+            </h3>
+            <button onClick={() => setRejectsOpen(false)} className="ml-auto text-slate-400 hover:text-slate-600">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          {rejects.length > 0 && (
+            <>
+              <div className="mt-2 flex flex-wrap gap-2 text-[12px]">
+                {Object.entries(
+                  rejects.reduce<Record<string, number>>((acc, r) => {
+                    acc[r.reason] = (acc[r.reason] || 0) + 1;
+                    return acc;
+                  }, {}),
+                )
+                  .sort((a, b) => b[1] - a[1])
+                  .map(([reason, count]) => (
+                    <span key={reason} className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1">
+                      {REJECT_TITLES[reason] || reason}: <b>{count}</b>
+                    </span>
+                  ))}
+              </div>
+
+              <div className="mt-3 max-h-72 overflow-auto">
+                <table className="w-full text-[12px]">
+                  <thead className="text-slate-500">
+                    <tr className="text-left">
+                      <th className="py-1 font-medium">Когда</th>
+                      <th className="py-1 font-medium">Причина</th>
+                      <th className="py-1 font-medium">Заказ</th>
+                      <th className="py-1 font-medium">Что поднесли</th>
+                      <th className="py-1 font-medium">Кто</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rejects.map((r) => (
+                      <tr key={r.id} className="border-t border-slate-100">
+                        <td className="py-1 whitespace-nowrap text-slate-500">{fmtDateTime(r.createdAt)}</td>
+                        <td className="py-1">
+                          <div className="text-slate-800">{REJECT_TITLES[r.reason] || r.reason}</div>
+                          {r.detail && <div className="text-slate-500">{r.detail}</div>}
+                        </td>
+                        <td className="py-1 whitespace-nowrap text-slate-600">{r.orderId || '—'}</td>
+                        <td className="py-1 font-mono text-[11px] break-all text-slate-600">
+                          {r.rawValue.length > 30 ? `${r.rawValue.slice(0, 30)}…` : r.rawValue}
+                        </td>
+                        <td className="py-1 whitespace-nowrap text-slate-500">{r.employee || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
         </div>
       )}
@@ -600,7 +706,9 @@ export const FbsOrdersDatabase = ({
 
                       <td className="px-3 py-2 whitespace-nowrap">
                         <div className="font-medium text-slate-900">{row.orderId}</div>
-                        <div className="text-xs text-slate-500">заказ {fmtDate(row.orderCreatedAt)}</div>
+                        <div className="text-xs text-slate-500">
+                          {row.orderCreatedAt ? `заказан ${fmtDateTime(row.orderCreatedAt)}` : 'дата заказа не пришла'}
+                        </div>
                         {row.price !== null && (
                           <div className="text-xs text-slate-500">{row.price.toLocaleString('ru-RU')} ₽</div>
                         )}
@@ -657,7 +765,7 @@ export const FbsOrdersDatabase = ({
                             </div>
                           </>
                         ) : (
-                          <span className="text-xs text-slate-400">не спрашивали</span>
+                          <span className="text-xs text-slate-400">{syncing ? 'спрашиваем…' : '—'}</span>
                         )}
                       </td>
                     </tr>

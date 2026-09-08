@@ -41,7 +41,12 @@ import {
 import { explainWbAccess } from '../utils/wbTokenScopes';
 import { buildStickersPdf, fetchStickers } from '../utils/stickers';
 import { getWBImageUrl, getWBImageUrls } from '../utils/wbImages';
-import { deleteFbsOrderCode, upsertFbsOrderCode } from '../utils/fbsOrderCodes';
+import {
+  deleteFbsOrderCode,
+  findFbsOrderByCode,
+  logFbsScanReject,
+  upsertFbsOrderCode,
+} from '../utils/fbsOrderCodes';
 import { FbsOrdersDatabase } from './FbsOrdersDatabase';
 
 // --- Types ---
@@ -493,6 +498,15 @@ const FBS_CUES: Record<
   },
 };
 
+/**
+ * Ниже этой длины строка маркой быть не может.
+ *
+ * Настоящий ЧЗ — DataMatrix на 80+ символов. Порог берём с запасом: он должен
+ * отсекать стикер WB (9 символов) и штрихкод товара (13), но не спорить с
+ * форматами марок, которых мы не видели.
+ */
+const MIN_HONEST_SIGN_LENGTH = 20;
+
 type WBSupplyManagerTab = 'fbs' | 'orders_db' | 'supply_order' | 'fbs_calc' | 'fbs_orders' | 'fbo_acceptance';
 
 export const WBSupplyManager = ({
@@ -568,6 +582,10 @@ export const WBSupplyManager = ({
   const [fbsScanRows, setFbsScanRows] = useState<FbsSupplyScanOrderRow[]>([]);
   const [fbsScansBySticker, setFbsScansBySticker] = useState<Record<string, FbsSupplyScanSavedItem>>({});
   const [fbsScanMode, setFbsScanMode] = useState<'sticker' | 'honest_sign'>('sticker');
+  // Отказ «код уже отсканирован» с предложением записать его повторно:
+  // возврат и переотправка — обычное дело, а раньше вещь было не отгрузить.
+  const [fbsScanOverride, setFbsScanOverride] = useState<{ row: FbsSupplyScanOrderRow; code: string; where: string } | null>(null);
+  const [fbsScanOverrideBusy, setFbsScanOverrideBusy] = useState(false);
   const [fbsScanInputValue, setFbsScanInputValue] = useState('');
   const [fbsPendingStickerRow, setFbsPendingStickerRow] = useState<FbsSupplyScanOrderRow | null>(null);
   const [fbsScanNotice, setFbsScanNotice] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
@@ -3156,6 +3174,77 @@ export const WBSupplyManager = ({
     }
   };
 
+  /**
+   * Записать ЧЗ, который база считает уже использованным.
+   *
+   * Проверка на повтор нужна — она ловит пересорт. Но она же ловит возврат и
+   * повторную отправку, а это законные случаи. Решение оставляем человеку с
+   * товаром в руках и пишем в журнал, кто и что продавил.
+   */
+  const forceSaveFbsScanEntry = async (row: FbsSupplyScanOrderRow, honestSignCode: string, where: string) => {
+    if (!activeSupplyId) return;
+    const supplyId = activeSupplyId;
+    const supplierId = selectedSupplierId;
+
+    setFbsScanOverrideBusy(true);
+    try {
+      const next = { ...fbsScansRef.current };
+      next[row.storageKey] = {
+        storageKey: row.storageKey,
+        stickerDigits: row.stickerDigits,
+        stickerScanText: row.stickerScanText,
+        honestSignCode,
+        updatedAt: new Date().toISOString(),
+        orderId: row.orderId,
+        title: row.title,
+        article: row.article,
+        size: row.size,
+      };
+      applyFbsScans(next);
+
+      const saved = await saveFbsSupplyScanMap(supplyId, next, supplierId);
+      await syncFbsScannedCodesToUnifiedBase([honestSignCode], supplierId);
+      applyFbsScans(saved);
+
+      await upsertFbsOrderCode({
+        supplierId,
+        supplyId,
+        orderId: row.orderId,
+        chzCode: honestSignCode,
+        stickerDigits: row.stickerDigits,
+        stickerText: row.stickerScanText,
+        nmId: row.nmId ?? null,
+        article: row.article,
+        size: row.size,
+        title: row.title,
+      }).catch((e) => console.error('fbs_order_codes upsert failed', e));
+
+      void logFbsScanReject({
+        supplierId,
+        supplyId,
+        orderId: row.orderId,
+        rawValue: honestSignCode,
+        reason: 'override_duplicate',
+        detail: `записан повторно; ранее: ${where}`,
+      });
+
+      setFbsScanFailedKeys((prev) => {
+        const rest = { ...prev };
+        delete rest[row.storageKey];
+        return rest;
+      });
+      setFbsScanOverride(null);
+      setFbsScanNotice({ type: 'success', text: `ЧЗ записан для заказа ${row.orderId} повторно — как возврат или переотправка.` });
+      fbsCue('ready');
+    } catch (e: any) {
+      dropFbsScanEntry(row.storageKey);
+      fbsCue('error');
+      setFbsScanNotice({ type: 'error', text: e?.message || 'Не удалось записать ЧЗ повторно' });
+    } finally {
+      setFbsScanOverrideBusy(false);
+    }
+  };
+
   const resetFbsScannedCode = async (row: FbsSupplyScanOrderRow) => {
     if (!activeSupplyId) return;
     try {
@@ -3432,31 +3521,58 @@ export const WBSupplyManager = ({
     setFbsScanInputValue('');
   };
 
+  /** Строка поставки по значению стикера — одинаково для обоих шагов сканирования. */
+  const findFbsRowByStickerScan = (raw: string): FbsSupplyScanOrderRow | null => {
+    const scanText = normalizeScannedStickerLookupKey(raw);
+    const stickerDigits = normalizeStickerDigits(raw);
+    if (!scanText && !stickerDigits) return null;
+
+    return (
+      fbsScanRows.find((item) => {
+        const rowScanText = normalizeScannedStickerLookupKey(item.stickerScanText || '');
+        if (scanText && rowScanText && rowScanText === scanText) return true;
+        if (stickerDigits && item.stickerDigits === stickerDigits) return true;
+        if (scanText && normalizeScannedStickerLookupKey(item.stickerText || '') === scanText) return true;
+        return false;
+      }) || null
+    );
+  };
+
   const handleFbsScanSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (scanBurstRef.current) { clearTimeout(scanBurstRef.current); scanBurstRef.current = null; }
     const raw = String((fbsScanInputRef.current?.value ?? fbsScanInputValue) || '').trim();
     if (!raw) return;
 
+    // Новый скан — прежнее предложение «записать всё равно» больше не про него.
+    setFbsScanOverride(null);
+
     if (fbsScanMode === 'sticker') {
-      const scanText = normalizeScannedStickerLookupKey(raw);
-      const stickerDigits = normalizeStickerDigits(raw);
       const completeness = getFbsScanCompletenessStats(fbsScanRows);
       if (!completeness.isFullyReady) {
         setFbsScanNotice({ type: 'error', text: `Сканирование временно заблокировано: поставка загружена не полностью. Сейчас есть стикеров ${completeness.rowsWithSticker}/${completeness.totalRows}, «Стикер при считывании» ${completeness.rowsWithScanText}/${completeness.totalRows}. Сначала добейся полной загрузки поставки.` });
+        void logFbsScanReject({
+          supplierId: selectedSupplierId,
+          supplyId: activeSupplyId || '',
+          rawValue: raw,
+          reason: 'supply_not_ready',
+          detail: `стикеров ${completeness.rowsWithSticker}/${completeness.totalRows}`,
+        });
         clearScanInput();
         return;
       }
 
-      const row = fbsScanRows.find((item) => {
-        const rowScanText = normalizeScannedStickerLookupKey(item.stickerScanText || '');
-        if (scanText && rowScanText && rowScanText === scanText) return true;
-        if (stickerDigits && item.stickerDigits === stickerDigits) return true;
-        if (scanText && normalizeScannedStickerLookupKey(item.stickerText || '') === scanText) return true;
-        return false;
-      });
+      const row = findFbsRowByStickerScan(raw);
       if (!row) {
         setFbsScanNotice({ type: 'error', text: 'Стикер не найден в текущей поставке. Проверь файл поставки или сам скан.' });
+        void logFbsScanReject({
+          supplierId: selectedSupplierId,
+          supplyId: activeSupplyId || '',
+          rawValue: raw,
+          reason: 'sticker_not_found',
+          detail: `строк в поставке: ${fbsScanRows.length}`,
+        });
+        fbsCue('error');
         clearScanInput();
         return;
       }
@@ -3477,6 +3593,55 @@ export const WBSupplyManager = ({
     const honestSignCode = normalizeDataMatrixText(raw);
     if (!honestSignCode) {
       setFbsScanNotice({ type: 'error', text: 'Не удалось распознать код Честного знака' });
+      clearScanInput();
+      return;
+    }
+
+    /*
+     * На этом шаге ждём марку — и только марку.
+     *
+     * Раньше сюда проходило что угодно. По базе видно, чем это кончалось: из
+     * 196 «кодов», которые марками не являются, 107 равны стикеру того же
+     * заказа, а 75 — стикеру соседнего. То есть сборщик подносил стикер второй
+     * раз (или уже следующий товар), строка закрывалась мусором, настоящая
+     * марка не считывалась, а следующий скан приходил в режим ЧЗ и ломал всю
+     * цепочку — товар «переставал сканироваться».
+     */
+    const stickerRow = findFbsRowByStickerScan(raw);
+    if (stickerRow) {
+      const samePending = stickerRow.storageKey === fbsPendingStickerRow.storageKey;
+      const text = samePending
+        ? `Это стикер того же заказа ${stickerRow.orderId}, а не честный знак. Найдите на упаковке код маркировки (длинный DataMatrix) и отсканируйте его.`
+        : `Это стикер другого заказа (${stickerRow.orderId}). У заказа ${fbsPendingStickerRow.orderId} честный знак ещё не считан — отсканируйте марку с товара в руках или нажмите «Сбросить».`;
+      setFbsScanNotice({ type: 'error', text });
+      setFbsScanFailedKeys((prev) => ({ ...prev, [fbsPendingStickerRow.storageKey]: text }));
+      void logFbsScanReject({
+        supplierId: selectedSupplierId,
+        supplyId: activeSupplyId || '',
+        orderId: fbsPendingStickerRow.orderId,
+        rawValue: raw,
+        reason: 'sticker_instead_of_chz',
+        detail: samePending ? 'стикер того же заказа' : `стикер заказа ${stickerRow.orderId}`,
+      });
+      fbsCue('error');
+      clearScanInput();
+      return;
+    }
+
+    // Короткая строка маркой быть не может: настоящий ЧЗ — это 80+ символов.
+    // Так отсекаются и товарный штрихкод EAN-13, и случайно набранное «1».
+    if (honestSignCode.length < MIN_HONEST_SIGN_LENGTH) {
+      const text = `Это не похоже на честный знак: в коде ${honestSignCode.length} символов, а в марке их больше ${MIN_HONEST_SIGN_LENGTH}. Похоже, отсканирован штрихкод товара.`;
+      setFbsScanNotice({ type: 'error', text });
+      void logFbsScanReject({
+        supplierId: selectedSupplierId,
+        supplyId: activeSupplyId || '',
+        orderId: fbsPendingStickerRow.orderId,
+        rawValue: raw,
+        reason: 'not_a_chz',
+        detail: `длина ${honestSignCode.length}`,
+      });
+      fbsCue('error');
       clearScanInput();
       return;
     }
@@ -3515,6 +3680,14 @@ export const WBSupplyManager = ({
       setFbsScanNotice({
         type: 'error',
         text: `Дубль ЧЗ: код уже отсканирован на заказе ${where}. Отсканируйте новый честный знак — тот, что на товаре в руках.`,
+      });
+      void logFbsScanReject({
+        supplierId,
+        supplyId,
+        orderId: pendingRow.orderId,
+        rawValue: raw,
+        reason: 'duplicate_in_supply',
+        detail: `код уже на заказе ${where}`,
       });
       clearScanInput();
       return;
@@ -3567,7 +3740,33 @@ export const WBSupplyManager = ({
         if (existsInSupplierScannedBase) {
           dropFbsScanEntry(pendingRow.storageKey);
           fbsCue('error');
-          setFbsScanNotice({ type: 'error', text: 'Этот ЧЗ уже есть в базе отсканированных ЧЗ этого поставщика. Скан отменён.' });
+
+          /*
+           * Отказ перестал быть тупиком.
+           *
+           * Код мог быть отсканирован раньше законно: товар вернулся и уезжает
+           * снова, или его считали на приёмке ФБО — там пишется та же общая
+           * база. Раньше сборщик в такой ситуации просто не мог отправить вещь.
+           * Теперь показываем, где код стоял, и даём записать под ответственность.
+           */
+          const previous = await findFbsOrderByCode(supplierId, honestSignCode).catch(() => null);
+          const where = previous
+            ? `заказ ${previous.orderId}${previous.article ? `, ${previous.article}` : ''}, поставка ${previous.supplyId || '—'} от ${new Date(previous.scannedAt).toLocaleDateString('ru-RU')}`
+            : 'в общей базе кабинета (возможно, приёмка ФБО)';
+
+          setFbsScanNotice({
+            type: 'error',
+            text: `Этот ЧЗ уже отсканирован раньше: ${where}. Скан отменён. Если это возврат или повторная отправка — нажмите «Записать всё равно».`,
+          });
+          setFbsScanOverride({ row: pendingRow, code: honestSignCode, where });
+          void logFbsScanReject({
+            supplierId,
+            supplyId,
+            orderId: pendingRow.orderId,
+            rawValue: honestSignCode,
+            reason: 'already_in_supplier_base',
+            detail: where,
+          });
           return;
         }
         // Пишем актуальную карту из ref, а не снимок момента скана: пока запрос
@@ -6234,6 +6433,34 @@ export const WBSupplyManager = ({
               {fbsScanNotice && (
                 <div className={`rounded-xl border px-4 py-3 text-sm ${fbsScanNotice.type === 'error' ? 'border-rose-200 bg-rose-50 text-rose-700' : fbsScanNotice.type === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-indigo-200 bg-indigo-50 text-indigo-700'}`}>
                   {fbsScanNotice.text}
+                </div>
+              )}
+
+              {/* Выход из тупика «код уже отсканирован»: решает человек с товаром в руках. */}
+              {fbsScanOverride && (
+                <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                  <div className="font-semibold">Код уже использовался: {fbsScanOverride.where}</div>
+                  <div className="mt-1 opacity-80">
+                    Так бывает при возврате и повторной отправке. Если товар в руках — тот самый, запишите код повторно.
+                    Если это разные вещи — перед вами пересорт, отправлять нельзя.
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      disabled={fbsScanOverrideBusy}
+                      onClick={() => forceSaveFbsScanEntry(fbsScanOverride.row, fbsScanOverride.code, fbsScanOverride.where)}
+                      className="px-3 py-2 rounded-lg bg-amber-600 text-white text-sm font-semibold hover:bg-amber-700 disabled:opacity-50"
+                    >
+                      {fbsScanOverrideBusy ? 'Записываем…' : 'Записать всё равно'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setFbsScanOverride(null); clearScanInput(); }}
+                      className="px-3 py-2 rounded-lg border border-amber-300 bg-white text-sm text-amber-800 hover:bg-amber-100"
+                    >
+                      Отмена
+                    </button>
+                  </div>
                 </div>
               )}
 

@@ -130,6 +130,126 @@ export async function deleteFbsOrderCode(supplierId: string, orderId: string): P
   if (error) throw new Error(`Не удалили ЧЗ из базы заказов: ${error.message}`);
 }
 
+/**
+ * Где этот код уже стоял.
+ *
+ * Нужно, чтобы отказ «ЧЗ уже отсканирован» перестал быть тупиком: сборщику
+ * говорим заказ, поставку и дату — по ним видно, брак это, возврат или пересорт.
+ */
+export async function findFbsOrderByCode(
+  supplierId: string,
+  chzCode: string,
+): Promise<{ orderId: string; supplyId: string; scannedAt: string; article: string } | null> {
+  const sid = String(supplierId || '').trim();
+  const code = String(chzCode || '').trim();
+  if (!sid || !code) return null;
+
+  const { data, error } = await supabase
+    .from('fbs_order_codes')
+    .select('order_id, supply_id, scanned_at, article')
+    .eq('supplier_id', sid)
+    .eq('chz_code', code)
+    .order('scanned_at', { ascending: false })
+    .limit(1);
+  if (error || !data?.length) return null;
+
+  const row = data[0] as any;
+  return {
+    orderId: String(row.order_id || ''),
+    supplyId: String(row.supply_id || ''),
+    scannedAt: String(row.scanned_at || ''),
+    article: String(row.article || ''),
+  };
+}
+
+export type FbsScanRejectReason =
+  | 'sticker_instead_of_chz'
+  | 'not_a_chz'
+  | 'duplicate_in_supply'
+  | 'already_in_supplier_base'
+  | 'sticker_not_found'
+  | 'supply_not_ready'
+  | 'save_failed'
+  /** Не отказ, а его отмена человеком: код записан повторно осознанно. */
+  | 'override_duplicate';
+
+/**
+ * Записать отказ сканера.
+ *
+ * Пишем «мимо» основного потока и молча глотаем ошибку: журнал полезен, но
+ * ронять из-за него сканирование нельзя — сборщик стоит с товаром в руках.
+ */
+export async function logFbsScanReject(input: {
+  supplierId?: string;
+  supplyId?: string;
+  orderId?: string;
+  rawValue?: string;
+  reason: FbsScanRejectReason;
+  detail?: string;
+}): Promise<void> {
+  try {
+    await supabase.from('fbs_scan_rejects').insert({
+      supplier_id: String(input.supplierId || '').trim() || null,
+      supply_id: String(input.supplyId || ''),
+      order_id: String(input.orderId || ''),
+      raw_value: String(input.rawValue || '').slice(0, 300),
+      reason: input.reason,
+      detail: String(input.detail || '').slice(0, 500),
+      employee: currentEmployeeName(),
+    });
+  } catch {
+    // журнал не должен мешать работе за столом
+  }
+}
+
+export interface FbsScanReject {
+  id: string;
+  supplyId: string;
+  orderId: string;
+  rawValue: string;
+  reason: FbsScanRejectReason | string;
+  detail: string;
+  employee: string;
+  createdAt: string;
+}
+
+export const REJECT_TITLES: Record<string, string> = {
+  sticker_instead_of_chz: 'Вместо ЧЗ поднесли стикер',
+  not_a_chz: 'Это не честный знак',
+  duplicate_in_supply: 'Дубль внутри поставки',
+  already_in_supplier_base: 'Код уже был отсканирован раньше',
+  sticker_not_found: 'Стикер не найден в поставке',
+  supply_not_ready: 'Поставка загружена не полностью',
+  save_failed: 'Ошибка записи',
+  override_duplicate: 'Записан повторно вручную',
+};
+
+export async function fetchFbsScanRejects(supplierId: string, days = 7): Promise<FbsScanReject[]> {
+  const sid = String(supplierId || '').trim();
+  if (!sid) return [];
+
+  const since = new Date(Date.now() - days * 24 * 3600 * 1000).toISOString();
+  const { data, error } = await supabase
+    .from('fbs_scan_rejects')
+    .select('id, supply_id, order_id, raw_value, reason, detail, employee, created_at')
+    .eq('supplier_id', sid)
+    .gte('created_at', since)
+    .order('created_at', { ascending: false })
+    .limit(300);
+  if (error) throw new Error(`Не удалось прочитать журнал отказов: ${error.message}`);
+
+  return (data || []).map((r: any) => ({
+    id: String(r.id),
+    supplyId: String(r.supply_id || ''),
+    orderId: String(r.order_id || ''),
+    rawValue: String(r.raw_value || ''),
+    reason: String(r.reason || ''),
+    detail: String(r.detail || ''),
+    employee: String(r.employee || ''),
+    createdAt: String(r.created_at || ''),
+  }));
+}
+
 export type FbsOrderCodeSort = 'scanned_desc' | 'scanned_asc' | 'order_desc' | 'article_asc';
 
 export interface FbsOrderCodeQuery {
