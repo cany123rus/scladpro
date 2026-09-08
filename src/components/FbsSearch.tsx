@@ -8,6 +8,7 @@ import { buildStickersPdf, fetchStickers, type StickerImage } from '../utils/sti
 import { ensureExcel, ensurePdfLibs, lazyLibs } from '../pages/dashboardLazyLibs';
 import {
   encodeGsForExcel,
+  fixCyrillicKeyboardLayout,
   normalizeDataMatrixText,
   restoreDataMatrixGs,
   stickerKey,
@@ -689,7 +690,9 @@ export function FbsSearch({
    * никаких кнопок в процессе — руки заняты товаром.
    */
   async function handleScan(raw: string) {
-    const value = raw.trim();
+    // Русская раскладка превращает код в кириллицу, и он не сходится ни со
+    // стикером, ни с маркой. Переводим обратно — как в окне скана поставки ФБС.
+    const value = fixCyrillicKeyboardLayout(raw.trim());
     if (!value) return;
 
     const list = pickings.find((p) => p.id === activePick);

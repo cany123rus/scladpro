@@ -432,13 +432,14 @@ export const ruToEn: Record<string, string> = {
   'я': 'z', 'ч': 'x', 'с': 'c', 'м': 'v', 'и': 'b', 'т': 'n', 'ь': 'm', 'б': ',', 'ю': '.', '.': '/'
 };
 
-export const fixLayout = (str: string) => {
-  return str.split('').map(char => {
-    const lower = char.toLowerCase();
-    if (ruToEn[lower]) {
-      const fixed = ruToEn[lower];
-      return char === lower ? fixed : fixed.toUpperCase();
-    }
-    return char;
-  }).join('');
-};
+/**
+ * Перевод скана из русской раскладки.
+ *
+ * Своя реализация здесь была неполной и на кодах маркировки не срабатывала:
+ * буквы она чинила, а знаки — нет. В русской раскладке цифровой ряд с Shift
+ * даёт `"№;:?` вместо `@#$^&`, и таких символов в серийнике ЧЗ полно. Плюс
+ * заглавные: `Ж` превращалась в `;` вместо `:`, потому что результат просто
+ * переводился в верхний регистр. Логика теперь одна на всё приложение —
+ * в utils/honestSign.
+ */
+export { fixCyrillicKeyboardLayout as fixLayout } from '../utils/honestSign';

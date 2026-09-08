@@ -171,7 +171,9 @@ export type FbsScanRejectReason =
   | 'supply_not_ready'
   | 'save_failed'
   /** Не отказ, а его отмена человеком: код записан повторно осознанно. */
-  | 'override_duplicate';
+  | 'override_duplicate'
+  /** Тоже не отказ: скан пришёл в русской раскладке и был переведён обратно. */
+  | 'layout_fixed';
 
 /**
  * Записать отказ сканера.
@@ -222,6 +224,7 @@ export const REJECT_TITLES: Record<string, string> = {
   supply_not_ready: 'Поставка загружена не полностью',
   save_failed: 'Ошибка записи',
   override_duplicate: 'Записан повторно вручную',
+  layout_fixed: 'Русская раскладка (код исправлен)',
 };
 
 export async function fetchFbsScanRejects(supplierId: string, days = 7): Promise<FbsScanReject[]> {

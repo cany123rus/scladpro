@@ -34,6 +34,7 @@ import { supabase } from '../lib/supabase';
 import {
   GS_SEPARATOR,
   encodeGsForExcel,
+  fixCyrillicKeyboardLayout,
   normalizeDataMatrixText,
   normalizeScanStickerText,
   restoreDataMatrixGs,
@@ -586,6 +587,9 @@ export const WBSupplyManager = ({
   // возврат и переотправка — обычное дело, а раньше вещь было не отгрузить.
   const [fbsScanOverride, setFbsScanOverride] = useState<{ row: FbsSupplyScanOrderRow; code: string; where: string } | null>(null);
   const [fbsScanOverrideBusy, setFbsScanOverrideBusy] = useState(false);
+  // Висит, пока раскладку не переключат: одно исчезающее сообщение сборщик
+  // пролистает следующим сканом и продолжит работать «через кириллицу».
+  const [fbsLayoutHint, setFbsLayoutHint] = useState(false);
   const [fbsScanInputValue, setFbsScanInputValue] = useState('');
   const [fbsPendingStickerRow, setFbsPendingStickerRow] = useState<FbsSupplyScanOrderRow | null>(null);
   const [fbsScanNotice, setFbsScanNotice] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
@@ -3541,11 +3545,35 @@ export const WBSupplyManager = ({
   const handleFbsScanSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (scanBurstRef.current) { clearTimeout(scanBurstRef.current); scanBurstRef.current = null; }
-    const raw = String((fbsScanInputRef.current?.value ?? fbsScanInputValue) || '').trim();
-    if (!raw) return;
+    const typed = String((fbsScanInputRef.current?.value ?? fbsScanInputValue) || '').trim();
+    if (!typed) return;
+
+    /*
+     * Русская раскладка.
+     *
+     * Сканер изображает нажатия клавиш, и при русской раскладке код приходит
+     * кириллицей — не сходится ни со стикером, ни с маркой. Раньше это выглядело
+     * как «товар не сканируется», хотя достаточно было переключить язык.
+     * Чиним сами, но говорим об этом: иначе раскладку так и не переключат, а на
+     * ТСД и в других окнах она подведёт снова.
+     */
+    const raw = fixCyrillicKeyboardLayout(typed);
+    const layoutFixed = raw !== typed;
 
     // Новый скан — прежнее предложение «записать всё равно» больше не про него.
     setFbsScanOverride(null);
+
+    if (layoutFixed) {
+      setFbsLayoutHint(true);
+      void logFbsScanReject({
+        supplierId: selectedSupplierId,
+        supplyId: activeSupplyId || '',
+        orderId: fbsPendingStickerRow?.orderId || '',
+        rawValue: typed,
+        reason: 'layout_fixed',
+        detail: 'скан пришёл в русской раскладке, код исправлен автоматически',
+      });
+    }
 
     if (fbsScanMode === 'sticker') {
       const completeness = getFbsScanCompletenessStats(fbsScanRows);
@@ -6429,6 +6457,26 @@ export const WBSupplyManager = ({
                   </label>
                 </div>
               </div>
+
+              {fbsLayoutHint && (
+                <div className="flex items-start gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                  <AlertCircle className="w-5 h-5 flex-shrink-0" />
+                  <div>
+                    <div className="font-semibold">Включена русская раскладка</div>
+                    <div className="opacity-80 mt-0.5">
+                      Сканер отдаёт коды кириллицей. Мы переводим их обратно, и сканировать можно дальше, но лучше
+                      переключить язык на английский (Alt+Shift) — в других окнах такой перевод не сработает.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setFbsLayoutHint(false)}
+                    className="ml-auto text-amber-500 hover:text-amber-700"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
 
               {fbsScanNotice && (
                 <div className={`rounded-xl border px-4 py-3 text-sm ${fbsScanNotice.type === 'error' ? 'border-rose-200 bg-rose-50 text-rose-700' : fbsScanNotice.type === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-indigo-200 bg-indigo-50 text-indigo-700'}`}>
