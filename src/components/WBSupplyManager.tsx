@@ -21,7 +21,8 @@ import {
   List,
   Calculator,
   FileSpreadsheet,
-  Upload
+  Upload,
+  Database
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -39,6 +40,9 @@ import {
 } from '../utils/honestSign';
 import { explainWbAccess } from '../utils/wbTokenScopes';
 import { buildStickersPdf, fetchStickers } from '../utils/stickers';
+import { getWBImageUrl, getWBImageUrls } from '../utils/wbImages';
+import { deleteFbsOrderCode, upsertFbsOrderCode } from '../utils/fbsOrderCodes';
+import { FbsOrdersDatabase } from './FbsOrdersDatabase';
 
 // --- Types ---
 
@@ -155,34 +159,7 @@ const generateSupplyName = () => {
   return `Поставка_${dd}${mm}${yyyy}_${HH}${MM}`;
 };
 
-const getWBImageUrls = (nmId: number) => {
-  const vol = ~~(nmId / 100000);
-  const part = ~~(nmId / 1000);
-  const thresholds = [143,287,431,719,1007,1061,1115,1169,1313,1601,1655,1919,2045,2189,2405,2621,2837,3053,3269,3485,3701,3917,4133,4349,4565,4877,5189,5501,5813,6125,6437,6749,7061,7373,7685,7997,8309,8621,9244,9620,10380,11132,11900,12650,13400,14150,14900];
-  let bi = 0; while (bi < thresholds.length && vol > thresholds[bi]) bi++;
-  const host = `basket-${String(bi + 1).padStart(2, '0')}.wbbasket.ru`;
-
-  const base = `https://${host}/vol${vol}/part${part}/${nmId}/images`;
-  /*
-   * Сначала webp, потом jpg.
-   *
-   * WB перевёл CDN на webp: проверено 22.08.2026 — `c516x688/1.jpg` отдаёт 404
-   * и для свежей карточки (nmID 1263826852), и для прошлогодней (413702350),
-   * а `1.webp` в обоих случаях возвращает картинку. Пока список состоял из
-   * одних jpg, запасные адреса были мертвы, и товар без карточки в кэше
-   * оставался с пустой рамкой.
-   */
-  return [
-    `${base}/c516x688/1.webp`,
-    `${base}/big/1.webp`,
-    `${base}/c246x328/1.webp`,
-    `${base}/c516x688/2.webp`,
-    `${base}/c516x688/1.jpg`,
-    `${base}/big/1.jpg`,
-  ];
-};
-
-const getWBImageUrl = (nmId: number) => getWBImageUrls(nmId)[0];
+// Адреса фото WB живут в src/utils/wbImages.ts — их использует и «База заказов».
 
 const compareSizeStrings = (a: string, b: string) => {
     const sizeA = String(a || '').toUpperCase();
@@ -516,7 +493,7 @@ const FBS_CUES: Record<
   },
 };
 
-type WBSupplyManagerTab = 'fbs' | 'supply_order' | 'fbs_calc' | 'fbs_orders' | 'fbo_acceptance';
+type WBSupplyManagerTab = 'fbs' | 'orders_db' | 'supply_order' | 'fbs_calc' | 'fbs_orders' | 'fbo_acceptance';
 
 export const WBSupplyManager = ({
   suppliers = [],
@@ -556,12 +533,15 @@ export const WBSupplyManager = ({
     }
   }, [activeTab]);
   const [selectedSupplierIdFbs, setSelectedSupplierIdFbs] = useState<string>('');
+  const [selectedSupplierIdOrdersDb, setSelectedSupplierIdOrdersDb] = useState<string>('');
   const [selectedSupplierIdSupplyOrder, setSelectedSupplierIdSupplyOrder] = useState<string>('');
   const [selectedSupplierIdCalc, setSelectedSupplierIdCalc] = useState<string>('');
   const [selectedSupplierIdFbsOrders, setSelectedSupplierIdFbsOrders] = useState<string>('');
   const [selectedSupplierIdFboAcceptance, setSelectedSupplierIdFboAcceptance] = useState<string>('');
   const selectedSupplierId = activeTab === 'fbs'
     ? selectedSupplierIdFbs
+    : activeTab === 'orders_db'
+    ? selectedSupplierIdOrdersDb
     : activeTab === 'supply_order'
       ? selectedSupplierIdSupplyOrder
       : activeTab === 'fbs_calc'
@@ -948,11 +928,12 @@ export const WBSupplyManager = ({
   useEffect(() => {
     if (suppliers.length === 0) return;
     if (!selectedSupplierIdFbs) setSelectedSupplierIdFbs(suppliers[0].id);
+    if (!selectedSupplierIdOrdersDb) setSelectedSupplierIdOrdersDb(suppliers[0].id);
     if (!selectedSupplierIdSupplyOrder) setSelectedSupplierIdSupplyOrder(suppliers[0].id);
     if (!selectedSupplierIdCalc) setSelectedSupplierIdCalc(suppliers[0].id);
     if (!selectedSupplierIdFbsOrders) setSelectedSupplierIdFbsOrders('__all__');
     if (!selectedSupplierIdFboAcceptance) setSelectedSupplierIdFboAcceptance('__all__');
-  }, [suppliers, selectedSupplierIdFbs, selectedSupplierIdSupplyOrder, selectedSupplierIdCalc, selectedSupplierIdFbsOrders, selectedSupplierIdFboAcceptance]);
+  }, [suppliers, selectedSupplierIdFbs, selectedSupplierIdOrdersDb, selectedSupplierIdSupplyOrder, selectedSupplierIdCalc, selectedSupplierIdFbsOrders, selectedSupplierIdFboAcceptance]);
 
   useEffect(() => {
     const loadFbsOrdersMeta = async () => {
@@ -3183,6 +3164,11 @@ export const WBSupplyManager = ({
       if (currentEntry?.key) delete next[currentEntry.key];
       else delete next[row.storageKey];
       const saved = await saveFbsSupplyScanMap(activeSupplyId, next, selectedSupplierId);
+      // Из базы заказов строку тоже убираем: иначе она будет утверждать, что на
+      // заказе стоит код, который сборщик только что снял.
+      await deleteFbsOrderCode(selectedSupplierId, row.orderId).catch((e) => {
+        console.error('fbs_order_codes delete failed', e);
+      });
       applyFbsScans(saved);
       if (fbsPendingStickerRow?.storageKey === row.storageKey) {
         setFbsPendingStickerRow(null);
@@ -3589,6 +3575,35 @@ export const WBSupplyManager = ({
         const saved = await saveFbsSupplyScanMap(supplyId, fbsScansRef.current, supplierId);
         await syncFbsScannedCodesToUnifiedBase([honestSignCode], supplierId);
         applyFbsScans(saved);
+
+        /*
+         * Строка в «Базу заказов».
+         *
+         * Пишем после основного сохранения и не роняем скан, если не вышло:
+         * для сборщика у стола источник правды — карта поставки, и отменять
+         * принятый товар из-за второй таблицы нельзя. Но и молчать нельзя —
+         * иначе заказ тихо выпадет из базы.
+         */
+        try {
+          await upsertFbsOrderCode({
+            supplierId,
+            supplyId,
+            orderId: pendingRow.orderId,
+            chzCode: honestSignCode,
+            stickerDigits: pendingRow.stickerDigits,
+            stickerText: pendingRow.stickerScanText,
+            nmId: pendingRow.nmId ?? null,
+            article: pendingRow.article,
+            size: pendingRow.size,
+            title: pendingRow.title,
+          });
+        } catch (dbError: any) {
+          console.error('fbs_order_codes upsert failed', dbError);
+          setFbsScanNotice({
+            type: 'error',
+            text: `ЧЗ сохранён в поставке, но не попал в «Базу заказов» (${dbError?.message || 'ошибка записи'}). Товар можно отправлять.`,
+          });
+        }
         setFbsScanSavingKeys((prev) => {
           const rest = { ...prev };
           delete rest[pendingRow.storageKey];
@@ -5735,7 +5750,7 @@ export const WBSupplyManager = ({
             
             <div className="flex items-center gap-4">
                 {/* Supplier Selector (only for Управление FBS) */}
-                {(activeTab === 'fbs') && (
+                {(activeTab === 'fbs' || activeTab === 'orders_db') && (
                   <div className="flex items-center gap-2">
                       <span className="text-sm font-medium">Поставщик:</span>
                       <select 
@@ -5744,6 +5759,7 @@ export const WBSupplyManager = ({
                           onChange={(e) => {
                             const value = e.target.value;
                             if (activeTab === 'fbs') setSelectedSupplierIdFbs(value);
+                            else if (activeTab === 'orders_db') setSelectedSupplierIdOrdersDb(value);
                             else if (activeTab === 'supply_order') setSelectedSupplierIdSupplyOrder(value);
                             else if (activeTab === 'fbs_calc') setSelectedSupplierIdCalc(value);
                           }}
@@ -5768,7 +5784,16 @@ export const WBSupplyManager = ({
                       Управление FBS
                   </div>
               </button>
-              <button 
+              <button
+                onClick={() => setActiveTab('orders_db')}
+                className={`px-4 py-2 font-medium transition-colors border-b-2 ${activeTab === 'orders_db' ? 'border-purple-600 text-purple-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
+              >
+                  <div className="flex items-center gap-2">
+                      <Database className="w-4 h-4" />
+                      База заказов
+                  </div>
+              </button>
+              <button
                 onClick={() => setActiveTab('fbs_calc')}
                 className={`px-4 py-2 font-medium transition-colors border-b-2 ${activeTab === 'fbs_calc' ? 'border-purple-600 text-purple-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
               >
@@ -5817,6 +5842,15 @@ export const WBSupplyManager = ({
             <span className="text-2xl">&times;</span>
           </button>
         </div>
+      )}
+
+      {/* Content: База заказов — что уехало с каким ЧЗ */}
+      {activeTab === 'orders_db' && (
+        <FbsOrdersDatabase
+          supplierId={selectedSupplierIdOrdersDb}
+          supplierName={selectedSupplier?.name}
+          wbFetch={wbFetch}
+        />
       )}
 
       {/* Content: FBS Tab */}
