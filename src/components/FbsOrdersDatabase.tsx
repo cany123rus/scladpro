@@ -545,7 +545,7 @@ export const FbsOrdersDatabase = ({
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-slate-500">
               <tr className="text-left">
-                <th className="px-3 py-2 font-medium w-16">Фото</th>
+                <th className="px-3 py-2 font-medium w-40">Фото</th>
                 <th className="px-3 py-2 font-medium">Заказ</th>
                 <th className="px-3 py-2 font-medium">Товар</th>
                 <th className="px-3 py-2 font-medium">Честный знак</th>
@@ -575,14 +575,14 @@ export const FbsOrdersDatabase = ({
                 visibleRows.map((row) => {
                   const suspicious = !row.looksLikeChz;
                   return (
-                    <tr key={row.id} className="border-t border-slate-100 align-top hover:bg-slate-50">
+                    <tr key={row.id} className="border-t border-slate-100 align-middle hover:bg-slate-50">
                       <td className="px-3 py-2">
                         {row.nmId ? (
                           <img
                             src={getWBImageUrls(row.nmId)[0]}
                             alt=""
                             loading="lazy"
-                            className="w-12 h-16 object-contain rounded border border-slate-200 bg-white"
+                            className="w-36 h-48 object-contain rounded border border-slate-200 bg-white"
                             onError={(e) => {
                               // У WB несколько вариантов адреса — идём по списку,
                               // пока не найдётся живой, и только потом сдаёмся.
@@ -594,7 +594,7 @@ export const FbsOrdersDatabase = ({
                             }}
                           />
                         ) : (
-                          <div className="w-12 h-16 rounded border border-dashed border-slate-200" />
+                          <div className="w-36 h-48 rounded border border-dashed border-slate-200" />
                         )}
                       </td>
 
