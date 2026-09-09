@@ -157,26 +157,41 @@ export async function listCertificates(): Promise<CertificateInfo[]> {
     const out: CertificateInfo[] = [];
 
     for (let i = 1; i <= count; i++) {
-      const cert = await certificates.Item(i);
-      const subject = String(await cert.SubjectName);
-      const validTo = new Date(String(await cert.ValidToDate));
+      /*
+       * Каждый сертификат читаем отдельно и падение глотаем.
+       *
+       * В хранилище копятся старые сертификаты, чьи ключи лежат на носителях,
+       * давно вынутых из компьютера. На таком КриптоПро показывает модальное
+       * «Выбор ключевого носителя», и если нажать «Отмена», обращение падает.
+       * Раньше это роняло весь перебор — вместе с действующим сертификатом,
+       * который лежал в списке следом.
+       */
+      try {
+        const cert = await certificates.Item(i);
+        const subject = String(await cert.SubjectName);
+        const validTo = new Date(String(await cert.ValidToDate));
 
-      // Просроченные не показываем: выбрать такой можно только по ошибке,
-      // а ГИС МТ откажет уже после подписи, когда виноватым выглядит сайт.
-      if (validTo.getTime() < Date.now()) continue;
+        // Просроченные не показываем: выбрать такой можно только по ошибке,
+        // а ГИС МТ откажет уже после подписи, когда виноватым выглядит сайт.
+        if (validTo.getTime() < Date.now()) continue;
 
-      out.push({
-        thumbprint: String(await cert.Thumbprint),
-        subject,
-        issuer: String(await cert.IssuerName),
-        validFrom: new Date(String(await cert.ValidFromDate)).toISOString(),
-        validTo: validTo.toISOString(),
-        inn: extractInn(subject),
-        organization: extractOrganization(subject),
-      });
+        out.push({
+          thumbprint: String(await cert.Thumbprint),
+          subject,
+          issuer: String(await cert.IssuerName),
+          validFrom: new Date(String(await cert.ValidFromDate)).toISOString(),
+          validTo: validTo.toISOString(),
+          inn: extractInn(subject),
+          organization: extractOrganization(subject),
+        });
+      } catch (e) {
+        console.warn('Сертификат пропущен при переборе', e);
+      }
     }
 
-    return out;
+    // Свежие первыми: у одного ИНН бывает несколько сертификатов, и подписывать
+    // надо последним выданным, а не тем, что первым попался в хранилище.
+    return out.sort((a, b) => b.validTo.localeCompare(a.validTo));
   } finally {
     try {
       await store.Close();
