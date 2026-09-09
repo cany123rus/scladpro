@@ -25,7 +25,22 @@ const CADESCOM_BASE64_TO_BINARY = 1;
 const CADESCOM_CADES_BES = 1;
 const CAPICOM_ENCODE_BASE64 = 0;
 
-let pluginPromise: Promise<any> | null = null;
+let pluginPromise: Promise<void> | null = null;
+
+/*
+ * Готовый объект плагина берём отдельной функцией, а не возвращаем из промиса.
+ *
+ * `cadesplugin` — thenable: у него есть собственный `then`, и промис-машинерия
+ * его «усыновляет». Асинхронная функция, вернувшая этот объект, отдаёт наружу
+ * не его, а результат его `then` — то есть undefined, потому что КриптоПро
+ * вызывает resolve без аргументов. Наружу уходило `undefined`, и первое же
+ * обращение падало с «Cannot read properties of undefined».
+ */
+export function cadesApi(): any {
+  const plugin = window.cadesplugin;
+  if (!plugin) throw new Error('Плагин КриптоПро ещё не готов');
+  return plugin;
+}
 
 /**
  * Дожидается готовности плагина.
@@ -35,11 +50,14 @@ let pluginPromise: Promise<any> | null = null;
  * браузера. Пробуем оба и говорим человеку понятную причину, если не вышло:
  * «кнопка не работает» — худшее, что можно оставить складу.
  */
-export function loadCadesPlugin(): Promise<any> {
+export function loadCadesPlugin(): Promise<void> {
   if (pluginPromise) return pluginPromise;
 
   pluginPromise = (async () => {
-    if (window.cadesplugin) return waitReady(window.cadesplugin);
+    if (window.cadesplugin) {
+      await waitReady(window.cadesplugin);
+      return;
+    }
 
     /*
      * Сначала убеждаемся, что файл вообще лежит на сайте.
@@ -79,7 +97,7 @@ export function loadCadesPlugin(): Promise<any> {
       throw new Error('Файл cadesplugin_api.js загрузился, но объект плагина не появился — проверьте версию файла.');
     }
 
-    return waitReady(window.cadesplugin);
+    await waitReady(window.cadesplugin);
   })();
 
   return pluginPromise;
@@ -93,10 +111,9 @@ export function loadCadesPlugin(): Promise<any> {
  * КриптоПро сложно, поэтому подсказываем оба варианта: расширение ставится в
  * конкретный профиль, и «стоит в другом профиле» — самая частая причина.
  */
-async function waitReady(plugin: any) {
+async function waitReady(plugin: any): Promise<void> {
   try {
     await Promise.resolve(plugin);
-    return plugin;
   } catch (e: any) {
     throw new Error(
       `Расширение КриптоПро не отвечает (${e?.message || e}). `
@@ -128,7 +145,8 @@ const extractOrganization = (subject: string) => {
 
 /** Сертификаты из личного хранилища Windows — только действующие. */
 export async function listCertificates(): Promise<CertificateInfo[]> {
-  const plugin = await loadCadesPlugin();
+  await loadCadesPlugin();
+  const plugin = cadesApi();
 
   const store = await plugin.CreateObjectAsync('CAdESCOM.Store');
   await store.Open(CAPICOM_CURRENT_USER_STORE, CAPICOM_MY_STORE, CAPICOM_STORE_OPEN_READ_ONLY);
@@ -176,7 +194,8 @@ export async function listCertificates(): Promise<CertificateInfo[]> {
  * не догадаться, что дело в переводах строк.
  */
 export async function signDetachedBase64(base64Data: string, thumbprint: string): Promise<string> {
-  const plugin = await loadCadesPlugin();
+  await loadCadesPlugin();
+  const plugin = cadesApi();
 
   const store = await plugin.CreateObjectAsync('CAdESCOM.Store');
   await store.Open(CAPICOM_CURRENT_USER_STORE, CAPICOM_MY_STORE, CAPICOM_STORE_OPEN_READ_ONLY);
