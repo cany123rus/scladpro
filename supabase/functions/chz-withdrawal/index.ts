@@ -40,6 +40,8 @@ interface ChzConfig {
   soldFrom: string | null;
   /** Шаблон документа: в products подставляются коды, остальное берётся как есть. */
   documentTemplate: Record<string, unknown>;
+  /** Формат подписи строки входа — подбирается при первом успешном входе. */
+  authSignMode?: string;
 }
 
 /*
@@ -263,6 +265,26 @@ Deno.serve(async (req) => {
         }
 
         return json({ asked: ids.length, updated });
+      }
+
+      /*
+       * Дописать настройку.
+       *
+       * Нужна ровно для одного: запомнить формат подписи, который ГИС МТ принял.
+       * Подбирать его при каждом входе — значит четыре раза дёргать носитель
+       * и человека, который держит токен.
+       */
+      case 'config/patch': {
+        const patch = (payload.patch ?? {}) as Record<string, unknown>;
+        if (!patch || typeof patch !== 'object') return json({ error: 'Нечего сохранять' }, 400);
+
+        const next = { ...cfg, ...patch };
+        const { error } = await supabase
+          .from('app_settings')
+          .upsert([{ key: CONFIG_KEY, value: JSON.stringify(next) }], { onConflict: 'key' });
+        if (error) return json({ error: `Настройка не сохранена: ${error.message}` }, 500);
+
+        return json({ ok: true, config: next });
       }
 
       /* ---------- очередь ---------- */

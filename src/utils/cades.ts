@@ -208,7 +208,11 @@ export async function listCertificates(): Promise<CertificateInfo[]> {
  * и с ними сервер отвечает «подпись невалидна» — ошибка, по которой ни за что
  * не догадаться, что дело в переводах строк.
  */
-export async function signDetachedBase64(base64Data: string, thumbprint: string): Promise<string> {
+export async function signDetachedBase64(
+  base64Data: string,
+  thumbprint: string,
+  detached = true,
+): Promise<string> {
   await loadCadesPlugin();
   const plugin = cadesApi();
 
@@ -230,7 +234,7 @@ export async function signDetachedBase64(base64Data: string, thumbprint: string)
     await signedData.propset_ContentEncoding(CADESCOM_BASE64_TO_BINARY);
     await signedData.propset_Content(base64Data);
 
-    const signature = await signedData.SignCades(signer, CADESCOM_CADES_BES, true, CAPICOM_ENCODE_BASE64);
+    const signature = await signedData.SignCades(signer, CADESCOM_CADES_BES, detached, CAPICOM_ENCODE_BASE64);
     return String(signature).replace(/[\r\n]/g, '');
   } finally {
     try {

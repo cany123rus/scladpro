@@ -5,6 +5,7 @@ import {
   chzEnqueue,
   chzPoll,
   chzPrepareBatch,
+  chzSaveConfig,
   chzSessionFinish,
   chzSessionStart,
   chzStatus,
@@ -26,6 +27,16 @@ import { currentEmployeeName } from '../utils/fbsOrderCodes';
  * компьютера сотрудника. Поэтому на экране всего две подписи: вход в систему
  * (раз в смену) и сам документ.
  */
+
+/** Как именно подписывается строка входа: перебираем, пока ГИС МТ не примет. */
+type AuthSignMode = 'attached_text' | 'attached_asis' | 'detached_text' | 'detached_asis';
+
+const AUTH_MODE_TITLES: Record<AuthSignMode, string> = {
+  attached_text: 'прикреплённая, строка как текст',
+  attached_asis: 'прикреплённая, строка как base64',
+  detached_text: 'открепленная, строка как текст',
+  detached_asis: 'открепленная, строка как base64',
+};
 
 const STATUS_TITLES: Record<string, string> = {
   pending: 'Ждут вывода',
@@ -104,7 +115,16 @@ export const ChzWithdrawal = ({ supplierId, supplierName }: { supplierId: string
     }
   };
 
-  /** Вход в ГИС МТ: подписываем случайную строку, получаем токен на смену. */
+  /*
+   * Вход в ГИС МТ: подписываем присланную ими строку.
+   *
+   * Формат подписи их документация задаёт неоднозначно: строку можно понимать
+   * и как обычный текст, и как уже закодированный base64, а подпись бывает
+   * прикреплённой и открепленной. Ошибка на любой комбинации одна и та же —
+   * «Подпись невалидна, код 2», — по ней не отличить неверный формат от
+   * неверного ключа. Поэтому первый раз перебираем варианты и запоминаем тот,
+   * который ГИС МТ принял: дальше вход идёт сразу правильным.
+   */
   const signIn = async () => {
     if (!thumbprint) {
       setNotice({ type: 'error', text: 'Сначала выберите сертификат' });
@@ -112,12 +132,43 @@ export const ChzWithdrawal = ({ supplierId, supplierName }: { supplierId: string
     }
     setBusy('signin');
     setNotice(null);
+
+    const known = status?.config.authSignMode;
+    const modes: AuthSignMode[] = known
+      ? [known]
+      : ['attached_text', 'attached_asis', 'detached_text', 'detached_asis'];
+
+    const errors: string[] = [];
+
     try {
-      const challenge = await chzSessionStart(supplierId);
-      const signature = await signDetachedBase64(btoa(challenge.data), thumbprint);
-      const res = await chzSessionFinish(supplierId, challenge.uuid, signature);
-      setNotice({ type: 'success', text: `Вход выполнен, токен действует до ${fmt(res.expiresAt)}` });
-      await refresh();
+      for (const mode of modes) {
+        const detached = mode.startsWith('detached');
+        // Строку либо кодируем сами, либо отдаём как есть — плагин ждёт base64
+        // и раскодирует его в те байты, которые в итоге и подписываются.
+        const challenge = await chzSessionStart(supplierId);
+        const content = mode.endsWith('_text') ? btoa(challenge.data) : challenge.data;
+
+        try {
+          const signature = await signDetachedBase64(content, thumbprint, detached);
+          const res = await chzSessionFinish(supplierId, challenge.uuid, signature);
+
+          if (!known) await chzSaveConfig(supplierId, { authSignMode: mode });
+          setNotice({
+            type: 'success',
+            text: `Вход выполнен, токен действует до ${fmt(res.expiresAt)}.`
+              + (known ? '' : ` Формат подписи подобран: ${AUTH_MODE_TITLES[mode]} — запомнили.`),
+          });
+          await refresh();
+          return;
+        } catch (e: any) {
+          errors.push(`${AUTH_MODE_TITLES[mode]}: ${e?.message || e}`);
+        }
+      }
+
+      setNotice({
+        type: 'error',
+        text: `Ни один формат подписи не подошёл. ${errors.join(' · ')}`,
+      });
     } catch (e: any) {
       setNotice({ type: 'error', text: e?.message || 'Вход не выполнен' });
     } finally {

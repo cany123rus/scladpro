@@ -15,6 +15,8 @@ export interface ChzConfig {
   batchSize: number;
   soldFrom: string | null;
   documentTemplate: Record<string, unknown>;
+  /** Формат подписи строки входа, подобранный при первом успешном входе. */
+  authSignMode?: 'attached_text' | 'attached_asis' | 'detached_text' | 'detached_asis';
 }
 
 export interface ChzStatus {
@@ -61,6 +63,9 @@ export const chzSessionStart = (supplierId: string) =>
 
 export const chzSessionFinish = (supplierId: string, uuid: string, signature: string) =>
   call<{ ok: boolean; expiresAt: string }>('session/finish', supplierId, { uuid, signature });
+
+export const chzSaveConfig = (supplierId: string, patch: Partial<ChzConfig>) =>
+  call<{ ok: boolean; config: ChzConfig }>('config/patch', supplierId, { patch });
 
 export const chzSyncWbStatuses = (supplierId: string) =>
   call<{ asked: number; updated: number }>('sync-wb-statuses', supplierId);
