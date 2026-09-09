@@ -87,6 +87,13 @@ export const chzSubmitBatch = (supplierId: string, documentId: string, signature
     signedBy,
   });
 
+export const chzCheckCises = (supplierId: string, limit = 500) =>
+  call<{ asked: number; summary: { ours: number; foreign: number; retired: number; unknown: number } }>(
+    'cises/check',
+    supplierId,
+    { limit },
+  );
+
 export const chzPoll = (supplierId: string) =>
   call<{ checked: Array<{ id: string; status: string; detail: string }> }>('poll', supplierId);
 
@@ -99,12 +106,14 @@ export interface ChzQueueRow {
   error: string;
   documentId: string | null;
   createdAt: string;
+  ownerName: string;
+  cisStatus: string;
 }
 
 export async function fetchChzQueue(supplierId: string, status = '', limit = 200): Promise<ChzQueueRow[]> {
   let query = supabase
     .from('chz_withdrawals')
-    .select('id, order_id, chz_code, sold_at, status, error, document_id, created_at')
+    .select('id, order_id, chz_code, sold_at, status, error, document_id, created_at, owner_name, cis_status')
     .eq('supplier_id', supplierId)
     .order('created_at', { ascending: false })
     .limit(limit);
@@ -122,6 +131,8 @@ export async function fetchChzQueue(supplierId: string, status = '', limit = 200
     error: String(r.error || ''),
     documentId: r.document_id ? String(r.document_id) : null,
     createdAt: String(r.created_at || ''),
+    ownerName: String(r.owner_name || ''),
+    cisStatus: String(r.cis_status || ''),
   }));
 }
 

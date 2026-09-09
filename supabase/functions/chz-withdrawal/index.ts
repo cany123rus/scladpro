@@ -480,9 +480,109 @@ Deno.serve(async (req) => {
         const token = await getToken(supplierId);
         if (!token) return json({ error: 'Нужен вход в ГИС МТ: подпишите вход заново' }, 401);
 
-        const limit = Number(payload.limit ?? 20);
-        const res = await chzFetch(cfg, `/doc/list?limit=${limit}`, token);
-        return json({ status: res.status, body: res.body });
+        /*
+         * Разведка по справочнику адресов.
+         *
+         * Состав методов true-api меняется, и гадать вслепую нельзя: обращение
+         * читающее, метод жёстко GET — записать что-либо этим действием
+         * невозможно. Список путей приходит снаружи, чтобы не пересобирать
+         * функцию ради каждой проверки.
+         */
+        const paths: string[] = Array.isArray(payload.paths) && payload.paths.length
+          ? payload.paths.map((p: unknown) => String(p))
+          : [`/doc/list?limit=${Number(payload.limit ?? 20)}`];
+
+        const results = [];
+        for (const path of paths.slice(0, 12)) {
+          const res = await chzFetch(cfg, path.startsWith('/') ? path : `/${path}`, token, { method: 'GET' });
+          const body = typeof res.body === 'string' ? res.body.slice(0, 400) : res.body;
+          results.push({ path, status: res.status, body });
+        }
+
+        return json({ results });
+      }
+
+      /*
+       * Что ГИС МТ думает о наших кодах.
+       *
+       * Читающий запрос, и он отвечает на главный вопрос: коды ещё в обороте
+       * или Wildberries уже вывел их сам. Выводить второй раз нечего, а узнать
+       * это до отправки дешевле, чем разбирать гору отказов.
+       *
+       * Запрашиваем код идентификации — первые 31 символ марки: остальное это
+       * криптохвост, он в такие запросы не входит.
+       */
+      case 'cises/check': {
+        const token = await getToken(supplierId);
+        if (!token) return json({ error: 'Нужен вход в ГИС МТ: подпишите вход заново' }, 401);
+
+        const limit = Math.min(Number(payload.limit ?? 500), 1000);
+        const { data: rows } = await supabase
+          .from('chz_withdrawals')
+          .select('id, chz_code')
+          .eq('supplier_id', supplierId)
+          .in('status', ['pending', 'blocked', 'retired'])
+          .limit(limit);
+
+        if (!rows?.length) return json({ error: 'В очереди нет кодов' }, 400);
+
+        const byKi = new Map<string, { id: string }>();
+        rows.forEach((r: { id: string; chz_code: string }) => byKi.set(String(r.chz_code).slice(0, 31), { id: r.id }));
+
+        const summary = { ours: 0, foreign: 0, retired: 0, unknown: 0 };
+        const nowIso = new Date().toISOString();
+
+        // ГИС МТ берёт пачками; тысяча кодов за раз — предел, который они держат.
+        const kis = [...byKi.keys()];
+        for (let i = 0; i < kis.length; i += 500) {
+          const chunk = kis.slice(i, i + 500);
+          const res = await chzFetch(cfg, '/cises/info', token, { method: 'POST', body: JSON.stringify(chunk) });
+          if (!res.ok) return json({ error: `ГИС МТ не ответил по кодам: ${errorText(res.body)}`, summary }, 502);
+
+          const list: Array<Record<string, any>> = Array.isArray(res.body) ? res.body : [];
+          for (const item of list) {
+            const info = item?.cisInfo || {};
+            const row = byKi.get(String(info?.requestedCis || info?.cis || ''));
+            if (!row) continue;
+
+            const ownerInn = String(info?.ownerInn || '');
+            const cisStatus = String(info?.status || '');
+            const retired = cisStatus === 'RETIRED';
+            const ours = ownerInn === String(supplier.inn || '');
+
+            /*
+             * Статус очереди выставляем по факту, а не по надежде:
+             * выведенное второй раз выводить нечего, а чужой код нам и не
+             * принадлежит — оба случая должны быть видны до отправки.
+             */
+            const nextStatus = retired ? 'retired' : ours ? 'pending' : 'blocked';
+            const error = retired
+              ? 'Код уже выведен из оборота'
+              : ours
+                ? ''
+                : `Код числится за другим владельцем: ${info?.ownerName || ownerInn}. Нужна приёмка по УПД.`;
+
+            if (retired) summary.retired += 1;
+            else if (ours) summary.ours += 1;
+            else summary.foreign += 1;
+
+            await supabase
+              .from('chz_withdrawals')
+              .update({
+                owner_inn: ownerInn,
+                owner_name: String(info?.ownerName || ''),
+                cis_status: cisStatus,
+                checked_at: nowIso,
+                status: nextStatus,
+                error,
+                updated_at: nowIso,
+              })
+              .eq('id', row.id);
+          }
+        }
+
+        summary.unknown = kis.length - summary.ours - summary.foreign - summary.retired;
+        return json({ asked: kis.length, summary });
       }
 
       /* ---------- ГИС МТ проверяет документ не сразу ---------- */

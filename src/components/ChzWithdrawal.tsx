@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { AlertTriangle, CheckCircle2, KeyRound, Loader2, RefreshCw, Send, ShieldCheck } from 'lucide-react';
 import { listCertificates, signDetachedBase64, type CertificateInfo } from '../utils/cades';
 import {
+  chzCheckCises,
   chzEnqueue,
   chzPoll,
   chzPrepareBatch,
@@ -39,9 +40,11 @@ const AUTH_MODE_TITLES: Record<AuthSignMode, string> = {
 };
 
 const STATUS_TITLES: Record<string, string> = {
-  pending: 'Ждут вывода',
+  pending: 'Готовы к выводу',
+  blocked: 'Чужой владелец',
+  retired: 'Уже выведены',
   sent: 'Отправлены, ГИС МТ проверяет',
-  accepted: 'Выведены',
+  accepted: 'Выведены нами',
   rejected: 'Отказ',
 };
 
@@ -223,6 +226,34 @@ export const ChzWithdrawal = ({ supplierId, supplierName }: { supplierId: string
     }
   };
 
+  /*
+   * Спросить ГИС МТ, чьи это коды.
+   *
+   * Вывести из оборота может только владелец. По живой очереди видно, зачем
+   * проверка: часть кодов числится за поставщиком — приёмка по УПД не
+   * оформлена, — и без этой сверки они ушли бы в отправку и вернулись отказом.
+   */
+  const checkCises = async () => {
+    setBusy('cises');
+    setNotice(null);
+    try {
+      const res = await chzCheckCises(supplierId);
+      const s = res.summary;
+      setNotice({
+        type: s.foreign || s.retired ? 'info' : 'success',
+        text:
+          `Проверено кодов: ${res.asked}. Ваши и в обороте — ${s.ours}.`
+          + (s.foreign ? ` Числятся за другим владельцем — ${s.foreign}: их выводить нельзя, нужна приёмка по УПД.` : '')
+          + (s.retired ? ` Уже выведены — ${s.retired}.` : ''),
+      });
+      await refresh();
+    } catch (e: any) {
+      setNotice({ type: 'error', text: e?.message || 'Не удалось проверить коды' });
+    } finally {
+      setBusy('');
+    }
+  };
+
   const poll = async () => {
     setBusy('poll');
     setNotice(null);
@@ -278,13 +309,17 @@ export const ChzWithdrawal = ({ supplierId, supplierName }: { supplierId: string
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        {(['pending', 'sent', 'accepted', 'rejected'] as const).map((key) => (
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">
+        {(['pending', 'blocked', 'retired', 'sent', 'accepted', 'rejected'] as const).map((key) => (
           <div key={key} className="oc-card p-4">
             <div className="text-[11px] uppercase tracking-wide text-slate-500">{STATUS_TITLES[key]}</div>
             <div
               className={`mt-1 text-[22px] font-bold tabular-nums ${
-                key === 'rejected' && counts[key] ? 'text-rose-600' : key === 'accepted' ? 'text-emerald-600' : ''
+                (key === 'rejected' || key === 'blocked') && counts[key]
+                  ? 'text-rose-600'
+                  : key === 'accepted'
+                    ? 'text-emerald-600'
+                    : ''
               }`}
             >
               {counts[key] || 0}
@@ -375,6 +410,15 @@ export const ChzWithdrawal = ({ supplierId, supplierName }: { supplierId: string
           </button>
 
           <button
+            onClick={checkCises}
+            disabled={Boolean(busy) || !status?.signedIn}
+            className="px-3 py-2 text-sm rounded border border-amber-300 text-amber-700 hover:bg-amber-50 disabled:opacity-50"
+            title="Спросить у ГИС МТ, чьи это коды и не выведены ли они уже"
+          >
+            {busy === 'cises' ? 'Проверяем коды…' : 'Проверить коды в ГИС МТ'}
+          </button>
+
+          <button
             onClick={poll}
             disabled={Boolean(busy)}
             className="px-3 py-2 text-sm rounded border border-slate-300 hover:bg-slate-50 disabled:opacity-50"
@@ -409,9 +453,11 @@ export const ChzWithdrawal = ({ supplierId, supplierName }: { supplierId: string
           <h3 className="font-semibold text-slate-900">Коды</h3>
           <select value={queueFilter} onChange={(e) => setQueueFilter(e.target.value)} className="oc-select ml-auto">
             <option value="">все</option>
-            <option value="pending">ждут вывода</option>
+            <option value="pending">готовы к выводу</option>
+            <option value="blocked">чужой владелец</option>
+            <option value="retired">уже выведены</option>
             <option value="sent">отправлены</option>
-            <option value="accepted">выведены</option>
+            <option value="accepted">выведены нами</option>
             <option value="rejected">отказ</option>
           </select>
         </div>
@@ -423,13 +469,14 @@ export const ChzWithdrawal = ({ supplierId, supplierName }: { supplierId: string
                 <th className="px-3 py-2 font-medium">Заказ</th>
                 <th className="px-3 py-2 font-medium">Код маркировки</th>
                 <th className="px-3 py-2 font-medium">Продан</th>
+                <th className="px-3 py-2 font-medium">Владелец кода</th>
                 <th className="px-3 py-2 font-medium">Состояние</th>
               </tr>
             </thead>
             <tbody>
               {queue.length === 0 && (
                 <tr>
-                  <td colSpan={4} className="px-3 py-6 text-center text-slate-400">
+                  <td colSpan={5} className="px-3 py-6 text-center text-slate-400">
                     Пусто
                   </td>
                 </tr>
@@ -441,12 +488,15 @@ export const ChzWithdrawal = ({ supplierId, supplierName }: { supplierId: string
                     {row.chzCode.length > 44 ? `${row.chzCode.slice(0, 44)}…` : row.chzCode}
                   </td>
                   <td className="px-3 py-2 whitespace-nowrap text-slate-500">{fmt(row.soldAt)}</td>
+                  <td className="px-3 py-2 text-slate-600">
+                    {row.ownerName || <span className="text-slate-400">не проверяли</span>}
+                  </td>
                   <td className="px-3 py-2">
                     <span
                       className={
                         row.status === 'accepted'
                           ? 'text-emerald-600'
-                          : row.status === 'rejected'
+                          : row.status === 'rejected' || row.status === 'blocked'
                             ? 'text-rose-600'
                             : 'text-slate-600'
                       }
