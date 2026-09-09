@@ -22,7 +22,8 @@ import {
   Calculator,
   FileSpreadsheet,
   Upload,
-  Database
+  Database,
+  ShieldCheck
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -49,6 +50,7 @@ import {
   upsertFbsOrderCode,
 } from '../utils/fbsOrderCodes';
 import { FbsOrdersDatabase } from './FbsOrdersDatabase';
+import { ChzWithdrawal } from './ChzWithdrawal';
 
 // --- Types ---
 
@@ -508,7 +510,7 @@ const FBS_CUES: Record<
  */
 const MIN_HONEST_SIGN_LENGTH = 20;
 
-type WBSupplyManagerTab = 'fbs' | 'orders_db' | 'supply_order' | 'fbs_calc' | 'fbs_orders' | 'fbo_acceptance';
+type WBSupplyManagerTab = 'fbs' | 'orders_db' | 'chz_withdrawal' | 'supply_order' | 'fbs_calc' | 'fbs_orders' | 'fbo_acceptance';
 
 export const WBSupplyManager = ({
   suppliers = [],
@@ -555,7 +557,7 @@ export const WBSupplyManager = ({
   const [selectedSupplierIdFboAcceptance, setSelectedSupplierIdFboAcceptance] = useState<string>('');
   const selectedSupplierId = activeTab === 'fbs'
     ? selectedSupplierIdFbs
-    : activeTab === 'orders_db'
+    : activeTab === 'orders_db' || activeTab === 'chz_withdrawal'
     ? selectedSupplierIdOrdersDb
     : activeTab === 'supply_order'
       ? selectedSupplierIdSupplyOrder
@@ -5977,7 +5979,7 @@ export const WBSupplyManager = ({
             
             <div className="flex items-center gap-4">
                 {/* Supplier Selector (only for Управление FBS) */}
-                {(activeTab === 'fbs' || activeTab === 'orders_db') && (
+                {(activeTab === 'fbs' || activeTab === 'orders_db' || activeTab === 'chz_withdrawal') && (
                   <div className="flex items-center gap-2">
                       <span className="text-sm font-medium">Поставщик:</span>
                       <select 
@@ -5986,7 +5988,7 @@ export const WBSupplyManager = ({
                           onChange={(e) => {
                             const value = e.target.value;
                             if (activeTab === 'fbs') setSelectedSupplierIdFbs(value);
-                            else if (activeTab === 'orders_db') setSelectedSupplierIdOrdersDb(value);
+                            else if (activeTab === 'orders_db' || activeTab === 'chz_withdrawal') setSelectedSupplierIdOrdersDb(value);
                             else if (activeTab === 'supply_order') setSelectedSupplierIdSupplyOrder(value);
                             else if (activeTab === 'fbs_calc') setSelectedSupplierIdCalc(value);
                           }}
@@ -6018,6 +6020,15 @@ export const WBSupplyManager = ({
                   <div className="flex items-center gap-2">
                       <Database className="w-4 h-4" />
                       База заказов
+                  </div>
+              </button>
+              <button
+                onClick={() => setActiveTab('chz_withdrawal')}
+                className={`px-4 py-2 font-medium transition-colors border-b-2 ${activeTab === 'chz_withdrawal' ? 'border-purple-600 text-purple-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
+              >
+                  <div className="flex items-center gap-2">
+                      <ShieldCheck className="w-4 h-4" />
+                      Вывод из оборота
                   </div>
               </button>
               <button
@@ -6078,6 +6089,11 @@ export const WBSupplyManager = ({
           supplierName={selectedSupplier?.name}
           wbFetch={wbFetch}
         />
+      )}
+
+      {/* Content: Вывод из оборота — ЧЗ по проданным заказам */}
+      {activeTab === 'chz_withdrawal' && (
+        <ChzWithdrawal supplierId={selectedSupplierIdOrdersDb} supplierName={selectedSupplier?.name} />
       )}
 
       {/* Content: FBS Tab */}
