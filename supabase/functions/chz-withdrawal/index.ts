@@ -42,6 +42,14 @@ interface ChzConfig {
   documentTemplate: Record<string, unknown>;
   /** Формат подписи строки входа — подбирается при первом успешном входе. */
   authSignMode?: string;
+  /**
+   * Разрешение отправлять документы.
+   *
+   * По умолчанию выключено. Вход в ГИС МТ безобиден — он только выдаёт токен,
+   * а вот документ вывода необратим, и пока тип документа не сверен на живом
+   * ответе, отправлять его нельзя даже случайным кликом.
+   */
+  allowSubmit: boolean;
 }
 
 /*
@@ -59,6 +67,7 @@ const DEFAULT_CONFIG: ChzConfig = {
   holdDays: 3,
   batchSize: 300,
   soldFrom: '2026-09-01T00:00:00Z',
+  allowSubmit: false,
   documentTemplate: {
     withdrawal_type: 'REMOTE_SALE',
     action: 'WITHDRAWAL',
@@ -391,6 +400,17 @@ Deno.serve(async (req) => {
         const signedBy = String(payload.signedBy || '');
         if (!documentId || !signature) return json({ error: 'Нет подписи или документа' }, 400);
 
+        if (!cfg.allowSubmit) {
+          return json(
+            {
+              error:
+                'Отправка документов пока запрещена настройкой (allowSubmit=false). '
+                + 'Сначала сверяем тип документа на живом ответе ГИС МТ — вывод из оборота необратим.',
+            },
+            409,
+          );
+        }
+
         const token = await getToken(supplierId);
         if (!token) return json({ error: 'Нужен вход в ГИС МТ: подпишите вход заново' }, 401);
 
@@ -447,6 +467,22 @@ Deno.serve(async (req) => {
           .eq('document_id', documentId);
 
         return json({ ok: true, externalId, codesCount: doc.payload?.products?.length ?? 0 });
+      }
+
+      /*
+       * Заглянуть в документы кабинета в ГИС МТ.
+       *
+       * Только чтение. Нужно, чтобы узнать, как называются типы документов на
+       * практике: их справочник меняется, а по чужим примерам из интернета
+       * выводить из оборота — плохая идея.
+       */
+      case 'doc/list': {
+        const token = await getToken(supplierId);
+        if (!token) return json({ error: 'Нужен вход в ГИС МТ: подпишите вход заново' }, 401);
+
+        const limit = Number(payload.limit ?? 20);
+        const res = await chzFetch(cfg, `/doc/list?limit=${limit}`, token);
+        return json({ status: res.status, body: res.body });
       }
 
       /* ---------- ГИС МТ проверяет документ не сразу ---------- */
