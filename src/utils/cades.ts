@@ -38,38 +38,71 @@ let pluginPromise: Promise<any> | null = null;
 export function loadCadesPlugin(): Promise<any> {
   if (pluginPromise) return pluginPromise;
 
-  pluginPromise = new Promise((resolve, reject) => {
-    const settle = () => {
-      const plugin = window.cadesplugin;
-      if (!plugin) {
-        reject(new Error('Плагин КриптоПро не найден. Установите «КриптоПро ЭЦП Browser plug-in» и расширение в браузере.'));
-        return;
-      }
-      Promise.resolve(plugin)
-        .then(() => resolve(plugin))
-        .catch((e: any) =>
-          reject(new Error(`Плагин установлен, но не отвечает: ${e?.message || e}. Проверьте, что расширение включено.`)),
-        );
-    };
+  pluginPromise = (async () => {
+    if (window.cadesplugin) return waitReady(window.cadesplugin);
 
-    if (window.cadesplugin) {
-      settle();
-      return;
+    /*
+     * Сначала убеждаемся, что файл вообще лежит на сайте.
+     *
+     * Хостинг отдаёт index.html на любой неизвестный адрес, поэтому пропавший
+     * cadesplugin_api.js «загружался» успешно: браузер честно выполнял HTML как
+     * скрипт, объект не появлялся, и раздел писал «плагин не найден» — хотя
+     * плагин стоял, а не хватало нашего файла. Проверяем содержимое до вставки.
+     */
+    let source: string;
+    try {
+      const res = await fetch('/cadesplugin_api.js', { cache: 'no-store' });
+      source = res.ok ? await res.text() : '';
+    } catch {
+      source = '';
     }
 
-    const script = document.createElement('script');
-    script.src = '/cadesplugin_api.js';
-    script.onload = () => setTimeout(settle, 0);
-    script.onerror = () =>
-      reject(
-        new Error(
-          'Не найден файл /cadesplugin_api.js. Его даёт КриптоПро вместе с плагином — положите файл в папку public проекта.',
-        ),
+    if (!source || /^\s*<!doctype html|^\s*<html/i.test(source)) {
+      throw new Error(
+        'На сайте нет файла cadesplugin_api.js — это часть КриптоПро, её нужно положить рядом с сайтом. '
+          + 'Скачайте файл со страницы КриптоПро (cryptopro.ru/cadesplugin, ссылка «Демо-страница» → сохранить cadesplugin_api.js) и передайте мне.',
       );
-    document.head.appendChild(script);
-  });
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = '/cadesplugin_api.js';
+      script.onload = () => resolve();
+      script.onerror = () => reject(new Error('Файл cadesplugin_api.js не выполнился'));
+      document.head.appendChild(script);
+    });
+
+    // Объект создаётся синхронно самим файлом, но дадим ему такт на инициализацию.
+    await new Promise((r) => setTimeout(r, 0));
+
+    if (!window.cadesplugin) {
+      throw new Error('Файл cadesplugin_api.js загрузился, но объект плагина не появился — проверьте версию файла.');
+    }
+
+    return waitReady(window.cadesplugin);
+  })();
 
   return pluginPromise;
+}
+
+/**
+ * Готовность плагина.
+ *
+ * `cadesplugin` — промис: он отклоняется, если расширения нет в этом профиле
+ * браузера или не установлен сам КриптоПро CSP. Различить это по тексту от
+ * КриптоПро сложно, поэтому подсказываем оба варианта: расширение ставится в
+ * конкретный профиль, и «стоит в другом профиле» — самая частая причина.
+ */
+async function waitReady(plugin: any) {
+  try {
+    await Promise.resolve(plugin);
+    return plugin;
+  } catch (e: any) {
+    throw new Error(
+      `Расширение КриптоПро не отвечает (${e?.message || e}). `
+        + 'Проверьте, что расширение включено именно в том профиле браузера, где открыт СкладПро, и что установлен КриптоПро CSP.',
+    );
+  }
 }
 
 export interface CertificateInfo {
