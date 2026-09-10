@@ -598,6 +598,37 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     setLoadingCategories(true);
     setSupplierCategories([]);
 
+    /*
+     * Сначала смотрим в кэш карточек, и обычно этим всё и кончается.
+     *
+     * Раньше на каждую смену поставщика раздел обходил Wildberries страницами
+     * по сотне карточек: у Власенко их 1019, то есть одиннадцать запросов
+     * подряд, прежде чем на экране появится выпадающий список. Те же карточки
+     * уже лежат в wb_products_cache — оттуда 36 категорий приходят за 17 мс.
+     * В WB идём, только если кэш пуст.
+     */
+    try {
+      const { data: cachedCards } = await supabase
+        .from('wb_products_cache')
+        .select('product_json')
+        .eq('supplier_id', supplierId)
+        .limit(20000);
+
+      const cachedSet = new Set<string>();
+      (cachedCards || []).forEach((row: any) => {
+        const cat = normalizeHSCategory(String(row?.product_json?.subjectName || '').trim());
+        if (cat) cachedSet.add(cat);
+      });
+
+      if (cachedSet.size > 0) {
+        setSupplierCategories(Array.from(cachedSet).sort((a, b) => a.localeCompare(b, 'ru')));
+        setLoadingCategories(false);
+        return;
+      }
+    } catch (cacheError) {
+      console.warn('Категории из кэша карточек не прочитались, идём в WB:', cacheError);
+    }
+
     const supplier = suppliers.find(s => s.id === supplierId);
     if (!supplier || !supplier.wb_api_token) {
       setLoadingCategories(false);
@@ -815,17 +846,32 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     setHonestSignCategoryStats(stats);
   };
 
+  /*
+   * За теми же данными второй раз не ходим.
+   *
+   * Сводка, история и категории грузились заново на каждый выбор поставщика —
+   * даже при возврате к тому же кабинету через минуту. Помним, что уже
+   * загружали в этой сессии; после загрузки файла или удаления истории отметка
+   * сбрасывается, и данные перечитываются.
+   */
+  const hsLoadedForSupplierRef = useRef<string>('');
+
   useEffect(() => {
-    if (honestSignSupplierId) {
-        fetchSupplierCategories(honestSignSupplierId);
-        fetchHonestSignUploadHistory();
-        fetchHonestSignCategoryStats();
-    } else {
-        setSupplierCategories([]);
-        setHonestSignUploadHistory([]);
-        setHonestSignPrintedHistory([]);
-        setHonestSignCategoryStats([]);
+    if (!honestSignSupplierId) {
+      hsLoadedForSupplierRef.current = '';
+      setSupplierCategories([]);
+      setHonestSignUploadHistory([]);
+      setHonestSignPrintedHistory([]);
+      setHonestSignCategoryStats([]);
+      return;
     }
+
+    if (hsLoadedForSupplierRef.current === honestSignSupplierId) return;
+    hsLoadedForSupplierRef.current = honestSignSupplierId;
+
+    fetchSupplierCategories(honestSignSupplierId);
+    fetchHonestSignUploadHistory();
+    fetchHonestSignCategoryStats();
   }, [honestSignSupplierId]);
 
   // Тяжёлые истории (десятки тысяч строк) грузим лениво — только при открытии
@@ -6102,92 +6148,37 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         return;
       }
 
-      const supplyIds = supplies.map((s) => s.id);
-      const { data: allBoxes, error: boxesError } = await supabase
-        .from('boxes')
-        .select('id, supply_id')
-        .in('supply_id', supplyIds)
-        .is('deleted_at', null);
-
-      if (boxesError) throw boxesError;
-
-      const boxesBySupply = (allBoxes || []).reduce((acc: any, box: any) => {
-        if (!acc[box.supply_id]) acc[box.supply_id] = [];
-        acc[box.supply_id].push(box.id);
-        return acc;
-      }, {});
-
-      const allBoxIds = (allBoxes || []).map((b: any) => b.id);
-      // Одна выборка строк ЧЗ для всех целей (счётчик + пол). Дедуп по id —
-      // страховка от возможных дублей строк на границах страниц пагинации.
-      const itemsRaw = await fetchSupplyItemsWithHonestSign(allBoxIds, 'id, box_id, honest_sign_code');
-      const seenItemIds = new Set<string>();
-      const itemsWithCodes = itemsRaw.filter((item: any) => {
-        const id = String(item?.id || '');
-        if (!id || seenItemIds.has(id)) return false;
-        seenItemIds.add(id);
-        return true;
+      /*
+       * Счётчики и пол считает база.
+       *
+       * Здесь показываются 17 поставок, а собирались они из семидесяти тысяч
+       * строк: 1 250 коробов, 34 396 позиций постранично по тысяче и ещё
+       * столько же запросов, чтобы узнать пол по каждому коду. Раздел от
+       * этого и подвисал. Теперь одна функция возвращает строку на поставку.
+       */
+      const { data: overview, error: overviewError } = await supabase.rpc('hs_supply_overview', {
+        p_supplier: supplierId,
       });
 
-      const boxCounts: Record<string, number> = {};
-      itemsWithCodes.forEach((item: any) => {
-        const boxId = String(item?.box_id || '');
-        if (!boxId) return;
-        boxCounts[boxId] = (boxCounts[boxId] || 0) + 1;
+      if (overviewError) throw overviewError;
+
+      const bySupply = new Map<string, { codes: number; genders: string[] }>();
+      (overview || []).forEach((row: any) => {
+        bySupply.set(String(row?.supply_id || ''), {
+          codes: Number(row?.codes || 0),
+          genders: Array.isArray(row?.genders) ? row.genders.map((g: any) => normalizeHSGender(String(g))).filter(Boolean) : [],
+        });
       });
 
       const suppliesWithCounts = supplies.map((s) => {
-        const sBoxIds = boxesBySupply[s.id] || [];
-        const count = sBoxIds.reduce((acc: number, boxId: string) => acc + (boxCounts[boxId] || 0), 0);
-        return { ...s, code_count: count, gender_label: '-' };
+        const info = bySupply.get(String(s.id)) || { codes: 0, genders: [] };
+        const genders = Array.from(new Set(info.genders));
+        return {
+          ...s,
+          code_count: info.codes,
+          gender_label: genders.length === 1 ? getHSGenderLabel(genders[0]) : genders.length > 1 ? 'Смешанный' : '-',
+        };
       });
-
-      try {
-        const uniqueCodes = Array.from(new Set(itemsWithCodes.map((item: any) => String(item?.honest_sign_code || '').trim()).filter(Boolean)));
-        const codeGenderMap = new Map<string, string>();
-        const hsChunkSize = 1000;
-
-        for (let i = 0; i < uniqueCodes.length; i += hsChunkSize) {
-          const chunk = uniqueCodes.slice(i, i + hsChunkSize);
-          const { data: genderRows, error: genderError } = await supabase
-            .from('unified_honest_sign_codes')
-            .select('code, gender')
-            .eq('supplier_id', supplierId)
-            .in('code', chunk);
-
-          if (genderError) throw genderError;
-          (genderRows || []).forEach((row: any) => {
-            const code = String(row?.code || '').trim();
-            if (!code) return;
-            codeGenderMap.set(code, normalizeHSGender(row?.gender));
-          });
-        }
-
-        const boxGenderSets: Record<string, Set<string>> = {};
-        itemsWithCodes.forEach((item: any) => {
-          const boxId = String(item?.box_id || '');
-          const code = String(item?.honest_sign_code || '').trim();
-          const gender = normalizeHSGender(codeGenderMap.get(code) || '');
-          if (!boxId || !gender) return;
-          if (!boxGenderSets[boxId]) boxGenderSets[boxId] = new Set<string>();
-          boxGenderSets[boxId].add(gender);
-        });
-
-        suppliesWithCounts.forEach((s: any) => {
-          const sBoxIds = boxesBySupply[s.id] || [];
-          const genderSet = new Set<string>();
-          sBoxIds.forEach((boxId: string) => {
-            (boxGenderSets[boxId] || new Set<string>()).forEach((gender) => genderSet.add(gender));
-          });
-          s.gender_label = genderSet.size === 1
-            ? getHSGenderLabel(Array.from(genderSet)[0])
-            : genderSet.size > 1
-              ? 'Смешанный'
-              : '-';
-        });
-      } catch (genderLoadError) {
-        console.warn('Optional Honest Sign gender enrichment skipped:', genderLoadError);
-      }
 
       setHonestSignCodes(suppliesWithCounts.filter((s) => s.code_count > 0));
     } catch (error) {
