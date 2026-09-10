@@ -722,37 +722,35 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     }
   };
 
+  /*
+   * История загрузок — тоже группировкой в базе.
+   *
+   * Раньше приезжали пять тысяч кодов только ради того, чтобы схлопнуть их в
+   * десяток строк «файл + минута». Заодно теперь видно, сколько кодов было в
+   * каждой загрузке: раньше это знание выбрасывалось.
+   */
   const fetchHonestSignUploadHistory = async () => {
     if (!honestSignSupplierId) return;
 
-    const { data: codes } = await supabase
-        .from('unified_honest_sign_codes')
-        .select('file_name, created_at, category, gender')
-        .eq('supplier_id', honestSignSupplierId)
-        .neq('file_name', 'Напечатанные QR')
-        .neq('file_name', 'Отсканировано')
-        .order('created_at', { ascending: false })
-        .limit(5000);
+    const { data: rows, error } = await supabase.rpc('hs_upload_history', {
+      p_supplier: honestSignSupplierId,
+      p_limit: 200,
+    });
 
-    if (!codes) return;
-
-    const history: any[] = [];
-    const seen = new Set();
-
-    for (const code of codes) {
-        const key = `${code.file_name}-${new Date(code.created_at).setSeconds(0,0)}`;
-        if (!seen.has(key)) {
-            seen.add(key);
-            history.push({
-                file_name: code.file_name,
-                created_at: code.created_at,
-                category: normalizeHSCategory(code.category),
-                gender: normalizeHSGender(code.gender)
-            });
-        }
+    if (error) {
+      console.error('Error loading HS upload history:', error);
+      return;
     }
 
-    setHonestSignUploadHistory(history);
+    setHonestSignUploadHistory(
+      (rows || []).map((row: any) => ({
+        file_name: String(row?.file_name || ''),
+        created_at: row?.created_at,
+        category: normalizeHSCategory(row?.category),
+        gender: normalizeHSGender(row?.gender),
+        codes: Number(row?.codes || 0),
+      })),
+    );
   };
 
   const fetchHonestSignPrintedHistory = async () => {
@@ -787,56 +785,32 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     setHonestSignPrintedHistory(history);
   };
 
+  /*
+   * Сводку по категориям считает база.
+   *
+   * Раньше сюда постранично по тысяче приезжали все коды поставщика: у
+   * Власенко это 37 924 строки, почти сорок запросов через прокси на каждое
+   * открытие вкладки — раздел от этого и подвисал. Теперь та же арифметика
+   * делается одним запросом и возвращает десяток строк.
+   */
   const fetchHonestSignCategoryStats = async () => {
     if (!honestSignSupplierId) return;
 
-    const pageSize = 1000;
-    const allRows: any[] = [];
-    let from = 0;
+    const { data, error } = await supabase.rpc('hs_category_stats', { p_supplier: honestSignSupplierId });
 
-    while (true) {
-      const { data, error } = await supabase
-        .from('unified_honest_sign_codes')
-        .select('category,file_name,status')
-        .eq('supplier_id', honestSignSupplierId)
-        .range(from, from + pageSize - 1);
-
-      if (error) {
-        console.error('Error loading HS category stats:', error);
-        setHonestSignCategoryStats([]);
-        return;
-      }
-
-      const chunk = data || [];
-      allRows.push(...chunk);
-      if (chunk.length < pageSize) break;
-      from += pageSize;
+    if (error) {
+      console.error('Error loading HS category stats:', error);
+      setHonestSignCategoryStats([]);
+      return;
     }
 
-    const map = new Map<string, { total: number; inBase: number; printed: number; scanned: number }>();
-
-    for (const row of allRows as any[]) {
-      const category = normalizeHSCategory(String(row?.category || 'Без категории'));
-      if (!map.has(category)) map.set(category, { total: 0, inBase: 0, printed: 0, scanned: 0 });
-
-      const item = map.get(category)!;
-      item.total += 1;
-
-      const fileName = String(row?.file_name || '');
-      const status = String(row?.status || '').toLowerCase();
-
-      if (fileName === 'Напечатанные QR' || status === 'printed') {
-        item.printed += 1;
-      } else if (fileName === 'Отсканировано' || status === 'scanned') {
-        item.scanned += 1;
-      } else {
-        item.inBase += 1;
-      }
-    }
-
-    const stats = Array.from(map.entries())
-      .map(([category, v]) => ({ category, ...v }))
-      .sort((a, b) => a.category.localeCompare(b.category, 'ru'));
+    const stats = (data || []).map((row: any) => ({
+      category: String(row?.category || 'Без категории'),
+      total: Number(row?.total || 0),
+      inBase: Number(row?.in_base || 0),
+      printed: Number(row?.printed || 0),
+      scanned: Number(row?.scanned || 0),
+    }));
 
     setHonestSignCategoryStats(stats);
   };
