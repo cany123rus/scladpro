@@ -43,6 +43,7 @@ import {
 import { explainWbAccess } from '../utils/wbTokenScopes';
 import { buildStickersPdf, fetchStickers } from '../utils/stickers';
 import { getWBImageUrl, getWBImageUrls } from '../utils/wbImages';
+import { DEFAULT_CHZ_LABEL_LAYOUT, drawChzLabel, readChzLabelLayout } from '../utils/chzLabel';
 import {
   deleteFbsOrderCode,
   findFbsOrderByCode,
@@ -611,6 +612,13 @@ export const WBSupplyManager = ({
   const [fbsScanFailedKeys, setFbsScanFailedKeys] = useState<Record<string, string>>({});
   // Что показывать в листе: всё, только несобранное или только собранное.
   const [fbsScanFilter, setFbsScanFilter] = useState<'all' | 'pending' | 'done'>('all');
+  /*
+   * Печать стикеров вместе с этикеткой ЧЗ.
+   *
+   * По умолчанию выключено: пока код подбирается из базы по очереди, без
+   * привязки к товару и размеру, такие этикетки годятся только на проверку.
+   */
+  const [fbsStickersWithChz, setFbsStickersWithChz] = useState(false);
   /*
    * Высота панели фильтров — под неё подставляется шапка таблицы.
    *
@@ -5789,6 +5797,32 @@ export const WBSupplyManager = ({
     }
   };
 
+  /**
+   * Свободные марки кабинета из базы кодов.
+   *
+   * Пока без привязки к GTIN и размеру — берём по очереди, самые старые
+   * первыми. Это осознанное упрощение на время проверки: связка «код →
+   * товар и размер» появится отдельно, и до неё печатать такие этикетки
+   * в реальную отгрузку нельзя.
+   */
+  const takeFreeChzCodes = async (supplierId: string, count: number): Promise<string[]> => {
+    if (!supplierId || count <= 0) return [];
+
+    const { data, error } = await supabase
+      .from('unified_honest_sign_codes')
+      .select('code')
+      .eq('supplier_id', supplierId)
+      .neq('file_name', 'Напечатанные QR')
+      .neq('file_name', 'Отсканировано')
+      .neq('status', 'printed')
+      .neq('status', 'scanned')
+      .order('created_at', { ascending: true })
+      .limit(count);
+
+    if (error) throw new Error(`Не удалось получить коды из базы: ${error.message}`);
+    return (data || []).map((r: any) => String(r?.code || '').trim()).filter(Boolean);
+  };
+
   const downloadFBSStickers = async () => {
     if (!activeSupplyId) return;
     setLoading(true);
@@ -5890,7 +5924,40 @@ export const WBSupplyManager = ({
       const orderedStickers = orderIds
         .map((id) => stickersByOrderId.get(id))
         .filter(Boolean);
-      
+
+      /*
+       * Марки под этикетки «ШК + ЧЗ».
+       *
+       * Берём ровно столько, сколько стикеров: одна марка на задание. Если
+       * кодов в базе меньше — печатаем сколько есть и говорим об этом, а не
+       * молча отдаём половину поставки без маркировки.
+       */
+      const orderById = new Map<number, any>();
+      sortedSupplyOrders.forEach((o: any) => {
+        const id = extractSafeOrderId(o);
+        if (id) orderById.set(id, o);
+      });
+
+      let chzCodes: string[] = [];
+      let chzLayout = DEFAULT_CHZ_LABEL_LAYOUT;
+
+      if (fbsStickersWithChz) {
+        chzCodes = await takeFreeChzCodes(selectedSupplierId, orderedStickers.length);
+        const { data: layoutRow } = await supabase
+          .from('app_settings')
+          .select('value')
+          .eq('key', 'wb_label_layout_v1')
+          .maybeSingle();
+        chzLayout = readChzLabelLayout(layoutRow?.value);
+
+        if (chzCodes.length === 0) {
+          throw new Error('В базе кодов нет свободных марок для этого кабинета — загрузите коды или снимите галочку');
+        }
+        if (chzCodes.length < orderedStickers.length) {
+          setSuccessMsg(`Внимание: марок ${chzCodes.length}, а заданий ${orderedStickers.length}. Остальные стикеры выйдут без ЧЗ.`);
+        }
+      }
+
       if (orderedStickers.length > 0) {
              setSuccessMsg(`Стикеры WB: получено ${orderedStickers.length} из ${orderIds.length}`);
              setTimeout(() => setSuccessMsg(null), 2500);
@@ -5905,6 +5972,28 @@ export const WBSupplyManager = ({
                  compress: true
                });
 
+               // Кириллица на этикетке ЧЗ: без шрифта jsPDF нарисует кракозябры.
+               if (fbsStickersWithChz) {
+                 try {
+                   if (!cachedPdfFontRef.current) {
+                     const fontUrl = 'https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.66/fonts/Roboto/Roboto-Regular.ttf';
+                     const response = await withTimeout(fetch(fontUrl), 7000, 'Таймаут загрузки шрифта');
+                     const blob = await response.blob();
+                     const reader = new FileReader();
+                     reader.readAsDataURL(blob);
+                     await new Promise((resolve) => { reader.onloadend = () => resolve(reader.result); });
+                     cachedPdfFontRef.current = (reader.result as string).split(',')[1];
+                   }
+                   if (cachedPdfFontRef.current) {
+                     pdf.addFileToVFS('Roboto-Regular.ttf', cachedPdfFontRef.current);
+                     pdf.addFont('Roboto-Regular.ttf', 'Roboto', 'normal');
+                     pdf.addFont('Roboto-Regular.ttf', 'Roboto', 'bold');
+                   }
+                 } catch (e) {
+                   console.warn('Шрифт для этикетки ЧЗ не загрузился', e);
+                 }
+               }
+
                for (let i = 0; i < slice.length; i++) {
                  const sticker = slice[i];
                  if (i > 0) pdf.addPage([58, 40], 'landscape');
@@ -5912,10 +6001,15 @@ export const WBSupplyManager = ({
                  const rawBase64 = String(sticker.file || '');
                  const stickerType = String(sticker.__type || 'svg').toLowerCase();
 
-                 try {
+                 /*
+                  * Рисование стикера вынесено в функцию, чтобы прежние
+                  * `continue` стали `return`: этикетка ЧЗ должна встать следом
+                  * даже за пропущенным стикером, иначе марки съедут на заказ.
+                  */
+                 const drawSticker = async () => {
                    if (rawBase64.length > 2_000_000) {
                      console.warn('sticker payload too large, skipped', rawBase64.length);
-                     continue;
+                     return;
                    }
 
                    const renderToDataUrl = async (srcDataUrl: string) => {
@@ -5949,7 +6043,7 @@ export const WBSupplyManager = ({
                      if (normalized) {
                        pdf.addImage(normalized, opts.imageType, 0, 0, 58, 40);
                      }
-                     continue;
+                     return;
                    }
 
                    // SVG fallback (guarded)
@@ -5962,8 +6056,34 @@ export const WBSupplyManager = ({
                    if (normalized) {
                      pdf.addImage(normalized, opts.imageType, 0, 0, 58, 40);
                    }
+                 };
+
+                 try {
+                   await drawSticker();
                  } catch (e) {
                    console.warn('sticker render failed, skipped', e);
+                 }
+
+                 // Этикетка ЧЗ идёт следующей страницей — сразу за своим заданием.
+                 if (fbsStickersWithChz) {
+                   const code = chzCodes[i];
+                   if (code) {
+                     const orderId = Number(sticker?.orderId ?? sticker?.id ?? sticker?.order_id);
+                     const order = orderById.get(orderId) || {};
+                     pdf.addPage([58, 40], 'landscape');
+                     try {
+                       await drawChzLabel(pdf, bwipjs, chzLayout, {
+                         chzCode: code,
+                         barcode: String(order?.skus?.[0] || order?.barcode || ''),
+                         title: String(order?.title || ''),
+                         article: String(order?.article || ''),
+                         size: String(order?.size || ''),
+                         supplierName: String(selectedSupplier?.name || ''),
+                       });
+                     } catch (e) {
+                       console.warn('chz label render failed', e);
+                     }
+                   }
                  }
                }
 
@@ -6355,12 +6475,27 @@ export const WBSupplyManager = ({
                                         >
                                             <Barcode className="w-3 h-3" /> ШК
                                         </button>
-                                        <button 
+                                        <button
                                             onClick={(e) => { e.stopPropagation(); downloadFBSStickers(); }}
                                             className="flex items-center gap-1 bg-white border border-slate-300 px-2 py-1 rounded text-xs hover:bg-slate-50"
                                         >
-                                            <Printer className="w-3 h-3" /> Стикеры
+                                            <Printer className="w-3 h-3" /> {fbsStickersWithChz ? 'Стикеры + ЧЗ' : 'Стикеры'}
                                         </button>
+                                        {/* Пока код берётся из базы по очереди, без привязки к товару и
+                                            размеру, поэтому по умолчанию выключено и подписано «проверка». */}
+                                        <label
+                                            onClick={(e) => e.stopPropagation()}
+                                            title="За каждым стикером WB пойдёт этикетка ШК + ЧЗ. Код берётся из базы по очереди, без привязки к товару и размеру"
+                                            className="flex items-center gap-1 bg-white border border-amber-300 text-amber-700 px-2 py-1 rounded text-xs cursor-pointer hover:bg-amber-50"
+                                        >
+                                            <input
+                                                type="checkbox"
+                                                checked={fbsStickersWithChz}
+                                                onChange={(e) => setFbsStickersWithChz(e.target.checked)}
+                                                className="w-3 h-3"
+                                            />
+                                            с ЧЗ (проверка)
+                                        </label>
                                         <button
                                             onClick={(e) => { e.stopPropagation(); downloadFbsScanTemplateExcel(); }}
                                             className="flex items-center gap-1 bg-white border border-indigo-300 text-indigo-700 px-2 py-1 rounded text-xs hover:bg-indigo-50"
