@@ -611,6 +611,16 @@ export const WBSupplyManager = ({
   const [fbsScanFailedKeys, setFbsScanFailedKeys] = useState<Record<string, string>>({});
   // Что показывать в листе: всё, только несобранное или только собранное.
   const [fbsScanFilter, setFbsScanFilter] = useState<'all' | 'pending' | 'done'>('all');
+  /*
+   * Высота панели фильтров — под неё подставляется шапка таблицы.
+   *
+   * Обе прилипают к верху одного и того же контейнера, и без смещения шапка
+   * уезжала под фильтры: на середине списка от неё оставалась половина строки.
+   * Считаем высоту живьём, потому что на узком экране кнопки переносятся на
+   * вторую строку, и любое зашитое число оказалось бы неверным.
+   */
+  const fbsFilterBarRef = useRef<HTMLDivElement | null>(null);
+  const [fbsFilterBarHeight, setFbsFilterBarHeight] = useState(0);
   // Номер задания, для которого сейчас тянем стикер (потерянный переклеивают).
   const [fbsStickerPrintingId, setFbsStickerPrintingId] = useState<string>('');
   // Голосовые подсказки шагов. Выбор запоминаем: на складе он свой у каждого ПК.
@@ -1247,6 +1257,29 @@ export const WBSupplyManager = ({
       }
     }
   }, [selectedSupplierId, currentToken, activeTab]);
+
+  /*
+   * Держим высоту панели фильтров в состоянии.
+   *
+   * Панель переносится на две строки, когда окно узкое, и меняет высоту при
+   * смене подписи кнопки звука. Наблюдатель ловит это сам — иначе шапка
+   * таблицы прилипала бы не на своём месте до следующей перерисовки.
+   */
+  useEffect(() => {
+    const node = fbsFilterBarRef.current;
+    if (!node) {
+      setFbsFilterBarHeight(0);
+      return undefined;
+    }
+
+    const measure = () => setFbsFilterBarHeight(node.offsetHeight);
+    measure();
+
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [fbsScanModalOpen, fbsScanLoading, fbsScanRows.length, fbsSoundOn]);
 
   useEffect(() => {
     if (!fbsScanModalOpen || fbsScanLoading) return;
@@ -6562,7 +6595,10 @@ export const WBSupplyManager = ({
               </form>
             </div>
 
-            <div className="p-5 overflow-auto">
+            {/* Отступа сверху нет намеренно: липкая панель прилипает к границе
+                padding-box, и с `pt-5` она вставала на два десятка пикселей
+                ниже края — в этот просвет затекали строки таблицы. */}
+            <div className="px-5 pb-5 overflow-auto">
               {/* Фильтр по состоянию сборки: на длинной поставке главное —
                   быстро увидеть, что ещё не отсканировано. */}
               {!fbsScanLoading && fbsScanRows.length > 0 && (() => {
@@ -6576,7 +6612,10 @@ export const WBSupplyManager = ({
                 return (
                   // sticky относительно этого скролл-контейнера: список
                   // длинный, а «что осталось» нужно видеть на любой прокрутке.
-                  <div className="sticky top-0 z-20 -mx-5 mb-3 flex flex-wrap items-center gap-2 border-b border-slate-100 bg-white px-5 py-2">
+                  <div
+                    ref={fbsFilterBarRef}
+                    className="sticky top-0 z-30 -mx-5 mb-3 flex flex-wrap items-center gap-2 border-b border-slate-200 bg-white/95 px-5 py-3 shadow-[0_2px_6px_-4px_rgba(15,23,42,0.35)] backdrop-blur"
+                  >
                     {tabs.map((tab) => (
                       <button
                         key={tab.id}
@@ -6628,11 +6667,20 @@ export const WBSupplyManager = ({
               ) : !fbsScanRows.length ? (
                 <div className="text-slate-500">В этой поставке пока нет заказов со стикерами.</div>
               ) : (
-                <div className="overflow-auto rounded-xl border border-slate-200">
+                <div className="rounded-xl border border-slate-200">
+                  {/* Своей прокрутки у обёртки нет намеренно: контейнер
+                      прокрутки должен быть один — иначе шапка прилипает к
+                      обёртке, которая сама уезжает вверх, и толку от sticky
+                      никакого. */}
                   <table className="w-full text-sm">
                     {/* Шапка держится наверху: строки высокие из-за фото, и без
-                        неё на середине списка непонятно, где какая колонка. */}
-                    <thead className="sticky top-0 z-10 bg-slate-50 text-slate-600 shadow-[0_1px_0_0_#e2e8f0]">
+                        неё на середине списка непонятно, где какая колонка.
+                        Смещаем ровно на высоту панели фильтров, чтобы они не
+                        накрывали друг друга. */}
+                    <thead
+                      style={{ top: fbsFilterBarHeight }}
+                      className="sticky z-20 bg-slate-50 text-slate-600 shadow-[0_1px_0_0_#e2e8f0]"
+                    >
                       <tr>
                         {/* Колонка должна быть шире картинки: при w-16 ячейка
                             сжимала фото в вертикальную полоску. */}
