@@ -19355,30 +19355,45 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const wbLayoutPdfPreviewUrlsRef = useRef<string[]>([]);
   useEffect(() => {
     if (activeTab !== 'map') return;
+
+    /*
+     * Пока блок тащат — предпросмотр не трогаем.
+     *
+     * Каждая пересборка подменяет blob-адрес, и лежащий под рамками PDF
+     * перезагружается: при перетаскивании это выглядело как мигание. Ждём,
+     * когда кнопку отпустят, и только тогда рисуем заново.
+     */
+    if (wbDragState) return;
+
     let cancelled = false;
     const timer = setTimeout(async () => {
       try {
-        const templates: Array<'withChz' | 'withoutChz' | 'fboBoxes' | 'nameSequence'> = ['withChz', 'withoutChz', 'fboBoxes', 'nameSequence'];
-        const next: Record<string, string> = {};
-        for (const t of templates) {
-          const doc = await buildWbLayoutLabelDoc(t);
-          next[t] = doc.output('bloburl') as unknown as string;
-        }
+        // Собираем только открытый макет: остальные три не видны, а каждая
+        // сборка — это ещё один PDF и ещё одна перезагрузка iframe.
+        const doc = await buildWbLayoutLabelDoc(wbLayoutTemplate);
+        const url = doc.output('bloburl') as unknown as string;
+
         if (cancelled) {
-          Object.values(next).forEach((u) => { try { URL.revokeObjectURL(u); } catch {} });
+          try { URL.revokeObjectURL(url); } catch {}
           return;
         }
-        // revoke previous urls
-        wbLayoutPdfPreviewUrlsRef.current.forEach((u) => { try { URL.revokeObjectURL(u); } catch {} });
-        wbLayoutPdfPreviewUrlsRef.current = Object.values(next);
-        setWbLayoutPdfPreviews(next);
+
+        setWbLayoutPdfPreviews((prev) => {
+          const old = prev[wbLayoutTemplate];
+          if (old) { try { URL.revokeObjectURL(old); } catch {} }
+          return { ...prev, [wbLayoutTemplate]: url };
+        });
+        wbLayoutPdfPreviewUrlsRef.current = [
+          ...wbLayoutPdfPreviewUrlsRef.current.filter(Boolean),
+          url,
+        ].slice(-8);
       } catch (e) {
         console.warn('label pdf preview build failed', e);
       }
     }, 450);
     return () => { cancelled = true; clearTimeout(timer); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, wbLayoutEditor]);
+  }, [activeTab, wbLayoutEditor, wbLayoutTemplate, wbDragState]);
 
   const handlePrintNameSequenceLabels = async () => {
     await ensurePdfLibs();
@@ -22709,8 +22724,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         {wbLayoutPdfPreviews.withoutChz ? (
                           <iframe title="wb-layout-underlay-withoutChz" src={`${wbLayoutPdfPreviews.withoutChz}#toolbar=0&navpanes=0&scrollbar=0&view=Fit`} className="pointer-events-none absolute inset-0 h-full w-full border-0" />
                         ) : null}
-                        <div
-                          className="absolute border-2 border-dashed border-fuchsia-400 rounded flex items-center justify-center text-[12px] text-slate-600 cursor-move"
+                        <WbLayoutHandle
+                          title="Штрихкод"
+                          tone="fuchsia"
                           onMouseDown={(e) => startWbBlockDrag(e, 'withoutChz', 'barcodeXpx', 'barcodeYpx', wbLayoutEditor.withoutChz.barcodeXpx, wbLayoutEditor.withoutChz.barcodeYpx)}
                           style={{
                             left: `${wbLayoutEditor.withoutChz.barcodeXpx}px`,
@@ -22718,23 +22734,34 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             width: `${wbLayoutEditor.withoutChz.barcodeW * PREVIEW_SCALE_X}px`,
                             height: `${wbLayoutEditor.withoutChz.barcodeH * PREVIEW_SCALE_Y}px`,
                           }}
-                        >
-                          Штрихкод
-                        </div>
-                        <div className="absolute text-black font-bold border border-cyan-300 rounded px-1 bg-white/70 cursor-move" onMouseDown={(e) => startWbBlockDrag(e, 'withoutChz', 'barcodeXpx', 'barcodeTextYpx', wbLayoutEditor.withoutChz.barcodeXpx, wbLayoutEditor.withoutChz.barcodeTextYpx)} style={{ left: `${wbLayoutEditor.withoutChz.barcodeXpx}px`, top: `${wbLayoutEditor.withoutChz.barcodeTextYpx}px`, width: `${wbLayoutEditor.withoutChz.barcodeW * PREVIEW_SCALE_X}px`, textAlign: 'center', fontSize: '20px' }}>
-                          2045891906831
-                        </div>
+                        />
 
-                        <div className="absolute border-2 border-emerald-300 rounded px-2 py-1 bg-white/70 cursor-move text-slate-900" onMouseDown={(e) => startWbBlockDrag(e, 'withoutChz', 'textXpx', 'textYpx', wbLayoutEditor.withoutChz.textXpx, wbLayoutEditor.withoutChz.textYpx)} style={{ left: `${wbLayoutEditor.withoutChz.textXpx}px`, top: `${wbLayoutEditor.withoutChz.textYpx}px`, width: '350px' }}>
-                          <div className="text-center" style={{ fontSize: `${ptToPreviewPx(wbLayoutEditor.withoutChz.titleFont)}px`, lineHeight: 1.07, fontWeight: 700 }}>
-                            Костюм мужской домашний с футболкой и шортами летний
-                          </div>
-                          <div className="text-center text-slate-800" style={{ marginTop: `${mmToPreviewY(wbLayoutEditor.withoutChz.titleGap)}px`, fontSize: `${ptToPreviewPx(wbLayoutEditor.withoutChz.textFont)}px`, lineHeight: `${mmToPreviewY(wbLayoutEditor.withoutChz.dataGap)}px` }}>Артикул: 526817909</div>
-                          <div className="text-center text-slate-800" style={{ fontSize: `${ptToPreviewPx(wbLayoutEditor.withoutChz.textFont)}px`, lineHeight: `${mmToPreviewY(wbLayoutEditor.withoutChz.dataGap)}px` }}>Модель: BK-104</div>
-                          <div className="text-center text-slate-800" style={{ fontSize: `${ptToPreviewPx(wbLayoutEditor.withoutChz.textFont)}px`, lineHeight: `${mmToPreviewY(wbLayoutEditor.withoutChz.dataGap)}px` }}>Размер: M-L</div>
-                          <div className="text-center text-slate-800" style={{ fontSize: `${ptToPreviewPx(wbLayoutEditor.withoutChz.textFont)}px`, lineHeight: `${mmToPreviewY(wbLayoutEditor.withoutChz.dataGap)}px` }}>Цвет: бордовый</div>
-                          <div className="text-center text-slate-800" style={{ fontSize: `${ptToPreviewPx(wbLayoutEditor.withoutChz.textFont)}px`, lineHeight: `${mmToPreviewY(wbLayoutEditor.withoutChz.dataGap)}px` }}>Поставщик: ИП БЕКИРОВА_Л_Р</div>
-                        </div>
+                        <WbLayoutHandle
+                          title="Цифры ШК"
+                          tone="cyan"
+                          onMouseDown={(e) => startWbBlockDrag(e, 'withoutChz', 'barcodeXpx', 'barcodeTextYpx', wbLayoutEditor.withoutChz.barcodeXpx, wbLayoutEditor.withoutChz.barcodeTextYpx)}
+                          style={{
+                            left: `${wbLayoutEditor.withoutChz.barcodeXpx}px`,
+                            top: `${Math.max(
+                              wbLayoutEditor.withoutChz.barcodeYpx + wbLayoutEditor.withoutChz.barcodeH * PREVIEW_SCALE_Y + mmToPreviewY(1.2),
+                              wbLayoutEditor.withoutChz.barcodeTextYpx,
+                            ) - ptToPreviewPx(10.6)}px`,
+                            width: `${wbLayoutEditor.withoutChz.barcodeW * PREVIEW_SCALE_X}px`,
+                            height: `${ptToPreviewPx(10.6) * 1.25}px`,
+                          }}
+                        />
+
+                        <WbLayoutHandle
+                          title="Текст"
+                          tone="emerald"
+                          onMouseDown={(e) => startWbBlockDrag(e, 'withoutChz', 'textXpx', 'textYpx', wbLayoutEditor.withoutChz.textXpx, wbLayoutEditor.withoutChz.textYpx)}
+                          style={{
+                            left: `${wbLayoutEditor.withoutChz.textXpx}px`,
+                            top: `${wbLayoutEditor.withoutChz.textYpx - ptToPreviewPx(wbLayoutEditor.withoutChz.titleFont)}px`,
+                            width: `${mmToPreviewX(Math.max(24, 56 - (wbLayoutEditor.withoutChz.textXpx / PREVIEW_SCALE_X)))}px`,
+                            height: `${mmToPreviewY(4.5 + wbLayoutEditor.withoutChz.titleGap + wbLayoutEditor.withoutChz.dataGap * 4) + ptToPreviewPx(wbLayoutEditor.withoutChz.textFont)}px`,
+                          }}
+                        />
                       </div>
                     </div>
 
@@ -22743,21 +22770,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         {wbLayoutPdfPreviews.fboBoxes ? (
                           <iframe title="wb-layout-underlay-fboBoxes" src={`${wbLayoutPdfPreviews.fboBoxes}#toolbar=0&navpanes=0&scrollbar=0&view=Fit`} className="pointer-events-none absolute inset-0 h-full w-full border-0" />
                         ) : null}
-                        <div className="absolute text-black font-bold border border-cyan-300 rounded px-1 bg-white/70 cursor-move" onMouseDown={(e) => startWbBlockDrag(e, 'fboBoxes', 'numberXpx', 'numberYpx', wbLayoutEditor.fboBoxes.numberXpx, wbLayoutEditor.fboBoxes.numberYpx)} style={{ left: `${wbLayoutEditor.fboBoxes.numberXpx - mmToPreviewX(6)}px`, top: `${wbLayoutEditor.fboBoxes.numberYpx}px`, width: `${mmToPreviewX(12)}px`, textAlign: 'center', fontSize: `${ptToPreviewPx(wbLayoutEditor.fboBoxes.numberFont)}px` }}>
-                          1/120
-                        </div>
-                        <div className="absolute text-slate-800 border border-emerald-300 rounded px-1 bg-white/70 cursor-move" onMouseDown={(e) => startWbBlockDrag(e, 'fboBoxes', 'supplierXpx', 'supplierYpx', wbLayoutEditor.fboBoxes.supplierXpx, wbLayoutEditor.fboBoxes.supplierYpx)} style={{ left: `${wbLayoutEditor.fboBoxes.supplierXpx - mmToPreviewX(12)}px`, top: `${wbLayoutEditor.fboBoxes.supplierYpx}px`, width: `${mmToPreviewX(24)}px`, textAlign: 'center', fontSize: `${ptToPreviewPx(wbLayoutEditor.fboBoxes.supplierFont)}px` }}>
-                          ИП Власенко
-                        </div>
-                        <div className="absolute border-2 border-dashed border-fuchsia-400 rounded flex items-center justify-center text-[12px] text-slate-600 cursor-move" onMouseDown={(e) => startWbBlockDrag(e, 'fboBoxes', 'barcodeXpx', 'barcodeYpx', wbLayoutEditor.fboBoxes.barcodeXpx, wbLayoutEditor.fboBoxes.barcodeYpx)} style={{ left: `${wbLayoutEditor.fboBoxes.barcodeXpx}px`, top: `${wbLayoutEditor.fboBoxes.barcodeYpx}px`, width: `${wbLayoutEditor.fboBoxes.barcodeW * PREVIEW_SCALE_X}px`, height: `${wbLayoutEditor.fboBoxes.barcodeH * PREVIEW_SCALE_Y}px` }}>
-                          Штрихкод
-                        </div>
-                        <div className="absolute text-black font-bold border border-cyan-300 rounded px-1 bg-white/70 cursor-move" onMouseDown={(e) => startWbBlockDrag(e, 'fboBoxes', 'codeXpx', 'codeYpx', wbLayoutEditor.fboBoxes.codeXpx, wbLayoutEditor.fboBoxes.codeYpx)} style={{ left: `${wbLayoutEditor.fboBoxes.codeXpx - mmToPreviewX(14)}px`, top: `${wbLayoutEditor.fboBoxes.codeYpx}px`, width: `${mmToPreviewX(28)}px`, textAlign: 'center', fontSize: `${ptToPreviewPx(wbLayoutEditor.fboBoxes.codeFont)}px` }}>
-                          WBBOX001234567
-                        </div>
-                        <div className="absolute text-slate-700 border border-amber-300 rounded px-1 bg-white/70 cursor-move" onMouseDown={(e) => startWbBlockDrag(e, 'fboBoxes', 'footerXpx', 'footerYpx', wbLayoutEditor.fboBoxes.footerXpx, wbLayoutEditor.fboBoxes.footerYpx)} style={{ left: `${wbLayoutEditor.fboBoxes.footerXpx - mmToPreviewX(10)}px`, top: `${wbLayoutEditor.fboBoxes.footerYpx}px`, width: `${mmToPreviewX(20)}px`, textAlign: 'center', fontSize: `${ptToPreviewPx(wbLayoutEditor.fboBoxes.footerFont)}px` }}>
-                          ШК короба
-                        </div>
+                        <WbLayoutHandle title="Номер" tone="cyan" onMouseDown={(e) => startWbBlockDrag(e, 'fboBoxes', 'numberXpx', 'numberYpx', wbLayoutEditor.fboBoxes.numberXpx, wbLayoutEditor.fboBoxes.numberYpx)} style={{ left: `${wbLayoutEditor.fboBoxes.numberXpx - mmToPreviewX(6)}px`, top: `${wbLayoutEditor.fboBoxes.numberYpx - ptToPreviewPx(wbLayoutEditor.fboBoxes.numberFont)}px`, width: `${mmToPreviewX(12)}px`, height: `${ptToPreviewPx(wbLayoutEditor.fboBoxes.numberFont) * 1.25}px` }} />
+                        <WbLayoutHandle title="Поставщик" tone="emerald" onMouseDown={(e) => startWbBlockDrag(e, 'fboBoxes', 'supplierXpx', 'supplierYpx', wbLayoutEditor.fboBoxes.supplierXpx, wbLayoutEditor.fboBoxes.supplierYpx)} style={{ left: `${wbLayoutEditor.fboBoxes.supplierXpx - mmToPreviewX(12)}px`, top: `${wbLayoutEditor.fboBoxes.supplierYpx - ptToPreviewPx(wbLayoutEditor.fboBoxes.supplierFont)}px`, width: `${mmToPreviewX(24)}px`, height: `${ptToPreviewPx(wbLayoutEditor.fboBoxes.supplierFont) * 1.25}px` }} />
+                        <WbLayoutHandle title="Штрихкод" tone="fuchsia" onMouseDown={(e) => startWbBlockDrag(e, 'fboBoxes', 'barcodeXpx', 'barcodeYpx', wbLayoutEditor.fboBoxes.barcodeXpx, wbLayoutEditor.fboBoxes.barcodeYpx)} style={{ left: `${wbLayoutEditor.fboBoxes.barcodeXpx}px`, top: `${wbLayoutEditor.fboBoxes.barcodeYpx}px`, width: `${wbLayoutEditor.fboBoxes.barcodeW * PREVIEW_SCALE_X}px`, height: `${wbLayoutEditor.fboBoxes.barcodeH * PREVIEW_SCALE_Y}px` }} />
+                        <WbLayoutHandle title="Код короба" tone="amber" onMouseDown={(e) => startWbBlockDrag(e, 'fboBoxes', 'codeXpx', 'codeYpx', wbLayoutEditor.fboBoxes.codeXpx, wbLayoutEditor.fboBoxes.codeYpx)} style={{ left: `${wbLayoutEditor.fboBoxes.codeXpx - mmToPreviewX(14)}px`, top: `${wbLayoutEditor.fboBoxes.codeYpx - ptToPreviewPx(wbLayoutEditor.fboBoxes.codeFont)}px`, width: `${mmToPreviewX(28)}px`, height: `${ptToPreviewPx(wbLayoutEditor.fboBoxes.codeFont) * 1.25}px` }} />
+                        <WbLayoutHandle title="Подпись" tone="indigo" onMouseDown={(e) => startWbBlockDrag(e, 'fboBoxes', 'footerXpx', 'footerYpx', wbLayoutEditor.fboBoxes.footerXpx, wbLayoutEditor.fboBoxes.footerYpx)} style={{ left: `${wbLayoutEditor.fboBoxes.footerXpx - mmToPreviewX(10)}px`, top: `${wbLayoutEditor.fboBoxes.footerYpx - ptToPreviewPx(wbLayoutEditor.fboBoxes.footerFont)}px`, width: `${mmToPreviewX(20)}px`, height: `${ptToPreviewPx(wbLayoutEditor.fboBoxes.footerFont) * 1.25}px` }} />
                       </div>
                     </div>
 
@@ -22766,12 +22783,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         {wbLayoutPdfPreviews.nameSequence ? (
                           <iframe title="wb-layout-underlay-nameSequence" src={`${wbLayoutPdfPreviews.nameSequence}#toolbar=0&navpanes=0&scrollbar=0&view=Fit`} className="pointer-events-none absolute inset-0 h-full w-full border-0" />
                         ) : null}
-                        <div className="absolute text-black font-bold border border-cyan-300 rounded px-1 bg-white/70 cursor-move" onMouseDown={(e) => startWbBlockDrag(e, 'nameSequence', 'numberXpx', 'numberYpx', wbLayoutEditor.nameSequence.numberXpx, wbLayoutEditor.nameSequence.numberYpx)} style={{ left: `${wbLayoutEditor.nameSequence.numberXpx - mmToPreviewX(8)}px`, top: `${wbLayoutEditor.nameSequence.numberYpx}px`, width: `${mmToPreviewX(16)}px`, textAlign: 'center', fontSize: `${ptToPreviewPx(wbLayoutEditor.nameSequence.numberFont)}px` }}>
-                          1
-                        </div>
-                        <div className="absolute text-slate-800 border border-emerald-300 rounded px-1 bg-white/70 cursor-move" onMouseDown={(e) => startWbBlockDrag(e, 'nameSequence', 'nameXpx', 'nameYpx', wbLayoutEditor.nameSequence.nameXpx, wbLayoutEditor.nameSequence.nameYpx)} style={{ left: `${wbLayoutEditor.nameSequence.nameXpx - mmToPreviewX(16)}px`, top: `${wbLayoutEditor.nameSequence.nameYpx}px`, width: `${mmToPreviewX(32)}px`, textAlign: 'center', fontSize: `${ptToPreviewPx(wbLayoutEditor.nameSequence.nameFont)}px` }}>
-                          Имя
-                        </div>
+                        <WbLayoutHandle title="Номер" tone="cyan" onMouseDown={(e) => startWbBlockDrag(e, 'nameSequence', 'numberXpx', 'numberYpx', wbLayoutEditor.nameSequence.numberXpx, wbLayoutEditor.nameSequence.numberYpx)} style={{ left: `${wbLayoutEditor.nameSequence.numberXpx - mmToPreviewX(8)}px`, top: `${wbLayoutEditor.nameSequence.numberYpx - ptToPreviewPx(wbLayoutEditor.nameSequence.numberFont)}px`, width: `${mmToPreviewX(16)}px`, height: `${ptToPreviewPx(wbLayoutEditor.nameSequence.numberFont) * 1.25}px` }} />
+                        <WbLayoutHandle title="Имя" tone="emerald" onMouseDown={(e) => startWbBlockDrag(e, 'nameSequence', 'nameXpx', 'nameYpx', wbLayoutEditor.nameSequence.nameXpx, wbLayoutEditor.nameSequence.nameYpx)} style={{ left: `${wbLayoutEditor.nameSequence.nameXpx - mmToPreviewX(16)}px`, top: `${wbLayoutEditor.nameSequence.nameYpx - ptToPreviewPx(wbLayoutEditor.nameSequence.nameFont)}px`, width: `${mmToPreviewX(32)}px`, height: `${ptToPreviewPx(wbLayoutEditor.nameSequence.nameFont) * 1.25}px` }} />
                       </div>
                     </div>
                   </div>
