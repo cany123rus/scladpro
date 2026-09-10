@@ -43,7 +43,7 @@ import {
 import { explainWbAccess } from '../utils/wbTokenScopes';
 import { buildStickersPdf, fetchStickers } from '../utils/stickers';
 import { getWBImageUrl, getWBImageUrls } from '../utils/wbImages';
-import { DEFAULT_CHZ_LABEL_LAYOUT, drawChzLabel, readChzLabelLayout } from '../utils/chzLabel';
+import { DEFAULT_CHZ_LABEL_LAYOUT, drawChzLabel, matchChzCodeForProduct, readChzLabelLayout } from '../utils/chzLabel';
 import {
   deleteFbsOrderCode,
   findFbsOrderByCode,
@@ -5805,22 +5805,131 @@ export const WBSupplyManager = ({
    * товар и размер» появится отдельно, и до неё печатать такие этикетки
    * в реальную отгрузку нельзя.
    */
-  const takeFreeChzCodes = async (supplierId: string, count: number): Promise<string[]> => {
+  const takeFreeChzCodes = async (
+    supplierId: string,
+    count: number,
+  ): Promise<Array<{ code: string; category: string; gender: string }>> => {
     if (!supplierId || count <= 0) return [];
 
     const { data, error } = await supabase
       .from('unified_honest_sign_codes')
-      .select('code')
+      .select('code, category, gender')
       .eq('supplier_id', supplierId)
       .neq('file_name', 'Напечатанные QR')
       .neq('file_name', 'Отсканировано')
       .neq('status', 'printed')
       .neq('status', 'scanned')
       .order('created_at', { ascending: true })
-      .limit(count);
+      .limit(Math.max(count * 4, count));
 
     if (error) throw new Error(`Не удалось получить коды из базы: ${error.message}`);
-    return (data || []).map((r: any) => String(r?.code || '').trim()).filter(Boolean);
+
+    return (data || [])
+      .map((r: any) => ({
+        code: String(r?.code || '').trim(),
+        category: String(r?.category || '').trim(),
+        gender: String(r?.gender || '').trim().toLowerCase(),
+      }))
+      .filter((r: any) => r.code);
+  };
+
+  /** Пол и предмет карточки — по ним марка и подбирается под заказ. */
+  const loadProductMetaByNmId = async (supplierId: string, nmIds: number[]) => {
+    const meta = new Map<number, { gender: string; subject: string }>();
+    const ids = Array.from(new Set(nmIds.filter((id) => Number.isFinite(id) && id > 0)));
+    if (!supplierId || ids.length === 0) return meta;
+
+    for (let i = 0; i < ids.length; i += 500) {
+      const { data } = await supabase
+        .from('wb_products_cache')
+        .select('nm_id, product_json')
+        .eq('supplier_id', supplierId)
+        .in('nm_id', ids.slice(i, i + 500));
+
+      (data || []).forEach((row: any) => {
+        const card = row?.product_json || {};
+        const genderRaw = (card.characteristics || []).find((c: any) => String(c?.name || '').trim().toLowerCase() === 'пол');
+        const genderValue = String(genderRaw?.value?.[0] || '').trim().toLowerCase();
+        meta.set(Number(row.nm_id), {
+          gender: genderValue.startsWith('муж') ? 'male' : genderValue.startsWith('жен') ? 'female' : '',
+          subject: String(card.subjectName || '').trim().toLowerCase(),
+        });
+      });
+    }
+
+    return meta;
+  };
+
+  /**
+   * Закрепляет напечатанные марки за заказами.
+   *
+   * Марка уже наклеена на вещь, значит сканировать её у стола незачем: пишем
+   * связку сразу в карту поставки, и в окне «Скан ЧЗ» задание выглядит
+   * закрытым. Одновременно код помечается напечатанным в общей базе, чтобы
+   * следующая печать его не выдала повторно — один код на две вещи это
+   * пересорт.
+   */
+  const bindPrintedChzToOrders = async (
+    codesByOrderId: Map<number, string>,
+    ordersById: Map<number, any>,
+  ) => {
+    if (!activeSupplyId || codesByOrderId.size === 0) return;
+    const supplyId = activeSupplyId;
+    const supplierId = selectedSupplierId;
+
+    try {
+      const savedMap = await loadFbsSupplyScanMap(supplyId, supplierId);
+      const next = { ...savedMap };
+      const nowIso = new Date().toISOString();
+
+      codesByOrderId.forEach((code, orderId) => {
+        const order = ordersById.get(orderId) || {};
+        const storageKey = `order:${orderId}`;
+        next[storageKey] = {
+          storageKey,
+          stickerDigits: '',
+          stickerScanText: '',
+          honestSignCode: normalizeDataMatrixText(code),
+          updatedAt: nowIso,
+          orderId: String(orderId),
+          title: String(order?.title || ''),
+          article: String(order?.article || ''),
+          size: String(order?.size || ''),
+        };
+      });
+
+      const saved = await saveFbsSupplyScanMap(supplyId, next, supplierId);
+      applyFbsScans(saved);
+
+      // Помечаем напечатанными — иначе они снова попадут в подбор.
+      const printedCodes = Array.from(codesByOrderId.values());
+      for (let i = 0; i < printedCodes.length; i += 200) {
+        await supabase
+          .from('unified_honest_sign_codes')
+          .update({ file_name: 'Напечатанные QR' })
+          .eq('supplier_id', supplierId)
+          .in('code', printedCodes.slice(i, i + 200));
+      }
+
+      // И в базу заказов — с пометкой, что связка из печати, а не со сканера.
+      for (const [orderId, code] of codesByOrderId.entries()) {
+        const order = ordersById.get(orderId) || {};
+        await upsertFbsOrderCode({
+          supplierId,
+          supplyId,
+          orderId: String(orderId),
+          chzCode: normalizeDataMatrixText(code),
+          nmId: Number(order?.nmId || 0) || null,
+          article: String(order?.article || ''),
+          size: String(order?.size || ''),
+          title: String(order?.title || ''),
+        }).catch((e) => console.error('fbs_order_codes upsert failed', e));
+      }
+
+      setSuccessMsg(`Марки закреплены за заданиями: ${codesByOrderId.size}. Сканировать их в «Скан ЧЗ» не нужно.`);
+    } catch (e: any) {
+      setError(`Этикетки напечатаны, но связка не сохранилась: ${e?.message || e}. Отсканируйте эти коды вручную.`);
+    }
   };
 
   const downloadFBSStickers = async () => {
@@ -5938,11 +6047,17 @@ export const WBSupplyManager = ({
         if (id) orderById.set(id, o);
       });
 
-      let chzCodes: string[] = [];
+      /** Заказ → подобранная марка. Пустая ячейка значит «стикер без ЧЗ». */
+      const chzByOrderId = new Map<number, string>();
       let chzLayout = DEFAULT_CHZ_LABEL_LAYOUT;
+      let unmatchedOrders = 0;
 
       if (fbsStickersWithChz) {
-        chzCodes = await takeFreeChzCodes(selectedSupplierId, orderedStickers.length);
+        const pool = await takeFreeChzCodes(selectedSupplierId, orderedStickers.length);
+        if (pool.length === 0) {
+          throw new Error('В базе кодов нет свободных марок для этого кабинета — загрузите коды или снимите галочку');
+        }
+
         const { data: layoutRow } = await supabase
           .from('app_settings')
           .select('value')
@@ -5950,11 +6065,35 @@ export const WBSupplyManager = ({
           .maybeSingle();
         chzLayout = readChzLabelLayout(layoutRow?.value);
 
-        if (chzCodes.length === 0) {
-          throw new Error('В базе кодов нет свободных марок для этого кабинета — загрузите коды или снимите галочку');
+        const productMeta = await loadProductMetaByNmId(
+          selectedSupplierId,
+          Array.from(orderById.values()).map((o: any) => Number(o?.nmId || 0)),
+        );
+
+        const used = new Set<string>();
+        for (const sticker of orderedStickers) {
+          const orderId = Number(sticker?.orderId ?? sticker?.id ?? sticker?.order_id);
+          const order = orderById.get(orderId);
+          if (!order) continue;
+
+          const match = matchChzCodeForProduct(pool, used, productMeta.get(Number(order?.nmId || 0)));
+          if (!match) {
+            unmatchedOrders += 1;
+            continue;
+          }
+
+          used.add(match.code);
+          chzByOrderId.set(orderId, match.code);
         }
-        if (chzCodes.length < orderedStickers.length) {
-          setSuccessMsg(`Внимание: марок ${chzCodes.length}, а заданий ${orderedStickers.length}. Остальные стикеры выйдут без ЧЗ.`);
+
+        if (chzByOrderId.size === 0) {
+          throw new Error(
+            'Ни одна свободная марка не подошла заданиям: не совпали пол и категория. '
+            + 'Проверьте, что коды загружены с указанием пола и категории товара.',
+          );
+        }
+        if (unmatchedOrders > 0) {
+          setSuccessMsg(`Марки подобраны для ${chzByOrderId.size} заданий из ${orderedStickers.length}. Остальные стикеры выйдут без ЧЗ: подходящей марки нет.`);
         }
       }
 
@@ -6066,9 +6205,9 @@ export const WBSupplyManager = ({
 
                  // Этикетка ЧЗ идёт следующей страницей — сразу за своим заданием.
                  if (fbsStickersWithChz) {
-                   const code = chzCodes[i];
+                   const orderId = Number(sticker?.orderId ?? sticker?.id ?? sticker?.order_id);
+                   const code = chzByOrderId.get(orderId);
                    if (code) {
-                     const orderId = Number(sticker?.orderId ?? sticker?.id ?? sticker?.order_id);
                      const order = orderById.get(orderId) || {};
                      pdf.addPage([58, 40], 'landscape');
                      try {
@@ -6101,6 +6240,9 @@ export const WBSupplyManager = ({
                try {
                  const pdf = await buildPdfForSlice(orderedStickers, profile);
                  pdf.save(`stickers_fbs_${activeSupplyId}.pdf`);
+                 if (fbsStickersWithChz && chzByOrderId.size > 0) {
+                   await bindPrintedChzToOrders(chzByOrderId, orderById);
+                 }
                  return;
                } catch (e) {
                  console.warn('single stickers pdf failed on profile, trying lighter profile', profile, e);

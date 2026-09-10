@@ -48,6 +48,64 @@ export const DEFAULT_CHZ_LABEL_LAYOUT: ChzLabelLayout = {
   barcodeTextY: 37.48,
 };
 
+/** «Костюмы» и «Костюмы спортивные» — одна категория, как и в базе кодов. */
+export const normalizeHsCategoryName = (raw: string): string => {
+  const value = String(raw || '').trim().toLowerCase();
+  if (!value) return '';
+  if (value === 'костюмы' || value === 'костюмы спортивные' || value === 'костюмы / костюмы спортивные') {
+    return 'костюмы / костюмы спортивные';
+  }
+  return value;
+};
+
+export interface ChzPoolItem {
+  code: string;
+  category: string;
+  gender: string;
+}
+
+export interface ChzProductMeta {
+  gender: string;
+  subject: string;
+}
+
+/**
+ * Подбор марки под товар заказа.
+ *
+ * Первая же проверка показала, зачем это нужно: марка мужского костюма встала
+ * на женский товар, потому что коды брались просто по очереди. Правила:
+ *
+ *  - у марки указан пол — у товара должен быть ровно такой же. Неизвестный пол
+ *    товара тоже не подходит: «наверное, мужской» — не основание клеить марку;
+ *  - категории, если обе известны, должны совпадать;
+ *  - хотя бы одно совпадение обязательно, иначе это подбор вслепую.
+ *
+ * Не нашли подходящей — печатаем стикер без ЧЗ. Отсутствие марки заметят и
+ * исправят, а чужая марка уедет с товаром молча.
+ */
+export function matchChzCodeForProduct(
+  pool: readonly ChzPoolItem[],
+  used: ReadonlySet<string>,
+  product: ChzProductMeta | undefined,
+): ChzPoolItem | undefined {
+  const productGender = String(product?.gender || '').trim().toLowerCase();
+  const productSubject = normalizeHsCategoryName(product?.subject || '');
+
+  return pool.find((item) => {
+    if (used.has(item.code)) return false;
+
+    const codeGender = String(item.gender || '').trim().toLowerCase();
+    const codeCategory = normalizeHsCategoryName(item.category);
+
+    if (codeGender && codeGender !== productGender) return false;
+    if (codeCategory && productSubject && codeCategory !== productSubject) return false;
+
+    const genderMatched = Boolean(codeGender && codeGender === productGender);
+    const categoryMatched = Boolean(codeCategory && productSubject && codeCategory === productSubject);
+    return genderMatched || categoryMatched;
+  });
+}
+
 export interface ChzLabelData {
   chzCode: string;
   /** Товарный штрихкод (EAN-13 из карточки WB). */
