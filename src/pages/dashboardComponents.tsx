@@ -88,6 +88,45 @@ export const ReportsSection = ({ children }: { children: React.ReactNode }) => <
 export const EmployeesSection = ({ children }: { children: React.ReactNode }) => <SectionWrapper>{children}</SectionWrapper>;
 export const TelegramSettingsSection = ({ children }: { children: React.ReactNode }) => <SectionWrapper>{children}</SectionWrapper>;
 
+/**
+ * Рамка перетаскиваемого блока в конструкторе этикеток.
+ *
+ * Только контур и подпись в углу: под рамкой лежит настоящий PDF, и заливка
+ * с текстом-заглушкой закрывала бы именно то, ради чего человек сюда смотрит.
+ */
+export const WbLayoutHandle = ({
+  title,
+  tone,
+  style,
+  onMouseDown,
+}: {
+  title: string;
+  tone: 'indigo' | 'emerald' | 'amber' | 'fuchsia' | 'cyan';
+  style: React.CSSProperties;
+  onMouseDown: (e: React.MouseEvent) => void;
+}) => {
+  const tones: Record<string, { border: string; chip: string }> = {
+    indigo: { border: 'border-indigo-500/80', chip: 'bg-indigo-600' },
+    emerald: { border: 'border-emerald-500/80', chip: 'bg-emerald-600' },
+    amber: { border: 'border-amber-500/80', chip: 'bg-amber-600' },
+    fuchsia: { border: 'border-fuchsia-500/80', chip: 'bg-fuchsia-600' },
+    cyan: { border: 'border-cyan-500/80', chip: 'bg-cyan-600' },
+  };
+  const t = tones[tone] || tones.indigo;
+
+  return (
+    <div
+      onMouseDown={onMouseDown}
+      style={style}
+      className={`absolute cursor-move rounded border border-dashed ${t.border} transition hover:border-solid hover:bg-white/10`}
+    >
+      <span className={`pointer-events-none absolute -top-[9px] left-0 rounded px-1 text-[9px] font-medium leading-[14px] text-white ${t.chip}`}>
+        {title}
+      </span>
+    </div>
+  );
+};
+
 export const DatamatrixCode = ({ code }: { code: string }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 

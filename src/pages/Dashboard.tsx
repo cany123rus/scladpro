@@ -55,7 +55,7 @@ import { downloadJsonRowsAsExcel, ensureExcelFileSize, ensureExcelRowLimit, ensu
 import { readFirstSheetAsJsonFast } from '../utils/excelWorkerClient';
 import { mergeWarehouseUpdates, removeWarehouseShelfItem, upsertWarehouseShelfItem } from '../utils/warehouseActions';
 import { ensurePdfLibs, ensureExcel, ensureBwip, lazyLibs } from './dashboardLazyLibs';
-import { ExcelUploader, SuppliesFBOSection, WBProductsSection, ReportsSection, EmployeesSection, TelegramSettingsSection, DatamatrixCode } from './dashboardComponents';
+import { ExcelUploader, SuppliesFBOSection, WBProductsSection, ReportsSection, EmployeesSection, TelegramSettingsSection, DatamatrixCode, WbLayoutHandle } from './dashboardComponents';
 import { DashboardDatabaseTab } from './DashboardDatabaseTab';
 import { drawReportHeader, drawMetaLines, drawKpiChips, reportFooter, reportTableStyles } from './pdfReportKit';
 
@@ -18948,8 +18948,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   });
 
   const [wbDragState, setWbDragState] = useState<any>(null);
+  /*
+   * Холст редактора — та же этикетка 58×40 мм, только в пикселях.
+   *
+   * Масштаб один на обе оси: раньше по вертикали он был на треть процента
+   * другим (510/40 против 737/58), и квадратный DataMatrix выходил чуть
+   * прямоугольным, а всё, что ниже середины, съезжало относительно печати.
+   */
   const PREVIEW_BASE_W = 737;
-  const PREVIEW_BASE_H = 510;
+  const PREVIEW_BASE_H = Math.round((737 / 58) * 40);
   const [wbPreviewScale, setWbPreviewScale] = useState(1);
   const wbPreviewScaleRef = useRef(1);
   const wbPreviewWrapRef = useRef<HTMLDivElement>(null);
@@ -18967,7 +18974,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     return () => ro.disconnect();
   }, [activeTab]);
   const PREVIEW_SCALE_X = 737 / 58;
-  const PREVIEW_SCALE_Y = 510 / 40;
+  const PREVIEW_SCALE_Y = 737 / 58;
   const PT_TO_MM = 0.3528;
   const mmToPreviewX = (mm: number) => mm * PREVIEW_SCALE_X;
   const mmToPreviewY = (mm: number) => mm * PREVIEW_SCALE_Y;
@@ -22603,11 +22610,31 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   <div className="origin-top-left" style={{ width: PREVIEW_BASE_W, height: PREVIEW_BASE_H, transform: `scale(${wbPreviewScale})` }}>
                   <div className="space-y-4">
                     <div className={wbLayoutTemplate === 'withChz' ? '' : 'hidden'}>
-                      <div className="wb-preview-frame mx-auto rounded-2xl p-3 w-[737px] h-[510px] max-w-full bg-white relative overflow-hidden ring-1 ring-slate-200 shadow-[0_14px_40px_-16px_rgba(15,23,42,0.35)]">
-                        <div className="pointer-events-none absolute inset-0 rounded-2xl" style={{ backgroundImage: 'linear-gradient(rgba(148,163,184,0.10) 1px, transparent 1px), linear-gradient(90deg, rgba(148,163,184,0.10) 1px, transparent 1px)', backgroundSize: '24px 24px' }} />
+                      {/* Подложка — настоящий PDF, рамки блоков лежат поверх него.
+                          Так «где двигаю» и «как напечатается» — это одна картинка,
+                          а не две похожие: раньше предпросмотр рисовался своим
+                          кодом, системным шрифтом и от верхнего края текста,
+                          тогда как печать ставит текст по базовой линии. */}
+                      <div
+                        className="wb-preview-frame mx-auto rounded-2xl max-w-full bg-white relative overflow-hidden ring-1 ring-slate-200 shadow-[0_14px_40px_-16px_rgba(15,23,42,0.35)]"
+                        style={{ width: PREVIEW_BASE_W, height: PREVIEW_BASE_H }}
+                      >
+                        {wbLayoutPdfPreviews.withChz ? (
+                          <iframe
+                            title="wb-layout-underlay"
+                            src={`${wbLayoutPdfPreviews.withChz}#toolbar=0&navpanes=0&scrollbar=0&view=Fit`}
+                            className="pointer-events-none absolute inset-0 h-full w-full border-0"
+                          />
+                        ) : (
+                          <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-xs text-slate-400">
+                            Готовлю предпросмотр печати…
+                          </div>
+                        )}
                         <span className="pointer-events-none absolute right-2 bottom-2 rounded-full bg-slate-900/70 px-2 py-0.5 text-[10px] font-medium text-white">58 × 40 мм</span>
-                        <div
-                          className="absolute rounded-lg border-2 border-indigo-400/70 bg-indigo-50/60 backdrop-blur-[1px] flex items-center justify-center text-[10px] font-medium text-indigo-700 shadow-sm cursor-move transition hover:ring-2 hover:ring-indigo-300/70"
+                        {/* Рамки — только рамки: содержимое видно на подложке. */}
+                        <WbLayoutHandle
+                          title="ЧЗ"
+                          tone="indigo"
                           onMouseDown={(e) => startWbBlockDrag(e, 'withChz', 'dmXpx', 'dmYpx', wbLayoutEditor.withChz.dmXpx, wbLayoutEditor.withChz.dmYpx)}
                           style={{
                             left: `${wbLayoutEditor.withChz.dmXpx}px`,
@@ -22615,25 +22642,38 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             width: `${wbLayoutEditor.withChz.dmSize * PREVIEW_SCALE_X}px`,
                             height: `${wbLayoutEditor.withChz.dmSize * PREVIEW_SCALE_Y}px`,
                           }}
-                        >
-                          QR/DataMatrix
-                        </div>
+                        />
 
-                        <div className="absolute text-slate-900 rounded-lg border-2 border-emerald-400/70 px-2 py-1 bg-emerald-50/50 backdrop-blur-[1px] shadow-sm cursor-move transition hover:ring-2 hover:ring-emerald-300/70" onMouseDown={(e) => startWbBlockDrag(e, 'withChz', 'textXpx', 'textYpx', wbLayoutEditor.withChz.textXpx, wbLayoutEditor.withChz.textYpx)} style={{ left: `${wbLayoutEditor.withChz.textXpx}px`, top: `${wbLayoutEditor.withChz.textYpx}px`, right: '12px', fontSize: `${ptToPreviewPx(wbLayoutEditor.withChz.titleFont)}px`, lineHeight: 1.05, fontWeight: 700 }}>
-                          Костюм мужской домашний
-                        </div>
-                        <div className="absolute text-slate-800" style={{ left: `${wbLayoutEditor.withChz.textXpx + 2}px`, top: `${wbLayoutEditor.withChz.textYpx + mmToPreviewY(4.0 + wbLayoutEditor.withChz.titleGap)}px`, fontSize: `${ptToPreviewPx(wbLayoutEditor.withChz.textFont)}px` }}>Артикул: 232759650</div>
-                        <div className="absolute text-slate-800" style={{ left: `${wbLayoutEditor.withChz.textXpx + 2}px`, top: `${wbLayoutEditor.withChz.textYpx + mmToPreviewY(4.0 + wbLayoutEditor.withChz.titleGap + wbLayoutEditor.withChz.dataGap)}px`, fontSize: `${ptToPreviewPx(wbLayoutEditor.withChz.textFont)}px` }}>Модель: M-2026</div>
-                        <div className="absolute text-slate-800" style={{ left: `${wbLayoutEditor.withChz.textXpx + 2}px`, top: `${wbLayoutEditor.withChz.textYpx + mmToPreviewY(4.0 + wbLayoutEditor.withChz.titleGap + wbLayoutEditor.withChz.dataGap * 2)}px`, fontSize: `${ptToPreviewPx(wbLayoutEditor.withChz.textFont)}px` }}>Размер: 7XL</div>
-                        <div className="absolute text-slate-800" style={{ left: `${wbLayoutEditor.withChz.textXpx + 2}px`, top: `${wbLayoutEditor.withChz.textYpx + mmToPreviewY(4.0 + wbLayoutEditor.withChz.titleGap + wbLayoutEditor.withChz.dataGap * 3)}px`, fontSize: `${ptToPreviewPx(wbLayoutEditor.withChz.textFont)}px` }}>Цвет: графит</div>
-                        <div className="absolute text-slate-800" style={{ left: `${wbLayoutEditor.withChz.textXpx + 2}px`, top: `${wbLayoutEditor.withChz.textYpx + mmToPreviewY(4.0 + wbLayoutEditor.withChz.titleGap + wbLayoutEditor.withChz.dataGap * 4)}px`, fontSize: `${ptToPreviewPx(wbLayoutEditor.withChz.textFont)}px` }}>Поставщик: ИП Власенко_И_А</div>
+                        {/* Текст печатается по базовой линии, поэтому рамка
+                            начинается на строку выше точки привязки — иначе она
+                            стояла бы ниже настоящего текста. */}
+                        <WbLayoutHandle
+                          title="Текст"
+                          tone="emerald"
+                          onMouseDown={(e) => startWbBlockDrag(e, 'withChz', 'textXpx', 'textYpx', wbLayoutEditor.withChz.textXpx, wbLayoutEditor.withChz.textYpx)}
+                          style={{
+                            left: `${wbLayoutEditor.withChz.textXpx}px`,
+                            top: `${wbLayoutEditor.withChz.textYpx - ptToPreviewPx(wbLayoutEditor.withChz.titleFont)}px`,
+                            width: `${mmToPreviewX(28.8)}px`,
+                            height: `${mmToPreviewY(4.0 + wbLayoutEditor.withChz.titleGap + wbLayoutEditor.withChz.dataGap * 4) + ptToPreviewPx(wbLayoutEditor.withChz.textFont)}px`,
+                          }}
+                        />
 
-                        <div className="absolute text-[11px] font-medium text-amber-700 rounded-md border border-amber-400/70 px-1.5 py-0.5 bg-amber-50/60 backdrop-blur-[1px] shadow-sm cursor-move transition hover:ring-2 hover:ring-amber-300/70 truncate" onMouseDown={(e) => startWbBlockDrag(e, 'withChz', 'dmTextXpx', 'dmTextYpx', wbLayoutEditor.withChz.dmTextXpx, wbLayoutEditor.withChz.dmTextYpx)} style={{ left: `${wbLayoutEditor.withChz.dmTextXpx}px`, top: `${wbLayoutEditor.withChz.dmTextYpx}px`, width: `${Math.max(120, wbLayoutEditor.withChz.dmSize * PREVIEW_SCALE_X)}px` }}>
-                          01046240600993100000...
-                        </div>
+                        <WbLayoutHandle
+                          title="Код цифрами"
+                          tone="amber"
+                          onMouseDown={(e) => startWbBlockDrag(e, 'withChz', 'dmTextXpx', 'dmTextYpx', wbLayoutEditor.withChz.dmTextXpx, wbLayoutEditor.withChz.dmTextYpx)}
+                          style={{
+                            left: `${wbLayoutEditor.withChz.dmTextXpx}px`,
+                            top: `${wbLayoutEditor.withChz.dmTextYpx - ptToPreviewPx(3.6)}px`,
+                            width: `${Math.max(mmToPreviewX(16), wbLayoutEditor.withChz.dmSize * PREVIEW_SCALE_X)}px`,
+                            height: `${ptToPreviewPx(3.6) * 2.4}px`,
+                          }}
+                        />
 
-                        <div
-                          className="absolute rounded-lg border-2 border-dashed border-fuchsia-400/80 bg-fuchsia-50/40 backdrop-blur-[1px] flex items-center justify-center text-[12px] font-medium text-fuchsia-700 shadow-sm cursor-move transition hover:ring-2 hover:ring-fuchsia-300/70"
+                        <WbLayoutHandle
+                          title="Штрихкод"
+                          tone="fuchsia"
                           onMouseDown={(e) => startWbBlockDrag(e, 'withChz', 'barcodeXpx', 'barcodeYpx', wbLayoutEditor.withChz.barcodeXpx, wbLayoutEditor.withChz.barcodeYpx)}
                           style={{
                             left: `${wbLayoutEditor.withChz.barcodeXpx}px`,
@@ -22641,17 +22681,34 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             width: `${wbLayoutEditor.withChz.barcodeW * PREVIEW_SCALE_X}px`,
                             height: `${wbLayoutEditor.withChz.barcodeH * PREVIEW_SCALE_Y}px`,
                           }}
-                        >
-                          Штрихкод
-                        </div>
-                        <div className="absolute text-black font-bold rounded-md border border-cyan-400/70 px-1 bg-cyan-50/50 backdrop-blur-[1px] shadow-sm cursor-move transition hover:ring-2 hover:ring-cyan-300/70" onMouseDown={(e) => startWbBlockDrag(e, 'withChz', 'barcodeXpx', 'barcodeTextYpx', wbLayoutEditor.withChz.barcodeXpx, wbLayoutEditor.withChz.barcodeTextYpx)} style={{ left: `${wbLayoutEditor.withChz.barcodeXpx}px`, top: `${wbLayoutEditor.withChz.barcodeTextYpx}px`, width: `${wbLayoutEditor.withChz.barcodeW * PREVIEW_SCALE_X}px`, textAlign: 'center', fontSize: '20px' }}>
-                          2042797303856
-                        </div>
+                        />
+
+                        {/* Цифры под штрихкодом печать не опускает выше самого
+                            штрихкода: берётся большее из «под ним» и заданной
+                            высоты. Повторяем то же правило, иначе рамка и печать
+                            расходятся, как только цифры тянут вверх. */}
+                        <WbLayoutHandle
+                          title="Цифры ШК"
+                          tone="cyan"
+                          onMouseDown={(e) => startWbBlockDrag(e, 'withChz', 'barcodeXpx', 'barcodeTextYpx', wbLayoutEditor.withChz.barcodeXpx, wbLayoutEditor.withChz.barcodeTextYpx)}
+                          style={{
+                            left: `${wbLayoutEditor.withChz.barcodeXpx}px`,
+                            top: `${Math.max(
+                              wbLayoutEditor.withChz.barcodeYpx + wbLayoutEditor.withChz.barcodeH * PREVIEW_SCALE_Y + mmToPreviewY(1.2),
+                              wbLayoutEditor.withChz.barcodeTextYpx,
+                            ) - ptToPreviewPx(10.4)}px`,
+                            width: `${wbLayoutEditor.withChz.barcodeW * PREVIEW_SCALE_X}px`,
+                            height: `${ptToPreviewPx(10.4) * 1.25}px`,
+                          }}
+                        />
                       </div>
                     </div>
 
                     <div className={wbLayoutTemplate === 'withoutChz' ? '' : 'hidden'}>
-                      <div className="wb-preview-frame mx-auto rounded-2xl p-3 w-[737px] h-[510px] max-w-full bg-white relative overflow-hidden ring-1 ring-slate-200 shadow-[0_14px_40px_-16px_rgba(15,23,42,0.35)]">
+                      <div className="wb-preview-frame mx-auto rounded-2xl max-w-full bg-white relative overflow-hidden ring-1 ring-slate-200 shadow-[0_14px_40px_-16px_rgba(15,23,42,0.35)]" style={{ width: PREVIEW_BASE_W, height: PREVIEW_BASE_H }}>
+                        {wbLayoutPdfPreviews.withoutChz ? (
+                          <iframe title="wb-layout-underlay-withoutChz" src={`${wbLayoutPdfPreviews.withoutChz}#toolbar=0&navpanes=0&scrollbar=0&view=Fit`} className="pointer-events-none absolute inset-0 h-full w-full border-0" />
+                        ) : null}
                         <div
                           className="absolute border-2 border-dashed border-fuchsia-400 rounded flex items-center justify-center text-[12px] text-slate-600 cursor-move"
                           onMouseDown={(e) => startWbBlockDrag(e, 'withoutChz', 'barcodeXpx', 'barcodeYpx', wbLayoutEditor.withoutChz.barcodeXpx, wbLayoutEditor.withoutChz.barcodeYpx)}
@@ -22682,7 +22739,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     </div>
 
                     <div className={wbLayoutTemplate === 'fboBoxes' ? '' : 'hidden'}>
-                      <div className="wb-preview-frame mx-auto rounded-2xl p-3 w-[737px] h-[510px] max-w-full bg-white relative overflow-hidden ring-1 ring-slate-200 shadow-[0_14px_40px_-16px_rgba(15,23,42,0.35)]">
+                      <div className="wb-preview-frame mx-auto rounded-2xl max-w-full bg-white relative overflow-hidden ring-1 ring-slate-200 shadow-[0_14px_40px_-16px_rgba(15,23,42,0.35)]" style={{ width: PREVIEW_BASE_W, height: PREVIEW_BASE_H }}>
+                        {wbLayoutPdfPreviews.fboBoxes ? (
+                          <iframe title="wb-layout-underlay-fboBoxes" src={`${wbLayoutPdfPreviews.fboBoxes}#toolbar=0&navpanes=0&scrollbar=0&view=Fit`} className="pointer-events-none absolute inset-0 h-full w-full border-0" />
+                        ) : null}
                         <div className="absolute text-black font-bold border border-cyan-300 rounded px-1 bg-white/70 cursor-move" onMouseDown={(e) => startWbBlockDrag(e, 'fboBoxes', 'numberXpx', 'numberYpx', wbLayoutEditor.fboBoxes.numberXpx, wbLayoutEditor.fboBoxes.numberYpx)} style={{ left: `${wbLayoutEditor.fboBoxes.numberXpx - mmToPreviewX(6)}px`, top: `${wbLayoutEditor.fboBoxes.numberYpx}px`, width: `${mmToPreviewX(12)}px`, textAlign: 'center', fontSize: `${ptToPreviewPx(wbLayoutEditor.fboBoxes.numberFont)}px` }}>
                           1/120
                         </div>
@@ -22702,7 +22762,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     </div>
 
                     <div className={wbLayoutTemplate === 'nameSequence' ? '' : 'hidden'}>
-                      <div className="wb-preview-frame mx-auto rounded-2xl p-3 w-[737px] h-[510px] max-w-full bg-white relative overflow-hidden ring-1 ring-slate-200 shadow-[0_14px_40px_-16px_rgba(15,23,42,0.35)]">
+                      <div className="wb-preview-frame mx-auto rounded-2xl max-w-full bg-white relative overflow-hidden ring-1 ring-slate-200 shadow-[0_14px_40px_-16px_rgba(15,23,42,0.35)]" style={{ width: PREVIEW_BASE_W, height: PREVIEW_BASE_H }}>
+                        {wbLayoutPdfPreviews.nameSequence ? (
+                          <iframe title="wb-layout-underlay-nameSequence" src={`${wbLayoutPdfPreviews.nameSequence}#toolbar=0&navpanes=0&scrollbar=0&view=Fit`} className="pointer-events-none absolute inset-0 h-full w-full border-0" />
+                        ) : null}
                         <div className="absolute text-black font-bold border border-cyan-300 rounded px-1 bg-white/70 cursor-move" onMouseDown={(e) => startWbBlockDrag(e, 'nameSequence', 'numberXpx', 'numberYpx', wbLayoutEditor.nameSequence.numberXpx, wbLayoutEditor.nameSequence.numberYpx)} style={{ left: `${wbLayoutEditor.nameSequence.numberXpx - mmToPreviewX(8)}px`, top: `${wbLayoutEditor.nameSequence.numberYpx}px`, width: `${mmToPreviewX(16)}px`, textAlign: 'center', fontSize: `${ptToPreviewPx(wbLayoutEditor.nameSequence.numberFont)}px` }}>
                           1
                         </div>
