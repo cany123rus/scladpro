@@ -5813,7 +5813,7 @@ export const WBSupplyManager = ({
 
     const { data, error } = await supabase
       .from('unified_honest_sign_codes')
-      .select('code, category, gender')
+      .select('code, category, gender, size')
       .eq('supplier_id', supplierId)
       .neq('file_name', 'Напечатанные QR')
       .neq('file_name', 'Отсканировано')
@@ -5829,6 +5829,7 @@ export const WBSupplyManager = ({
         code: String(r?.code || '').trim(),
         category: String(r?.category || '').trim(),
         gender: String(r?.gender || '').trim().toLowerCase(),
+        size: String(r?.size || '').trim(),
       }))
       .filter((r: any) => r.code);
   };
@@ -6076,7 +6077,14 @@ export const WBSupplyManager = ({
           const order = orderById.get(orderId);
           if (!order) continue;
 
-          const match = matchChzCodeForProduct(pool, used, productMeta.get(Number(order?.nmId || 0)));
+          // Размер берём из самого задания: в карточке их несколько, а уехать
+          // должен именно тот, что заказали.
+          const card = productMeta.get(Number(order?.nmId || 0));
+          const match = matchChzCodeForProduct(pool, used, {
+            gender: card?.gender || '',
+            subject: card?.subject || '',
+            size: String(order?.size || ''),
+          });
           if (!match) {
             unmatchedOrders += 1;
             continue;

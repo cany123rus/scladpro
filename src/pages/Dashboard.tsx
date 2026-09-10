@@ -559,6 +559,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [honestSignTab, setHonestSignTab] = useState<'codes' | 'print' | 'base' | 'printed'>('codes');
   const [honestSignBaseCategory, setHonestSignBaseCategory] = useState('');
   const [honestSignBaseGender, setHonestSignBaseGender] = useState<'male' | 'female' | ''>('');
+  /*
+   * Размер загружаемых марок.
+   *
+   * Марка выпускается под конкретный размер, и без него подбор кода к заданию
+   * остаётся приблизительным: пол и категория совпадают у всей линейки.
+   */
+  const [honestSignBaseSize, setHonestSignBaseSize] = useState('');
+  const [honestSignSizes, setHonestSignSizes] = useState<Array<{ size: string; cards: number }>>([]);
   const [honestSignUploadHistory, setHonestSignUploadHistory] = useState<any[]>([]);
   const [honestSignPrintedHistory, setHonestSignPrintedHistory] = useState<any[]>([]);
   const [supplierCategories, setSupplierCategories] = useState<string[]>([]);
@@ -845,6 +853,39 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
     setHonestSignCategoryStats(stats);
   };
+
+  /*
+   * Размеры подтягиваем под выбранную категорию.
+   *
+   * Список берём из карточек поставщика: показывать все размеры магазина, когда
+   * грузят марки на костюмы, — верный способ выбрать чужой.
+   */
+  useEffect(() => {
+    if (!honestSignSupplierId) {
+      setHonestSignSizes([]);
+      return;
+    }
+
+    let cancelled = false;
+    supabase
+      .rpc('hs_supplier_sizes', { p_supplier: honestSignSupplierId, p_category: honestSignBaseCategory || null })
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) {
+          console.warn('Размеры не загрузились', error);
+          setHonestSignSizes([]);
+          return;
+        }
+        setHonestSignSizes((data || []).map((r: any) => ({ size: String(r?.size || ''), cards: Number(r?.cards || 0) })));
+      });
+
+    return () => { cancelled = true; };
+  }, [honestSignSupplierId, honestSignBaseCategory]);
+
+  // Сменили категорию — прежний размер к ней может не относиться.
+  useEffect(() => {
+    setHonestSignBaseSize('');
+  }, [honestSignBaseCategory]);
 
   /*
    * За теми же данными второй раз не ходим.
@@ -6267,6 +6308,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       return;
     }
 
+    // Без размера марку потом не привязать к заданию — спрашиваем сразу,
+    // пока человек помнит, какой файл грузит.
+    const normalizedSize = String(honestSignBaseSize || '').trim();
+    if (!normalizedSize) {
+      showToast('Выберите размер — марка выпускается под конкретный размер', 'error');
+      return;
+    }
+
     try {
       setLoadingHonestSign(true);
 
@@ -6297,6 +6346,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         supplier_id: honestSignSupplierId,
         category: normalizeHSCategory(honestSignBaseCategory),
         gender: normalizedGender,
+        size: normalizedSize,
         code,
         file_name: fileName,
         status: 'new'
@@ -24527,6 +24577,29 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               <option value="female">Женский</option>
                             </select>
                         </div>
+                        <div>
+                            {/* Размеры — только те, что есть у карточек выбранной категории:
+                                весь размерный ряд магазина здесь только мешает. */}
+                            <label className="block text-sm font-medium text-slate-700 mb-2">Размер</label>
+                            <select
+                              value={honestSignBaseSize}
+                              onChange={(e) => setHonestSignBaseSize(e.target.value)}
+                              className="w-full p-3 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                              disabled={!honestSignSupplierId}
+                            >
+                              <option value="">-- Выберите размер --</option>
+                              {honestSignSizes.map((s) => (
+                                <option key={s.size} value={s.size}>
+                                  {s.size} ({s.cards})
+                                </option>
+                              ))}
+                            </select>
+                            {honestSignSupplierId && honestSignSizes.length === 0 && (
+                              <p className="mt-1 text-xs text-slate-500">
+                                У карточек этой категории размеров не нашлось — проверьте выбор категории.
+                              </p>
+                            )}
+                        </div>
                     </div>
 
                     {honestSignCategoryStats.length > 0 && (
@@ -24561,12 +24634,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     <div className="flex items-center justify-center w-full mb-8">
                         <label
                           className={`flex flex-col items-center justify-center w-full h-64 border-2 border-dashed rounded-lg transition-colors ${
-                            !honestSignSupplierId || !honestSignBaseCategory || !honestSignBaseGender
+                            !honestSignSupplierId || !honestSignBaseCategory || !honestSignBaseGender || !honestSignBaseSize
                               ? 'border-slate-200 bg-slate-100 cursor-not-allowed opacity-70'
                               : 'border-slate-300 cursor-pointer bg-slate-50 hover:bg-slate-100'
                           }`}
                           onClick={(ev) => {
-                            if (!honestSignSupplierId || !honestSignBaseCategory || !honestSignBaseGender) {
+                            if (!honestSignSupplierId || !honestSignBaseCategory || !honestSignBaseGender || !honestSignBaseSize) {
                               ev.preventDefault();
                               showToast('Сначала выберите поставщика, категорию и пол', 'error');
                             }
@@ -24582,7 +24655,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               className="hidden"
                               accept=".csv,.txt,.xlsx,.xls"
                               onChange={handleHonestSignBaseUpload}
-                              disabled={!honestSignSupplierId || !honestSignBaseCategory || !honestSignBaseGender}
+                              disabled={!honestSignSupplierId || !honestSignBaseCategory || !honestSignBaseGender || !honestSignBaseSize}
                             />
                         </label>
                     </div>
@@ -24590,7 +24663,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     <div className="flex justify-end mb-8">
                       <button
                         onClick={handleHonestSignBaseImportFromTelegram}
-                        disabled={loadingHonestSign || !honestSignSupplierId || !honestSignBaseCategory || !honestSignBaseGender}
+                        disabled={loadingHonestSign || !honestSignSupplierId || !honestSignBaseCategory || !honestSignBaseGender || !honestSignBaseSize}
                         className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         {loadingHonestSign ? 'Загрузка...' : 'Загрузить файл из Telegram'}

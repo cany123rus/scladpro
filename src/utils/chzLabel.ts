@@ -62,12 +62,32 @@ export interface ChzPoolItem {
   code: string;
   category: string;
   gender: string;
+  size?: string;
 }
 
 export interface ChzProductMeta {
   gender: string;
   subject: string;
+  size?: string;
 }
+
+/**
+ * Размеры сравниваем по написанию, а не по буквам.
+ *
+ * В карточках WB встречаются «2XL», «2xl» и «XXL» — для человека это один
+ * размер, а для строкового сравнения три разных. Приводим к одному виду,
+ * иначе марка не подберётся к своему же товару.
+ */
+export const normalizeHsSize = (raw: string): string => {
+  let value = String(raw || '').trim().toLowerCase().replace(/\s+/g, '');
+  if (!value) return '';
+
+  // XXL -> 2xl, XXXL -> 3xl и так далее.
+  const repeated = value.match(/^(x{2,})l$/);
+  if (repeated) value = `${repeated[1].length}xl`;
+
+  return value;
+};
 
 /**
  * Подбор марки под товар заказа.
@@ -77,6 +97,7 @@ export interface ChzProductMeta {
  *
  *  - у марки указан пол — у товара должен быть ровно такой же. Неизвестный пол
  *    товара тоже не подходит: «наверное, мужской» — не основание клеить марку;
+ *  - то же и с размером: указан у марки — должен совпасть с размером задания;
  *  - категории, если обе известны, должны совпадать;
  *  - хотя бы одно совпадение обязательно, иначе это подбор вслепую.
  *
@@ -90,19 +111,23 @@ export function matchChzCodeForProduct(
 ): ChzPoolItem | undefined {
   const productGender = String(product?.gender || '').trim().toLowerCase();
   const productSubject = normalizeHsCategoryName(product?.subject || '');
+  const productSize = normalizeHsSize(product?.size || '');
 
   return pool.find((item) => {
     if (used.has(item.code)) return false;
 
     const codeGender = String(item.gender || '').trim().toLowerCase();
     const codeCategory = normalizeHsCategoryName(item.category);
+    const codeSize = normalizeHsSize(item.size || '');
 
     if (codeGender && codeGender !== productGender) return false;
+    if (codeSize && codeSize !== productSize) return false;
     if (codeCategory && productSubject && codeCategory !== productSubject) return false;
 
     const genderMatched = Boolean(codeGender && codeGender === productGender);
+    const sizeMatched = Boolean(codeSize && codeSize === productSize);
     const categoryMatched = Boolean(codeCategory && productSubject && codeCategory === productSubject);
-    return genderMatched || categoryMatched;
+    return genderMatched || sizeMatched || categoryMatched;
   });
 }
 
