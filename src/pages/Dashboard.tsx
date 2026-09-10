@@ -567,6 +567,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
    */
   const [honestSignBaseSize, setHonestSignBaseSize] = useState('');
   const [honestSignSizes, setHonestSignSizes] = useState<Array<{ size: string; cards: number }>>([]);
+  /*
+   * «Без размера» — осознанный выбор, а не пропуск поля.
+   *
+   * Бывает, что марки заказаны на всю линейку сразу. Тогда размер не пишем
+   * вовсе, и подбор берёт такую марку под любой размер этой категории и пола.
+   */
+  const [honestSignBaseNoSize, setHonestSignBaseNoSize] = useState(false);
   const [honestSignUploadHistory, setHonestSignUploadHistory] = useState<any[]>([]);
   const [honestSignPrintedHistory, setHonestSignPrintedHistory] = useState<any[]>([]);
   const [supplierCategories, setSupplierCategories] = useState<string[]>([]);
@@ -787,6 +794,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         created_at: row?.created_at,
         category: normalizeHSCategory(row?.category),
         gender: normalizeHSGender(row?.gender),
+        size: String(row?.size || ''),
         codes: Number(row?.codes || 0),
       })),
     );
@@ -6308,11 +6316,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       return;
     }
 
-    // Без размера марку потом не привязать к заданию — спрашиваем сразу,
-    // пока человек помнит, какой файл грузит.
-    const normalizedSize = String(honestSignBaseSize || '').trim();
-    if (!normalizedSize) {
-      showToast('Выберите размер — марка выпускается под конкретный размер', 'error');
+    /*
+     * Размер спрашиваем сразу, пока человек помнит, какой файл грузит.
+     * Исключение — отметка «без размера»: тогда марка подойдёт любому размеру
+     * этой категории и пола, и это выбор, а не забытое поле.
+     */
+    const normalizedSize = honestSignBaseNoSize ? '' : String(honestSignBaseSize || '').trim();
+    if (!honestSignBaseNoSize && !normalizedSize) {
+      showToast('Выберите размер или отметьте «без размера»', 'error');
       return;
     }
 
@@ -6346,7 +6357,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         supplier_id: honestSignSupplierId,
         category: normalizeHSCategory(honestSignBaseCategory),
         gender: normalizedGender,
-        size: normalizedSize,
+        // Пустой размер храним как NULL: «нет значения» и «пустая строка» —
+        // разные вещи, а подбор проверяет именно наличие.
+        size: normalizedSize || null,
         code,
         file_name: fileName,
         status: 'new'
@@ -24584,8 +24597,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             <select
                               value={honestSignBaseSize}
                               onChange={(e) => setHonestSignBaseSize(e.target.value)}
-                              className="w-full p-3 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
-                              disabled={!honestSignSupplierId}
+                              className="w-full p-3 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none disabled:bg-slate-100 disabled:text-slate-400"
+                              disabled={!honestSignSupplierId || honestSignBaseNoSize}
                             >
                               <option value="">-- Выберите размер --</option>
                               {honestSignSizes.map((s) => (
@@ -24594,9 +24607,23 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                 </option>
                               ))}
                             </select>
-                            {honestSignSupplierId && honestSignSizes.length === 0 && (
+
+                            <label className="mt-2 flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={honestSignBaseNoSize}
+                                onChange={(e) => {
+                                  setHonestSignBaseNoSize(e.target.checked);
+                                  if (e.target.checked) setHonestSignBaseSize('');
+                                }}
+                                className="w-4 h-4"
+                              />
+                              без размера — подойдут любому размеру этой категории и пола
+                            </label>
+
+                            {honestSignSupplierId && honestSignSizes.length === 0 && !honestSignBaseNoSize && (
                               <p className="mt-1 text-xs text-slate-500">
-                                У карточек этой категории размеров не нашлось — проверьте выбор категории.
+                                У карточек этой категории размеров не нашлось — проверьте выбор категории или отметьте «без размера».
                               </p>
                             )}
                         </div>
@@ -24634,12 +24661,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     <div className="flex items-center justify-center w-full mb-8">
                         <label
                           className={`flex flex-col items-center justify-center w-full h-64 border-2 border-dashed rounded-lg transition-colors ${
-                            !honestSignSupplierId || !honestSignBaseCategory || !honestSignBaseGender || !honestSignBaseSize
+                            !honestSignSupplierId || !honestSignBaseCategory || !honestSignBaseGender || (!honestSignBaseSize && !honestSignBaseNoSize)
                               ? 'border-slate-200 bg-slate-100 cursor-not-allowed opacity-70'
                               : 'border-slate-300 cursor-pointer bg-slate-50 hover:bg-slate-100'
                           }`}
                           onClick={(ev) => {
-                            if (!honestSignSupplierId || !honestSignBaseCategory || !honestSignBaseGender || !honestSignBaseSize) {
+                            if (!honestSignSupplierId || !honestSignBaseCategory || !honestSignBaseGender || (!honestSignBaseSize && !honestSignBaseNoSize)) {
                               ev.preventDefault();
                               showToast('Сначала выберите поставщика, категорию и пол', 'error');
                             }
@@ -24655,7 +24682,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               className="hidden"
                               accept=".csv,.txt,.xlsx,.xls"
                               onChange={handleHonestSignBaseUpload}
-                              disabled={!honestSignSupplierId || !honestSignBaseCategory || !honestSignBaseGender || !honestSignBaseSize}
+                              disabled={!honestSignSupplierId || !honestSignBaseCategory || !honestSignBaseGender || (!honestSignBaseSize && !honestSignBaseNoSize)}
                             />
                         </label>
                     </div>
@@ -24663,7 +24690,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     <div className="flex justify-end mb-8">
                       <button
                         onClick={handleHonestSignBaseImportFromTelegram}
-                        disabled={loadingHonestSign || !honestSignSupplierId || !honestSignBaseCategory || !honestSignBaseGender || !honestSignBaseSize}
+                        disabled={loadingHonestSign || !honestSignSupplierId || !honestSignBaseCategory || !honestSignBaseGender || (!honestSignBaseSize && !honestSignBaseNoSize)}
                         className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         {loadingHonestSign ? 'Загрузка...' : 'Загрузить файл из Telegram'}
@@ -24690,7 +24717,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                                 <td className="p-3">{new Date(item.created_at).toLocaleString('ru-RU')}</td>
                                                 <td className="p-3">{item.file_name}</td>
                                                 <td className="p-3">{item.category || '-'}</td>
-                                                <td className="p-3">{getHSGenderLabel(item.gender)}</td>
+                                                <td className="p-3">
+                                                  {getHSGenderLabel(item.gender)}
+                                                  {/* Партия без размера подходит любому — это видно сразу. */}
+                                                  {item.size ? (
+                                                    <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600">{item.size}</span>
+                                                  ) : (
+                                                    <span className="ml-2 rounded bg-amber-50 px-1.5 py-0.5 text-xs text-amber-700">без размера</span>
+                                                  )}
+                                                </td>
                                                 <td className="p-3 text-right flex gap-2 justify-end">
                                                     <button
                                                         onClick={() => handlePrintHonestSignHistory(item.file_name, item.created_at)}
