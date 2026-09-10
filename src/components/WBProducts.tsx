@@ -963,6 +963,53 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
       const bySupplier = await fetchCodesBySuppliers(supplierIds);
       cachePayload = { preparedAt: new Date().toISOString(), bySupplier };
       savePrintCodesCache(cachePayload);
+    } else if (!useCacheOnly) {
+      /*
+       * Кэш есть, но он мог устареть.
+       *
+       * Коды подтягиваются в него один раз, кнопкой «Подготовить к печати», и
+       * при печати из него же вычёркиваются израсходованные. Поэтому марки,
+       * загруженные после подготовки, в печать не попадали: этикетка выходила
+       * без ЧЗ, а причина была не видна — в базе код есть, а в кэше его нет.
+       * Обновляем список, если он старше получаса, сохраняя уже израсходованные.
+       */
+      const preparedAtMs = new Date(cachePayload.preparedAt || 0).getTime();
+      const stale = !Number.isFinite(preparedAtMs) || Date.now() - preparedAtMs > 30 * 60 * 1000;
+
+      if (stale) {
+        try {
+          const supplierIds = Object.keys(variantsBySupplier);
+          const fresh = await fetchCodesBySuppliers(supplierIds);
+
+          /*
+           * Напечатанные, но ещё не отмеченные в базе, отбрасываем.
+           *
+           * Отметка «Напечатанные QR» уходит в базу отложенно, из очереди в
+           * localStorage. Пока она не ушла, свежий список из базы всё ещё
+           * содержит эти коды — и без такой чистки один код напечатался бы
+           * дважды, а это пересорт.
+           */
+          let pending: string[] = [];
+          try {
+            const raw = localStorage.getItem(WB_PRINT_PENDING_SYNC_KEY);
+            const parsed = raw ? JSON.parse(raw) : [];
+            if (Array.isArray(parsed)) pending = parsed.map(String);
+          } catch {
+            pending = [];
+          }
+          const spent = new Set(pending);
+
+          const merged: CachedCodesPayload['bySupplier'] = { ...cachePayload.bySupplier };
+          for (const [sid, codes] of Object.entries(fresh)) {
+            merged[sid] = codes.filter((c) => !spent.has(c.code));
+          }
+
+          cachePayload = { preparedAt: new Date().toISOString(), bySupplier: merged };
+          savePrintCodesCache(cachePayload);
+        } catch {
+          // Сеть отвалилась — печатаем тем, что есть: это лучше, чем не печатать.
+        }
+      }
     }
 
     for (const [supplierId, variants] of Object.entries(variantsBySupplier)) {
