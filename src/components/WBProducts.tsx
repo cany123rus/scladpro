@@ -6,6 +6,7 @@ import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import bwipjs from 'bwip-js';
 import { supabase } from '../lib/supabase';
+import { restoreDataMatrixGs } from '../utils/honestSign';
 import { FixedSizeList as List, ListChildComponentProps } from 'react-window';
 import { isWarehouseOfflineEnabled, warehouseOfflineClient } from '../lib/warehouseOffline';
 
@@ -113,11 +114,20 @@ const Sticker = ({ variant, honestSignCode, supplierName }: { variant: ProductVa
                 }
             }
 
-            // Force literal DataMatrix to ensure full string is scanned
-            // (GS1 scanners often truncate to GTIN if FNC1 is present)
+            /*
+             * Символ печатаем литеральным DataMatrix, но с байтами GS внутри.
+             *
+             * FNC1 не включаем намеренно: с ним сканеры обрезали код до GTIN.
+             * А вот сами разделители обязательны — настоящая марка содержит два
+             * символа 29, и без них этикетка читается кодом на два символа
+             * короче, которого в ГИС МТ не существует. В скан-файл для WB
+             * разделители возвращает тот же restoreDataMatrixGs.
+             */
             bwipjs.toCanvas(dmCanvasRef.current, {
                 bcid: 'datamatrix',
-                text: codeToEncode,
+                text: restoreDataMatrixGs(codeToEncode),
+                binarytext: true,
+                parsefnc: false,
                 scale: 3,
                 includetext: false,
                 padding: 2,
@@ -1123,7 +1133,11 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
 
         if (honestSignCode) {
           // Layout #1 (with ЧЗ): like sample — larger DM left, text right, barcode lower-right
-          const dmText = normalizeDataMatrixText(honestSignCode);
+          //
+          // Сначала нормализуем (дописывается пропущенный признак 21), затем
+          // возвращаем GS-разделители: печатать надо ровно тот код, который
+          // уходит в скан-файл WB, иначе этикетка читается чужой строкой.
+          const dmText = restoreDataMatrixGs(normalizeDataMatrixText(honestSignCode));
 
           try {
             bwipjs.toCanvas(canvas, {

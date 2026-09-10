@@ -4,6 +4,7 @@ import { Upload, Loader2 } from 'lucide-react';
 import { ensureExcelFileSize, ensureExcelRowLimit } from '../utils/safeExcel';
 import { readFirstSheetAsJsonFast } from '../utils/excelWorkerClient';
 import { ensureBwip, lazyLibs } from './dashboardLazyLibs';
+import { restoreDataMatrixGs } from '../utils/honestSign';
 
 export const ExcelUploader = ({ onUpload, disabled = false, maxFileBytes, onBatchStart, onBatchDone }: { onUpload: (data: any[], fileName?: string, sourceFile?: File) => void | Promise<void>; disabled?: boolean; maxFileBytes?: number; onBatchStart?: (count: number) => void; onBatchDone?: () => void }) => {
   const [busy, setBusy] = useState(false);
@@ -95,9 +96,13 @@ export const DatamatrixCode = ({ code }: { code: string }) => {
     ensureBwip().then(() => {
       if (cancelled || !canvasRef.current) return;
       try {
+        // С GS-разделителями: без них символ читается кодом на два символа
+        // короче настоящего, и такого кода в ГИС МТ не существует.
         lazyLibs.bwipjs.toCanvas(canvasRef.current, {
             bcid: 'datamatrix',
-            text: code,
+            text: restoreDataMatrixGs(code),
+            binarytext: true,
+            parsefnc: false,
             scale: 3,
             height: 10,
             includetext: false,

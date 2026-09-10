@@ -60,6 +60,7 @@ import { DashboardDatabaseTab } from './DashboardDatabaseTab';
 import { drawReportHeader, drawMetaLines, drawKpiChips, reportFooter, reportTableStyles } from './pdfReportKit';
 
 import { DASHBOARD_TAB_IDS, isDashboardTabId } from '../constants/dashboardTabs';
+import { restoreDataMatrixGs } from '../utils/honestSign';
 import { getDefaultWarehouseOfflineUrl, getWarehouseOfflineUrl, isWarehouseOfflineEnabled, setWarehouseOfflineEnabled, setWarehouseOfflineUrl, warehouseOfflineClient, WarehouseOfflineSnapshot, WarehouseOfflineStatus } from '../lib/warehouseOffline';
 import type {
   NotificationType, NotificationItem, ToastStyle, Supplier, Product,
@@ -937,9 +938,20 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
             const canvas = document.createElement('canvas');
             try {
+                /*
+                 * В символ уходит код с GS-разделителями.
+                 *
+                 * Настоящая марка содержит два символа 29 — перед блоками 91 и
+                 * 92. Без них распечатанная этикетка при считывании даёт строку
+                 * на два символа короче настоящей: для ГИС МТ это уже другой
+                 * код. В скан-файл для WB разделители возвращаются тем же
+                 * restoreDataMatrixGs — печать должна совпадать с ним посимвольно.
+                 */
                 lazyLibs.bwipjs.toCanvas(canvas, {
                     bcid: 'datamatrix',
-                    text: code,
+                    text: restoreDataMatrixGs(code),
+                    binarytext: true,
+                    parsefnc: false,
                     scale: 2,
                     height: 20,
                     includetext: false,
@@ -19229,7 +19241,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           ? `${dmTextRaw.slice(0, 16)}21${dmTextRaw.slice(16)}`
           : dmTextRaw;
         try {
-          lazyLibs.bwipjs.toCanvas(canvas, { bcid: 'datamatrix', text: dmText, binarytext: true, parsefnc: false, scale: 4, padding: 1, includetext: false });
+          // Образец в макете печатаем теми же правилами, что и живой код,
+          // иначе на предпросмотре размер символа не совпадёт с настоящим.
+          lazyLibs.bwipjs.toCanvas(canvas, { bcid: 'datamatrix', text: restoreDataMatrixGs(dmText), binarytext: true, parsefnc: false, scale: 4, padding: 1, includetext: false });
           doc.addImage(canvas.toDataURL('image/png'), 'PNG', layout.withChz.dmX, layout.withChz.dmY, layout.withChz.dmSize, layout.withChz.dmSize);
           doc.setFontSize(3.6);
           doc.text(doc.splitTextToSize(dmText, Math.max(16, layout.withChz.dmSize - 0.4)), layout.withChz.dmTextX, layout.withChz.dmTextY);
@@ -19424,7 +19438,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           try {
             lazyLibs.bwipjs.toCanvas(dmCanvas, {
               bcid: 'datamatrix',
-              text: labelBuilder.qr,
+              // Разделители GS возвращаем перед кодированием: без них этикетка
+              // считывается не тем кодом, что записан в скан-файл.
+              text: restoreDataMatrixGs(labelBuilder.qr),
               binarytext: true,
               parsefnc: false,
               scale: 2,
@@ -24644,7 +24660,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                                 try {
                                                     lazyLibs.bwipjs.toCanvas(canvas, {
                                                         bcid: 'datamatrix',
-                                                        text: code,
+                                                        text: restoreDataMatrixGs(code),
+                                                        binarytext: true,
+                                                        parsefnc: false,
                                                         scale: 2,
                                                         height: 20,
                                                         includetext: false,
