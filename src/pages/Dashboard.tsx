@@ -431,52 +431,22 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     } catch {}
   }, [cameraStreams]);
 
+  /*
+   * Простой на рабочем месте: возвращаем на «Задачи» через десять минут.
+   *
+   * Автовыход из профиля отсюда убран намеренно. ПК стоит у стола сборки,
+   * и отойти за товаром или на обед дольше получаса — обычное дело: человек
+   * возвращался к экрану входа, а начатая поставка и открытое окно скана
+   * пропадали. Сессию теперь закрывают только кнопкой «Выйти».
+   */
   useEffect(() => {
     let tabTimer: ReturnType<typeof setTimeout> | null = null;
-    let logoutTimer: ReturnType<typeof setTimeout> | null = null;
 
     const resetInactivityTimer = () => {
       if (tabTimer) clearTimeout(tabTimer);
-      if (logoutTimer) clearTimeout(logoutTimer);
-
       tabTimer = setTimeout(() => {
         setActiveTab('tasks');
       }, 10 * 60 * 1000);
-
-      logoutTimer = setTimeout(async () => {
-        try {
-          const employee = currentEmployeeRef.current;
-          const employeeName = employee?.full_name || user?.email || 'Неизвестный пользователь';
-
-          await logAction(
-            'Автовыход по неактивности',
-            `Сотрудник отключен из-за неактивности (30 минут): ${employeeName}`,
-            employee?.id
-          );
-
-          try {
-            const text = `⏱️ *Автовыход по неактивности*\n👤 ${employeeName}\nПричина: 30 минут без активности\n🕒 ${new Date().toLocaleString('ru-RU')}`;
-            const formData = new FormData();
-            formData.append('chat_id', '498924112');
-            formData.append('text', text);
-            formData.append('parse_mode', 'Markdown');
-
-            const token = String((telegramBotTokenFile || '').trim());
-            if (token) {
-              await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-                method: 'POST',
-                body: formData
-              });
-            }
-          } catch (e) {
-            console.error('Auto-logout telegram notify failed', e);
-          }
-
-          await signOut();
-        } finally {
-          navigate('/login');
-        }
-      }, 30 * 60 * 1000);
     };
 
     const events: Array<keyof WindowEventMap> = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
@@ -485,10 +455,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
     return () => {
       if (tabTimer) clearTimeout(tabTimer);
-      if (logoutTimer) clearTimeout(logoutTimer);
       events.forEach((eventName) => window.removeEventListener(eventName, resetInactivityTimer as EventListener));
     };
-  }, [navigate, signOut]);
+  }, []);
 
   // Suppliers State
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -14366,35 +14335,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       }
     }
   }, [showActivityLogModal]);
-
-  // Auto-logout on inactivity (disabled by user request)
-  useEffect(() => {
-    const AUTO_LOGOUT_ENABLED = false;
-    if (!AUTO_LOGOUT_ENABLED) return;
-
-    let timeout: number;
-    const resetTimer = () => {
-      clearTimeout(timeout);
-      timeout = setTimeout(() => {
-        handleLogout();
-      }, 5 * 60 * 1000); // 5 minutes
-    };
-
-    window.addEventListener('mousemove', resetTimer);
-    window.addEventListener('keydown', resetTimer);
-    window.addEventListener('click', resetTimer);
-    window.addEventListener('scroll', resetTimer);
-
-    resetTimer(); // Start timer
-
-    return () => {
-      clearTimeout(timeout);
-      window.removeEventListener('mousemove', resetTimer);
-      window.removeEventListener('keydown', resetTimer);
-      window.removeEventListener('click', resetTimer);
-      window.removeEventListener('scroll', resetTimer);
-    };
-  }, []);
 
   const createPermanentAuthToken = () => {
       const randomPart = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
