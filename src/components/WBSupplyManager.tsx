@@ -3678,7 +3678,6 @@ export const WBSupplyManager = ({
     const images = await loadImageDataUrls(urls, 6);
 
     const body = rows.map((row) => {
-      const code = String(findFbsScanSavedEntry(row, fbsScansBySticker)?.item?.honestSignCode || '');
       const img = getFbsRowPhotoCandidates(row).map((u) => images.get(u) || '').find(Boolean) || '';
       return [
         String(row.orderId || '—'),
@@ -3686,7 +3685,9 @@ export const WBSupplyManager = ({
         String(row.title || ''),
         String(row.size || ''),
         String(row.article || ''),
-        code || '—',
+        // Стикер, а не ЧЗ: по листу ходят по складу и сверяют наклейку на
+        // вещи. Марка тут только мешала бы — её на полке никто не читает.
+        getSafeStickerText(row),
       ];
     });
 
@@ -3699,7 +3700,7 @@ export const WBSupplyManager = ({
 
     (autoTable as any)(doc, {
       startY: 30,
-      head: [['№ задания', 'Фото', 'Наименование', 'Размер', 'Артикул', 'ЧЗ']],
+      head: [['№ задания', 'Фото', 'Наименование', 'Размер', 'Артикул', 'Стикер']],
       body,
       styles: { fontSize: 7, cellPadding: 2, valign: 'middle', font: 'Roboto' },
       headStyles: { font: 'Roboto', fontStyle: 'normal' },
@@ -3708,10 +3709,10 @@ export const WBSupplyManager = ({
       columnStyles: {
         0: { cellWidth: 20 },
         1: { cellWidth: 20, minCellHeight: 24 },
-        2: { minCellWidth: 46 },
+        2: { minCellWidth: 58 },
         3: { cellWidth: 14, halign: 'center' },
-        4: { cellWidth: 22 },
-        5: { minCellWidth: 46 },
+        4: { cellWidth: 24 },
+        5: { cellWidth: 34 },
       },
       didParseCell: (data: any) => {
         if (data.column.index === 1 && data.section === 'body') {
