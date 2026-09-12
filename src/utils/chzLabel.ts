@@ -205,10 +205,6 @@ export interface FbsComboLayout {
   partBX: number;
   partBY: number;
   partBFont: number;
-  barX: number;
-  barY: number;
-  barW: number;
-  barH: number;
   codeTextX: number;
   codeTextY: number;
   codeTextFont: number;
@@ -219,22 +215,18 @@ export const DEFAULT_FBS_COMBO_LAYOUT: FbsComboLayout = {
   dmY: 1,
   // 72×72 модуля в символе: 24 мм дают 0,33 мм на модуль — столько же, сколько
   // на проверенной этикетке. Меньше 22 мм уводит к границе допустимого.
-  dmSize: 24,
-  qrX: 26,
+  dmSize: 28,
+  qrX: 31,
   qrY: 1,
-  qrSize: 15,
-  partAX: 42.5,
-  partAY: 6.5,
-  partAFont: 6.2,
-  partBX: 42.5,
-  partBY: 14.5,
-  partBFont: 12,
-  barX: 2,
-  barY: 26,
-  barW: 54,
-  barH: 5.8,
-  codeTextX: 2,
-  codeTextY: 35,
+  qrSize: 16,
+  partAX: 31,
+  partAY: 22,
+  partAFont: 7,
+  partBX: 31,
+  partBY: 30,
+  partBFont: 15,
+  codeTextX: 1,
+  codeTextY: 34.5,
   codeTextFont: 3.4,
 };
 
@@ -439,35 +431,20 @@ export async function drawFbsComboLabel(
     doc.text(partB, layout.partBX, layout.partBY);
   }
 
-  // 4. Штрихкод задания во всю ширину — второй способ считать то же значение.
-  if (stickerCode) {
-    try {
-      bwipjs.toCanvas(canvas, {
-        bcid: 'code128',
-        text: stickerCode,
-        scale: 4,
-        height: 6,
-        includetext: false,
-        paddingwidth: 0,
-        paddingheight: 0,
-        backgroundcolor: 'ffffff',
-      });
-      doc.addImage(canvas.toDataURL('image/png'), 'PNG', layout.barX, layout.barY, layout.barW, layout.barH);
-    } catch (e) {
-      console.warn('Не нарисовали штрихкод задания', e);
-    }
-  }
-
   /*
-   * 5. Код марки текстом — и больше ничего.
+   * 4. Код марки текстом — и больше ничего.
    *
-   * Ни товарного штрихкода, ни артикула с размером тут нет намеренно: на
-   * этикетке только два кода, марка и задание. Всё остальное отнимало бы
-   * место у них и путало сборщика, который сверяет её со стикером WB.
+   * На этикетке ровно два символа: марка и QR задания. Полосы штрихкода тут
+   * были, но их убрали — QR несёт то же самое значение, а место лучше отдать
+   * марке: у неё 72×72 модуля, и каждый лишний миллиметр стороны заметно
+   * улучшает считывание. Товарного ШК, артикула и размера здесь нет тем более.
    */
   setFont('normal');
   doc.setFontSize(layout.codeTextFont);
-  if (code) doc.text(doc.splitTextToSize(code, layout.barW).slice(0, 2), layout.codeTextX, layout.codeTextY);
+  if (code) {
+    const width = Math.max(20, 57 - layout.codeTextX);
+    doc.text(doc.splitTextToSize(code, width).slice(0, 2), layout.codeTextX, layout.codeTextY);
+  }
 }
 
 /** Товарный штрихкод: EAN-13, если сходится контрольная цифра, иначе code128. */

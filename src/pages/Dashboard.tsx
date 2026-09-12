@@ -18951,8 +18951,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       qrSize: DEFAULT_FBS_COMBO_LAYOUT.qrSize,
       partAFont: DEFAULT_FBS_COMBO_LAYOUT.partAFont,
       partBFont: DEFAULT_FBS_COMBO_LAYOUT.partBFont,
-      barW: DEFAULT_FBS_COMBO_LAYOUT.barW,
-      barH: DEFAULT_FBS_COMBO_LAYOUT.barH,
       codeTextFont: DEFAULT_FBS_COMBO_LAYOUT.codeTextFont,
       dmXpx: DEFAULT_FBS_COMBO_LAYOUT.dmX * WB_PREVIEW_SCALE,
       dmYpx: DEFAULT_FBS_COMBO_LAYOUT.dmY * WB_PREVIEW_SCALE,
@@ -18962,8 +18960,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       partAYpx: DEFAULT_FBS_COMBO_LAYOUT.partAY * WB_PREVIEW_SCALE,
       partBXpx: DEFAULT_FBS_COMBO_LAYOUT.partBX * WB_PREVIEW_SCALE,
       partBYpx: DEFAULT_FBS_COMBO_LAYOUT.partBY * WB_PREVIEW_SCALE,
-      barXpx: DEFAULT_FBS_COMBO_LAYOUT.barX * WB_PREVIEW_SCALE,
-      barYpx: DEFAULT_FBS_COMBO_LAYOUT.barY * WB_PREVIEW_SCALE,
       codeTextXpx: DEFAULT_FBS_COMBO_LAYOUT.codeTextX * WB_PREVIEW_SCALE,
       codeTextYpx: DEFAULT_FBS_COMBO_LAYOUT.codeTextY * WB_PREVIEW_SCALE,
     },
@@ -19085,8 +19081,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
             partAYpx: parsed?.fbsCombo?.partAY != null ? mmToPxY(parsed.fbsCombo.partAY) : prev.fbsCombo.partAYpx,
             partBXpx: parsed?.fbsCombo?.partBX != null ? mmToPxX(parsed.fbsCombo.partBX) : prev.fbsCombo.partBXpx,
             partBYpx: parsed?.fbsCombo?.partBY != null ? mmToPxY(parsed.fbsCombo.partBY) : prev.fbsCombo.partBYpx,
-            barXpx: parsed?.fbsCombo?.barX != null ? mmToPxX(parsed.fbsCombo.barX) : prev.fbsCombo.barXpx,
-            barYpx: parsed?.fbsCombo?.barY != null ? mmToPxY(parsed.fbsCombo.barY) : prev.fbsCombo.barYpx,
             codeTextXpx: parsed?.fbsCombo?.codeTextX != null ? mmToPxX(parsed.fbsCombo.codeTextX) : prev.fbsCombo.codeTextXpx,
             codeTextYpx: parsed?.fbsCombo?.codeTextY != null ? mmToPxY(parsed.fbsCombo.codeTextY) : prev.fbsCombo.codeTextYpx,
           },
@@ -19260,10 +19254,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         partBX: pxToMmX(wbLayoutEditor.fbsCombo.partBXpx),
         partBY: pxToMmY(wbLayoutEditor.fbsCombo.partBYpx),
         partBFont: wbLayoutEditor.fbsCombo.partBFont,
-        barX: pxToMmX(wbLayoutEditor.fbsCombo.barXpx),
-        barY: pxToMmY(wbLayoutEditor.fbsCombo.barYpx),
-        barW: wbLayoutEditor.fbsCombo.barW,
-        barH: wbLayoutEditor.fbsCombo.barH,
         codeTextX: pxToMmX(wbLayoutEditor.fbsCombo.codeTextXpx),
         codeTextY: pxToMmY(wbLayoutEditor.fbsCombo.codeTextYpx),
         codeTextFont: wbLayoutEditor.fbsCombo.codeTextFont,
@@ -22773,12 +22763,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       <div className={`p-3 bg-white rounded-xl border border-slate-200 shadow-sm ${wbLayoutTemplate === 'fbsCombo' ? '' : 'hidden'}`}>
                         <div className="text-xs font-bold mb-2 text-slate-700">Стикер задания + ЧЗ на одной этикетке</div>
                         {([
-                          { key: 'dmSize', label: 'Размер марки (ЧЗ)', min: 20, max: 26, step: 0.1, unit: ' мм' },
-                          { key: 'qrSize', label: 'Размер QR задания', min: 11, max: 22, step: 0.1, unit: ' мм' },
+                          { key: 'dmSize', label: 'Размер марки (ЧЗ)', min: 20, max: 32, step: 0.1, unit: ' мм' },
+                          { key: 'qrSize', label: 'Размер QR задания', min: 11, max: 24, step: 0.1, unit: ' мм' },
                           { key: 'partBFont', label: 'Размер номера (крупно)', min: 8, max: 18, step: 0.5, unit: '' },
                           { key: 'partAFont', label: 'Размер номера (мелко)', min: 4, max: 9, step: 0.1, unit: '' },
-                          { key: 'barW', label: 'Штрихкод задания, ширина', min: 30, max: 56, step: 0.1, unit: ' мм' },
-                          { key: 'barH', label: 'Штрихкод задания, высота', min: 4, max: 9, step: 0.1, unit: ' мм' },
                           { key: 'codeTextFont', label: 'Размер кода марки текстом', min: 2.6, max: 5, step: 0.1, unit: '' },
                         ] as const).map(({ key, label, min, max, step, unit }) => (
                           <div key={`fbsCombo-${key}`}>
@@ -22792,10 +22780,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           </div>
                         ))}
                         <div className="mt-3 rounded-lg border border-dashed border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
-                          Только два кода: марка и задание. Товарного штрихкода, артикула и размера тут нет —
-                          место отдано символам.
-                          У марки 72×72 модуля: на 24 мм это 0,33 мм на модуль, как на проверенной этикетке;
-                          ниже 22 мм она уходит к границе допустимого по ГИС МТ.
+                          Только два символа: марка и QR задания. Полос штрихкода тут нет — QR несёт то же
+                          значение, а место отдано марке. Товарного ШК, артикула и размера нет тем более.
+                          У марки 72×72 модуля: на 28 мм это 0,39 мм на модуль, с запасом против
+                          проверенной этикетки; ниже 22 мм она уходит к границе допустимого по ГИС МТ.
                           У оригинального стикера WB есть ещё четыре служебных кода по углам — здесь их нет,
                           поэтому макет стоит обкатать на приёмке одной небольшой поставкой.
                         </div>
@@ -23062,14 +23050,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           style={{ left: `${wbLayoutEditor.fbsCombo.partBXpx}px`, top: `${wbLayoutEditor.fbsCombo.partBYpx - ptToPreviewPx(wbLayoutEditor.fbsCombo.partBFont)}px`, width: `${mmToPreviewX(14)}px`, height: `${ptToPreviewPx(wbLayoutEditor.fbsCombo.partBFont) * 1.3}px` }}
                         />
                         <WbLayoutHandle
-                          title="Штрихкод задания" tone="violet"
-                          onMouseDown={(e) => startWbBlockDrag(e, 'fbsCombo', 'barXpx', 'barYpx', wbLayoutEditor.fbsCombo.barXpx, wbLayoutEditor.fbsCombo.barYpx)}
-                          style={{ left: `${wbLayoutEditor.fbsCombo.barXpx}px`, top: `${wbLayoutEditor.fbsCombo.barYpx}px`, width: `${mmToPreviewX(wbLayoutEditor.fbsCombo.barW)}px`, height: `${mmToPreviewY(wbLayoutEditor.fbsCombo.barH)}px` }}
-                        />
-                        <WbLayoutHandle
                           title="Код марки текстом" tone="rose"
                           onMouseDown={(e) => startWbBlockDrag(e, 'fbsCombo', 'codeTextXpx', 'codeTextYpx', wbLayoutEditor.fbsCombo.codeTextXpx, wbLayoutEditor.fbsCombo.codeTextYpx)}
-                          style={{ left: `${wbLayoutEditor.fbsCombo.codeTextXpx}px`, top: `${wbLayoutEditor.fbsCombo.codeTextYpx - ptToPreviewPx(wbLayoutEditor.fbsCombo.codeTextFont)}px`, width: `${mmToPreviewX(wbLayoutEditor.fbsCombo.barW)}px`, height: `${ptToPreviewPx(wbLayoutEditor.fbsCombo.codeTextFont) * 3}px` }}
+                          style={{ left: `${wbLayoutEditor.fbsCombo.codeTextXpx}px`, top: `${wbLayoutEditor.fbsCombo.codeTextYpx - ptToPreviewPx(wbLayoutEditor.fbsCombo.codeTextFont)}px`, width: `${mmToPreviewX(56) - wbLayoutEditor.fbsCombo.codeTextXpx}px`, height: `${ptToPreviewPx(wbLayoutEditor.fbsCombo.codeTextFont) * 3}px` }}
                         />
                       </div>
                     </div>
