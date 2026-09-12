@@ -142,19 +142,135 @@ export interface ChzLabelData {
   supplierName?: string;
 }
 
+/** Настройки макета «ШК + ЧЗ + конец стикера». Правятся в конструкторе. */
+export interface ChzTailLayout {
+  dmX: number;
+  dmY: number;
+  dmSize: number;
+  dmTextY: number;
+  tailX: number;
+  tailY: number;
+  tailFont: number;
+  textX: number;
+  titleY: number;
+  titleFont: number;
+  dataY: number;
+  dataGap: number;
+  textFont: number;
+  barcodeX: number;
+  barcodeY: number;
+  barcodeW: number;
+  barcodeH: number;
+  barcodeTextY: number;
+}
+
+export const DEFAULT_CHZ_TAIL_LAYOUT: ChzTailLayout = {
+  dmX: 1.3,
+  dmY: 2.0,
+  dmSize: 24.5,
+  dmTextY: 27.6,
+  tailX: 56.5,
+  tailY: 11,
+  tailFont: 20,
+  textX: 27.5,
+  titleY: 15.5,
+  titleFont: 6.6,
+  dataY: 21.5,
+  dataGap: 2.9,
+  textFont: 5.6,
+  barcodeX: 29.89,
+  barcodeY: 27.41,
+  barcodeW: 25.5,
+  barcodeH: 6.9,
+  barcodeTextY: 37.48,
+};
+
+/** Настройки совмещённого макета «стикер задания + ЧЗ». */
+export interface FbsComboLayout {
+  dmX: number;
+  dmY: number;
+  dmSize: number;
+  qrX: number;
+  qrY: number;
+  qrSize: number;
+  partAX: number;
+  partAY: number;
+  partAFont: number;
+  partBX: number;
+  partBY: number;
+  partBFont: number;
+  barX: number;
+  barY: number;
+  barW: number;
+  barH: number;
+  codeTextX: number;
+  codeTextY: number;
+  codeTextFont: number;
+  infoX: number;
+  infoY: number;
+  infoFont: number;
+}
+
+export const DEFAULT_FBS_COMBO_LAYOUT: FbsComboLayout = {
+  dmX: 1,
+  dmY: 1,
+  // 72×72 модуля в символе: 24 мм дают 0,33 мм на модуль — столько же, сколько
+  // на проверенной этикетке. Меньше 22 мм уводит к границе допустимого.
+  dmSize: 24,
+  qrX: 26,
+  qrY: 1,
+  qrSize: 15,
+  partAX: 42.5,
+  partAY: 6.5,
+  partAFont: 6.2,
+  partBX: 42.5,
+  partBY: 14.5,
+  partBFont: 12,
+  barX: 2,
+  barY: 26,
+  barW: 54,
+  barH: 5.8,
+  codeTextX: 2,
+  codeTextY: 34.2,
+  codeTextFont: 3.2,
+  infoX: 2,
+  infoY: 39,
+  infoFont: 5,
+};
+
+export function readChzTailLayout(raw: unknown): ChzTailLayout {
+  try {
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    const part = (parsed as any)?.chzTail;
+    if (!part || typeof part !== 'object') return DEFAULT_CHZ_TAIL_LAYOUT;
+    return { ...DEFAULT_CHZ_TAIL_LAYOUT, ...part };
+  } catch {
+    return DEFAULT_CHZ_TAIL_LAYOUT;
+  }
+}
+
+export function readFbsComboLayout(raw: unknown): FbsComboLayout {
+  try {
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    const part = (parsed as any)?.fbsCombo;
+    if (!part || typeof part !== 'object') return DEFAULT_FBS_COMBO_LAYOUT;
+    return { ...DEFAULT_FBS_COMBO_LAYOUT, ...part };
+  } catch {
+    return DEFAULT_FBS_COMBO_LAYOUT;
+  }
+}
+
 /**
  * Этикетка «ШК + ЧЗ + конец номера стикера».
  *
  * Отличается от обычной одним: справа вверху крупно набраны последние четыре
  * цифры стикера — те самые, что на этикетке WB напечатаны большим кеглем. По
  * ним задание находят глазами в коробке, не поднося сканер к каждой вещи.
- *
- * Геометрия зашита здесь, а не в конструкторе: макет новый, и пока его не
- * обкатали на печати, отдельная копия координат в настройках только мешала бы.
  */
 export async function drawChzTailLabel(
   doc: any,
   bwipjs: any,
+  layout: ChzTailLayout,
   data: ChzLabelData & { stickerTail?: string },
   fontName = 'Roboto',
 ): Promise<void> {
@@ -176,41 +292,55 @@ export async function drawChzTailLabel(
         includetext: false,
         backgroundcolor: 'ffffff',
       });
-      doc.addImage(canvas.toDataURL('image/png'), 'PNG', 1.3, 2.0, 24.5, 24.5);
+      doc.addImage(canvas.toDataURL('image/png'), 'PNG', layout.dmX, layout.dmY, layout.dmSize, layout.dmSize);
 
       setFont('normal');
       doc.setFontSize(3.6);
-      doc.text(doc.splitTextToSize(code, 24), 1.2, 27.6);
+      doc.text(doc.splitTextToSize(code, Math.max(16, layout.dmSize - 0.5)), layout.dmX - 0.1, layout.dmTextY);
     } catch (e) {
       console.warn('Не нарисовали DataMatrix', e);
     }
   }
 
-  // Хвост номера — самое крупное на этикетке: его читает человек, а не сканер.
+  /*
+   * Конец номера стикера — только цифры, без кодов задания.
+   *
+   * Это подпись для человека: сборщик держит вещь и сверяет четыре цифры с
+   * теми, что на стикере WB, чтобы не наклеить марку на соседний товар.
+   * Второго машиночитаемого кода тут нет намеренно — сканеру он не нужен, а
+   * место отнял бы у марки.
+   */
   const tail = String(data.stickerTail || '').trim();
   if (tail) {
     setFont('bold');
-    doc.setFontSize(20);
-    doc.text(tail, 56.5, 11, { align: 'right' });
+    doc.setFontSize(layout.tailFont);
+    doc.text(tail, layout.tailX, layout.tailY, { align: 'right' });
   }
 
   setFont('bold');
-  doc.setFontSize(6.6);
-  doc.text(doc.splitTextToSize(String(data.title || ''), 29).slice(0, 2), 27.5, tail ? 15.5 : 5.5);
+  doc.setFontSize(layout.titleFont);
+  doc.text(
+    doc.splitTextToSize(String(data.title || ''), 29).slice(0, 2),
+    layout.textX,
+    tail ? layout.titleY : 5.5,
+  );
 
   setFont('normal');
-  doc.setFontSize(5.6);
+  doc.setFontSize(layout.textFont);
   const lines = [
     data.article ? `Арт: ${data.article}` : '',
     data.size ? `Размер: ${data.size}` : '',
   ].filter(Boolean);
-  let y = tail ? 21.5 : 13;
+  let y = tail ? layout.dataY : 13;
   for (const line of lines) {
-    doc.text(line, 27.5, y);
-    y += 2.9;
+    doc.text(line, layout.textX, y);
+    y += layout.dataGap;
   }
 
-  await drawProductBarcode(doc, bwipjs, canvas, String(data.barcode || ''), 29.89, 27.41, 25.5, 6.9, 37.48, setFont);
+  await drawProductBarcode(
+    doc, bwipjs, canvas, String(data.barcode || ''),
+    layout.barcodeX, layout.barcodeY, layout.barcodeW, layout.barcodeH, layout.barcodeTextY, setFont,
+  );
 }
 
 /**
@@ -228,6 +358,7 @@ export async function drawChzTailLabel(
 export async function drawFbsComboLabel(
   doc: any,
   bwipjs: any,
+  layout: FbsComboLayout,
   data: ChzLabelData & { stickerCode?: string; partA?: string; partB?: string },
   fontName = 'Roboto',
 ): Promise<void> {
@@ -259,7 +390,7 @@ export async function drawFbsComboLabel(
        * модуль в два с небольшим пикселя термопринтера. Место под остальное
        * забираем откуда угодно, только не отсюда.
        */
-      doc.addImage(canvas.toDataURL('image/png'), 'PNG', 1, 1, 24, 24);
+      doc.addImage(canvas.toDataURL('image/png'), 'PNG', layout.dmX, layout.dmY, layout.dmSize, layout.dmSize);
     } catch (e) {
       console.warn('Не нарисовали DataMatrix', e);
     }
@@ -278,7 +409,7 @@ export async function drawFbsComboLabel(
         includetext: false,
         backgroundcolor: 'ffffff',
       });
-      doc.addImage(canvas.toDataURL('image/png'), 'PNG', 26, 1, 15, 15);
+      doc.addImage(canvas.toDataURL('image/png'), 'PNG', layout.qrX, layout.qrY, layout.qrSize, layout.qrSize);
     } catch (e) {
       console.warn('Не нарисовали QR задания', e);
     }
@@ -289,13 +420,13 @@ export async function drawFbsComboLabel(
   const partB = String(data.partB || '').trim();
   if (partA) {
     setFont('normal');
-    doc.setFontSize(6.2);
-    doc.text(partA, 42.5, 6.5);
+    doc.setFontSize(layout.partAFont);
+    doc.text(partA, layout.partAX, layout.partAY);
   }
   if (partB) {
     setFont('bold');
-    doc.setFontSize(12);
-    doc.text(partB, 42.5, 14.5);
+    doc.setFontSize(layout.partBFont);
+    doc.text(partB, layout.partBX, layout.partBY);
   }
 
   // 4. Штрихкод задания во всю ширину — второй способ считать то же значение.
@@ -311,7 +442,7 @@ export async function drawFbsComboLabel(
         paddingheight: 0,
         backgroundcolor: 'ffffff',
       });
-      doc.addImage(canvas.toDataURL('image/png'), 'PNG', 2, 26, 54, 5.8);
+      doc.addImage(canvas.toDataURL('image/png'), 'PNG', layout.barX, layout.barY, layout.barW, layout.barH);
     } catch (e) {
       console.warn('Не нарисовали штрихкод задания', e);
     }
@@ -319,12 +450,12 @@ export async function drawFbsComboLabel(
 
   // 5. Подписи внизу: сам код марки и товар — для разбора руками.
   setFont('normal');
-  doc.setFontSize(3.2);
-  if (code) doc.text(doc.splitTextToSize(code, 54).slice(0, 2), 2, 34.2);
+  doc.setFontSize(layout.codeTextFont);
+  if (code) doc.text(doc.splitTextToSize(code, layout.barW).slice(0, 2), layout.codeTextX, layout.codeTextY);
 
-  doc.setFontSize(5);
+  doc.setFontSize(layout.infoFont);
   const info = [data.article, data.size].filter(Boolean).join(' · ');
-  if (info) doc.text(doc.splitTextToSize(info, 54)[0], 2, 39);
+  if (info) doc.text(doc.splitTextToSize(info, layout.barW)[0], layout.infoX, layout.infoY);
 }
 
 /** Товарный штрихкод: EAN-13, если сходится контрольная цифра, иначе code128. */

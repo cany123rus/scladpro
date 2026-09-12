@@ -61,6 +61,21 @@ import { drawReportHeader, drawMetaLines, drawKpiChips, reportFooter, reportTabl
 
 import { DASHBOARD_TAB_IDS, isDashboardTabId } from '../constants/dashboardTabs';
 import { restoreDataMatrixGs } from '../utils/honestSign';
+import {
+  DEFAULT_CHZ_TAIL_LAYOUT,
+  DEFAULT_FBS_COMBO_LAYOUT,
+  drawChzTailLabel,
+  drawFbsComboLabel,
+} from '../utils/chzLabel';
+
+/*
+ * Образец марки для предпросмотра макетов ФБС.
+ *
+ * Настоящий код из базы, а не выдуманная строка: в нём 72×72 модуля, и на
+ * короткой подделке символ вышел бы вдвое мельче — по конструктору казалось бы,
+ * что места на этикетке вагон.
+ */
+const WB_LAYOUT_SAMPLE_CHZ = '0104640233723909215XH=oFmHzyr,Z91EE1292z8CrXhvLbaNMr/WunGb/KsgNurUHZwN2psSJR8RJd/U=';
 import { getDefaultWarehouseOfflineUrl, getWarehouseOfflineUrl, isWarehouseOfflineEnabled, setWarehouseOfflineEnabled, setWarehouseOfflineUrl, warehouseOfflineClient, WarehouseOfflineSnapshot, WarehouseOfflineStatus } from '../lib/warehouseOffline';
 import type {
   NotificationType, NotificationItem, ToastStyle, Supplier, Product,
@@ -18891,7 +18906,17 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       numberYpx: 227,
       nameXpx: 369,
       nameYpx: 427,
-    }
+    },
+    /*
+     * Макеты печати ФБС. Координаты храним прямо в миллиметрах.
+     *
+     * У четырёх макетов выше позиции живут в пикселях предпросмотра ради
+     * перетаскивания блоков мышью. Здесь перетаскивания нет — есть ползунки и
+     * настоящий PDF под ними, — и лишнее преобразование мм↔px только добавило
+     * бы расхождение между конструктором и печатью.
+     */
+    chzTail: { ...DEFAULT_CHZ_TAIL_LAYOUT },
+    fbsCombo: { ...DEFAULT_FBS_COMBO_LAYOUT },
   });
 
   const [wbDragState, setWbDragState] = useState<any>(null);
@@ -18982,6 +19007,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
             nameXpx: parsed?.nameSequence?.nameX != null ? mmToPxX(parsed.nameSequence.nameX) : prev.nameSequence.nameXpx,
             nameYpx: parsed?.nameSequence?.nameY != null ? mmToPxY(parsed.nameSequence.nameY) : prev.nameSequence.nameYpx,
           },
+          chzTail: { ...prev.chzTail, ...(parsed?.chzTail || {}) },
+          fbsCombo: { ...prev.fbsCombo, ...(parsed?.fbsCombo || {}) },
         }));
       } catch {}
     };
@@ -19044,7 +19071,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
   const startWbBlockDrag = (
     e: React.MouseEvent,
-    layout: 'withChz' | 'withoutChz' | 'fboBoxes' | 'nameSequence',
+    layout: 'withChz' | 'withoutChz' | 'fboBoxes' | 'nameSequence' | 'chzTail' | 'fbsCombo',
     xKey: string,
     yKey: string,
     baseX: number,
@@ -19115,7 +19142,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         nameY: pxToMmY(wbLayoutEditor.nameSequence.nameYpx),
         numberFont: wbLayoutEditor.nameSequence.numberFont,
         nameFont: wbLayoutEditor.nameSequence.nameFont,
-      }
+      },
+      // Эти два уже в миллиметрах — пересчитывать нечего.
+      chzTail: { ...wbLayoutEditor.chzTail },
+      fbsCombo: { ...wbLayoutEditor.fbsCombo },
     };
   };
 
@@ -19180,7 +19210,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     }
   };
 
-  const buildWbLayoutLabelDoc = async (template: 'withChz' | 'withoutChz' | 'fboBoxes' | 'nameSequence') => {
+  const buildWbLayoutLabelDoc = async (template: 'withChz' | 'withoutChz' | 'fboBoxes' | 'nameSequence' | 'chzTail' | 'fbsCombo') => {
       await ensurePdfLibs();
       await ensureBwip();
       const layout = getWbLayoutPayloadFromEditor();
@@ -19266,6 +19296,36 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         doc.setFont('Roboto', 'normal');
         doc.setFontSize(layout.fboBoxes.footerFont);
         doc.text('ШК короба', layout.fboBoxes.footerX, layout.fboBoxes.footerY, { align: 'center' });
+      } else if (template === 'chzTail' || template === 'fbsCombo') {
+        /*
+         * Оба макета ФБС рисуются тем же кодом, что и печать поставки.
+         *
+         * Образец марки — настоящий: у неё 72×72 модуля, и на выдуманной
+         * короткой строке символ вышел бы вдвое мельче, а по предпросмотру
+         * казалось бы, что места хватает с запасом.
+         */
+        const sample = {
+          chzCode: WB_LAYOUT_SAMPLE_CHZ,
+          barcode: '2054911865119',
+          title: 'Костюм спортивный мужской тройка',
+          article: 'КостюмТройкаЧёрный',
+          size: '2XL',
+          supplierName: 'ИП Власенко_И_А',
+        };
+
+        if (template === 'chzTail') {
+          await drawChzTailLabel(doc, lazyLibs.bwipjs, layout.chzTail as any, {
+            ...sample,
+            stickerTail: '6885',
+          });
+        } else {
+          await drawFbsComboLabel(doc, lazyLibs.bwipjs, layout.fbsCombo as any, {
+            ...sample,
+            stickerCode: '*DXPcELUX',
+            partA: '5777837',
+            partB: '6885',
+          });
+        }
       } else {
         doc.setFont('Roboto', 'bold');
         doc.setFontSize(layout.nameSequence.numberFont);
@@ -19279,7 +19339,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       return doc;
   };
 
-  const handleTestPrintWbLayout = async (template: 'withChz' | 'withoutChz' | 'fboBoxes' | 'nameSequence') => {
+  const handleTestPrintWbLayout = async (template: 'withChz' | 'withoutChz' | 'fboBoxes' | 'nameSequence' | 'chzTail' | 'fbsCombo') => {
     try {
       const doc = await buildWbLayoutLabelDoc(template);
       const blobUrl = doc.output('bloburl');
@@ -19295,7 +19355,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   };
 
   // Выбранный шаблон в конструкторе этикеток (вкладки).
-  const [wbLayoutTemplate, setWbLayoutTemplate] = useState<'withChz' | 'withoutChz' | 'fboBoxes' | 'nameSequence'>('withChz');
+  const [wbLayoutTemplate, setWbLayoutTemplate] = useState<'withChz' | 'withoutChz' | 'fboBoxes' | 'nameSequence' | 'chzTail' | 'fbsCombo'>('withChz');
 
   // Живой PDF-предпросмотр (1-в-1 с печатью) для конструктора этикеток.
   const [wbLayoutPdfPreviews, setWbLayoutPdfPreviews] = useState<Record<string, string>>({});
@@ -22474,6 +22534,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   { key: 'withoutChz', label: 'Без ЧЗ' },
                   { key: 'fboBoxes', label: 'Короба FBO' },
                   { key: 'nameSequence', label: 'Номер + имя' },
+                  { key: 'chzTail', label: 'ЧЗ + конец стикера' },
+                  { key: 'fbsCombo', label: 'Стикер + ЧЗ' },
                 ] as const).map(({ key, label }) => (
                   <button
                     key={`maptab-${key}`}
@@ -22552,6 +22614,69 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           Макет для быстрой печати последовательности: сверху номер, снизу имя пользователя.
                         </div>
                       </div>
+
+                      {/* Макеты ФБС: печатаются из «Управление ФБС» кнопкой
+                          «Стикеры» с галочкой «с ЧЗ». Перетаскивания блоков тут
+                          нет — под ползунками настоящий PDF, по нему и видно. */}
+                      <div className={`p-3 bg-white rounded-xl border border-slate-200 shadow-sm ${wbLayoutTemplate === 'chzTail' ? '' : 'hidden'}`}>
+                        <div className="text-xs font-bold mb-2 text-slate-700">ШК + ЧЗ + конец стикера</div>
+                        {([
+                          { key: 'dmSize', label: 'Размер марки (ЧЗ)', min: 20, max: 26, step: 0.1, unit: ' мм' },
+                          { key: 'tailFont', label: 'Размер цифр стикера', min: 10, max: 28, step: 0.5, unit: '' },
+                          { key: 'tailY', label: 'Цифры стикера, отступ сверху', min: 5, max: 20, step: 0.1, unit: ' мм' },
+                          { key: 'titleFont', label: 'Размер названия', min: 4.5, max: 9, step: 0.1, unit: '' },
+                          { key: 'titleY', label: 'Название, отступ сверху', min: 10, max: 22, step: 0.1, unit: ' мм' },
+                          { key: 'textFont', label: 'Размер текста', min: 4, max: 8, step: 0.1, unit: '' },
+                          { key: 'dataY', label: 'Текст, отступ сверху', min: 14, max: 27, step: 0.1, unit: ' мм' },
+                          { key: 'barcodeW', label: 'Штрихкод ширина', min: 18, max: 30, step: 0.1, unit: ' мм' },
+                          { key: 'barcodeH', label: 'Штрихкод высота', min: 4, max: 10, step: 0.1, unit: ' мм' },
+                        ] as const).map(({ key, label, min, max, step, unit }) => (
+                          <div key={`chzTail-${key}`}>
+                            <label className="mt-2 block text-[11px] font-medium text-slate-500">{label}: {Number((wbLayoutEditor.chzTail as any)[key]).toFixed(1)}{unit}</label>
+                            <input
+                              type="range" min={min} max={max} step={step}
+                              value={(wbLayoutEditor.chzTail as any)[key]}
+                              onChange={(e) => setWbLayoutEditor((prev: any) => ({ ...prev, chzTail: { ...prev.chzTail, [key]: Number(e.target.value) } }))}
+                              className="w-full accent-indigo-600 cursor-pointer"
+                            />
+                          </div>
+                        ))}
+                        <div className="mt-3 rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-600">
+                          Цифры справа — последние четыре цифры стикера задания, только для глаз сборщика.
+                          Второго машиночитаемого кода тут нет: сканеру он не нужен, а место отнял бы у марки.
+                        </div>
+                      </div>
+
+                      <div className={`p-3 bg-white rounded-xl border border-slate-200 shadow-sm ${wbLayoutTemplate === 'fbsCombo' ? '' : 'hidden'}`}>
+                        <div className="text-xs font-bold mb-2 text-slate-700">Стикер задания + ЧЗ на одной этикетке</div>
+                        {([
+                          { key: 'dmSize', label: 'Размер марки (ЧЗ)', min: 20, max: 26, step: 0.1, unit: ' мм' },
+                          { key: 'qrSize', label: 'Размер QR задания', min: 11, max: 20, step: 0.1, unit: ' мм' },
+                          { key: 'qrX', label: 'QR, отступ слева', min: 22, max: 36, step: 0.1, unit: ' мм' },
+                          { key: 'partBFont', label: 'Размер номера (крупно)', min: 8, max: 18, step: 0.5, unit: '' },
+                          { key: 'partAFont', label: 'Размер номера (мелко)', min: 4, max: 9, step: 0.1, unit: '' },
+                          { key: 'barY', label: 'Штрихкод, отступ сверху', min: 22, max: 32, step: 0.1, unit: ' мм' },
+                          { key: 'barH', label: 'Штрихкод высота', min: 4, max: 9, step: 0.1, unit: ' мм' },
+                          { key: 'codeTextFont', label: 'Размер кода марки текстом', min: 2.6, max: 5, step: 0.1, unit: '' },
+                          { key: 'infoFont', label: 'Размер артикула и размера', min: 3.5, max: 7, step: 0.1, unit: '' },
+                        ] as const).map(({ key, label, min, max, step, unit }) => (
+                          <div key={`fbsCombo-${key}`}>
+                            <label className="mt-2 block text-[11px] font-medium text-slate-500">{label}: {Number((wbLayoutEditor.fbsCombo as any)[key]).toFixed(1)}{unit}</label>
+                            <input
+                              type="range" min={min} max={max} step={step}
+                              value={(wbLayoutEditor.fbsCombo as any)[key]}
+                              onChange={(e) => setWbLayoutEditor((prev: any) => ({ ...prev, fbsCombo: { ...prev.fbsCombo, [key]: Number(e.target.value) } }))}
+                              className="w-full accent-indigo-600 cursor-pointer"
+                            />
+                          </div>
+                        ))}
+                        <div className="mt-3 rounded-lg border border-dashed border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
+                          У марки 72×72 модуля: на 24 мм это 0,33 мм на модуль — как на проверенной этикетке.
+                          Ниже 22 мм символ уходит к границе допустимого по ГИС МТ.
+                          У оригинального стикера WB есть ещё четыре служебных кода по углам — здесь их нет,
+                          поэтому макет стоит обкатать на приёмке одной небольшой поставкой.
+                        </div>
+                      </div>
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
@@ -22560,6 +22685,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       <button onClick={() => handleTestPrintWbLayout('withoutChz')} className="w-full py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-800 text-sm font-medium">Пробная печать (без ЧЗ)</button>
                       <button onClick={() => handleTestPrintWbLayout('fboBoxes')} className="w-full py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 text-sm font-medium">Пробная печать (Короба FBO)</button>
                       <button onClick={() => handleTestPrintWbLayout('nameSequence')} className="w-full py-2 bg-fuchsia-600 text-white rounded-lg hover:bg-fuchsia-700 text-sm font-medium">Пробная печать (Номер + имя)</button>
+                      <button onClick={() => handleTestPrintWbLayout('chzTail')} className="w-full py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 text-sm font-medium">Пробная печать (ЧЗ + конец стикера)</button>
+                      <button onClick={() => handleTestPrintWbLayout('fbsCombo')} className="w-full py-2 bg-sky-700 text-white rounded-lg hover:bg-sky-800 text-sm font-medium">Пробная печать (Стикер + ЧЗ)</button>
                     </div>
                   </div>
                 </div>
@@ -22734,6 +22861,25 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <WbLayoutHandle title="Имя" tone="emerald" onMouseDown={(e) => startWbBlockDrag(e, 'nameSequence', 'nameXpx', 'nameYpx', wbLayoutEditor.nameSequence.nameXpx, wbLayoutEditor.nameSequence.nameYpx)} style={{ left: `${wbLayoutEditor.nameSequence.nameXpx - mmToPreviewX(16)}px`, top: `${wbLayoutEditor.nameSequence.nameYpx - ptToPreviewPx(wbLayoutEditor.nameSequence.nameFont)}px`, width: `${mmToPreviewX(32)}px`, height: `${ptToPreviewPx(wbLayoutEditor.nameSequence.nameFont) * 1.25}px` }} />
                       </div>
                     </div>
+
+                    {/* Макеты ФБС: показываем сам PDF без блоков-накладок.
+                        Двигать мышью тут нечего — размеры задаются ползунками,
+                        и лишние мок-блоки только расходились бы с печатью. */}
+                    {(['chzTail', 'fbsCombo'] as const).map((key) => (
+                      <div key={`fbs-preview-${key}`} className={wbLayoutTemplate === key ? '' : 'hidden'}>
+                        <div className="wb-preview-frame mx-auto rounded-2xl max-w-full bg-white relative overflow-hidden ring-1 ring-slate-200 shadow-[0_14px_40px_-16px_rgba(15,23,42,0.35)]" style={{ width: PREVIEW_BASE_W, height: PREVIEW_BASE_H }}>
+                          {wbLayoutPdfPreviews[key] ? (
+                            <iframe
+                              title={`wb-layout-underlay-${key}`}
+                              src={`${wbLayoutPdfPreviews[key]}#toolbar=0&navpanes=0&scrollbar=0&view=Fit`}
+                              className="pointer-events-none absolute inset-0 h-full w-full border-0"
+                            />
+                          ) : (
+                            <div className="flex h-full items-center justify-center text-sm text-slate-400">Готовлю PDF…</div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                   </div>
                   </div>
@@ -22752,6 +22898,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     { key: 'withoutChz', label: 'Без ЧЗ (только штрихкод)' },
                     { key: 'fboBoxes', label: 'Короба FBO' },
                     { key: 'nameSequence', label: 'Номер + имя' },
+                    { key: 'chzTail', label: 'ЧЗ + конец стикера' },
+                    { key: 'fbsCombo', label: 'Стикер + ЧЗ' },
                   ] as const).filter(({ key }) => key === wbLayoutTemplate).map(({ key }) => (
                     <div key={`pdfprev-${key}`}>
                       <div className="mx-auto w-[464px] max-w-full aspect-[58/40] rounded-2xl ring-1 ring-slate-200 shadow-md bg-white overflow-hidden">

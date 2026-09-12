@@ -46,14 +46,18 @@ import type { StickerImage } from '../utils/stickers';
 import { getWBImageUrl, getWBImageUrls } from '../utils/wbImages';
 import {
   DEFAULT_CHZ_LABEL_LAYOUT,
+  DEFAULT_CHZ_TAIL_LAYOUT,
+  DEFAULT_FBS_COMBO_LAYOUT,
   drawChzLabel,
   drawChzTailLabel,
   drawFbsComboLabel,
   matchChzCodeForProduct,
   normalizeHsSize,
   readChzLabelLayout,
+  readChzTailLayout,
+  readFbsComboLayout,
 } from '../utils/chzLabel';
-import type { ChzLabelLayout } from '../utils/chzLabel';
+import type { ChzLabelLayout, ChzTailLayout, FbsComboLayout } from '../utils/chzLabel';
 import {
   deleteFbsOrderCode,
   fetchFbsSupplyScans,
@@ -3785,7 +3789,7 @@ export const WBSupplyManager = ({
    */
   const buildChzLabelsPdf = async (
     items: Array<{ row: FbsSupplyScanOrderRow; code: string }>,
-    layout: ChzLabelLayout,
+    layouts: { chz: ChzLabelLayout; tail: ChzTailLayout; combo: FbsComboLayout },
     skus: Map<number, { bySize: Record<string, string>; only: string }>,
     stickersByOrderId: Map<number, StickerImage>,
     kind: FbsLabelKind,
@@ -3822,7 +3826,7 @@ export const WBSupplyManager = ({
       startPage();
       try {
         if (kind === 'combo') {
-          await drawFbsComboLabel(pdf, bwipjs, {
+          await drawFbsComboLabel(pdf, bwipjs, layouts.combo, {
             chzCode: item.code,
             stickerCode: String(sticker?.barcode || ''),
             partA: String(sticker?.partA || ''),
@@ -3831,7 +3835,7 @@ export const WBSupplyManager = ({
             size: String(item.row.size || ''),
           });
         } else if (kind === 'chz_tail') {
-          await drawChzTailLabel(pdf, bwipjs, {
+          await drawChzTailLabel(pdf, bwipjs, layouts.tail, {
             chzCode: item.code,
             barcode: pickChzLabelBarcode(skus, item.row),
             title: String(item.row.title || ''),
@@ -3840,7 +3844,7 @@ export const WBSupplyManager = ({
             stickerTail: String(sticker?.partB || '') || getStickerTail(item.row),
           });
         } else {
-          await drawChzLabel(pdf, bwipjs, layout, {
+          await drawChzLabel(pdf, bwipjs, layouts.chz, {
             chzCode: item.code,
             barcode: pickChzLabelBarcode(skus, item.row),
             title: String(item.row.title || ''),
@@ -3884,7 +3888,11 @@ export const WBSupplyManager = ({
       .select('value')
       .eq('key', 'wb_label_layout_v1')
       .maybeSingle();
-    const layout = readChzLabelLayout(layoutRow?.value);
+    const layouts = {
+      chz: readChzLabelLayout(layoutRow?.value),
+      tail: readChzTailLayout(layoutRow?.value),
+      combo: readFbsComboLayout(layoutRow?.value),
+    };
 
     const skus = await loadChzLabelSkus(
       selectedSupplierId,
@@ -3932,7 +3940,7 @@ export const WBSupplyManager = ({
     }
 
     setFbsScanNotice({ type: 'info', text: `Собираю PDF: этикеток ${items.length}…` });
-    const pdf = await buildChzLabelsPdf(items, layout, skus, stickersByOrderId, kind);
+    const pdf = await buildChzLabelsPdf(items, layouts, skus, stickersByOrderId, kind);
 
     const missingStickers = needStickers
       ? items.filter((item) => !stickersByOrderId.get(Number(String(item.row.orderId || '').trim()))).length
@@ -6782,6 +6790,8 @@ export const WBSupplyManager = ({
       /** Заказ → подобранная марка. Пустая ячейка значит «стикер без ЧЗ». */
       const chzByOrderId = new Map<number, string>();
       let chzLayout = DEFAULT_CHZ_LABEL_LAYOUT;
+      let chzTailLayout = DEFAULT_CHZ_TAIL_LAYOUT;
+      let comboLayout = DEFAULT_FBS_COMBO_LAYOUT;
       let unmatchedOrders = 0;
 
       if (fbsStickersWithChz) {
@@ -6796,6 +6806,8 @@ export const WBSupplyManager = ({
           .eq('key', 'wb_label_layout_v1')
           .maybeSingle();
         chzLayout = readChzLabelLayout(layoutRow?.value);
+        chzTailLayout = readChzTailLayout(layoutRow?.value);
+        comboLayout = readFbsComboLayout(layoutRow?.value);
 
         const productMeta = await loadProductMetaByNmId(
           selectedSupplierId,
@@ -6872,6 +6884,15 @@ export const WBSupplyManager = ({
                  }
                }
 
+               /*
+                * Совмещённая этикетка — одна страница на задание.
+                *
+                * Она сама несёт и QR, и штрихкод задания, поэтому картинка WB
+                * рядом была бы вторым экземпляром того же стикера. У остальных
+                * макетов порядок прежний: стикер, сразу за ним этикетка.
+                */
+               const comboMode = fbsStickersWithChz && fbsLabelKind === 'combo';
+
                for (let i = 0; i < slice.length; i++) {
                  const sticker = slice[i];
                  if (i > 0) pdf.addPage([58, 40], 'landscape');
@@ -6936,10 +6957,12 @@ export const WBSupplyManager = ({
                    }
                  };
 
-                 try {
-                   await drawSticker();
-                 } catch (e) {
-                   console.warn('sticker render failed, skipped', e);
+                 if (!comboMode) {
+                   try {
+                     await drawSticker();
+                   } catch (e) {
+                     console.warn('sticker render failed, skipped', e);
+                   }
                  }
 
                  // Этикетка ЧЗ идёт следующей страницей — сразу за своим заданием.
@@ -6948,16 +6971,39 @@ export const WBSupplyManager = ({
                    const code = chzByOrderId.get(orderId);
                    if (code) {
                      const order = orderById.get(orderId) || {};
-                     pdf.addPage([58, 40], 'landscape');
+                     const barcode = String(order?.skus?.[0] || order?.barcode || '');
+                     const partA = String(sticker?.partA || '');
+                     const partB = String(sticker?.partB || '');
+                     if (!comboMode) pdf.addPage([58, 40], 'landscape');
                      try {
-                       await drawChzLabel(pdf, bwipjs, chzLayout, {
-                         chzCode: code,
-                         barcode: String(order?.skus?.[0] || order?.barcode || ''),
-                         title: String(order?.title || ''),
-                         article: String(order?.article || ''),
-                         size: String(order?.size || ''),
-                         supplierName: String(selectedSupplier?.name || ''),
-                       });
+                       if (fbsLabelKind === 'combo') {
+                         await drawFbsComboLabel(pdf, bwipjs, comboLayout, {
+                           chzCode: code,
+                           stickerCode: String(sticker?.barcode || ''),
+                           partA,
+                           partB,
+                           article: String(order?.article || ''),
+                           size: String(order?.size || ''),
+                         });
+                       } else if (fbsLabelKind === 'chz_tail') {
+                         await drawChzTailLabel(pdf, bwipjs, chzTailLayout, {
+                           chzCode: code,
+                           barcode,
+                           title: String(order?.title || ''),
+                           article: String(order?.article || ''),
+                           size: String(order?.size || ''),
+                           stickerTail: partB,
+                         });
+                       } else {
+                         await drawChzLabel(pdf, bwipjs, chzLayout, {
+                           chzCode: code,
+                           barcode,
+                           title: String(order?.title || ''),
+                           article: String(order?.article || ''),
+                           size: String(order?.size || ''),
+                           supplierName: String(selectedSupplier?.name || ''),
+                         });
+                       }
                      } catch (e) {
                        console.warn('chz label render failed', e);
                      }
@@ -7370,7 +7416,7 @@ export const WBSupplyManager = ({
                                             размеру, поэтому по умолчанию выключено и подписано «проверка». */}
                                         <label
                                             onClick={(e) => e.stopPropagation()}
-                                            title="За каждым стикером WB пойдёт этикетка ШК + ЧЗ. Код берётся из базы по очереди, без привязки к товару и размеру"
+                                            title="За каждым стикером WB пойдёт этикетка с ЧЗ. Код берётся из базы по очереди, без привязки к товару и размеру"
                                             className="flex items-center gap-1 bg-white border border-amber-300 text-amber-700 px-2 py-1 rounded text-xs cursor-pointer hover:bg-amber-50"
                                         >
                                             <input
@@ -7381,6 +7427,25 @@ export const WBSupplyManager = ({
                                             />
                                             с ЧЗ (проверка)
                                         </label>
+                                        {/* Макет выбирается здесь же, у кнопки печати: решение «чем
+                                            печатать» принимают в момент печати поставки. */}
+                                        {fbsStickersWithChz && (
+                                            <select
+                                                onClick={(e) => e.stopPropagation()}
+                                                value={fbsLabelKind}
+                                                onChange={(e) => {
+                                                    const next = e.target.value as FbsLabelKind;
+                                                    setFbsLabelKind(next);
+                                                    try { localStorage.setItem('fbs_label_kind_v1', next); } catch {}
+                                                }}
+                                                title="Макет этикетки с ЧЗ. Настраивается в разделе «Конструктор этикеток»"
+                                                className="bg-white border border-amber-300 text-amber-800 px-2 py-1 rounded text-xs"
+                                            >
+                                                {(Object.keys(FBS_LABEL_KIND_TITLES) as FbsLabelKind[]).map((id) => (
+                                                    <option key={id} value={id}>{FBS_LABEL_KIND_TITLES[id]}</option>
+                                                ))}
+                                            </select>
+                                        )}
                                         <button
                                             onClick={(e) => { e.stopPropagation(); downloadFbsScanTemplateExcel(); }}
                                             className="flex items-center gap-1 bg-white border border-indigo-300 text-indigo-700 px-2 py-1 rounded text-xs hover:bg-indigo-50"
@@ -7700,20 +7765,14 @@ export const WBSupplyManager = ({
                         Выбрано: <span className="font-semibold tabular-nums">{fbsScanSelectedRows.length}</span>
                       </span>
 
-                      <select
-                        value={fbsLabelKind}
-                        onChange={(e) => {
-                          const next = e.target.value as FbsLabelKind;
-                          setFbsLabelKind(next);
-                          try { localStorage.setItem('fbs_label_kind_v1', next); } catch {}
-                        }}
-                        title="Макет этикетки"
-                        className="rounded-xl border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-700"
+                      {/* Макет выбирают у кнопки «Стикеры» на самой поставке —
+                          здесь только показываем, каким будет печать. */}
+                      <span
+                        title="Макет меняется у кнопки «Стикеры» на поставке, настраивается в «Конструкторе этикеток»"
+                        className="rounded-xl border border-slate-200 bg-slate-50 px-2 py-1.5 text-sm text-slate-600"
                       >
-                        {(Object.keys(FBS_LABEL_KIND_TITLES) as FbsLabelKind[]).map((id) => (
-                          <option key={id} value={id}>{FBS_LABEL_KIND_TITLES[id]}</option>
-                        ))}
-                      </select>
+                        Макет: {FBS_LABEL_KIND_TITLES[fbsLabelKind]}
+                      </span>
 
                       <label
                         className={`inline-flex items-center gap-2 text-sm ${fbsLabelKind === 'combo' ? 'text-slate-400' : 'text-slate-700'}`}
