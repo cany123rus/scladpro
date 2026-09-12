@@ -3009,39 +3009,6 @@ export const WBSupplyManager = ({
     };
   };
 
-  /*
-   * Строки, которые сейчас видно в таблице.
-   *
-   * Отдельно от разметки, потому что кнопка «Выбрать все» обязана выбрать
-   * ровно то, что человек видит: фильтр стоит на «Не отсканированы», а в
-   * выбор попала вся поставка — это уже не выбор, а сюрприз на печати.
-   */
-  const fbsScanVisibleRows = useMemo(() => {
-    return (fbsScanRows || []).filter((row) => {
-      if (fbsScanFilter === 'all') return true;
-      const done = Boolean(findFbsScanSavedEntry(row, fbsScansBySticker)?.item?.honestSignCode);
-      return fbsScanFilter === 'done' ? done : !done;
-    });
-  }, [fbsScanRows, fbsScanFilter, fbsScansBySticker]);
-
-  /** Отмеченные строки — в том же порядке, что и в таблице. */
-  const fbsScanSelectedRows = useMemo(
-    () => (fbsScanRows || []).filter((row) => fbsScanSelection[row.storageKey]),
-    [fbsScanRows, fbsScanSelection],
-  );
-
-  /*
-   * Счётчики прогресса считаем один раз за рендер.
-   *
-   * Раньше их запрашивали в трёх местах разметки, и каждый вызов заново
-   * перебирал поставку и строил карту уникальных строк — на четырёхстах
-   * заданиях это три лишних прохода на каждое нажатие клавиши.
-   */
-  const fbsScanStats = useMemo(
-    () => getFbsScanProgressStats(fbsScanRows, fbsScansBySticker),
-    [fbsScanRows, fbsScansBySticker],
-  );
-
   // Выбор живёт в пределах одного открытия окна: на другой поставке он врал бы.
   useEffect(() => {
     setFbsScanSelection({});
@@ -3121,6 +3088,49 @@ export const WBSupplyManager = ({
     if (rawStickerText === '—') return '—';
     return '-';
   };
+
+  /*
+   * Производные списки окна скана.
+   *
+   * Стоят строго ниже getSafeStickerText не для красоты: useMemo выполняется
+   * во время рендера, а цепочка getFbsScanProgressStats → getUniqueFbsScanRows
+   * → sanitizeFbsScanRows доходит до него. Объявленные выше, они обращались к
+   * ещё не инициализированной константе, и окно падало с «Cannot access before
+   * initialization» — ровно при открытии «Скан ЧЗ».
+   */
+
+  /*
+   * Строки, которые сейчас видно в таблице.
+   *
+   * Отдельно от разметки, потому что кнопка «Выбрать все» обязана выбрать
+   * ровно то, что человек видит: фильтр стоит на «Не отсканированы», а в
+   * выбор попала вся поставка — это уже не выбор, а сюрприз на печати.
+   */
+  const fbsScanVisibleRows = useMemo(() => {
+    return (fbsScanRows || []).filter((row) => {
+      if (fbsScanFilter === 'all') return true;
+      const done = Boolean(findFbsScanSavedEntry(row, fbsScansBySticker)?.item?.honestSignCode);
+      return fbsScanFilter === 'done' ? done : !done;
+    });
+  }, [fbsScanRows, fbsScanFilter, fbsScansBySticker]);
+
+  /** Отмеченные строки — в том же порядке, что и в таблице. */
+  const fbsScanSelectedRows = useMemo(
+    () => (fbsScanRows || []).filter((row) => fbsScanSelection[row.storageKey]),
+    [fbsScanRows, fbsScanSelection],
+  );
+
+  /*
+   * Счётчики прогресса считаем один раз за рендер.
+   *
+   * Раньше их запрашивали в трёх местах разметки, и каждый вызов заново
+   * перебирал поставку и строил карту уникальных строк — на четырёхстах
+   * заданиях это три лишних прохода на каждое нажатие клавиши.
+   */
+  const fbsScanStats = useMemo(
+    () => getFbsScanProgressStats(fbsScanRows, fbsScansBySticker),
+    [fbsScanRows, fbsScansBySticker],
+  );
 
   const mergeFbsScanRows = (apiRows: FbsSupplyScanOrderRow[], storedRows: FbsSupplyScanOrderRow[]) => {
     const apiClean = sanitizeFbsScanRows(apiRows || []);
