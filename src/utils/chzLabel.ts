@@ -148,8 +148,8 @@ export interface ChzTailLayout {
   dmY: number;
   dmSize: number;
   dmTextY: number;
-  headX: number;
-  headY: number;
+  /** Насколько начало номера поднято над концом. Общий блок, одна точка. */
+  headGap: number;
   headFont: number;
   tailX: number;
   tailY: number;
@@ -172,8 +172,7 @@ export const DEFAULT_CHZ_TAIL_LAYOUT: ChzTailLayout = {
   dmY: 2.0,
   dmSize: 24.5,
   dmTextY: 27.6,
-  headX: 56.5,
-  headY: 5.2,
+  headGap: 7.8,
   headFont: 7,
   tailX: 56.5,
   tailY: 13,
@@ -195,39 +194,43 @@ export const DEFAULT_CHZ_TAIL_LAYOUT: ChzTailLayout = {
 export interface FbsComboLayout {
   dmX: number;
   dmY: number;
-  dmSize: number;
   qrX: number;
   qrY: number;
-  qrSize: number;
-  partAX: number;
-  partAY: number;
+  /** Сторона обоих квадратов: марка и QR задания одного размера. */
+  symbolSize: number;
+  /** Код марки текстом под ней — мелко, в три строки по ширине символа. */
+  codeTextX: number;
+  codeTextY: number;
+  codeTextFont: number;
+  /** Начало номера над концом: тянутся вместе, как одна надпись. */
+  partGap: number;
   partAFont: number;
   partBX: number;
   partBY: number;
   partBFont: number;
-  codeTextX: number;
-  codeTextY: number;
-  codeTextFont: number;
 }
 
 export const DEFAULT_FBS_COMBO_LAYOUT: FbsComboLayout = {
-  dmX: 1,
+  dmX: 1.5,
   dmY: 1,
-  // 72×72 модуля в символе: 24 мм дают 0,33 мм на модуль — столько же, сколько
-  // на проверенной этикетке. Меньше 22 мм уводит к границе допустимого.
-  dmSize: 28,
-  qrX: 31,
+  qrX: 30,
   qrY: 1,
-  qrSize: 16,
-  partAX: 31,
-  partAY: 22,
-  partAFont: 7,
-  partBX: 31,
-  partBY: 30,
-  partBFont: 15,
-  codeTextX: 1,
-  codeTextY: 34.5,
+  /*
+   * Оба квадрата по 26 мм.
+   *
+   * В марке 72×72 модуля против 25×25 у QR задания, поэтому при равной
+   * стороне модуль у неё мельче: 0,36 мм — всё равно с запасом против
+   * проверенной этикетки, где он 0,33.
+   */
+  symbolSize: 26,
+  codeTextX: 1.5,
+  codeTextY: 29.6,
   codeTextFont: 3.4,
+  partGap: 6.5,
+  partAFont: 6.5,
+  partBX: 43,
+  partBY: 38,
+  partBFont: 12,
 };
 
 export function readChzTailLayout(raw: unknown): ChzTailLayout {
@@ -309,7 +312,8 @@ export async function drawChzTailLabel(
   if (head) {
     setFont('normal');
     doc.setFontSize(layout.headFont);
-    doc.text(head, layout.headX, layout.headY, { align: 'right' });
+    // Точка одна — у крупных цифр; мелкие просто висят над ними.
+    doc.text(head, layout.tailX, layout.tailY - layout.headGap, { align: 'right' });
   }
 
   const tail = String(data.stickerTail || '').trim();
@@ -386,13 +390,12 @@ export async function drawFbsComboLabel(
       /*
        * Марку не ужимаем ради красоты макета.
        *
-       * В символе 72×72 модуля: на 24 мм это 0,33 мм на модуль — ровно то, чем
-       * печатается проверенная этикетка «ШК + ЧЗ». Урезать до 21 мм значит
-       * уйти на 0,29 мм, к самой границе допустимого по ГИС МТ, и получить
-       * модуль в два с небольшим пикселя термопринтера. Место под остальное
-       * забираем откуда угодно, только не отсюда.
+       * В символе 72×72 модуля против 25×25 у QR задания. При равной стороне
+       * модуль у марки втрое мельче, поэтому сторону держим крупной: на 26 мм
+       * это 0,36 мм на модуль — с запасом против проверенной этикетки, где
+       * 0,33. Меньше 22 мм уводит к границе допустимого по ГИС МТ.
        */
-      doc.addImage(canvas.toDataURL('image/png'), 'PNG', layout.dmX, layout.dmY, layout.dmSize, layout.dmSize);
+      doc.addImage(canvas.toDataURL('image/png'), 'PNG', layout.dmX, layout.dmY, layout.symbolSize, layout.symbolSize);
     } catch (e) {
       console.warn('Не нарисовали DataMatrix', e);
     }
@@ -411,40 +414,51 @@ export async function drawFbsComboLabel(
         includetext: false,
         backgroundcolor: 'ffffff',
       });
-      doc.addImage(canvas.toDataURL('image/png'), 'PNG', layout.qrX, layout.qrY, layout.qrSize, layout.qrSize);
+      doc.addImage(canvas.toDataURL('image/png'), 'PNG', layout.qrX, layout.qrY, layout.symbolSize, layout.symbolSize);
     } catch (e) {
       console.warn('Не нарисовали QR задания', e);
     }
   }
 
-  // 3. Номер задания: мелкая старшая часть и крупная младшая — как у WB.
+  /*
+   * 3. Под каждым символом — его собственная подпись.
+   *
+   * Слева код марки целиком, мелко и в три строки по ширине символа — так же,
+   * как на обычной этикетке «ШК + ЧЗ». Справа номер задания. Подпись под своим
+   * кодом: под чужим сборщик читает её как ошибку.
+   */
+  if (code) {
+    setFont('normal');
+    doc.setFontSize(layout.codeTextFont);
+    doc.text(
+      doc.splitTextToSize(code, Math.max(16, layout.symbolSize - 0.4)).slice(0, 3),
+      layout.codeTextX,
+      layout.codeTextY,
+    );
+  }
+
+  // Номер задания: мелкая старшая часть и крупная младшая — как у WB.
   const partA = String(data.partA || '').trim();
   const partB = String(data.partB || '').trim();
   if (partA) {
     setFont('normal');
     doc.setFontSize(layout.partAFont);
-    doc.text(partA, layout.partAX, layout.partAY);
+    // Та же точка, что и у крупных цифр, только выше на partGap.
+    doc.text(partA, layout.partBX, layout.partBY - layout.partGap, { align: 'center' });
   }
   if (partB) {
     setFont('bold');
     doc.setFontSize(layout.partBFont);
-    doc.text(partB, layout.partBX, layout.partBY);
+    doc.text(partB, layout.partBX, layout.partBY, { align: 'center' });
   }
 
   /*
-   * 4. Код марки текстом — и больше ничего.
+   * Больше на этикетке ничего нет.
    *
-   * На этикетке ровно два символа: марка и QR задания. Полосы штрихкода тут
-   * были, но их убрали — QR несёт то же самое значение, а место лучше отдать
-   * марке: у неё 72×72 модуля, и каждый лишний миллиметр стороны заметно
-   * улучшает считывание. Товарного ШК, артикула и размера здесь нет тем более.
+   * Два символа и две подписи под ними. Полосы штрихкода тут были, но их
+   * убрали — QR несёт то же значение, а место лучше отдать марке. Товарного
+   * ШК, артикула и размера здесь нет тем более.
    */
-  setFont('normal');
-  doc.setFontSize(layout.codeTextFont);
-  if (code) {
-    const width = Math.max(20, 57 - layout.codeTextX);
-    doc.text(doc.splitTextToSize(code, width).slice(0, 2), layout.codeTextX, layout.codeTextY);
-  }
 }
 
 /** Товарный штрихкод: EAN-13, если сходится контрольная цифра, иначе code128. */
