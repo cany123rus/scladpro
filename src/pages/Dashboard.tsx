@@ -432,32 +432,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   }, [cameraStreams]);
 
   /*
-   * Простой на рабочем месте: возвращаем на «Задачи» через десять минут.
-   *
-   * Автовыход из профиля отсюда убран намеренно. ПК стоит у стола сборки,
-   * и отойти за товаром или на обед дольше получаса — обычное дело: человек
-   * возвращался к экрану входа, а начатая поставка и открытое окно скана
-   * пропадали. Сессию теперь закрывают только кнопкой «Выйти».
+   * Реакции на простой у рабочего места нет никакой: ни выхода из профиля,
+   * ни возврата на «Задачи». ПК стоит у стола сборки, отойти за товаром или
+   * на обед — обычное дело, и раздел, открытый до ухода, должен дождаться
+   * человека там же, где он его оставил.
    */
-  useEffect(() => {
-    let tabTimer: ReturnType<typeof setTimeout> | null = null;
-
-    const resetInactivityTimer = () => {
-      if (tabTimer) clearTimeout(tabTimer);
-      tabTimer = setTimeout(() => {
-        setActiveTab('tasks');
-      }, 10 * 60 * 1000);
-    };
-
-    const events: Array<keyof WindowEventMap> = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
-    events.forEach((eventName) => window.addEventListener(eventName, resetInactivityTimer, { passive: true } as AddEventListenerOptions));
-    resetInactivityTimer();
-
-    return () => {
-      if (tabTimer) clearTimeout(tabTimer);
-      events.forEach((eventName) => window.removeEventListener(eventName, resetInactivityTimer as EventListener));
-    };
-  }, []);
 
   // Suppliers State
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
