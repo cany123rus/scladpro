@@ -41,9 +41,17 @@ import {
   restoreDataMatrixGs,
 } from '../utils/honestSign';
 import { explainWbAccess } from '../utils/wbTokenScopes';
-import { buildStickersPdf, fetchStickers } from '../utils/stickers';
+import { buildStickersPdf, fetchStickers, renderStickerImage } from '../utils/stickers';
+import type { StickerImage } from '../utils/stickers';
 import { getWBImageUrl, getWBImageUrls } from '../utils/wbImages';
-import { DEFAULT_CHZ_LABEL_LAYOUT, drawChzLabel, matchChzCodeForProduct, readChzLabelLayout } from '../utils/chzLabel';
+import {
+  DEFAULT_CHZ_LABEL_LAYOUT,
+  drawChzLabel,
+  matchChzCodeForProduct,
+  normalizeHsSize,
+  readChzLabelLayout,
+} from '../utils/chzLabel';
+import type { ChzLabelLayout } from '../utils/chzLabel';
 import {
   deleteFbsOrderCode,
   findFbsOrderByCode,
@@ -631,6 +639,19 @@ export const WBSupplyManager = ({
   const [fbsFilterBarHeight, setFbsFilterBarHeight] = useState(0);
   // Номер задания, для которого сейчас тянем стикер (потерянный переклеивают).
   const [fbsStickerPrintingId, setFbsStickerPrintingId] = useState<string>('');
+  // То же для этикетки ЧЗ: печатается по одной строке из таблицы.
+  const [fbsChzPrintingKey, setFbsChzPrintingKey] = useState<string>('');
+  /*
+   * Отмеченные строки для пакетной печати.
+   *
+   * Ключ — storageKey строки, он же ключ карты сканов: номер задания есть не у
+   * всех строк (в файле поставки его может не быть), а storageKey есть всегда.
+   */
+  const [fbsScanSelection, setFbsScanSelection] = useState<Record<string, true>>({});
+  const [fbsScanBulkBusy, setFbsScanBulkBusy] = useState(false);
+  // Что кладём в пакет: стикер WB перед каждой этикеткой ЧЗ и лист подбора.
+  const [fbsBulkWithStickers, setFbsBulkWithStickers] = useState(true);
+  const [fbsBulkWithPicking, setFbsBulkWithPicking] = useState(false);
   // Голосовые подсказки шагов. Выбор запоминаем: на складе он свой у каждого ПК.
   const [fbsSoundOn, setFbsSoundOn] = useState<boolean>(() => {
     try {
@@ -2786,6 +2807,32 @@ export const WBSupplyManager = ({
     };
   };
 
+  /*
+   * Строки, которые сейчас видно в таблице.
+   *
+   * Отдельно от разметки, потому что кнопка «Выбрать все» обязана выбрать
+   * ровно то, что человек видит: фильтр стоит на «Не отсканированы», а в
+   * выбор попала вся поставка — это уже не выбор, а сюрприз на печати.
+   */
+  const fbsScanVisibleRows = useMemo(() => {
+    return (fbsScanRows || []).filter((row) => {
+      if (fbsScanFilter === 'all') return true;
+      const done = Boolean(findFbsScanSavedEntry(row, fbsScansBySticker)?.item?.honestSignCode);
+      return fbsScanFilter === 'done' ? done : !done;
+    });
+  }, [fbsScanRows, fbsScanFilter, fbsScansBySticker]);
+
+  /** Отмеченные строки — в том же порядке, что и в таблице. */
+  const fbsScanSelectedRows = useMemo(
+    () => (fbsScanRows || []).filter((row) => fbsScanSelection[row.storageKey]),
+    [fbsScanRows, fbsScanSelection],
+  );
+
+  // Выбор живёт в пределах одного открытия окна: на другой поставке он врал бы.
+  useEffect(() => {
+    setFbsScanSelection({});
+  }, [activeSupplyId, fbsScanModalOpen]);
+
   const getFbsScanCompletenessStats = (rows: FbsSupplyScanOrderRow[]) => {
     const uniqueRows = getUniqueFbsScanRows(rows || []);
     const rowsWithSticker = uniqueRows.filter((row) => Boolean(normalizeStickerDigits(String(row?.stickerDigits || row?.stickerText || '')))).length;
@@ -3375,6 +3422,359 @@ export const WBSupplyManager = ({
       setFbsScanNotice({ type: 'error', text: e?.message || 'Не удалось получить стикер' });
     } finally {
       setFbsStickerPrintingId('');
+    }
+  };
+
+  /**
+   * Шрифт с кириллицей в документ этикеток.
+   *
+   * Без него jsPDF рисует наименование и «Размер:» кракозябрами: встроенные
+   * шрифты стандарта PDF кириллицу не знают. Файл кэшируем на компонент —
+   * на пакете в двести этикеток он иначе качался бы каждый раз заново.
+   */
+  const addChzLabelFont = async (pdf: any) => {
+    try {
+      if (!cachedPdfFontRef.current) {
+        const fontUrl = 'https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.66/fonts/Roboto/Roboto-Regular.ttf';
+        const response = await withTimeout(fetch(fontUrl), 7000, 'Таймаут загрузки шрифта');
+        const blob = await response.blob();
+        const reader = new FileReader();
+        reader.readAsDataURL(blob);
+        await new Promise((resolve) => { reader.onloadend = () => resolve(reader.result); });
+        cachedPdfFontRef.current = (reader.result as string).split(',')[1];
+      }
+      if (cachedPdfFontRef.current) {
+        pdf.addFileToVFS('Roboto-Regular.ttf', cachedPdfFontRef.current);
+        pdf.addFont('Roboto-Regular.ttf', 'Roboto', 'normal');
+        pdf.addFont('Roboto-Regular.ttf', 'Roboto', 'bold');
+      }
+    } catch (e) {
+      console.warn('Шрифт для этикетки ЧЗ не загрузился', e);
+    }
+  };
+
+  /**
+   * Товарный штрихкод по номенклатуре и размеру задания.
+   *
+   * У карточки размеров несколько, и у каждого свой ШК. Берём тот, что
+   * совпал с размером задания; если не совпал ни один, а размер в карточке
+   * один — берём его. Иначе штрихкода не будет вовсе: пустое место на
+   * этикетке заметят, чужой ШК на вещи — нет.
+   */
+  const loadChzLabelSkus = async (supplierId: string, nmIds: number[]) => {
+    const out = new Map<number, { bySize: Record<string, string>; only: string }>();
+    const ids = Array.from(new Set(nmIds.filter((id) => Number.isFinite(id) && id > 0)));
+    if (!supplierId || ids.length === 0) return out;
+
+    for (let i = 0; i < ids.length; i += 500) {
+      const { data } = await supabase
+        .from('wb_products_cache')
+        .select('nm_id, product_json')
+        .eq('supplier_id', supplierId)
+        .in('nm_id', ids.slice(i, i + 500));
+
+      (data || []).forEach((row: any) => {
+        const sizes = Array.isArray(row?.product_json?.sizes) ? row.product_json.sizes : [];
+        const bySize: Record<string, string> = {};
+        let only = '';
+        sizes.forEach((s: any) => {
+          const sku = String(s?.skus?.[0] || '').trim();
+          if (!sku) return;
+          [s?.techSize, s?.wbSize].forEach((label: any) => {
+            const key = normalizeHsSize(String(label || ''));
+            if (key) bySize[key] = sku;
+          });
+        });
+        if (sizes.length === 1) only = String(sizes[0]?.skus?.[0] || '').trim();
+        out.set(Number(row.nm_id), { bySize, only });
+      });
+    }
+
+    return out;
+  };
+
+  const pickChzLabelBarcode = (
+    skus: Map<number, { bySize: Record<string, string>; only: string }>,
+    row: FbsSupplyScanOrderRow,
+  ) => {
+    const card = skus.get(Number(row?.nmId || 0));
+    if (!card) return '';
+    const key = normalizeHsSize(String(row?.size || ''));
+    return (key && card.bySize[key]) || card.only || '';
+  };
+
+  /**
+   * PDF с этикетками «ШК + ЧЗ» по строкам поставки.
+   *
+   * Печатается не «свободная» марка из базы, а та, что уже отсканирована на
+   * это задание: этикетку переклеивают на ту же вещь, и код обязан остаться
+   * прежним. Со стикером WB этикетка идёт парой — стикер, сразу за ним ЧЗ,
+   * чтобы сборщик не сводил их вручную.
+   */
+  const buildChzLabelsPdf = async (
+    items: Array<{ row: FbsSupplyScanOrderRow; code: string }>,
+    layout: ChzLabelLayout,
+    skus: Map<number, { bySize: Record<string, string>; only: string }>,
+    stickersByOrderId: Map<number, StickerImage>,
+  ) => {
+    const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: [58, 40], compress: true });
+    await addChzLabelFont(pdf);
+
+    // jsPDF создаёт первую страницу сам — считаем её занятой только после
+    // первой отрисовки, иначе документ начнётся с пустого листа.
+    let pageUsed = false;
+    const startPage = () => {
+      if (pageUsed) pdf.addPage([58, 40], 'landscape');
+      pageUsed = true;
+    };
+
+    for (const item of items) {
+      const orderId = Number(String(item.row.orderId || '').trim());
+      const sticker = Number.isFinite(orderId) ? stickersByOrderId.get(orderId) : undefined;
+
+      if (sticker) {
+        try {
+          const data = await renderStickerImage(sticker);
+          if (data) {
+            startPage();
+            pdf.addImage(data, 'PNG', 0, 0, 58, 40);
+          }
+        } catch (e) {
+          console.warn('Стикер не отрисовался', orderId, e);
+        }
+      }
+
+      startPage();
+      try {
+        await drawChzLabel(pdf, bwipjs, layout, {
+          chzCode: item.code,
+          barcode: pickChzLabelBarcode(skus, item.row),
+          title: String(item.row.title || ''),
+          article: String(item.row.article || ''),
+          size: String(item.row.size || ''),
+          supplierName: String(selectedSupplier?.name || ''),
+        });
+      } catch (e) {
+        console.warn('Этикетка ЧЗ не отрисовалась', item.row.orderId, e);
+      }
+    }
+
+    return pdf;
+  };
+
+  /**
+   * Общая печать этикеток ЧЗ: и по одной строке, и пакетом.
+   *
+   * Вкладку под результат открывает вызывающий — до первого await, пока жив
+   * жест клика; иначе блокировщик всплывающих окон режет её молча.
+   */
+  const printChzLabels = async (
+    rows: FbsSupplyScanOrderRow[],
+    opts: { withStickers: boolean; fileName: string; tab: Window | null },
+  ) => {
+    const items = rows
+      .map((row) => ({
+        row,
+        code: normalizeDataMatrixText(String(findFbsScanSavedEntry(row, fbsScansBySticker)?.item?.honestSignCode || '')),
+      }))
+      .filter((item) => item.code);
+
+    if (!items.length) {
+      throw new Error('Ни у одной выбранной строки нет отсканированного ЧЗ — печатать нечего');
+    }
+
+    const { data: layoutRow } = await supabase
+      .from('app_settings')
+      .select('value')
+      .eq('key', 'wb_label_layout_v1')
+      .maybeSingle();
+    const layout = readChzLabelLayout(layoutRow?.value);
+
+    const skus = await loadChzLabelSkus(
+      selectedSupplierId,
+      items.map((item) => Number(item.row.nmId || 0)),
+    ).catch(() => new Map<number, { bySize: Record<string, string>; only: string }>());
+
+    let stickersByOrderId = new Map<number, StickerImage>();
+    if (opts.withStickers) {
+      const token = getSupplierToken();
+      if (!token) throw new Error('Токен API кабинета не найден — снимите галочку «Стикеры WB»');
+
+      const orderIds = Array.from(new Set(
+        items
+          .map((item) => Number(String(item.row.orderId || '').trim()))
+          .filter((id) => Number.isFinite(id) && id > 0),
+      ));
+
+      setFbsScanNotice({ type: 'info', text: `Запрашиваю стикеры у WB: 0 из ${orderIds.length}…` });
+      stickersByOrderId = await fetchStickers(token, orderIds, (done, total) => {
+        setFbsScanNotice({ type: 'info', text: `Запрашиваю стикеры у WB: ${done} из ${total}…` });
+      });
+    }
+
+    setFbsScanNotice({ type: 'info', text: `Собираю PDF: этикеток ${items.length}…` });
+    const pdf = await buildChzLabelsPdf(items, layout, skus, stickersByOrderId);
+
+    const missingStickers = opts.withStickers
+      ? items.filter((item) => !stickersByOrderId.get(Number(String(item.row.orderId || '').trim()))).length
+      : 0;
+    const skipped = rows.length - items.length;
+    const tail = [
+      skipped > 0 ? `без ЧЗ пропущено: ${skipped}` : '',
+      missingStickers > 0 ? `WB не отдал стикеров: ${missingStickers}` : '',
+    ].filter(Boolean).join('; ');
+
+    if (opts.tab) {
+      const blobUrl = String(pdf.output('bloburl'));
+      opts.tab.location.href = blobUrl;
+      setTimeout(() => { try { URL.revokeObjectURL(blobUrl); } catch {} }, 60000);
+    } else {
+      pdf.save(opts.fileName);
+    }
+
+    setFbsScanNotice({
+      type: 'success',
+      text: `Этикеток ЧЗ: ${items.length}.${tail ? ` (${tail})` : ''}`
+        + (opts.tab ? ' Открыто в новой вкладке.' : ' Браузер запретил вкладку — файл скачан.'),
+    });
+  };
+
+  /** Этикетка ЧЗ одной строки — когда её испортили при упаковке. */
+  const printSingleChzLabel = async (row: FbsSupplyScanOrderRow) => {
+    const tab = window.open('', '_blank');
+    if (tab) {
+      tab.document.write('<title>Этикетка ЧЗ</title><p style="font:14px sans-serif;padding:16px">Готовлю этикетку…</p>');
+      tab.document.close();
+    }
+
+    setFbsChzPrintingKey(row.storageKey);
+    try {
+      await printChzLabels([row], {
+        withStickers: false,
+        fileName: `ЧЗ ${row.orderId || row.storageKey}.pdf`,
+        tab,
+      });
+    } catch (e: any) {
+      try { tab?.close(); } catch {}
+      setFbsScanNotice({ type: 'error', text: e?.message || 'Не удалось напечатать этикетку ЧЗ' });
+    } finally {
+      setFbsChzPrintingKey('');
+    }
+  };
+
+  /**
+   * Лист подбора по отмеченным строкам.
+   *
+   * Отдельный файл, а не страницы в том же PDF: этикетки уходят на
+   * термопринтер 58×40, лист — на обычный A4, и печатаются они на разных
+   * принтерах.
+   */
+  const buildSelectedPickingListPdf = async (rows: FbsSupplyScanOrderRow[]) => {
+    const doc = new jsPDF();
+    await addChzLabelFont(doc);
+    try { doc.setFont('Roboto'); } catch {}
+
+    const urls = Array.from(new Set(rows.flatMap((row) => getFbsRowPhotoCandidates(row)).filter(Boolean)));
+    const images = await loadImageDataUrls(urls, 6);
+
+    const body = rows.map((row) => {
+      const code = String(findFbsScanSavedEntry(row, fbsScansBySticker)?.item?.honestSignCode || '');
+      const img = getFbsRowPhotoCandidates(row).map((u) => images.get(u) || '').find(Boolean) || '';
+      return [
+        String(row.orderId || '—'),
+        img,
+        String(row.title || ''),
+        String(row.size || ''),
+        String(row.article || ''),
+        code || '—',
+      ];
+    });
+
+    const supplyName = supplies.find((s) => s.id === activeSupplyId)?.name || activeSupplyId || '';
+    doc.setFontSize(15);
+    doc.text(`Лист подбора (выбранные) ${supplyName}`, 14, 18);
+    doc.setFontSize(10);
+    doc.text(`Дата: ${new Date().toLocaleDateString('ru-RU')}`, 14, 24);
+    doc.text(`Строк: ${rows.length}`, 100, 24);
+
+    (autoTable as any)(doc, {
+      startY: 30,
+      head: [['№ задания', 'Фото', 'Наименование', 'Размер', 'Артикул', 'ЧЗ']],
+      body,
+      styles: { fontSize: 7, cellPadding: 2, valign: 'middle', font: 'Roboto' },
+      headStyles: { font: 'Roboto', fontStyle: 'normal' },
+      bodyStyles: { font: 'Roboto', fontStyle: 'normal' },
+      rowPageBreak: 'avoid',
+      columnStyles: {
+        0: { cellWidth: 20 },
+        1: { cellWidth: 20, minCellHeight: 24 },
+        2: { minCellWidth: 46 },
+        3: { cellWidth: 14, halign: 'center' },
+        4: { cellWidth: 22 },
+        5: { minCellWidth: 46 },
+      },
+      didParseCell: (data: any) => {
+        if (data.column.index === 1 && data.section === 'body') {
+          data.cell.text = [];
+        }
+        // Номер задания и ЧЗ — тем же шрифтом, что и в общем листе подбора:
+        // по ним ищут в PDF, а подстановки Roboto ломают поиск.
+        if (data.section === 'body' && [0, 5].includes(data.column.index)) {
+          const raw = Array.isArray(data.cell.text) ? data.cell.text.join(' ') : String(data.cell.text || '');
+          data.cell.text = [String(raw).replace(/\s+/g, '').trim()];
+          data.cell.styles.font = 'helvetica';
+        }
+      },
+      didDrawCell: (data: any) => {
+        if (data.column.index === 1 && data.cell.section === 'body') {
+          const img = data.cell.raw;
+          if (img) {
+            try {
+              const format = String(img).startsWith('data:image/png') ? 'PNG' : 'JPEG';
+              doc.addImage(img, format as 'PNG' | 'JPEG', data.cell.x + 2, data.cell.y + 2, 15, 20);
+            } catch {
+              // одна непрогрузившаяся картинка не повод ронять весь лист
+            }
+          }
+        }
+      },
+    });
+
+    return doc;
+  };
+
+  /** Пакетная печать по отмеченным строкам. */
+  const printSelectedFbsRows = async () => {
+    const rows = fbsScanSelectedRows;
+    if (!rows.length) {
+      setFbsScanNotice({ type: 'error', text: 'Не отмечено ни одной строки' });
+      return;
+    }
+
+    const tab = window.open('', '_blank');
+    if (tab) {
+      tab.document.write('<title>Этикетки ЧЗ</title><p style="font:14px sans-serif;padding:16px">Готовлю этикетки…</p>');
+      tab.document.close();
+    }
+
+    setFbsScanBulkBusy(true);
+    try {
+      if (fbsBulkWithPicking) {
+        setFbsScanNotice({ type: 'info', text: 'Собираю лист подбора…' });
+        const picking = await buildSelectedPickingListPdf(rows);
+        picking.save(`Лист подбора ${activeSupplyId || ''} ${rows.length}.pdf`);
+      }
+
+      await printChzLabels(rows, {
+        withStickers: fbsBulkWithStickers,
+        fileName: `Этикетки ЧЗ ${activeSupplyId || ''} ${rows.length}.pdf`,
+        tab,
+      });
+    } catch (e: any) {
+      try { tab?.close(); } catch {}
+      setFbsScanNotice({ type: 'error', text: e?.message || 'Не удалось напечатать выбранное' });
+    } finally {
+      setFbsScanBulkBusy(false);
     }
   };
 
@@ -6899,8 +7299,9 @@ export const WBSupplyManager = ({
                   // длинный, а «что осталось» нужно видеть на любой прокрутке.
                   <div
                     ref={fbsFilterBarRef}
-                    className="sticky top-0 z-30 -mx-5 mb-3 flex flex-wrap items-center gap-2 border-b border-slate-200 bg-white/95 px-5 py-3 shadow-[0_2px_6px_-4px_rgba(15,23,42,0.35)] backdrop-blur"
+                    className="sticky top-0 z-30 -mx-5 mb-3 flex flex-col gap-2 border-b border-slate-200 bg-white/95 px-5 py-3 shadow-[0_2px_6px_-4px_rgba(15,23,42,0.35)] backdrop-blur"
                   >
+                    <div className="flex flex-wrap items-center gap-2">
                     {tabs.map((tab) => (
                       <button
                         key={tab.id}
@@ -6943,6 +7344,65 @@ export const WBSupplyManager = ({
                     >
                       {fbsSoundOn ? '🔊 Звук включён' : '🔈 Звук выключен'}
                     </button>
+                    </div>
+
+                    {/* Пакетная печать. Вторая строка панели, а не отдельный
+                        блок: выбор идёт по тому же фильтру, что и вкладки
+                        выше, и разносить их по экрану значило бы путать. */}
+                    <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next: Record<string, true> = {};
+                          fbsScanVisibleRows.forEach((row) => { next[row.storageKey] = true; });
+                          setFbsScanSelection(next);
+                        }}
+                        className="px-3 py-1.5 rounded-xl text-sm border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                      >
+                        Выбрать все <span className="tabular-nums">({fbsScanVisibleRows.length})</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFbsScanSelection({})}
+                        disabled={!fbsScanSelectedRows.length}
+                        className="px-3 py-1.5 rounded-xl text-sm border border-slate-300 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+                      >
+                        Снять выбор
+                      </button>
+                      <span className="text-sm text-slate-600">
+                        Выбрано: <span className="font-semibold tabular-nums">{fbsScanSelectedRows.length}</span>
+                      </span>
+
+                      <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={fbsBulkWithStickers}
+                          onChange={(e) => setFbsBulkWithStickers(e.target.checked)}
+                          className="h-4 w-4 rounded border-slate-300"
+                        />
+                        Стикеры WB
+                      </label>
+                      <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={fbsBulkWithPicking}
+                          onChange={(e) => setFbsBulkWithPicking(e.target.checked)}
+                          className="h-4 w-4 rounded border-slate-300"
+                        />
+                        Лист подбора
+                      </label>
+
+                      <button
+                        type="button"
+                        onClick={printSelectedFbsRows}
+                        disabled={!fbsScanSelectedRows.length || fbsScanBulkBusy}
+                        title="Этикетки ЧЗ по отмеченным строкам. Со стикером WB они идут парой: стикер, сразу за ним ЧЗ"
+                        className="ml-auto inline-flex items-center gap-2 px-4 py-1.5 rounded-xl text-sm font-semibold bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40"
+                      >
+                        <Printer className="w-4 h-4" />
+                        {fbsScanBulkBusy ? 'Готовлю…' : 'Печать выбранных'}
+                      </button>
+                    </div>
                   </div>
                 );
               })()}
@@ -6967,6 +7427,25 @@ export const WBSupplyManager = ({
                       className="sticky z-20 bg-slate-50 text-slate-600 shadow-[0_1px_0_0_#e2e8f0]"
                     >
                       <tr>
+                        <th className="px-3 py-2 text-left w-10">
+                          {/* Тот же выбор, что и кнопкой в панели: отмечает
+                              ровно видимые строки, не всю поставку. */}
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 rounded border-slate-300"
+                            title="Выбрать все строки текущего фильтра"
+                            checked={fbsScanVisibleRows.length > 0 && fbsScanVisibleRows.every((row) => fbsScanSelection[row.storageKey])}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                const next: Record<string, true> = {};
+                                fbsScanVisibleRows.forEach((row) => { next[row.storageKey] = true; });
+                                setFbsScanSelection(next);
+                              } else {
+                                setFbsScanSelection({});
+                              }
+                            }}
+                          />
+                        </th>
                         {/* Колонка должна быть шире картинки: при w-16 ячейка
                             сжимала фото в вертикальную полоску. */}
                         <th className="px-3 py-2 text-left w-40">Фото</th>
@@ -6976,13 +7455,7 @@ export const WBSupplyManager = ({
                       </tr>
                     </thead>
                     <tbody>
-                      {fbsScanRows
-                        .filter((row) => {
-                          if (fbsScanFilter === 'all') return true;
-                          const done = Boolean(findFbsScanSavedEntry(row, fbsScansBySticker)?.item?.honestSignCode);
-                          return fbsScanFilter === 'done' ? done : !done;
-                        })
-                        .map((row) => {
+                      {fbsScanVisibleRows.map((row) => {
                         const scan = findFbsScanSavedEntry(row, fbsScansBySticker)?.item;
                         const isActive = fbsPendingStickerRow?.storageKey === row.storageKey;
                         const isSaving = !!fbsScanSavingKeys[row.storageKey];
@@ -6993,6 +7466,22 @@ export const WBSupplyManager = ({
                             key={row.storageKey}
                             className={`${failedReason ? 'bg-rose-50' : isSaving ? 'bg-amber-50/70' : scan?.honestSignCode ? 'bg-emerald-50/60' : isActive ? 'bg-amber-50' : 'bg-white'} border-t border-slate-100`}
                           >
+                            <td className="px-3 py-2 align-top">
+                              <input
+                                type="checkbox"
+                                className="mt-1 h-4 w-4 rounded border-slate-300"
+                                checked={!!fbsScanSelection[row.storageKey]}
+                                onChange={(e) => {
+                                  const checked = e.target.checked;
+                                  setFbsScanSelection((prev) => {
+                                    const next = { ...prev };
+                                    if (checked) next[row.storageKey] = true;
+                                    else delete next[row.storageKey];
+                                    return next;
+                                  });
+                                }}
+                              />
+                            </td>
                             <td className="px-3 py-2">
                               <FbsPhoto
                                 urls={getFbsRowPhotoCandidates(row)}
@@ -7029,6 +7518,19 @@ export const WBSupplyManager = ({
                                 ) : scan?.honestSignCode ? (
                                   <>
                                     <span className="text-emerald-600">ЧЗ сохранён</span>
+                                    {/* Этикетку с маркой рвут и заливают так же,
+                                        как стикер, — и переклеить нужно ровно ту
+                                        же марку, что уже привязана к заданию. */}
+                                    <button
+                                      type="button"
+                                      onClick={() => printSingleChzLabel(row)}
+                                      disabled={fbsChzPrintingKey === row.storageKey}
+                                      title="Этикетка «ШК + ЧЗ» этого задания — с уже отсканированной маркой"
+                                      className="inline-flex items-center gap-1 rounded-lg border border-indigo-300 bg-indigo-50 px-2 py-0.5 text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
+                                    >
+                                      <Printer className="w-3 h-3" />
+                                      {fbsChzPrintingKey === row.storageKey ? 'Готовлю…' : 'Печать ЧЗ'}
+                                    </button>
                                     <button
                                       type="button"
                                       onClick={() => resetFbsScannedCode(row)}
