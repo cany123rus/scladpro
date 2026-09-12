@@ -47,6 +47,8 @@ import { getWBImageUrl, getWBImageUrls } from '../utils/wbImages';
 import {
   DEFAULT_CHZ_LABEL_LAYOUT,
   drawChzLabel,
+  drawChzTailLabel,
+  drawFbsComboLabel,
   matchChzCodeForProduct,
   normalizeHsSize,
   readChzLabelLayout,
@@ -54,12 +56,25 @@ import {
 import type { ChzLabelLayout } from '../utils/chzLabel';
 import {
   deleteFbsOrderCode,
+  fetchFbsSupplyScans,
   findFbsOrderByCode,
   logFbsScanReject,
   upsertFbsOrderCode,
 } from '../utils/fbsOrderCodes';
-import { FbsOrdersDatabase } from './FbsOrdersDatabase';
-import { ChzWithdrawal } from './ChzWithdrawal';
+
+/*
+ * Подразделы грузятся отдельными чанками.
+ *
+ * «База заказов» и «Вывод ЧЗ» — большие самостоятельные экраны, но лежали в
+ * одном бандле с управлением ФБС и приезжали к каждому, кто просто открыл
+ * поставки. Теперь за них платит только тот, кто в них зашёл.
+ */
+const FbsOrdersDatabase = React.lazy(() =>
+  import('./FbsOrdersDatabase').then((m) => ({ default: m.FbsOrdersDatabase })),
+);
+const ChzWithdrawal = React.lazy(() =>
+  import('./ChzWithdrawal').then((m) => ({ default: m.ChzWithdrawal })),
+);
 
 // --- Types ---
 
@@ -149,6 +164,23 @@ interface FbsSupplyScanOrderRow {
   stickerText: string;
   stickerScanText: string;
 }
+
+/**
+ * Какой макет печатать из окна скана.
+ *
+ *  - `chz`      — «ШК + ЧЗ», как раньше;
+ *  - `chz_tail` — то же плюс крупный конец номера стикера, чтобы задание
+ *                 находили глазами;
+ *  - `combo`    — стикер задания и марка на одном поле: рисуем сами из данных
+ *                 WB, без картинки-оригинала.
+ */
+type FbsLabelKind = 'chz' | 'chz_tail' | 'combo';
+
+const FBS_LABEL_KIND_TITLES: Record<FbsLabelKind, string> = {
+  chz: 'ШК + ЧЗ',
+  chz_tail: 'ШК + ЧЗ + конец стикера',
+  combo: 'Совмещённая: стикер + ЧЗ',
+};
 
 interface FbsSupplyScanSheetMeta {
   updatedAt: string;
@@ -614,12 +646,38 @@ export const WBSupplyManager = ({
   // скана попадали в один рендер, второй строил карту без первого — и запись
   // затирала предыдущий ЧЗ, хотя в интерфейсе он оставался зелёным.
   const fbsScansRef = useRef<Record<string, FbsSupplyScanSavedItem>>({});
+  /*
+   * Отложенная запись снапшота поставки.
+   *
+   * Снапшот пишется целиком: на поставке в четыре сотни заданий это полтораста
+   * килобайт на каждый скан, то есть десятки мегабайт за смену и круговой рейс
+   * в сеть перед каждым следующим товаром. Держим его пачкой — а durable-запись
+   * на скан делает строка в fbs_order_codes, она маленькая и уходит сразу.
+   * Всё, что не успело попасть в снапшот, возвращается из строк при открытии.
+   */
+  const fbsScanFlushRef = useRef<{
+    timer: ReturnType<typeof setTimeout> | null;
+    supplyId: string;
+    supplierId: string;
+    dirty: boolean;
+  }>({ timer: null, supplyId: '', supplierId: '', dirty: false });
   // Строки, чья запись ещё идёт или уже провалилась: без этого «ЧЗ сохранён»
   // загорается до подтверждения от базы.
   const [fbsScanSavingKeys, setFbsScanSavingKeys] = useState<Record<string, true>>({});
   const [fbsScanFailedKeys, setFbsScanFailedKeys] = useState<Record<string, string>>({});
   // Что показывать в листе: всё, только несобранное или только собранное.
   const [fbsScanFilter, setFbsScanFilter] = useState<'all' | 'pending' | 'done'>('all');
+  /*
+   * Сколько строк рисуем.
+   *
+   * В поставке до четырёхсот заданий, и у каждой строки своё фото — целиком
+   * такая таблица кладёт окно на каждом нажатии клавиши. Показываем сотню и
+   * добираем по кнопке: сборщик работает сверху вниз и до конца списка
+   * доходит редко. На выбор и печать ограничение не влияет — они берут весь
+   * список по фильтру.
+   */
+  const FBS_SCAN_PAGE_SIZE = 100;
+  const [fbsScanRenderLimit, setFbsScanRenderLimit] = useState(FBS_SCAN_PAGE_SIZE);
   /*
    * Печать стикеров вместе с этикеткой ЧЗ.
    *
@@ -652,6 +710,15 @@ export const WBSupplyManager = ({
   // Что кладём в пакет: стикер WB перед каждой этикеткой ЧЗ и лист подбора.
   const [fbsBulkWithStickers, setFbsBulkWithStickers] = useState(true);
   const [fbsBulkWithPicking, setFbsBulkWithPicking] = useState(false);
+  // Макет этикетки. Выбор запоминаем: на рабочем месте он один и тот же.
+  const [fbsLabelKind, setFbsLabelKind] = useState<FbsLabelKind>(() => {
+    try {
+      const saved = localStorage.getItem('fbs_label_kind_v1');
+      return saved === 'chz_tail' || saved === 'combo' ? saved : 'chz';
+    } catch {
+      return 'chz';
+    }
+  });
   // Голосовые подсказки шагов. Выбор запоминаем: на складе он свой у каждого ПК.
   const [fbsSoundOn, setFbsSoundOn] = useState<boolean>(() => {
     try {
@@ -2057,7 +2124,38 @@ export const WBSupplyManager = ({
   /** Жив ли персональный эндпоинт заказов поставки: WB его убрал, но проверяем сами. */
   const directSupplyEndpointDeadRef = useRef(false);
 
-  const fetchOrdersForSupply = async (supplyId: string, options?: { enrich?: boolean; fresh?: boolean }) => {
+  /*
+   * Короткий кэш состава поставки.
+   *
+   * Лист подбора, групповой лист, стикеры и печать этикеток — каждый тянул
+   * поставку из WB заново, хотя человек нажимает их подряд за полминуты. При
+   * четырёхстах заданиях это лишняя минута ожидания и лишняя нагрузка на WB.
+   * Кэш включается явным `cacheTtlMs` и не касается окна скана и кнопки
+   * «Обновить данные» — там свежесть важнее скорости.
+   */
+  const supplyOrdersCacheRef = useRef<Map<string, { at: number; rows: any[] }>>(new Map());
+  /** Полторы минуты — столько живёт одна «сессия печати» у стола. */
+  const SUPPLY_ORDERS_CACHE_MS = 90_000;
+
+  const fetchOrdersForSupply = async (
+    supplyId: string,
+    options?: { enrich?: boolean; fresh?: boolean; cacheTtlMs?: number },
+  ) => {
+    const ttl = Number(options?.cacheTtlMs || 0);
+    const cacheKey = `${supplyId}|${options?.enrich ? 1 : 0}`;
+    if (ttl > 0) {
+      const hit = supplyOrdersCacheRef.current.get(cacheKey);
+      if (hit && Date.now() - hit.at < ttl) return hit.rows;
+    }
+
+    const rows = await fetchOrdersForSupplyFromWb(supplyId, options);
+    if (ttl > 0 && Array.isArray(rows) && rows.length) {
+      supplyOrdersCacheRef.current.set(cacheKey, { at: Date.now(), rows });
+    }
+    return rows;
+  };
+
+  const fetchOrdersForSupplyFromWb = async (supplyId: string, options?: { enrich?: boolean; fresh?: boolean }) => {
     const supply = supplies.find(s => s.id === supplyId);
     const dateFrom = supply
       ? Math.floor(new Date(supply.createdAt).getTime() / 1000) - (365 * 24 * 60 * 60)
@@ -2564,6 +2662,94 @@ export const WBSupplyManager = ({
     return clean;
   };
 
+  /**
+   * Дополнить снапшот сканами из базы.
+   *
+   * Строки пишутся сразу, снапшот — пачкой, поэтому после аварийного закрытия
+   * окна снапшот может отставать. Берём из базы то, чего в нём нет, и ставим
+   * на свои места. Строку, уже закрытую другим кодом, не трогаем: там сборщик
+   * что-то менял руками, и его решение старше нашей догадки.
+   */
+  const restoreFbsScansFromDb = (
+    savedMap: Record<string, FbsSupplyScanSavedItem>,
+    dbScans: Array<{ orderId: string; chzCode: string; stickerDigits: string; stickerText: string; article: string; size: string; title: string; scannedAt: string }>,
+    rows: FbsSupplyScanOrderRow[],
+  ) => {
+    const map = { ...(savedMap || {}) };
+    if (!dbScans?.length) return { map, added: 0 };
+
+    const knownCodes = new Set(
+      Object.values(map)
+        .map((item) => normalizeDataMatrixText(String(item?.honestSignCode || '')))
+        .filter(Boolean),
+    );
+    const rowByOrderId = new Map<string, FbsSupplyScanOrderRow>();
+    rows.forEach((row) => {
+      const id = String(row.orderId || '').trim();
+      if (id) rowByOrderId.set(id, row);
+    });
+
+    let added = 0;
+    for (const scan of dbScans) {
+      const code = normalizeDataMatrixText(String(scan.chzCode || ''));
+      if (!code || knownCodes.has(code)) continue;
+
+      const orderId = String(scan.orderId || '').trim();
+      const row = rowByOrderId.get(orderId);
+      const storageKey = row?.storageKey || `order:${orderId}`;
+      if (map[storageKey]?.honestSignCode) continue;
+
+      map[storageKey] = {
+        storageKey,
+        stickerDigits: row?.stickerDigits || scan.stickerDigits || '',
+        stickerScanText: row?.stickerScanText || scan.stickerText || '',
+        honestSignCode: code,
+        updatedAt: scan.scannedAt || new Date().toISOString(),
+        orderId,
+        title: row?.title || scan.title || '',
+        article: row?.article || scan.article || '',
+        size: row?.size || scan.size || '',
+      };
+      knownCodes.add(code);
+      added += 1;
+    }
+
+    return { map, added };
+  };
+
+  /** Записать снапшот прямо сейчас (закрытие окна, уход со страницы). */
+  const flushFbsScanMap = async () => {
+    const state = fbsScanFlushRef.current;
+    if (state.timer) { clearTimeout(state.timer); state.timer = null; }
+    if (!state.dirty || !state.supplyId) return;
+
+    const { supplyId, supplierId } = state;
+    state.dirty = false;
+    try {
+      const saved = await saveFbsSupplyScanMap(supplyId, fbsScansRef.current, supplierId);
+      applyFbsScans(saved);
+    } catch (e: any) {
+      // Снапшот — кэш, но молчать нельзя: пока он отстаёт, окно на другом
+      // рабочем месте покажет поставку без этих сканов.
+      state.dirty = true;
+      console.error('снапшот поставки не записан', e);
+      setFbsScanNotice({
+        type: 'error',
+        text: `Сканы записаны в базу, но снапшот поставки не сохранился (${e?.message || 'ошибка сети'}). Коды не потеряны — они вернутся при следующем открытии окна.`,
+      });
+    }
+  };
+
+  /** Отложить запись снапшота: сборщик обычно сканирует очередью. */
+  const scheduleFbsScanMapSave = (supplyId: string, supplierId: string) => {
+    const state = fbsScanFlushRef.current;
+    state.supplyId = supplyId;
+    state.supplierId = supplierId;
+    state.dirty = true;
+    if (state.timer) clearTimeout(state.timer);
+    state.timer = setTimeout(() => { void flushFbsScanMap(); }, 2500);
+  };
+
   const syncFbsScannedCodesToUnifiedBase = async (codes: string[], supplierId?: string) => {
     const normalizedSupplierId = String(supplierId || selectedSupplierId || '').trim();
     const uniqueCodes = Array.from(new Set((codes || []).map((code) => normalizeDataMatrixText(String(code || '').trim())).filter(Boolean)));
@@ -2584,6 +2770,8 @@ export const WBSupplyManager = ({
     });
 
     const idsToUpdate: string[] = [];
+    /** Коды, которые в общей базе числятся за другим кабинетом. */
+    const foreignCodes: string[] = [];
     const toInsert: Array<{ supplier_id: string; category: string; code: string; file_name: string; status: string; created_at: string }> = [];
 
     uniqueCodes.forEach((code) => {
@@ -2603,7 +2791,19 @@ export const WBSupplyManager = ({
       const rowSupplierId = String(row?.supplier_id || '').trim();
       if (!rowSupplierId || rowSupplierId === normalizedSupplierId) {
         if (row?.id) idsToUpdate.push(String(row.id));
+        return;
       }
+
+      /*
+       * Код принадлежит другому кабинету.
+       *
+       * Чужую строку не трогаем — в таблице уникальный индекс по самому коду,
+       * и «перетянуть» её значило бы стереть чужую марку. Но и промолчать
+       * нельзя, как было раньше: код не помечался отсканированным, и защита
+       * «этот ЧЗ уже использован» на него больше никогда не срабатывала — ту
+       * же марку можно было спокойно наклеить на второй товар.
+       */
+      foreignCodes.push(code);
     });
 
     if (idsToUpdate.length > 0) {
@@ -2625,6 +2825,8 @@ export const WBSupplyManager = ({
         .insert(toInsert);
       if (error) throw error;
     }
+
+    return { foreignCodes };
   };
 
   const isFbsCodeAlreadyScannedForSupplier = async (code: string, supplierId?: string) => {
@@ -2828,10 +3030,48 @@ export const WBSupplyManager = ({
     [fbsScanRows, fbsScanSelection],
   );
 
+  /*
+   * Счётчики прогресса считаем один раз за рендер.
+   *
+   * Раньше их запрашивали в трёх местах разметки, и каждый вызов заново
+   * перебирал поставку и строил карту уникальных строк — на четырёхстах
+   * заданиях это три лишних прохода на каждое нажатие клавиши.
+   */
+  const fbsScanStats = useMemo(
+    () => getFbsScanProgressStats(fbsScanRows, fbsScansBySticker),
+    [fbsScanRows, fbsScansBySticker],
+  );
+
   // Выбор живёт в пределах одного открытия окна: на другой поставке он врал бы.
   useEffect(() => {
     setFbsScanSelection({});
   }, [activeSupplyId, fbsScanModalOpen]);
+
+  /*
+   * Хвост отложенного снапшота.
+   *
+   * Закрыли окно, ушли со страницы, размонтировали раздел — дописываем то, что
+   * ещё не успело уйти. Скан от этого не зависит: он уже лежит строкой в базе,
+   * но снапшот нужен второму рабочему месту и быстрому открытию.
+   */
+  useEffect(() => {
+    if (fbsScanModalOpen) return;
+    void flushFbsScanMap();
+  }, [fbsScanModalOpen]);
+
+  // Смена фильтра или состава поставки — снова показываем первую сотню.
+  useEffect(() => {
+    setFbsScanRenderLimit(FBS_SCAN_PAGE_SIZE);
+  }, [fbsScanFilter, fbsScanRows]);
+
+  useEffect(() => {
+    const onLeave = () => { void flushFbsScanMap(); };
+    window.addEventListener('beforeunload', onLeave);
+    return () => {
+      window.removeEventListener('beforeunload', onLeave);
+      onLeave();
+    };
+  }, []);
 
   const getFbsScanCompletenessStats = (rows: FbsSupplyScanOrderRow[]) => {
     const uniqueRows = getUniqueFbsScanRows(rows || []);
@@ -3142,12 +3382,26 @@ export const WBSupplyManager = ({
     try {
       // forceRefresh: сверяем сохранённый лист с WB по количеству заказов.
       // Это один запрос, а цена ошибки — недособранная поставка.
-      const [{ rows, sheetRows, apiRows, mergedRows, sheetMeta, source }, savedMap] = await Promise.all([
+      const [{ rows, sheetRows, apiRows, mergedRows, sheetMeta, source }, savedMap, dbScans] = await Promise.all([
         loadPreparedFbsScanRows(activeSupplyId, selectedSupplierId, { forceRefresh: true }),
         loadFbsSupplyScanMap(activeSupplyId, selectedSupplierId),
+        // Снапшот пишется пачкой и может отставать — строки из базы возвращают
+        // хвост, не доехавший до него (закрыли вкладку, оборвалась сеть).
+        fetchFbsSupplyScans(selectedSupplierId, activeSupplyId).catch((e) => {
+          console.error('не прочитали сканы поставки из базы', e);
+          return [];
+        }),
       ]);
       setFbsScanRows(rows);
-      applyFbsScans(savedMap);
+
+      const restored = restoreFbsScansFromDb(savedMap, dbScans, rows);
+      applyFbsScans(restored.map);
+      if (restored.added > 0) {
+        // Молча дописывать нельзя: расхождение снапшота с базой значит, что в
+        // прошлый раз окно закрыли раньше, чем оно успело сохраниться.
+        console.warn('[WBSupplyManager] снапшот отставал от базы', restored.added);
+        scheduleFbsScanMapSave(activeSupplyId, selectedSupplierId);
+      }
       const completeness = getFbsScanCompletenessStats(rows);
       if (source !== 'cache' && (apiRows.length || JSON.stringify(rows) !== JSON.stringify(getUniqueFbsScanRows(mergedRows))) && completeness.isFullyReady) {
         void saveFbsSupplyScanSheetRows(activeSupplyId, rows, selectedSupplierId, 'wb').catch(() => undefined);
@@ -3193,6 +3447,9 @@ export const WBSupplyManager = ({
   const refreshFbsScanRowsFromWb = async () => {
     if (!activeSupplyId) return;
     const before = fbsScanRows.length;
+    // Человек нажал «обновить» — значит, состав изменился. Кэш печати сбрасываем,
+    // иначе следующий лист подбора выйдет по старому составу.
+    supplyOrdersCacheRef.current.clear();
     setFbsScanLoading(true);
     setFbsScanNotice({ type: 'info', text: 'Забираю состав поставки из WB…' });
     try {
@@ -3503,19 +3760,25 @@ export const WBSupplyManager = ({
     return (key && card.bySize[key]) || card.only || '';
   };
 
+  /** Последние четыре цифры стикера — крупная надпись на этикетке WB. */
+  const getStickerTail = (row: FbsSupplyScanOrderRow) => {
+    const digits = normalizeStickerDigits(String(row?.stickerDigits || row?.stickerText || ''));
+    return digits.length >= 4 ? digits.slice(-4) : digits;
+  };
+
   /**
-   * PDF с этикетками «ШК + ЧЗ» по строкам поставки.
+   * PDF с этикетками по строкам поставки.
    *
    * Печатается не «свободная» марка из базы, а та, что уже отсканирована на
    * это задание: этикетку переклеивают на ту же вещь, и код обязан остаться
-   * прежним. Со стикером WB этикетка идёт парой — стикер, сразу за ним ЧЗ,
-   * чтобы сборщик не сводил их вручную.
+   * прежним. Какой именно макет — решает `kind`.
    */
   const buildChzLabelsPdf = async (
     items: Array<{ row: FbsSupplyScanOrderRow; code: string }>,
     layout: ChzLabelLayout,
     skus: Map<number, { bySize: Record<string, string>; only: string }>,
     stickersByOrderId: Map<number, StickerImage>,
+    kind: FbsLabelKind,
   ) => {
     const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: [58, 40], compress: true });
     await addChzLabelFont(pdf);
@@ -3532,7 +3795,9 @@ export const WBSupplyManager = ({
       const orderId = Number(String(item.row.orderId || '').trim());
       const sticker = Number.isFinite(orderId) ? stickersByOrderId.get(orderId) : undefined;
 
-      if (sticker) {
+      // Совмещённая этикетка сама несёт коды задания — отдельная страница со
+      // стикером WB для неё была бы вторым экземпляром того же.
+      if (sticker && kind !== 'combo') {
         try {
           const data = await renderStickerImage(sticker);
           if (data) {
@@ -3546,16 +3811,36 @@ export const WBSupplyManager = ({
 
       startPage();
       try {
-        await drawChzLabel(pdf, bwipjs, layout, {
-          chzCode: item.code,
-          barcode: pickChzLabelBarcode(skus, item.row),
-          title: String(item.row.title || ''),
-          article: String(item.row.article || ''),
-          size: String(item.row.size || ''),
-          supplierName: String(selectedSupplier?.name || ''),
-        });
+        if (kind === 'combo') {
+          await drawFbsComboLabel(pdf, bwipjs, {
+            chzCode: item.code,
+            stickerCode: String(sticker?.barcode || ''),
+            partA: String(sticker?.partA || ''),
+            partB: String(sticker?.partB || '') || getStickerTail(item.row),
+            article: String(item.row.article || ''),
+            size: String(item.row.size || ''),
+          });
+        } else if (kind === 'chz_tail') {
+          await drawChzTailLabel(pdf, bwipjs, {
+            chzCode: item.code,
+            barcode: pickChzLabelBarcode(skus, item.row),
+            title: String(item.row.title || ''),
+            article: String(item.row.article || ''),
+            size: String(item.row.size || ''),
+            stickerTail: String(sticker?.partB || '') || getStickerTail(item.row),
+          });
+        } else {
+          await drawChzLabel(pdf, bwipjs, layout, {
+            chzCode: item.code,
+            barcode: pickChzLabelBarcode(skus, item.row),
+            title: String(item.row.title || ''),
+            article: String(item.row.article || ''),
+            size: String(item.row.size || ''),
+            supplierName: String(selectedSupplier?.name || ''),
+          });
+        }
       } catch (e) {
-        console.warn('Этикетка ЧЗ не отрисовалась', item.row.orderId, e);
+        console.warn('Этикетка не отрисовалась', item.row.orderId, e);
       }
     }
 
@@ -3570,8 +3855,9 @@ export const WBSupplyManager = ({
    */
   const printChzLabels = async (
     rows: FbsSupplyScanOrderRow[],
-    opts: { withStickers: boolean; fileName: string; tab: Window | null },
+    opts: { withStickers: boolean; fileName: string; tab: Window | null; kind?: FbsLabelKind },
   ) => {
+    const kind: FbsLabelKind = opts.kind || 'chz';
     const items = rows
       .map((row) => ({
         row,
@@ -3595,10 +3881,21 @@ export const WBSupplyManager = ({
       items.map((item) => Number(item.row.nmId || 0)),
     ).catch(() => new Map<number, { bySize: Record<string, string>; only: string }>());
 
+    /*
+     * Совмещённой этикетке данные стикера нужны всегда: она рисует QR и
+     * штрихкод задания сама, а их содержимое знает только WB. Остальным
+     * макетам стикер нужен, лишь когда его печатают отдельной страницей.
+     */
+    const needStickers = opts.withStickers || kind === 'combo';
+
     let stickersByOrderId = new Map<number, StickerImage>();
-    if (opts.withStickers) {
+    if (needStickers) {
       const token = getSupplierToken();
-      if (!token) throw new Error('Токен API кабинета не найден — снимите галочку «Стикеры WB»');
+      if (!token) {
+        throw new Error(kind === 'combo'
+          ? 'Токен API кабинета не найден — совмещённую этикетку без него не собрать'
+          : 'Токен API кабинета не найден — снимите галочку «Стикеры WB»');
+      }
 
       const orderIds = Array.from(new Set(
         items
@@ -3612,10 +3909,22 @@ export const WBSupplyManager = ({
       });
     }
 
-    setFbsScanNotice({ type: 'info', text: `Собираю PDF: этикеток ${items.length}…` });
-    const pdf = await buildChzLabelsPdf(items, layout, skus, stickersByOrderId);
+    if (kind === 'combo') {
+      // Без содержимого кодов совмещённая этикетка — просто картинка с ЧЗ:
+      // на приёмке её не примут. Лучше отказать до печати.
+      const withCode = items.filter((item) => {
+        const st = stickersByOrderId.get(Number(String(item.row.orderId || '').trim()));
+        return Boolean(st?.barcode);
+      }).length;
+      if (withCode === 0) {
+        throw new Error('WB не вернул содержимое кодов стикера — совмещённую этикетку печатать нельзя');
+      }
+    }
 
-    const missingStickers = opts.withStickers
+    setFbsScanNotice({ type: 'info', text: `Собираю PDF: этикеток ${items.length}…` });
+    const pdf = await buildChzLabelsPdf(items, layout, skus, stickersByOrderId, kind);
+
+    const missingStickers = needStickers
       ? items.filter((item) => !stickersByOrderId.get(Number(String(item.row.orderId || '').trim()))).length
       : 0;
     const skipped = rows.length - items.length;
@@ -3653,6 +3962,7 @@ export const WBSupplyManager = ({
         withStickers: false,
         fileName: `ЧЗ ${row.orderId || row.storageKey}.pdf`,
         tab,
+        kind: fbsLabelKind,
       });
     } catch (e: any) {
       try { tab?.close(); } catch {}
@@ -3767,9 +4077,11 @@ export const WBSupplyManager = ({
       }
 
       await printChzLabels(rows, {
-        withStickers: fbsBulkWithStickers,
-        fileName: `Этикетки ЧЗ ${activeSupplyId || ''} ${rows.length}.pdf`,
+        // У совмещённой этикетки стикер уже внутри — второй экземпляр не нужен.
+        withStickers: fbsBulkWithStickers && fbsLabelKind !== 'combo',
+        fileName: `Этикетки ${activeSupplyId || ''} ${rows.length}.pdf`,
         tab,
+        kind: fbsLabelKind,
       });
     } catch (e: any) {
       try { tab?.close(); } catch {}
@@ -4241,40 +4553,48 @@ export const WBSupplyManager = ({
           });
           return;
         }
-        // Пишем актуальную карту из ref, а не снимок момента скана: пока запрос
-        // стоял в очереди, могли добавиться следующие коды, и снимок стёр бы их.
-        const saved = await saveFbsSupplyScanMap(supplyId, fbsScansRef.current, supplierId);
-        await syncFbsScannedCodesToUnifiedBase([honestSignCode], supplierId);
-        applyFbsScans(saved);
-
         /*
-         * Строка в «Базу заказов».
+         * Строка в «Базу заказов» — первой.
          *
-         * Пишем после основного сохранения и не роняем скан, если не вышло:
-         * для сборщика у стола источник правды — карта поставки, и отменять
-         * принятый товар из-за второй таблицы нельзя. Но и молчать нельзя —
-         * иначе заказ тихо выпадет из базы.
+         * Раньше сначала писался весь снапшот поставки, а строка шла следом и
+         * права уронить скан не имела. Теперь порядок обратный: строка и есть
+         * запись о скане, и её ошибка отменяет товар. Снапшот стал кэшем и
+         * уходит пачкой — из строк он всегда восстановим, из него строки нет.
          */
-        try {
-          await upsertFbsOrderCode({
+        await upsertFbsOrderCode({
+          supplierId,
+          supplyId,
+          orderId: pendingRow.orderId,
+          chzCode: honestSignCode,
+          stickerDigits: pendingRow.stickerDigits,
+          stickerText: pendingRow.stickerScanText,
+          nmId: pendingRow.nmId ?? null,
+          article: pendingRow.article,
+          size: pendingRow.size,
+          title: pendingRow.title,
+        });
+
+        const syncResult = await syncFbsScannedCodesToUnifiedBase([honestSignCode], supplierId);
+        if (syncResult?.foreignCodes?.length) {
+          setFbsScanNotice({
+            type: 'error',
+            text: 'Эта марка в общей базе числится за другим кабинетом. Товар записан, но проверьте, тот ли это код: '
+              + 'отправлять чужую марку нельзя, а повторно она уже не отловится.',
+          });
+          void logFbsScanReject({
             supplierId,
             supplyId,
             orderId: pendingRow.orderId,
-            chzCode: honestSignCode,
-            stickerDigits: pendingRow.stickerDigits,
-            stickerText: pendingRow.stickerScanText,
-            nmId: pendingRow.nmId ?? null,
-            article: pendingRow.article,
-            size: pendingRow.size,
-            title: pendingRow.title,
-          });
-        } catch (dbError: any) {
-          console.error('fbs_order_codes upsert failed', dbError);
-          setFbsScanNotice({
-            type: 'error',
-            text: `ЧЗ сохранён в поставке, но не попал в «Базу заказов» (${dbError?.message || 'ошибка записи'}). Товар можно отправлять.`,
+            rawValue: honestSignCode,
+            reason: 'code_of_other_cabinet',
+            detail: 'код принадлежит другому поставщику в общей базе',
           });
         }
+
+        // Снапшот — отложенно: сборщик сканирует очередью, и держать его перед
+        // каждым товаром на сетевом запросе в полтораста килобайт незачем.
+        scheduleFbsScanMapSave(supplyId, supplierId);
+
         setFbsScanSavingKeys((prev) => {
           const rest = { ...prev };
           delete rest[pendingRow.storageKey];
@@ -5792,9 +6112,9 @@ export const WBSupplyManager = ({
     setLoading(true);
     try {
       // 1. Fetch orders for this supply via robust resolver with fallback chain
-      let supplyOrdersRaw = await withTimeout(fetchOrdersForSupply(activeSupplyId, { enrich: true, fresh: true }), 30000, 'Таймаут загрузки заказов (1)');
+      let supplyOrdersRaw = await withTimeout(fetchOrdersForSupply(activeSupplyId, { enrich: true, fresh: true, cacheTtlMs: SUPPLY_ORDERS_CACHE_MS }), 30000, 'Таймаут загрузки заказов (1)');
       if (!supplyOrdersRaw || supplyOrdersRaw.length === 0) {
-        supplyOrdersRaw = await withTimeout(fetchOrdersForSupply(activeSupplyId, { enrich: false, fresh: true }), 30000, 'Таймаут загрузки заказов (2)');
+        supplyOrdersRaw = await withTimeout(fetchOrdersForSupply(activeSupplyId, { enrich: false, fresh: true, cacheTtlMs: SUPPLY_ORDERS_CACHE_MS }), 30000, 'Таймаут загрузки заказов (2)');
       }
       if (!supplyOrdersRaw || supplyOrdersRaw.length === 0) {
         throw new Error('По выбранной поставке не найдены заказы для листа подбора');
@@ -5998,9 +6318,9 @@ export const WBSupplyManager = ({
     setLoading(true);
     try {
       // For grouped picking we need the full supply content, not a possibly partial direct payload.
-      let supplyOrdersRaw = await withTimeout(fetchOrdersForSupply(activeSupplyId, { enrich: true, fresh: true }), 30000, 'Таймаут загрузки заказов (групп.) 1');
+      let supplyOrdersRaw = await withTimeout(fetchOrdersForSupply(activeSupplyId, { enrich: true, fresh: true, cacheTtlMs: SUPPLY_ORDERS_CACHE_MS }), 30000, 'Таймаут загрузки заказов (групп.) 1');
       if (!supplyOrdersRaw || supplyOrdersRaw.length === 0) {
-        supplyOrdersRaw = await withTimeout(fetchOrdersForSupply(activeSupplyId, { enrich: false, fresh: true }), 30000, 'Таймаут загрузки заказов (групп.) 2');
+        supplyOrdersRaw = await withTimeout(fetchOrdersForSupply(activeSupplyId, { enrich: false, fresh: true, cacheTtlMs: SUPPLY_ORDERS_CACHE_MS }), 30000, 'Таймаут загрузки заказов (групп.) 2');
       }
       if (!supplyOrdersRaw || supplyOrdersRaw.length === 0) {
         throw new Error('По выбранной поставке не найдены заказы');
@@ -6338,7 +6658,7 @@ export const WBSupplyManager = ({
     if (!activeSupplyId) return;
     setLoading(true);
     try {
-      const supplyOrdersRaw = await withTimeout(fetchOrdersForSupply(activeSupplyId, { enrich: true, fresh: true }), 30000, 'Таймаут загрузки заказов для стикеров');
+      const supplyOrdersRaw = await withTimeout(fetchOrdersForSupply(activeSupplyId, { enrich: true, fresh: true, cacheTtlMs: SUPPLY_ORDERS_CACHE_MS }), 30000, 'Таймаут загрузки заказов для стикеров');
       const targetSupplyId = String(activeSupplyId || '').trim().toLowerCase();
       const supplyOrders = (supplyOrdersRaw || [])
         .filter((o: any) => {
@@ -6788,16 +7108,20 @@ export const WBSupplyManager = ({
 
       {/* Content: База заказов — что уехало с каким ЧЗ */}
       {activeTab === 'orders_db' && (
-        <FbsOrdersDatabase
-          supplierId={selectedSupplierIdOrdersDb}
-          supplierName={selectedSupplier?.name}
-          wbFetch={wbFetch}
-        />
+        <React.Suspense fallback={<div className="p-6 text-slate-500">Загружаю «Базу заказов»…</div>}>
+          <FbsOrdersDatabase
+            supplierId={selectedSupplierIdOrdersDb}
+            supplierName={selectedSupplier?.name}
+            wbFetch={wbFetch}
+          />
+        </React.Suspense>
       )}
 
       {/* Content: Вывод из оборота — ЧЗ по проданным заказам */}
       {activeTab === 'chz_withdrawal' && (
-        <ChzWithdrawal supplierId={selectedSupplierIdOrdersDb} supplierName={selectedSupplier?.name} />
+        <React.Suspense fallback={<div className="p-6 text-slate-500">Загружаю «Вывод ЧЗ»…</div>}>
+          <ChzWithdrawal supplierId={selectedSupplierIdOrdersDb} supplierName={selectedSupplier?.name} />
+        </React.Suspense>
       )}
 
       {/* Content: FBS Tab */}
@@ -7077,15 +7401,8 @@ export const WBSupplyManager = ({
                 <div className="text-lg font-bold text-slate-900">Скан ЧЗ</div>
                 <div className="text-sm text-slate-500">Поставка: {supplies.find((s) => s.id === activeSupplyId)?.name || activeSupplyId || '-'}</div>
                 <div className="text-xs text-slate-500 mt-1 space-y-1">
-                  {(() => {
-                    const stats = getFbsScanProgressStats(fbsScanRows, fbsScansBySticker);
-                    return (
-                      <>
-                        <div>Отсканировано: {stats.scannedCount} из {stats.totalRows}</div>
-                        <div>Заменено стикеров в поставке: {stats.scannedCount}</div>
-                      </>
-                    );
-                  })()}
+                  <div>Отсканировано: {fbsScanStats.scannedCount} из {fbsScanStats.totalRows}</div>
+                  <div>Заменено стикеров в поставке: {fbsScanStats.scannedCount}</div>
                 </div>
               </div>
               <button onClick={() => { setFbsScanModalOpen(false); setFbsPendingStickerRow(null); setFbsScanMode('sticker'); clearScanInput(); }} className="p-2 rounded-lg hover:bg-slate-100 text-slate-500">
@@ -7288,12 +7605,11 @@ export const WBSupplyManager = ({
               {/* Фильтр по состоянию сборки: на длинной поставке главное —
                   быстро увидеть, что ещё не отсканировано. */}
               {!fbsScanLoading && fbsScanRows.length > 0 && (() => {
-                const stats = getFbsScanProgressStats(fbsScanRows, fbsScansBySticker);
-                const pendingCount = Math.max(0, stats.totalRows - stats.scannedCount);
+                const pendingCount = Math.max(0, fbsScanStats.totalRows - fbsScanStats.scannedCount);
                 const tabs: Array<{ id: 'all' | 'pending' | 'done'; label: string; count: number }> = [
-                  { id: 'all', label: 'Все', count: stats.totalRows },
+                  { id: 'all', label: 'Все', count: fbsScanStats.totalRows },
                   { id: 'pending', label: 'Не отсканированы', count: pendingCount },
-                  { id: 'done', label: 'Отсканированы', count: stats.scannedCount },
+                  { id: 'done', label: 'Отсканированы', count: fbsScanStats.scannedCount },
                 ];
                 return (
                   // sticky относительно этого скролл-контейнера: список
@@ -7374,10 +7690,29 @@ export const WBSupplyManager = ({
                         Выбрано: <span className="font-semibold tabular-nums">{fbsScanSelectedRows.length}</span>
                       </span>
 
-                      <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+                      <select
+                        value={fbsLabelKind}
+                        onChange={(e) => {
+                          const next = e.target.value as FbsLabelKind;
+                          setFbsLabelKind(next);
+                          try { localStorage.setItem('fbs_label_kind_v1', next); } catch {}
+                        }}
+                        title="Макет этикетки"
+                        className="rounded-xl border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-700"
+                      >
+                        {(Object.keys(FBS_LABEL_KIND_TITLES) as FbsLabelKind[]).map((id) => (
+                          <option key={id} value={id}>{FBS_LABEL_KIND_TITLES[id]}</option>
+                        ))}
+                      </select>
+
+                      <label
+                        className={`inline-flex items-center gap-2 text-sm ${fbsLabelKind === 'combo' ? 'text-slate-400' : 'text-slate-700'}`}
+                        title={fbsLabelKind === 'combo' ? 'В совмещённой этикетке стикер уже есть' : 'Стикер WB отдельной страницей перед каждой этикеткой'}
+                      >
                         <input
                           type="checkbox"
-                          checked={fbsBulkWithStickers}
+                          checked={fbsBulkWithStickers && fbsLabelKind !== 'combo'}
+                          disabled={fbsLabelKind === 'combo'}
                           onChange={(e) => setFbsBulkWithStickers(e.target.checked)}
                           className="h-4 w-4 rounded border-slate-300"
                         />
@@ -7456,7 +7791,7 @@ export const WBSupplyManager = ({
                       </tr>
                     </thead>
                     <tbody>
-                      {fbsScanVisibleRows.map((row) => {
+                      {fbsScanVisibleRows.slice(0, fbsScanRenderLimit).map((row) => {
                         const scan = findFbsScanSavedEntry(row, fbsScansBySticker)?.item;
                         const isActive = fbsPendingStickerRow?.storageKey === row.storageKey;
                         const isSaving = !!fbsScanSavingKeys[row.storageKey];
@@ -7554,6 +7889,27 @@ export const WBSupplyManager = ({
                       })}
                     </tbody>
                   </table>
+                  {fbsScanVisibleRows.length > fbsScanRenderLimit && (
+                    <div className="flex items-center justify-center gap-3 border-t border-slate-100 px-3 py-3 text-sm text-slate-600">
+                      <span>
+                        Показано {fbsScanRenderLimit} из {fbsScanVisibleRows.length}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setFbsScanRenderLimit((n) => n + FBS_SCAN_PAGE_SIZE)}
+                        className="rounded-xl border border-slate-300 bg-white px-3 py-1.5 hover:bg-slate-50"
+                      >
+                        Показать ещё {FBS_SCAN_PAGE_SIZE}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFbsScanRenderLimit(fbsScanVisibleRows.length)}
+                        className="rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-slate-500 hover:bg-slate-50"
+                      >
+                        Все
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

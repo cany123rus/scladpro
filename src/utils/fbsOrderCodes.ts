@@ -120,6 +120,53 @@ export async function upsertFbsOrderCode(input: FbsOrderCodeInput): Promise<void
   if (error) throw new Error(`Не записали ЧЗ в базу заказов: ${error.message}`);
 }
 
+/**
+ * Сканы поставки из базы — на случай, если снапшот отстал.
+ *
+ * Снапшот в app_settings пишется не после каждого товара, а пачкой: на
+ * поставке в четыре сотни заданий он весит полтораста килобайт, и гонять его
+ * целиком на каждый скан значило бы держать сборщика в ожидании сети. Цена
+ * отложенной записи — потерянный хвост, если вкладку закрыли или свет моргнул.
+ *
+ * Строки же пишутся сразу, по одной. Поэтому при открытии окна снапшот
+ * дополняется ими: всё, что не успело в него попасть, возвращается на место.
+ */
+export async function fetchFbsSupplyScans(
+  supplierId: string,
+  supplyId: string,
+): Promise<Array<Pick<FbsOrderCodeRow, 'orderId' | 'chzCode' | 'stickerDigits' | 'stickerText' | 'article' | 'size' | 'title' | 'scannedAt'>>> {
+  const sid = String(supplierId || '').trim();
+  const supply = String(supplyId || '').trim();
+  if (!sid || !supply) return [];
+
+  const out: any[] = [];
+  // Постраничный обход: PostgREST отдаёт максимум тысячу строк за раз, а в
+  // крупной поставке заданий больше.
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabase
+      .from('fbs_order_codes')
+      .select('order_id, chz_code, sticker_digits, sticker_text, article, size, title, scanned_at')
+      .eq('supplier_id', sid)
+      .eq('supply_id', supply)
+      .order('scanned_at', { ascending: true })
+      .range(from, from + 999);
+    if (error) throw new Error(`Не прочитали сканы поставки из базы: ${error.message}`);
+    out.push(...(data || []));
+    if (!data || data.length < 1000) break;
+  }
+
+  return out.map((r: any) => ({
+    orderId: String(r?.order_id || ''),
+    chzCode: String(r?.chz_code || ''),
+    stickerDigits: String(r?.sticker_digits || ''),
+    stickerText: String(r?.sticker_text || ''),
+    article: String(r?.article || ''),
+    size: String(r?.size || ''),
+    title: String(r?.title || ''),
+    scannedAt: String(r?.scanned_at || ''),
+  }));
+}
+
 /** Сброс ЧЗ у заказа убирает строку и из базы — иначе база врёт про заказ. */
 export async function deleteFbsOrderCode(supplierId: string, orderId: string): Promise<void> {
   const sid = String(supplierId || '').trim();
@@ -225,6 +272,7 @@ export const REJECT_TITLES: Record<string, string> = {
   save_failed: 'Ошибка записи',
   override_duplicate: 'Записан повторно вручную',
   layout_fixed: 'Русская раскладка (код исправлен)',
+  code_of_other_cabinet: 'Марка числится за другим кабинетом',
 };
 
 export async function fetchFbsScanRejects(supplierId: string, days = 7): Promise<FbsScanReject[]> {

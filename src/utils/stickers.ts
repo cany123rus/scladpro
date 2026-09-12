@@ -17,6 +17,23 @@ export interface StickerImage {
   file: string;
   /** png или svg — от этого зависит, как рисовать. */
   type: 'png' | 'svg';
+  /**
+   * Старшая часть номера стикера (7 цифр) — мелкая надпись на этикетке WB.
+   */
+  partA?: string;
+  /**
+   * Младшая часть (4 цифры) — тот самый «конец номера», который набран на
+   * стикере крупно и по которому задание ищут глазами.
+   */
+  partB?: string;
+  /**
+   * Содержимое кодов стикера, например `*DXPcELUX`.
+   *
+   * Проверено на живом стикере: центральный QR кодирует ровно эту строку, и
+   * полосы штрихкода — её же. Значит этикетку можно нарисовать самим, не
+   * прикладывая картинку WB.
+   */
+  barcode?: string;
 }
 
 async function withTimeout<T>(p: Promise<T>, ms: number, message: string): Promise<T> {
@@ -93,7 +110,15 @@ export async function fetchStickers(
       for (const st of list) {
         const id = Number(st?.orderId ?? st?.id ?? st?.order_id);
         const file = String(st?.file ?? '');
-        if (Number.isFinite(id) && file && !out.has(id)) out.set(id, { file, type });
+        if (Number.isFinite(id) && file && !out.has(id)) {
+          out.set(id, {
+            file,
+            type,
+            partA: String(st?.partA ?? ''),
+            partB: String(st?.partB ?? ''),
+            barcode: String(st?.barcode ?? ''),
+          });
+        }
       }
       if (list.length > 0) break;
     }
