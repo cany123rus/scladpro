@@ -3780,6 +3780,12 @@ export const WBSupplyManager = ({
     return digits.length >= 4 ? digits.slice(-4) : digits;
   };
 
+  /** Начало того же номера — мелкая надпись над крупной, как у WB. */
+  const getStickerHead = (row: FbsSupplyScanOrderRow) => {
+    const digits = normalizeStickerDigits(String(row?.stickerDigits || row?.stickerText || ''));
+    return digits.length > 4 ? digits.slice(0, -4) : '';
+  };
+
   /**
    * PDF с этикетками по строкам поставки.
    *
@@ -3841,6 +3847,7 @@ export const WBSupplyManager = ({
             title: String(item.row.title || ''),
             article: String(item.row.article || ''),
             size: String(item.row.size || ''),
+            stickerHead: String(sticker?.partA || '') || getStickerHead(item.row),
             stickerTail: String(sticker?.partB || '') || getStickerTail(item.row),
           });
         } else {
@@ -6992,6 +6999,7 @@ export const WBSupplyManager = ({
                            title: String(order?.title || ''),
                            article: String(order?.article || ''),
                            size: String(order?.size || ''),
+                           stickerHead: partA,
                            stickerTail: partB,
                          });
                        } else {

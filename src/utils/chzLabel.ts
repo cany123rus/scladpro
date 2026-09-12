@@ -148,6 +148,9 @@ export interface ChzTailLayout {
   dmY: number;
   dmSize: number;
   dmTextY: number;
+  headX: number;
+  headY: number;
+  headFont: number;
   tailX: number;
   tailY: number;
   tailFont: number;
@@ -169,9 +172,12 @@ export const DEFAULT_CHZ_TAIL_LAYOUT: ChzTailLayout = {
   dmY: 2.0,
   dmSize: 24.5,
   dmTextY: 27.6,
+  headX: 56.5,
+  headY: 5.2,
+  headFont: 7,
   tailX: 56.5,
-  tailY: 11,
-  tailFont: 20,
+  tailY: 13,
+  tailFont: 18,
   textX: 27.5,
   titleY: 15.5,
   titleFont: 6.6,
@@ -206,9 +212,6 @@ export interface FbsComboLayout {
   codeTextX: number;
   codeTextY: number;
   codeTextFont: number;
-  infoX: number;
-  infoY: number;
-  infoFont: number;
 }
 
 export const DEFAULT_FBS_COMBO_LAYOUT: FbsComboLayout = {
@@ -231,11 +234,8 @@ export const DEFAULT_FBS_COMBO_LAYOUT: FbsComboLayout = {
   barW: 54,
   barH: 5.8,
   codeTextX: 2,
-  codeTextY: 34.2,
-  codeTextFont: 3.2,
-  infoX: 2,
-  infoY: 39,
-  infoFont: 5,
+  codeTextY: 35,
+  codeTextFont: 3.4,
 };
 
 export function readChzTailLayout(raw: unknown): ChzTailLayout {
@@ -271,7 +271,7 @@ export async function drawChzTailLabel(
   doc: any,
   bwipjs: any,
   layout: ChzTailLayout,
-  data: ChzLabelData & { stickerTail?: string },
+  data: ChzLabelData & { stickerHead?: string; stickerTail?: string },
   fontName = 'Roboto',
 ): Promise<void> {
   const canvas = document.createElement('canvas');
@@ -303,13 +303,23 @@ export async function drawChzTailLabel(
   }
 
   /*
-   * Конец номера стикера — только цифры, без кодов задания.
+   * Номер стикера целиком — только цифры, без кодов задания.
    *
-   * Это подпись для человека: сборщик держит вещь и сверяет четыре цифры с
-   * теми, что на стикере WB, чтобы не наклеить марку на соседний товар.
-   * Второго машиночитаемого кода тут нет намеренно — сканеру он не нужен, а
+   * Набран как у WB: начало мелко, конец крупно. Сборщик держит вещь и
+   * сверяет цифры со стикером, чтобы не наклеить марку на соседний товар —
+   * по четырём цифрам это быстро, а полный номер нужен, когда рядом лежат
+   * задания с одинаковым концом.
+   *
+   * Второго машиночитаемого кода тут нет намеренно: сканеру он не нужен, а
    * место отнял бы у марки.
    */
+  const head = String(data.stickerHead || '').trim();
+  if (head) {
+    setFont('normal');
+    doc.setFontSize(layout.headFont);
+    doc.text(head, layout.headX, layout.headY, { align: 'right' });
+  }
+
   const tail = String(data.stickerTail || '').trim();
   if (tail) {
     setFont('bold');
@@ -448,14 +458,16 @@ export async function drawFbsComboLabel(
     }
   }
 
-  // 5. Подписи внизу: сам код марки и товар — для разбора руками.
+  /*
+   * 5. Код марки текстом — и больше ничего.
+   *
+   * Ни товарного штрихкода, ни артикула с размером тут нет намеренно: на
+   * этикетке только два кода, марка и задание. Всё остальное отнимало бы
+   * место у них и путало сборщика, который сверяет её со стикером WB.
+   */
   setFont('normal');
   doc.setFontSize(layout.codeTextFont);
   if (code) doc.text(doc.splitTextToSize(code, layout.barW).slice(0, 2), layout.codeTextX, layout.codeTextY);
-
-  doc.setFontSize(layout.infoFont);
-  const info = [data.article, data.size].filter(Boolean).join(' · ');
-  if (info) doc.text(doc.splitTextToSize(info, layout.barW)[0], layout.infoX, layout.infoY);
 }
 
 /** Товарный штрихкод: EAN-13, если сходится контрольная цифра, иначе code128. */

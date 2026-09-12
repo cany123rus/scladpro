@@ -76,6 +76,15 @@ import {
  * что места на этикетке вагон.
  */
 const WB_LAYOUT_SAMPLE_CHZ = '0104640233723909215XH=oFmHzyr,Z91EE1292z8CrXhvLbaNMr/WunGb/KsgNurUHZwN2psSJR8RJd/U=';
+
+/**
+ * Пикселей предпросмотра на миллиметр этикетки.
+ *
+ * Тот же множитель, что у PREVIEW_SCALE_X/Y внутри компонента: холст 737 px
+ * на 58 мм. Нужен и снаружи — начальное состояние редактора считается до
+ * объявления компонентных констант.
+ */
+const WB_PREVIEW_SCALE = 737 / 58;
 import { getDefaultWarehouseOfflineUrl, getWarehouseOfflineUrl, isWarehouseOfflineEnabled, setWarehouseOfflineEnabled, setWarehouseOfflineUrl, warehouseOfflineClient, WarehouseOfflineSnapshot, WarehouseOfflineStatus } from '../lib/warehouseOffline';
 import type {
   NotificationType, NotificationItem, ToastStyle, Supplier, Product,
@@ -18908,15 +18917,56 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       nameYpx: 427,
     },
     /*
-     * Макеты печати ФБС. Координаты храним прямо в миллиметрах.
+     * Макеты печати ФБС.
      *
-     * У четырёх макетов выше позиции живут в пикселях предпросмотра ради
-     * перетаскивания блоков мышью. Здесь перетаскивания нет — есть ползунки и
-     * настоящий PDF под ними, — и лишнее преобразование мм↔px только добавило
-     * бы расхождение между конструктором и печатью.
+     * Позиции — в пикселях предпросмотра, как у остальных: блоки двигают
+     * мышью, а размеры и кегли задают ползунками. Перевод в миллиметры идёт
+     * при сохранении, одним и тем же множителем для обеих осей.
      */
-    chzTail: { ...DEFAULT_CHZ_TAIL_LAYOUT },
-    fbsCombo: { ...DEFAULT_FBS_COMBO_LAYOUT },
+    chzTail: {
+      dmSize: DEFAULT_CHZ_TAIL_LAYOUT.dmSize,
+      headFont: DEFAULT_CHZ_TAIL_LAYOUT.headFont,
+      tailFont: DEFAULT_CHZ_TAIL_LAYOUT.tailFont,
+      titleFont: DEFAULT_CHZ_TAIL_LAYOUT.titleFont,
+      textFont: DEFAULT_CHZ_TAIL_LAYOUT.textFont,
+      dataGap: DEFAULT_CHZ_TAIL_LAYOUT.dataGap,
+      barcodeW: DEFAULT_CHZ_TAIL_LAYOUT.barcodeW,
+      barcodeH: DEFAULT_CHZ_TAIL_LAYOUT.barcodeH,
+      dmXpx: DEFAULT_CHZ_TAIL_LAYOUT.dmX * WB_PREVIEW_SCALE,
+      dmYpx: DEFAULT_CHZ_TAIL_LAYOUT.dmY * WB_PREVIEW_SCALE,
+      dmTextYpx: DEFAULT_CHZ_TAIL_LAYOUT.dmTextY * WB_PREVIEW_SCALE,
+      headXpx: DEFAULT_CHZ_TAIL_LAYOUT.headX * WB_PREVIEW_SCALE,
+      headYpx: DEFAULT_CHZ_TAIL_LAYOUT.headY * WB_PREVIEW_SCALE,
+      tailXpx: DEFAULT_CHZ_TAIL_LAYOUT.tailX * WB_PREVIEW_SCALE,
+      tailYpx: DEFAULT_CHZ_TAIL_LAYOUT.tailY * WB_PREVIEW_SCALE,
+      textXpx: DEFAULT_CHZ_TAIL_LAYOUT.textX * WB_PREVIEW_SCALE,
+      titleYpx: DEFAULT_CHZ_TAIL_LAYOUT.titleY * WB_PREVIEW_SCALE,
+      dataYpx: DEFAULT_CHZ_TAIL_LAYOUT.dataY * WB_PREVIEW_SCALE,
+      barcodeXpx: DEFAULT_CHZ_TAIL_LAYOUT.barcodeX * WB_PREVIEW_SCALE,
+      barcodeYpx: DEFAULT_CHZ_TAIL_LAYOUT.barcodeY * WB_PREVIEW_SCALE,
+      barcodeTextYpx: DEFAULT_CHZ_TAIL_LAYOUT.barcodeTextY * WB_PREVIEW_SCALE,
+    },
+    fbsCombo: {
+      dmSize: DEFAULT_FBS_COMBO_LAYOUT.dmSize,
+      qrSize: DEFAULT_FBS_COMBO_LAYOUT.qrSize,
+      partAFont: DEFAULT_FBS_COMBO_LAYOUT.partAFont,
+      partBFont: DEFAULT_FBS_COMBO_LAYOUT.partBFont,
+      barW: DEFAULT_FBS_COMBO_LAYOUT.barW,
+      barH: DEFAULT_FBS_COMBO_LAYOUT.barH,
+      codeTextFont: DEFAULT_FBS_COMBO_LAYOUT.codeTextFont,
+      dmXpx: DEFAULT_FBS_COMBO_LAYOUT.dmX * WB_PREVIEW_SCALE,
+      dmYpx: DEFAULT_FBS_COMBO_LAYOUT.dmY * WB_PREVIEW_SCALE,
+      qrXpx: DEFAULT_FBS_COMBO_LAYOUT.qrX * WB_PREVIEW_SCALE,
+      qrYpx: DEFAULT_FBS_COMBO_LAYOUT.qrY * WB_PREVIEW_SCALE,
+      partAXpx: DEFAULT_FBS_COMBO_LAYOUT.partAX * WB_PREVIEW_SCALE,
+      partAYpx: DEFAULT_FBS_COMBO_LAYOUT.partAY * WB_PREVIEW_SCALE,
+      partBXpx: DEFAULT_FBS_COMBO_LAYOUT.partBX * WB_PREVIEW_SCALE,
+      partBYpx: DEFAULT_FBS_COMBO_LAYOUT.partBY * WB_PREVIEW_SCALE,
+      barXpx: DEFAULT_FBS_COMBO_LAYOUT.barX * WB_PREVIEW_SCALE,
+      barYpx: DEFAULT_FBS_COMBO_LAYOUT.barY * WB_PREVIEW_SCALE,
+      codeTextXpx: DEFAULT_FBS_COMBO_LAYOUT.codeTextX * WB_PREVIEW_SCALE,
+      codeTextYpx: DEFAULT_FBS_COMBO_LAYOUT.codeTextY * WB_PREVIEW_SCALE,
+    },
   });
 
   const [wbDragState, setWbDragState] = useState<any>(null);
@@ -19007,8 +19057,39 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
             nameXpx: parsed?.nameSequence?.nameX != null ? mmToPxX(parsed.nameSequence.nameX) : prev.nameSequence.nameXpx,
             nameYpx: parsed?.nameSequence?.nameY != null ? mmToPxY(parsed.nameSequence.nameY) : prev.nameSequence.nameYpx,
           },
-          chzTail: { ...prev.chzTail, ...(parsed?.chzTail || {}) },
-          fbsCombo: { ...prev.fbsCombo, ...(parsed?.fbsCombo || {}) },
+          chzTail: {
+            ...prev.chzTail,
+            ...(parsed?.chzTail || {}),
+            dmXpx: parsed?.chzTail?.dmX != null ? mmToPxX(parsed.chzTail.dmX) : prev.chzTail.dmXpx,
+            dmYpx: parsed?.chzTail?.dmY != null ? mmToPxY(parsed.chzTail.dmY) : prev.chzTail.dmYpx,
+            dmTextYpx: parsed?.chzTail?.dmTextY != null ? mmToPxY(parsed.chzTail.dmTextY) : prev.chzTail.dmTextYpx,
+            headXpx: parsed?.chzTail?.headX != null ? mmToPxX(parsed.chzTail.headX) : prev.chzTail.headXpx,
+            headYpx: parsed?.chzTail?.headY != null ? mmToPxY(parsed.chzTail.headY) : prev.chzTail.headYpx,
+            tailXpx: parsed?.chzTail?.tailX != null ? mmToPxX(parsed.chzTail.tailX) : prev.chzTail.tailXpx,
+            tailYpx: parsed?.chzTail?.tailY != null ? mmToPxY(parsed.chzTail.tailY) : prev.chzTail.tailYpx,
+            textXpx: parsed?.chzTail?.textX != null ? mmToPxX(parsed.chzTail.textX) : prev.chzTail.textXpx,
+            titleYpx: parsed?.chzTail?.titleY != null ? mmToPxY(parsed.chzTail.titleY) : prev.chzTail.titleYpx,
+            dataYpx: parsed?.chzTail?.dataY != null ? mmToPxY(parsed.chzTail.dataY) : prev.chzTail.dataYpx,
+            barcodeXpx: parsed?.chzTail?.barcodeX != null ? mmToPxX(parsed.chzTail.barcodeX) : prev.chzTail.barcodeXpx,
+            barcodeYpx: parsed?.chzTail?.barcodeY != null ? mmToPxY(parsed.chzTail.barcodeY) : prev.chzTail.barcodeYpx,
+            barcodeTextYpx: parsed?.chzTail?.barcodeTextY != null ? mmToPxY(parsed.chzTail.barcodeTextY) : prev.chzTail.barcodeTextYpx,
+          },
+          fbsCombo: {
+            ...prev.fbsCombo,
+            ...(parsed?.fbsCombo || {}),
+            dmXpx: parsed?.fbsCombo?.dmX != null ? mmToPxX(parsed.fbsCombo.dmX) : prev.fbsCombo.dmXpx,
+            dmYpx: parsed?.fbsCombo?.dmY != null ? mmToPxY(parsed.fbsCombo.dmY) : prev.fbsCombo.dmYpx,
+            qrXpx: parsed?.fbsCombo?.qrX != null ? mmToPxX(parsed.fbsCombo.qrX) : prev.fbsCombo.qrXpx,
+            qrYpx: parsed?.fbsCombo?.qrY != null ? mmToPxY(parsed.fbsCombo.qrY) : prev.fbsCombo.qrYpx,
+            partAXpx: parsed?.fbsCombo?.partAX != null ? mmToPxX(parsed.fbsCombo.partAX) : prev.fbsCombo.partAXpx,
+            partAYpx: parsed?.fbsCombo?.partAY != null ? mmToPxY(parsed.fbsCombo.partAY) : prev.fbsCombo.partAYpx,
+            partBXpx: parsed?.fbsCombo?.partBX != null ? mmToPxX(parsed.fbsCombo.partBX) : prev.fbsCombo.partBXpx,
+            partBYpx: parsed?.fbsCombo?.partBY != null ? mmToPxY(parsed.fbsCombo.partBY) : prev.fbsCombo.partBYpx,
+            barXpx: parsed?.fbsCombo?.barX != null ? mmToPxX(parsed.fbsCombo.barX) : prev.fbsCombo.barXpx,
+            barYpx: parsed?.fbsCombo?.barY != null ? mmToPxY(parsed.fbsCombo.barY) : prev.fbsCombo.barYpx,
+            codeTextXpx: parsed?.fbsCombo?.codeTextX != null ? mmToPxX(parsed.fbsCombo.codeTextX) : prev.fbsCombo.codeTextXpx,
+            codeTextYpx: parsed?.fbsCombo?.codeTextY != null ? mmToPxY(parsed.fbsCombo.codeTextY) : prev.fbsCombo.codeTextYpx,
+          },
         }));
       } catch {}
     };
@@ -19143,9 +19224,50 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         numberFont: wbLayoutEditor.nameSequence.numberFont,
         nameFont: wbLayoutEditor.nameSequence.nameFont,
       },
-      // Эти два уже в миллиметрах — пересчитывать нечего.
-      chzTail: { ...wbLayoutEditor.chzTail },
-      fbsCombo: { ...wbLayoutEditor.fbsCombo },
+      chzTail: {
+        dmX: pxToMmX(wbLayoutEditor.chzTail.dmXpx),
+        dmY: pxToMmY(wbLayoutEditor.chzTail.dmYpx),
+        dmSize: wbLayoutEditor.chzTail.dmSize,
+        dmTextY: pxToMmY(wbLayoutEditor.chzTail.dmTextYpx),
+        headX: pxToMmX(wbLayoutEditor.chzTail.headXpx),
+        headY: pxToMmY(wbLayoutEditor.chzTail.headYpx),
+        headFont: wbLayoutEditor.chzTail.headFont,
+        tailX: pxToMmX(wbLayoutEditor.chzTail.tailXpx),
+        tailY: pxToMmY(wbLayoutEditor.chzTail.tailYpx),
+        tailFont: wbLayoutEditor.chzTail.tailFont,
+        textX: pxToMmX(wbLayoutEditor.chzTail.textXpx),
+        titleY: pxToMmY(wbLayoutEditor.chzTail.titleYpx),
+        titleFont: wbLayoutEditor.chzTail.titleFont,
+        dataY: pxToMmY(wbLayoutEditor.chzTail.dataYpx),
+        dataGap: wbLayoutEditor.chzTail.dataGap,
+        textFont: wbLayoutEditor.chzTail.textFont,
+        barcodeX: pxToMmX(wbLayoutEditor.chzTail.barcodeXpx),
+        barcodeY: pxToMmY(wbLayoutEditor.chzTail.barcodeYpx),
+        barcodeW: wbLayoutEditor.chzTail.barcodeW,
+        barcodeH: wbLayoutEditor.chzTail.barcodeH,
+        barcodeTextY: pxToMmY(wbLayoutEditor.chzTail.barcodeTextYpx),
+      },
+      fbsCombo: {
+        dmX: pxToMmX(wbLayoutEditor.fbsCombo.dmXpx),
+        dmY: pxToMmY(wbLayoutEditor.fbsCombo.dmYpx),
+        dmSize: wbLayoutEditor.fbsCombo.dmSize,
+        qrX: pxToMmX(wbLayoutEditor.fbsCombo.qrXpx),
+        qrY: pxToMmY(wbLayoutEditor.fbsCombo.qrYpx),
+        qrSize: wbLayoutEditor.fbsCombo.qrSize,
+        partAX: pxToMmX(wbLayoutEditor.fbsCombo.partAXpx),
+        partAY: pxToMmY(wbLayoutEditor.fbsCombo.partAYpx),
+        partAFont: wbLayoutEditor.fbsCombo.partAFont,
+        partBX: pxToMmX(wbLayoutEditor.fbsCombo.partBXpx),
+        partBY: pxToMmY(wbLayoutEditor.fbsCombo.partBYpx),
+        partBFont: wbLayoutEditor.fbsCombo.partBFont,
+        barX: pxToMmX(wbLayoutEditor.fbsCombo.barXpx),
+        barY: pxToMmY(wbLayoutEditor.fbsCombo.barYpx),
+        barW: wbLayoutEditor.fbsCombo.barW,
+        barH: wbLayoutEditor.fbsCombo.barH,
+        codeTextX: pxToMmX(wbLayoutEditor.fbsCombo.codeTextXpx),
+        codeTextY: pxToMmY(wbLayoutEditor.fbsCombo.codeTextYpx),
+        codeTextFont: wbLayoutEditor.fbsCombo.codeTextFont,
+      },
     };
   };
 
@@ -19316,6 +19438,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         if (template === 'chzTail') {
           await drawChzTailLabel(doc, lazyLibs.bwipjs, layout.chzTail as any, {
             ...sample,
+            stickerHead: '5777837',
             stickerTail: '6885',
           });
         } else {
@@ -22622,12 +22745,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <div className="text-xs font-bold mb-2 text-slate-700">ШК + ЧЗ + конец стикера</div>
                         {([
                           { key: 'dmSize', label: 'Размер марки (ЧЗ)', min: 20, max: 26, step: 0.1, unit: ' мм' },
-                          { key: 'tailFont', label: 'Размер цифр стикера', min: 10, max: 28, step: 0.5, unit: '' },
-                          { key: 'tailY', label: 'Цифры стикера, отступ сверху', min: 5, max: 20, step: 0.1, unit: ' мм' },
+                          { key: 'tailFont', label: 'Конец номера, размер', min: 10, max: 28, step: 0.5, unit: '' },
+                          { key: 'headFont', label: 'Начало номера, размер', min: 4, max: 12, step: 0.1, unit: '' },
                           { key: 'titleFont', label: 'Размер названия', min: 4.5, max: 9, step: 0.1, unit: '' },
-                          { key: 'titleY', label: 'Название, отступ сверху', min: 10, max: 22, step: 0.1, unit: ' мм' },
                           { key: 'textFont', label: 'Размер текста', min: 4, max: 8, step: 0.1, unit: '' },
-                          { key: 'dataY', label: 'Текст, отступ сверху', min: 14, max: 27, step: 0.1, unit: ' мм' },
+                          { key: 'dataGap', label: 'Отступ строк данных', min: 1.8, max: 4.5, step: 0.05, unit: ' мм' },
                           { key: 'barcodeW', label: 'Штрихкод ширина', min: 18, max: 30, step: 0.1, unit: ' мм' },
                           { key: 'barcodeH', label: 'Штрихкод высота', min: 4, max: 10, step: 0.1, unit: ' мм' },
                         ] as const).map(({ key, label, min, max, step, unit }) => (
@@ -22642,8 +22764,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           </div>
                         ))}
                         <div className="mt-3 rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-600">
-                          Цифры справа — последние четыре цифры стикера задания, только для глаз сборщика.
-                          Второго машиночитаемого кода тут нет: сканеру он не нужен, а место отнял бы у марки.
+                          Справа — номер стикера целиком, как на этикетке WB: начало мелко, конец крупно.
+                          Это подпись для глаз сборщика; второго машиночитаемого кода тут нет — сканеру он не
+                          нужен, а место отнял бы у марки.
                         </div>
                       </div>
 
@@ -22651,14 +22774,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <div className="text-xs font-bold mb-2 text-slate-700">Стикер задания + ЧЗ на одной этикетке</div>
                         {([
                           { key: 'dmSize', label: 'Размер марки (ЧЗ)', min: 20, max: 26, step: 0.1, unit: ' мм' },
-                          { key: 'qrSize', label: 'Размер QR задания', min: 11, max: 20, step: 0.1, unit: ' мм' },
-                          { key: 'qrX', label: 'QR, отступ слева', min: 22, max: 36, step: 0.1, unit: ' мм' },
+                          { key: 'qrSize', label: 'Размер QR задания', min: 11, max: 22, step: 0.1, unit: ' мм' },
                           { key: 'partBFont', label: 'Размер номера (крупно)', min: 8, max: 18, step: 0.5, unit: '' },
                           { key: 'partAFont', label: 'Размер номера (мелко)', min: 4, max: 9, step: 0.1, unit: '' },
-                          { key: 'barY', label: 'Штрихкод, отступ сверху', min: 22, max: 32, step: 0.1, unit: ' мм' },
-                          { key: 'barH', label: 'Штрихкод высота', min: 4, max: 9, step: 0.1, unit: ' мм' },
+                          { key: 'barW', label: 'Штрихкод задания, ширина', min: 30, max: 56, step: 0.1, unit: ' мм' },
+                          { key: 'barH', label: 'Штрихкод задания, высота', min: 4, max: 9, step: 0.1, unit: ' мм' },
                           { key: 'codeTextFont', label: 'Размер кода марки текстом', min: 2.6, max: 5, step: 0.1, unit: '' },
-                          { key: 'infoFont', label: 'Размер артикула и размера', min: 3.5, max: 7, step: 0.1, unit: '' },
                         ] as const).map(({ key, label, min, max, step, unit }) => (
                           <div key={`fbsCombo-${key}`}>
                             <label className="mt-2 block text-[11px] font-medium text-slate-500">{label}: {Number((wbLayoutEditor.fbsCombo as any)[key]).toFixed(1)}{unit}</label>
@@ -22671,8 +22792,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           </div>
                         ))}
                         <div className="mt-3 rounded-lg border border-dashed border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
-                          У марки 72×72 модуля: на 24 мм это 0,33 мм на модуль — как на проверенной этикетке.
-                          Ниже 22 мм символ уходит к границе допустимого по ГИС МТ.
+                          Только два кода: марка и задание. Товарного штрихкода, артикула и размера тут нет —
+                          место отдано символам.
+                          У марки 72×72 модуля: на 24 мм это 0,33 мм на модуль, как на проверенной этикетке;
+                          ниже 22 мм она уходит к границе допустимого по ГИС МТ.
                           У оригинального стикера WB есть ещё четыре служебных кода по углам — здесь их нет,
                           поэтому макет стоит обкатать на приёмке одной небольшой поставкой.
                         </div>
@@ -22862,24 +22985,94 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       </div>
                     </div>
 
-                    {/* Макеты ФБС: показываем сам PDF без блоков-накладок.
-                        Двигать мышью тут нечего — размеры задаются ползунками,
-                        и лишние мок-блоки только расходились бы с печатью. */}
-                    {(['chzTail', 'fbsCombo'] as const).map((key) => (
-                      <div key={`fbs-preview-${key}`} className={wbLayoutTemplate === key ? '' : 'hidden'}>
-                        <div className="wb-preview-frame mx-auto rounded-2xl max-w-full bg-white relative overflow-hidden ring-1 ring-slate-200 shadow-[0_14px_40px_-16px_rgba(15,23,42,0.35)]" style={{ width: PREVIEW_BASE_W, height: PREVIEW_BASE_H }}>
-                          {wbLayoutPdfPreviews[key] ? (
-                            <iframe
-                              title={`wb-layout-underlay-${key}`}
-                              src={`${wbLayoutPdfPreviews[key]}#toolbar=0&navpanes=0&scrollbar=0&view=Fit`}
-                              className="pointer-events-none absolute inset-0 h-full w-full border-0"
-                            />
-                          ) : (
-                            <div className="flex h-full items-center justify-center text-sm text-slate-400">Готовлю PDF…</div>
-                          )}
-                        </div>
+                    {/* Макеты ФБС: под блоками настоящий PDF, блоки двигаются
+                        мышью — как и у остальных макетов. */}
+                    <div className={wbLayoutTemplate === 'chzTail' ? '' : 'hidden'}>
+                      <div className="wb-preview-frame mx-auto rounded-2xl max-w-full bg-white relative overflow-hidden ring-1 ring-slate-200 shadow-[0_14px_40px_-16px_rgba(15,23,42,0.35)]" style={{ width: PREVIEW_BASE_W, height: PREVIEW_BASE_H }}>
+                        {wbLayoutPdfPreviews.chzTail ? (
+                          <iframe title="wb-layout-underlay-chzTail" src={`${wbLayoutPdfPreviews.chzTail}#toolbar=0&navpanes=0&scrollbar=0&view=Fit`} className="pointer-events-none absolute inset-0 h-full w-full border-0" />
+                        ) : null}
+                        <WbLayoutHandle
+                          title="Марка ЧЗ" tone="indigo"
+                          onMouseDown={(e) => startWbBlockDrag(e, 'chzTail', 'dmXpx', 'dmYpx', wbLayoutEditor.chzTail.dmXpx, wbLayoutEditor.chzTail.dmYpx)}
+                          style={{ left: `${wbLayoutEditor.chzTail.dmXpx}px`, top: `${wbLayoutEditor.chzTail.dmYpx}px`, width: `${mmToPreviewX(wbLayoutEditor.chzTail.dmSize)}px`, height: `${mmToPreviewY(wbLayoutEditor.chzTail.dmSize)}px` }}
+                        />
+                        <WbLayoutHandle
+                          title="Код марки текстом" tone="slate"
+                          onMouseDown={(e) => startWbBlockDrag(e, 'chzTail', 'dmXpx', 'dmTextYpx', wbLayoutEditor.chzTail.dmXpx, wbLayoutEditor.chzTail.dmTextYpx)}
+                          style={{ left: `${wbLayoutEditor.chzTail.dmXpx}px`, top: `${wbLayoutEditor.chzTail.dmTextYpx - ptToPreviewPx(3.6)}px`, width: `${mmToPreviewX(wbLayoutEditor.chzTail.dmSize)}px`, height: `${ptToPreviewPx(3.6) * 3.4}px` }}
+                        />
+                        {/* Цифры выровнены по правому краю — блок тянем влево от точки. */}
+                        <WbLayoutHandle
+                          title="Начало номера" tone="fuchsia"
+                          onMouseDown={(e) => startWbBlockDrag(e, 'chzTail', 'headXpx', 'headYpx', wbLayoutEditor.chzTail.headXpx, wbLayoutEditor.chzTail.headYpx)}
+                          style={{ left: `${wbLayoutEditor.chzTail.headXpx - mmToPreviewX(14)}px`, top: `${wbLayoutEditor.chzTail.headYpx - ptToPreviewPx(wbLayoutEditor.chzTail.headFont)}px`, width: `${mmToPreviewX(14)}px`, height: `${ptToPreviewPx(wbLayoutEditor.chzTail.headFont) * 1.3}px` }}
+                        />
+                        <WbLayoutHandle
+                          title="Конец номера" tone="cyan"
+                          onMouseDown={(e) => startWbBlockDrag(e, 'chzTail', 'tailXpx', 'tailYpx', wbLayoutEditor.chzTail.tailXpx, wbLayoutEditor.chzTail.tailYpx)}
+                          style={{ left: `${wbLayoutEditor.chzTail.tailXpx - mmToPreviewX(18)}px`, top: `${wbLayoutEditor.chzTail.tailYpx - ptToPreviewPx(wbLayoutEditor.chzTail.tailFont)}px`, width: `${mmToPreviewX(18)}px`, height: `${ptToPreviewPx(wbLayoutEditor.chzTail.tailFont) * 1.25}px` }}
+                        />
+                        <WbLayoutHandle
+                          title="Название" tone="emerald"
+                          onMouseDown={(e) => startWbBlockDrag(e, 'chzTail', 'textXpx', 'titleYpx', wbLayoutEditor.chzTail.textXpx, wbLayoutEditor.chzTail.titleYpx)}
+                          style={{ left: `${wbLayoutEditor.chzTail.textXpx}px`, top: `${wbLayoutEditor.chzTail.titleYpx - ptToPreviewPx(wbLayoutEditor.chzTail.titleFont)}px`, width: `${mmToPreviewX(29)}px`, height: `${ptToPreviewPx(wbLayoutEditor.chzTail.titleFont) * 2.4}px` }}
+                        />
+                        <WbLayoutHandle
+                          title="Артикул и размер" tone="amber"
+                          onMouseDown={(e) => startWbBlockDrag(e, 'chzTail', 'textXpx', 'dataYpx', wbLayoutEditor.chzTail.textXpx, wbLayoutEditor.chzTail.dataYpx)}
+                          style={{ left: `${wbLayoutEditor.chzTail.textXpx}px`, top: `${wbLayoutEditor.chzTail.dataYpx - ptToPreviewPx(wbLayoutEditor.chzTail.textFont)}px`, width: `${mmToPreviewX(29)}px`, height: `${mmToPreviewY(wbLayoutEditor.chzTail.dataGap * 2)}px` }}
+                        />
+                        <WbLayoutHandle
+                          title="Штрихкод товара" tone="violet"
+                          onMouseDown={(e) => startWbBlockDrag(e, 'chzTail', 'barcodeXpx', 'barcodeYpx', wbLayoutEditor.chzTail.barcodeXpx, wbLayoutEditor.chzTail.barcodeYpx)}
+                          style={{ left: `${wbLayoutEditor.chzTail.barcodeXpx}px`, top: `${wbLayoutEditor.chzTail.barcodeYpx}px`, width: `${mmToPreviewX(wbLayoutEditor.chzTail.barcodeW)}px`, height: `${mmToPreviewY(wbLayoutEditor.chzTail.barcodeH)}px` }}
+                        />
+                        <WbLayoutHandle
+                          title="Цифры штрихкода" tone="rose"
+                          onMouseDown={(e) => startWbBlockDrag(e, 'chzTail', 'barcodeXpx', 'barcodeTextYpx', wbLayoutEditor.chzTail.barcodeXpx, wbLayoutEditor.chzTail.barcodeTextYpx)}
+                          style={{ left: `${wbLayoutEditor.chzTail.barcodeXpx}px`, top: `${wbLayoutEditor.chzTail.barcodeTextYpx - ptToPreviewPx(10.4)}px`, width: `${mmToPreviewX(wbLayoutEditor.chzTail.barcodeW)}px`, height: `${ptToPreviewPx(10.4) * 1.25}px` }}
+                        />
                       </div>
-                    ))}
+                    </div>
+
+                    <div className={wbLayoutTemplate === 'fbsCombo' ? '' : 'hidden'}>
+                      <div className="wb-preview-frame mx-auto rounded-2xl max-w-full bg-white relative overflow-hidden ring-1 ring-slate-200 shadow-[0_14px_40px_-16px_rgba(15,23,42,0.35)]" style={{ width: PREVIEW_BASE_W, height: PREVIEW_BASE_H }}>
+                        {wbLayoutPdfPreviews.fbsCombo ? (
+                          <iframe title="wb-layout-underlay-fbsCombo" src={`${wbLayoutPdfPreviews.fbsCombo}#toolbar=0&navpanes=0&scrollbar=0&view=Fit`} className="pointer-events-none absolute inset-0 h-full w-full border-0" />
+                        ) : null}
+                        <WbLayoutHandle
+                          title="Марка ЧЗ" tone="indigo"
+                          onMouseDown={(e) => startWbBlockDrag(e, 'fbsCombo', 'dmXpx', 'dmYpx', wbLayoutEditor.fbsCombo.dmXpx, wbLayoutEditor.fbsCombo.dmYpx)}
+                          style={{ left: `${wbLayoutEditor.fbsCombo.dmXpx}px`, top: `${wbLayoutEditor.fbsCombo.dmYpx}px`, width: `${mmToPreviewX(wbLayoutEditor.fbsCombo.dmSize)}px`, height: `${mmToPreviewY(wbLayoutEditor.fbsCombo.dmSize)}px` }}
+                        />
+                        <WbLayoutHandle
+                          title="QR задания" tone="cyan"
+                          onMouseDown={(e) => startWbBlockDrag(e, 'fbsCombo', 'qrXpx', 'qrYpx', wbLayoutEditor.fbsCombo.qrXpx, wbLayoutEditor.fbsCombo.qrYpx)}
+                          style={{ left: `${wbLayoutEditor.fbsCombo.qrXpx}px`, top: `${wbLayoutEditor.fbsCombo.qrYpx}px`, width: `${mmToPreviewX(wbLayoutEditor.fbsCombo.qrSize)}px`, height: `${mmToPreviewY(wbLayoutEditor.fbsCombo.qrSize)}px` }}
+                        />
+                        <WbLayoutHandle
+                          title="Номер мелко" tone="slate"
+                          onMouseDown={(e) => startWbBlockDrag(e, 'fbsCombo', 'partAXpx', 'partAYpx', wbLayoutEditor.fbsCombo.partAXpx, wbLayoutEditor.fbsCombo.partAYpx)}
+                          style={{ left: `${wbLayoutEditor.fbsCombo.partAXpx}px`, top: `${wbLayoutEditor.fbsCombo.partAYpx - ptToPreviewPx(wbLayoutEditor.fbsCombo.partAFont)}px`, width: `${mmToPreviewX(14)}px`, height: `${ptToPreviewPx(wbLayoutEditor.fbsCombo.partAFont) * 1.3}px` }}
+                        />
+                        <WbLayoutHandle
+                          title="Номер крупно" tone="emerald"
+                          onMouseDown={(e) => startWbBlockDrag(e, 'fbsCombo', 'partBXpx', 'partBYpx', wbLayoutEditor.fbsCombo.partBXpx, wbLayoutEditor.fbsCombo.partBYpx)}
+                          style={{ left: `${wbLayoutEditor.fbsCombo.partBXpx}px`, top: `${wbLayoutEditor.fbsCombo.partBYpx - ptToPreviewPx(wbLayoutEditor.fbsCombo.partBFont)}px`, width: `${mmToPreviewX(14)}px`, height: `${ptToPreviewPx(wbLayoutEditor.fbsCombo.partBFont) * 1.3}px` }}
+                        />
+                        <WbLayoutHandle
+                          title="Штрихкод задания" tone="violet"
+                          onMouseDown={(e) => startWbBlockDrag(e, 'fbsCombo', 'barXpx', 'barYpx', wbLayoutEditor.fbsCombo.barXpx, wbLayoutEditor.fbsCombo.barYpx)}
+                          style={{ left: `${wbLayoutEditor.fbsCombo.barXpx}px`, top: `${wbLayoutEditor.fbsCombo.barYpx}px`, width: `${mmToPreviewX(wbLayoutEditor.fbsCombo.barW)}px`, height: `${mmToPreviewY(wbLayoutEditor.fbsCombo.barH)}px` }}
+                        />
+                        <WbLayoutHandle
+                          title="Код марки текстом" tone="rose"
+                          onMouseDown={(e) => startWbBlockDrag(e, 'fbsCombo', 'codeTextXpx', 'codeTextYpx', wbLayoutEditor.fbsCombo.codeTextXpx, wbLayoutEditor.fbsCombo.codeTextYpx)}
+                          style={{ left: `${wbLayoutEditor.fbsCombo.codeTextXpx}px`, top: `${wbLayoutEditor.fbsCombo.codeTextYpx - ptToPreviewPx(wbLayoutEditor.fbsCombo.codeTextFont)}px`, width: `${mmToPreviewX(wbLayoutEditor.fbsCombo.barW)}px`, height: `${ptToPreviewPx(wbLayoutEditor.fbsCombo.codeTextFont) * 3}px` }}
+                        />
+                      </div>
+                    </div>
                   </div>
                   </div>
                   </div>

@@ -101,7 +101,7 @@ export const WbLayoutHandle = ({
   onMouseDown,
 }: {
   title: string;
-  tone: 'indigo' | 'emerald' | 'amber' | 'fuchsia' | 'cyan';
+  tone: 'indigo' | 'emerald' | 'amber' | 'fuchsia' | 'cyan' | 'slate' | 'violet' | 'rose';
   style: React.CSSProperties;
   onMouseDown: (e: React.MouseEvent) => void;
 }) => {
@@ -111,6 +111,9 @@ export const WbLayoutHandle = ({
     amber: { border: 'border-amber-500/80', chip: 'bg-amber-600' },
     fuchsia: { border: 'border-fuchsia-500/80', chip: 'bg-fuchsia-600' },
     cyan: { border: 'border-cyan-500/80', chip: 'bg-cyan-600' },
+    slate: { border: 'border-slate-500/80', chip: 'bg-slate-600' },
+    violet: { border: 'border-violet-500/80', chip: 'bg-violet-600' },
+    rose: { border: 'border-rose-500/80', chip: 'bg-rose-600' },
   };
   const t = tones[tone] || tones.indigo;
 
