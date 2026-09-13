@@ -1458,6 +1458,65 @@ export const WBSupplyManager = ({
     return () => clearTimeout(timer);
   }, [fbsScanModalOpen, fbsScanLoading, fbsScanMode, fbsPendingStickerRow]);
 
+  /*
+   * Сканер работает при любом фокусе, пока открыто окно «Скан ЧЗ».
+   *
+   * Сканер — это клавиатура: символы уходят туда, где стоит курсор. Стоило
+   * нажать галочку, вкладку фильтра или кнопку печати — поле скана теряло
+   * фокус, и следующий скан пропадал, пока сборщик не щёлкнет в поле мышью.
+   *
+   * Теперь нажатие любой печатной клавиши вне поля переводит фокус в поле
+   * скана, а сам первый символ дописывается вручную: событие уже ушло не
+   * туда, и без этого код потерял бы первую букву. Остальные символы сканер
+   * доставит в поле сам. Enter вне поля отправляет то, что уже набрано.
+   *
+   * Не перехватываем, если человек печатает в другом поле (количество
+   * грузомест и т. п.), если открыто окно поверх или зажат Ctrl/Alt — это
+   * сочетания клавиш, а не скан.
+   */
+  useEffect(() => {
+    if (!fbsScanModalOpen) return;
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      const input = fbsScanInputRef.current;
+      if (!input || input.disabled) return;
+      if (e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey) return;
+      if (boxesModal) return;
+
+      const target = e.target as HTMLElement | null;
+      if (target === input) return;
+      const tag = String(target?.tagName || '').toLowerCase();
+      const editable = tag === 'textarea'
+        || tag === 'select'
+        || Boolean(target?.isContentEditable)
+        || (tag === 'input' && !['checkbox', 'radio', 'button', 'submit', 'reset', 'file'].includes(String((target as HTMLInputElement).type || '').toLowerCase()));
+      if (editable) return;
+
+      if (e.key === 'Enter') {
+        if (!String(input.value || '').trim()) return;
+        e.preventDefault();
+        input.form?.requestSubmit();
+        return;
+      }
+
+      // Только печатный символ: стрелки, Tab, F5 и прочее оставляем странице.
+      if (e.key.length !== 1) return;
+
+      e.preventDefault();
+      try {
+        input.focus({ preventScroll: true });
+      } catch {
+        input.focus();
+      }
+      input.value = `${input.value || ''}${e.key}`;
+      // Уведомляем обработчик ввода: он же отправляет скан, если сканер не шлёт Enter.
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [fbsScanModalOpen, boxesModal]);
+
   // --- API Helpers ---
 
   const getSupplierToken = () => selectedSupplier?.wb_api_token?.trim();
