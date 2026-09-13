@@ -65,6 +65,13 @@ import {
   logFbsScanReject,
   upsertFbsOrderCode,
 } from '../utils/fbsOrderCodes';
+import {
+  describeSgtinDecision,
+  fetchOrdersSgtin,
+  removeOrderSgtins,
+  sameChzCode,
+  sendOrderSgtins,
+} from '../utils/wbOrderMeta';
 
 /*
  * Подразделы грузятся отдельными чанками.
@@ -703,6 +710,42 @@ export const WBSupplyManager = ({
   const [fbsStickerPrintingId, setFbsStickerPrintingId] = useState<string>('');
   // То же для этикетки ЧЗ: печатается по одной строке из таблицы.
   const [fbsChzPrintingKey, setFbsChzPrintingKey] = useState<string>('');
+  /*
+   * Марка ЧЗ у WB по номеру задания: что мы отправили и что WB о ней думает.
+   *
+   * phase: sending — запрос в пути; sent — WB принял, проверка ещё не читалась;
+   * wb — прочитано из WB (value + decision); error — WB отказал, message — почему.
+   */
+  const [fbsWbSgtin, setFbsWbSgtin] = useState<Record<string, {
+    phase: 'sending' | 'sent' | 'wb' | 'error';
+    value?: string;
+    decision?: string;
+    message?: string;
+  }>>({});
+  const [fbsWbSgtinBusy, setFbsWbSgtinBusy] = useState<'' | 'refresh' | 'push'>('');
+  /*
+   * Отправлять марку в WB сразу после скана.
+   *
+   * Включено по умолчанию, выключается на рабочем месте: ключ с правом записи
+   * есть не у каждого кабинета, и там, где его нет, каждая строка краснела бы
+   * отказом WB. Храним локально — у склада свой ПК.
+   */
+  const [fbsWbAutoSend, setFbsWbAutoSend] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('fbs_wb_sgtin_autosend_v1') !== '0';
+    } catch {
+      return true;
+    }
+  });
+  // Отправка из фоновой очереди скана читает флаг через ref: замыкание устаревает.
+  const fbsWbAutoSendRef = useRef(fbsWbAutoSend);
+  useEffect(() => { fbsWbAutoSendRef.current = fbsWbAutoSend; }, [fbsWbAutoSend]);
+  const fbsWbSgtinQueueRef = useRef<Promise<unknown>>(Promise.resolve());
+  const fbsWbRecheckRef = useRef<{ timer: ReturnType<typeof setTimeout> | null; ids: Set<string>; supplierId: string }>({
+    timer: null,
+    ids: new Set(),
+    supplierId: '',
+  });
   /*
    * Отмеченные строки для пакетной печати.
    *
@@ -3018,6 +3061,191 @@ export const WBSupplyManager = ({
     setFbsScanSelection({});
   }, [activeSupplyId, fbsScanModalOpen]);
 
+  // Состояние марок у WB — тоже только для открытой поставки.
+  useEffect(() => {
+    setFbsWbSgtin({});
+  }, [activeSupplyId, selectedSupplierId]);
+
+  /** Прочитать, что стоит на заданиях у WB, и статусы проверки. */
+  const refreshFbsWbSgtin = async (
+    orderIds: string[],
+    opts: { silent?: boolean; supplierId?: string } = {},
+  ) => {
+    const supplierId = opts.supplierId || selectedSupplierId;
+    const ids = Array.from(new Set(orderIds.map((id) => String(id || '').trim()).filter((id) => /^\d+$/.test(id))));
+    if (!supplierId || !ids.length) return;
+
+    if (!opts.silent) setFbsWbSgtinBusy('refresh');
+    try {
+      const states = await fetchOrdersSgtin(supplierId, ids);
+      setFbsWbSgtin((prev) => {
+        const next = { ...prev };
+        for (const id of ids) {
+          const state = states[id];
+          if (!state) continue;
+          const current = next[id];
+          // Отправка ещё в пути — её исход важнее того, что прочитали до неё.
+          if (current?.phase === 'sending') continue;
+          // Отказ WB не затираем пустым чтением: иначе причина пропадёт с экрана.
+          if (current?.phase === 'error' && !state.value) continue;
+          next[id] = { phase: 'wb', value: state.value, decision: state.decision };
+        }
+        return next;
+      });
+    } catch (e: any) {
+      if (!opts.silent) setFbsScanNotice({ type: 'error', text: `Не прочитали марки из WB: ${e?.message || e}` });
+    } finally {
+      if (!opts.silent) setFbsWbSgtinBusy('');
+    }
+  };
+
+  /*
+   * Перечитать через полминуты с небольшим.
+   *
+   * Сразу после привязки WB отвечает `pending`: он сверяет марку с Честным
+   * знаком. Чтобы сборщик увидел итог, а не вечное «проверяет», дочитываем
+   * статус сами — одной пачкой на все отправленные за это время задания.
+   */
+  const scheduleFbsWbRecheck = (ids: string[], supplierId: string) => {
+    const box = fbsWbRecheckRef.current;
+    if (box.supplierId && box.supplierId !== supplierId) box.ids.clear();
+    box.supplierId = supplierId;
+    ids.forEach((id) => box.ids.add(id));
+    if (box.timer) clearTimeout(box.timer);
+    box.timer = setTimeout(() => {
+      const list = Array.from(box.ids);
+      box.ids.clear();
+      box.timer = null;
+      void refreshFbsWbSgtin(list, { silent: true, supplierId });
+    }, 40_000);
+  };
+
+  /**
+   * Отправить марки в WB на задания.
+   *
+   * Запросы идут очередью: сканер выдаёт коды быстрее, чем WB их принимает, а
+   * параллельные вызовы только упирались бы в лимит. Отказ WB показываем у
+   * строки — скан у нас от этого не отменяется: марка отсканирована верно, а
+   * отправить её можно повторно или файлом.
+   */
+  const pushFbsSgtinsToWb = (
+    items: Array<{ orderId: string; code: string }>,
+    supplierId: string = selectedSupplierId,
+  ) => {
+    const clean = items
+      .map((item) => ({ orderId: String(item.orderId || '').trim(), code: String(item.code || '') }))
+      .filter((item) => /^\d+$/.test(item.orderId) && item.code);
+    if (!supplierId || !clean.length) return Promise.resolve();
+
+    setFbsWbSgtin((prev) => {
+      const next = { ...prev };
+      clean.forEach(({ orderId }) => { next[orderId] = { ...next[orderId], phase: 'sending', message: '' }; });
+      return next;
+    });
+
+    const task = fbsWbSgtinQueueRef.current
+      .catch(() => undefined)
+      .then(async () => {
+        try {
+          const results = await sendOrderSgtins(supplierId, clean);
+          const byId = new Map(results.map((r) => [String(r.orderId), r]));
+          setFbsWbSgtin((prev) => {
+            const next = { ...prev };
+            clean.forEach(({ orderId, code }) => {
+              const r = byId.get(orderId);
+              if (r?.ok) {
+                next[orderId] = { phase: 'sent', value: code, decision: 'pending' };
+              } else {
+                next[orderId] = { phase: 'error', message: r?.message || 'WB не ответил на отправку' };
+              }
+            });
+            return next;
+          });
+          const acceptedIds = results.filter((r) => r.ok).map((r) => String(r.orderId));
+          if (acceptedIds.length) scheduleFbsWbRecheck(acceptedIds, supplierId);
+          return results;
+        } catch (e: any) {
+          const message = e?.message || 'Не удалось отправить марку в WB';
+          setFbsWbSgtin((prev) => {
+            const next = { ...prev };
+            clean.forEach(({ orderId }) => { next[orderId] = { phase: 'error', message }; });
+            return next;
+          });
+          return [];
+        }
+      });
+
+    fbsWbSgtinQueueRef.current = task;
+    return task;
+  };
+
+  /**
+   * «Отправить в WB» по всей поставке.
+   *
+   * Для заданий, отсканированных до автоотправки, и для тех, где WB отказал.
+   * Сначала читаем, что уже стоит у WB, и отправляем только расхождения:
+   * перезаписывать совпадающую марку незачем, а лишние запросы WB считает.
+   */
+  const pushAllFbsSgtinsToWb = async () => {
+    const supplierId = selectedSupplierId;
+    const withCode = fbsScanRows
+      .map((row) => ({
+        orderId: String(row.orderId || '').trim(),
+        code: String(findFbsScanSavedEntry(row, fbsScansBySticker)?.item?.honestSignCode || ''),
+      }))
+      .filter((item) => /^\d+$/.test(item.orderId) && item.code);
+
+    if (!withCode.length) {
+      setFbsScanNotice({ type: 'info', text: 'В поставке нет отсканированных марок — отправлять нечего.' });
+      return;
+    }
+
+    setFbsWbSgtinBusy('push');
+    try {
+      setFbsScanNotice({ type: 'info', text: `Сверяю с WB ${withCode.length} марок…` });
+      const states = await fetchOrdersSgtin(supplierId, withCode.map((i) => i.orderId));
+      const todo = withCode.filter((item) => {
+        const state = states[item.orderId];
+        // Нет поля sgtin — марку на это задание поставить нельзя вовсе.
+        if (!state) return false;
+        return !sameChzCode(state.value, item.code);
+      });
+      const skipped = withCode.filter((item) => !states[item.orderId]).length;
+
+      setFbsWbSgtin((prev) => {
+        const next = { ...prev };
+        Object.entries(states).forEach(([id, s]) => { next[id] = { phase: 'wb', value: s.value, decision: s.decision }; });
+        return next;
+      });
+
+      if (!todo.length) {
+        setFbsScanNotice({
+          type: 'success',
+          text: `У WB уже стоят все марки поставки.${skipped ? ` Заданий, где WB марку не принимает: ${skipped}.` : ''}`,
+        });
+        return;
+      }
+
+      setFbsScanNotice({ type: 'info', text: `Отправляю в WB ${todo.length} марок…` });
+      const results = (await pushFbsSgtinsToWb(todo, supplierId)) as Array<{ ok: boolean; message?: string }> | undefined;
+      const list = Array.isArray(results) ? results : [];
+      const ok = list.filter((r) => r.ok).length;
+      const failed = list.length - ok;
+      const reason = list.find((r) => !r.ok)?.message;
+
+      setFbsScanNotice({
+        type: failed ? 'error' : 'success',
+        text: `Отправлено в WB: ${ok} из ${todo.length}.`
+          + (failed ? ` Отказ по ${failed}: ${reason || 'см. строки'}.` : ' Статусы проверки подтянутся примерно через минуту.')
+          + (skipped ? ` Заданий, где WB марку не принимает: ${skipped}.` : ''),
+      });
+    } catch (e: any) {
+      setFbsScanNotice({ type: 'error', text: `Не отправили марки в WB: ${e?.message || e}` });
+    } finally {
+      setFbsWbSgtinBusy('');
+    }
+  };
+
   /*
    * Хвост отложенного снапшота.
    *
@@ -3407,6 +3635,8 @@ export const WBSupplyManager = ({
         }),
       ]);
       setFbsScanRows(rows);
+      // Что уже стоит у WB — фоном: окно сканирования ждать этого не должно.
+      void refreshFbsWbSgtin(rows.map((r) => r.orderId), { silent: true });
 
       const restored = restoreFbsScansFromDb(savedMap, dbScans, rows);
       applyFbsScans(restored.map);
@@ -3584,6 +3814,11 @@ export const WBSupplyManager = ({
         title: row.title,
       }).catch((e) => console.error('fbs_order_codes upsert failed', e));
 
+      // Записали под ответственность человека — значит и в WB уходит она.
+      if (fbsWbAutoSendRef.current) {
+        void pushFbsSgtinsToWb([{ orderId: row.orderId, code: honestSignCode }], supplierId);
+      }
+
       void logFbsScanReject({
         supplierId,
         supplyId,
@@ -3629,6 +3864,31 @@ export const WBSupplyManager = ({
         setFbsScanMode('sticker');
         clearScanInput();
       }
+
+      /*
+       * Сброшенная марка должна уйти и из WB.
+       *
+       * Сбрасывают, когда марка не та, — оставить её на задании у WB значит
+       * отправить вещь с чужим кодом. Снимаем, только если знаем, что марка
+       * там есть: лишний запрос на пустое задание WB считает за десять.
+       */
+      const orderId = String(row.orderId || '').trim();
+      const wbState = fbsWbSgtin[orderId];
+      if (/^\d+$/.test(orderId) && (wbState?.value || wbState?.phase === 'sent' || wbState?.phase === 'sending')) {
+        try {
+          const [result] = await removeOrderSgtins(selectedSupplierId, [orderId]);
+          if (result && !result.ok) {
+            setFbsWbSgtin((prev) => ({ ...prev, [orderId]: { ...prev[orderId], phase: 'error', message: `Марку у WB снять не удалось: ${result.message}` } }));
+            setFbsScanNotice({ type: 'error', text: `ЧЗ сброшен у нас, но в WB марка осталась: ${result.message}` });
+            return;
+          }
+          setFbsWbSgtin((prev) => ({ ...prev, [orderId]: { phase: 'wb', value: '', decision: 'optional' } }));
+        } catch (e: any) {
+          setFbsScanNotice({ type: 'error', text: `ЧЗ сброшен у нас, но в WB марка осталась: ${e?.message || e}` });
+          return;
+        }
+      }
+
       setFbsScanNotice({ type: 'success', text: `ЧЗ для заказа ${row.orderId} сброшен. Можно сканировать заново.` });
     } catch (e: any) {
       setFbsScanNotice({ type: 'error', text: e?.message || 'Не удалось сбросить ЧЗ' });
@@ -4600,7 +4860,20 @@ export const WBSupplyManager = ({
         });
 
         const syncResult = await syncFbsScannedCodesToUnifiedBase([honestSignCode], supplierId);
-        if (syncResult?.foreignCodes?.length) {
+        const foreignCode = Boolean(syncResult?.foreignCodes?.length);
+
+        /*
+         * Марка — сразу в WB, на это задание.
+         *
+         * Только после того, как скан записан у нас: если отправить раньше, а
+         * запись упадёт, у WB останется марка, которой в нашей базе нет. Марку
+         * чужого кабинета не отправляем — сначала человек должен её проверить.
+         */
+        if (fbsWbAutoSendRef.current && !foreignCode) {
+          void pushFbsSgtinsToWb([{ orderId: pendingRow.orderId, code: honestSignCode }], supplierId);
+        }
+
+        if (foreignCode) {
           setFbsScanNotice({
             type: 'error',
             text: 'Эта марка в общей базе числится за другим кабинетом. Товар записан, но проверьте, тот ли это код: '
@@ -6673,6 +6946,14 @@ export const WBSupplyManager = ({
         }).catch((e) => console.error('fbs_order_codes upsert failed', e));
       }
 
+      // Напечатанная марка уже на вещи — значит и на задание в WB её ставим сразу.
+      if (fbsWbAutoSendRef.current) {
+        void pushFbsSgtinsToWb(
+          Array.from(codesByOrderId.entries()).map(([orderId, code]) => ({ orderId: String(orderId), code })),
+          supplierId,
+        );
+      }
+
       setSuccessMsg(`Марки закреплены за заданиями: ${codesByOrderId.size}. Сканировать их в «Скан ЧЗ» не нужно.`);
     } catch (e: any) {
       setError(`Этикетки напечатаны, но связка не сохранилась: ${e?.message || e}. Отсканируйте эти коды вручную.`);
@@ -7768,6 +8049,72 @@ export const WBSupplyManager = ({
                     </button>
                     </div>
 
+                    {/* Марки в WB: сводка по поставке и ручная отправка. */}
+                    {(() => {
+                      const counts = { ok: 0, wait: 0, bad: 0, missing: 0, differ: 0 };
+                      for (const row of fbsScanRows) {
+                        const ours = findFbsScanSavedEntry(row, fbsScansBySticker)?.item?.honestSignCode || '';
+                        const wb = fbsWbSgtin[String(row.orderId || '').trim()];
+                        if (!ours || !wb) continue;
+                        if (wb.phase === 'error') { counts.bad += 1; continue; }
+                        if (wb.phase === 'sending' || wb.phase === 'sent') { counts.wait += 1; continue; }
+                        if (!wb.value) { counts.missing += 1; continue; }
+                        if (!sameChzCode(wb.value, ours)) { counts.differ += 1; continue; }
+                        const { verdict } = describeSgtinDecision(wb.decision || '');
+                        if (verdict === 'ok') counts.ok += 1;
+                        else if (verdict === 'bad') counts.bad += 1;
+                        else counts.wait += 1;
+                      }
+
+                      return (
+                        <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-2 text-sm">
+                          <span className="font-semibold text-slate-700">Марки в WB:</span>
+                          <span className="text-emerald-700">✓ {counts.ok}</span>
+                          {counts.wait > 0 && <span className="text-sky-700">проверяются {counts.wait}</span>}
+                          {counts.missing > 0 && <span className="text-amber-700">не отправлены {counts.missing}</span>}
+                          {counts.differ > 0 && <span className="text-rose-700">другая марка {counts.differ}</span>}
+                          {counts.bad > 0 && <span className="font-semibold text-rose-700">ошибки {counts.bad}</span>}
+
+                          <label
+                            className="ml-2 inline-flex items-center gap-2 text-slate-700"
+                            title="Каждая отсканированная марка сразу уходит на задание в WB. Работает, пока задание на сборке"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={fbsWbAutoSend}
+                              onChange={(e) => {
+                                const next = e.target.checked;
+                                setFbsWbAutoSend(next);
+                                try { localStorage.setItem('fbs_wb_sgtin_autosend_v1', next ? '1' : '0'); } catch {}
+                              }}
+                              className="h-4 w-4 rounded border-slate-300"
+                            />
+                            Отправлять в WB сразу при скане
+                          </label>
+
+                          <button
+                            type="button"
+                            onClick={() => refreshFbsWbSgtin(fbsScanRows.map((r) => r.orderId))}
+                            disabled={Boolean(fbsWbSgtinBusy)}
+                            className="ml-auto inline-flex items-center gap-1 px-3 py-1.5 rounded-xl border border-slate-300 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+                          >
+                            <RefreshCw className={`w-3.5 h-3.5 ${fbsWbSgtinBusy === 'refresh' ? 'animate-spin' : ''}`} />
+                            Проверить в WB
+                          </button>
+                          <button
+                            type="button"
+                            onClick={pushAllFbsSgtinsToWb}
+                            disabled={Boolean(fbsWbSgtinBusy)}
+                            title="Отправить на задания все отсканированные марки, которых у WB нет или там стоит другая"
+                            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-emerald-600 font-semibold text-white hover:bg-emerald-700 disabled:opacity-40"
+                          >
+                            <Upload className="w-3.5 h-3.5" />
+                            {fbsWbSgtinBusy === 'push' ? 'Отправляю…' : 'Отправить всё в WB'}
+                          </button>
+                        </div>
+                      );
+                    })()}
+
                     {/* Пакетная печать. Вторая строка панели, а не отдельный
                         блок: выбор идёт по тому же фильтру, что и вкладки
                         выше, и разносить их по экрану значило бы путать. */}
@@ -7982,6 +8329,41 @@ export const WBSupplyManager = ({
                                   <span className="text-slate-500">Готов к сканированию</span>
                                 )}
                               </div>
+                              {(() => {
+                                /*
+                                 * Что с маркой у WB. Отдельной строкой под нашим
+                                 * статусом: «сохранён у нас» и «принят WB» —
+                                 * разные вещи, и путать их нельзя.
+                                 */
+                                const wb = fbsWbSgtin[String(row.orderId || '').trim()];
+                                if (!wb) return null;
+
+                                if (wb.phase === 'sending') {
+                                  return <div className="mt-1 text-[11px] text-sky-600">WB: отправляю марку…</div>;
+                                }
+                                if (wb.phase === 'error') {
+                                  return <div className="mt-1 text-[11px] font-medium text-rose-600">WB не принял: {wb.message}</div>;
+                                }
+
+                                const ours = scan?.honestSignCode || '';
+                                // У WB другая марка, чем у нас: главное, что нужно увидеть.
+                                if (wb.value && ours && !sameChzCode(wb.value, ours)) {
+                                  return <div className="mt-1 text-[11px] font-medium text-rose-600">WB: на задании другая марка — отправьте заново</div>;
+                                }
+                                // У нас марка есть, у WB нет — ещё не отправлена.
+                                if (!wb.value && ours) {
+                                  return <div className="mt-1 text-[11px] text-amber-600">WB: марка не отправлена</div>;
+                                }
+                                if (!wb.value) return null;
+
+                                const { verdict, text } = describeSgtinDecision(wb.decision || '');
+                                const tone = verdict === 'ok'
+                                  ? 'text-emerald-600'
+                                  : verdict === 'bad'
+                                    ? 'text-rose-600 font-medium'
+                                    : 'text-sky-600';
+                                return <div className={`mt-1 text-[11px] ${tone}`}>{verdict === 'ok' ? '✓ ' : ''}{text}</div>;
+                              })()}
                             </td>
                           </tr>
                         );
