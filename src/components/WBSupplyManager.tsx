@@ -8205,23 +8205,80 @@ export const WBSupplyManager = ({
       })()}
 
       {fbsScanModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => { setFbsScanModalOpen(false); setFbsPendingStickerRow(null); setFbsScanMode('sticker'); clearScanInput(); }}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
-            <div className="px-5 py-4 border-b border-slate-200 flex items-start justify-between gap-4">
-              <div>
-                <div className="text-lg font-bold text-slate-900">Скан ЧЗ</div>
-                <div className="text-sm text-slate-500">Поставка: {supplies.find((s) => s.id === activeSupplyId)?.name || activeSupplyId || '-'}</div>
-                <div className="text-xs text-slate-500 mt-1 space-y-1">
-                  <div>Отсканировано: {fbsScanStats.scannedCount} из {fbsScanStats.totalRows}</div>
-                  <div>Заменено стикеров в поставке: {fbsScanStats.scannedCount}</div>
+        /*
+         * Окно на весь экран, в две колонки.
+         *
+         * На мониторах 21–24″ прежняя компоновка «всё сверху, таблица снизу»
+         * оставляла таблице треть высоты: шаг с фото, семь кнопок и поле скана
+         * съедали остальное. Теперь всё управление — в узкой колонке слева, а
+         * таблица занимает всю высоту справа. На узком экране колонки
+         * складываются друг под друга, как было.
+         */
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-2 lg:p-3" onClick={() => { setFbsScanModalOpen(false); setFbsPendingStickerRow(null); setFbsScanMode('sticker'); clearScanInput(); }}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full h-full max-w-[1920px] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-3 border-b border-slate-200 flex items-center justify-between gap-4">
+              <div className="flex min-w-0 items-center gap-4">
+                <div className="text-lg font-bold text-slate-900 shrink-0">Скан ЧЗ</div>
+                <div className="min-w-0 truncate text-sm text-slate-500">
+                  {supplies.find((s) => s.id === activeSupplyId)?.name || activeSupplyId || '-'}
+                  <span className="ml-2 font-mono text-xs text-slate-400">{activeSupplyId}</span>
                 </div>
               </div>
-              <button onClick={() => { setFbsScanModalOpen(false); setFbsPendingStickerRow(null); setFbsScanMode('sticker'); clearScanInput(); }} className="p-2 rounded-lg hover:bg-slate-100 text-slate-500">
-                <X className="w-5 h-5" />
-              </button>
+              <div className="flex items-center gap-4">
+                {/* Прогресс крупно и в одну строку: главный вопрос у стола — сколько осталось. */}
+                <div className="hidden sm:flex items-center gap-3">
+                  <div className="h-2.5 w-48 overflow-hidden rounded-full bg-slate-100">
+                    <div
+                      className="h-full rounded-full bg-emerald-500 transition-all"
+                      style={{ width: `${fbsScanStats.totalRows ? Math.round((fbsScanStats.scannedCount / fbsScanStats.totalRows) * 100) : 0}%` }}
+                    />
+                  </div>
+                  <div className="text-sm text-slate-700 tabular-nums whitespace-nowrap">
+                    <b className="text-slate-900">{fbsScanStats.scannedCount}</b> из {fbsScanStats.totalRows}
+                    <span className="ml-2 text-slate-400">осталось {Math.max(0, fbsScanStats.totalRows - fbsScanStats.scannedCount)}</span>
+                  </div>
+                </div>
+                <button onClick={() => { setFbsScanModalOpen(false); setFbsPendingStickerRow(null); setFbsScanMode('sticker'); clearScanInput(); }} className="p-2 rounded-lg hover:bg-slate-100 text-slate-500">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
 
-            <div className="p-5 border-b border-slate-100 bg-slate-50 space-y-3">
+            <div className="flex-1 min-h-0 flex flex-col lg:flex-row">
+            <div className="lg:w-[420px] xl:w-[460px] shrink-0 overflow-auto p-4 border-b lg:border-b-0 lg:border-r border-slate-200 bg-slate-50 space-y-3">
+              {/* Поле скана — первым: курсор живёт в нём, и сборщик смотрит сюда. */}
+              <form onSubmit={handleFbsScanSubmit} className="flex flex-col gap-2">
+                <input
+                  ref={fbsScanInputRef}
+                  type="text"
+                  defaultValue=""
+                  onInput={onScanInputBurst}
+                  inputMode="none"
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
+                  placeholder={fbsScanMode === 'sticker' ? 'Сканируйте значение из колонки «Стикер при считывании»...' : 'Сканируйте код Честного знака...'}
+                  className="flex-1 oc-input"
+                  autoFocus
+                />
+                <button
+                  type="submit"
+                  disabled={fbsScanLoading}
+                  className="px-4 py-2 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
+                >
+                  {fbsScanMode === 'sticker' ? 'Найти строку' : 'Сохранить ЧЗ'}
+                </button>
+                {fbsScanMode === 'honest_sign' && (
+                  <button
+                    type="button"
+                    onClick={() => { setFbsPendingStickerRow(null); setFbsScanMode('sticker'); fbsCue('sticker'); clearScanInput(); setFbsScanNotice({ type: 'info', text: 'Скан ЧЗ сброшен. Можно сканировать следующий стикер.' }); }}
+                    className="px-4 py-2 rounded-xl border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                  >
+                    Сбросить
+                  </button>
+                )}
+              </form>
               {/* Панель шага — во всю ширину, кнопки под ней.
                   Раньше они делили строку, и пять длинных кнопок сжимали
                   подсказку в колонку шириной в одно слово. */}
@@ -8238,14 +8295,15 @@ export const WBSupplyManager = ({
                       </div>
                     </div>
                   ) : (
-                    <div className="flex items-start gap-4">
+                    <div className="flex flex-col gap-3">
                       {/* Крупное фото: на этом шаге сборщик держит вещь в руках
-                          и должен успеть заметить, что взял не тот товар. */}
+                          и должен успеть заметить, что взял не тот товар.
+                          В узкой колонке — над текстом, во всю ширину. */}
                       {fbsPendingStickerRow ? (
                         <FbsPhoto
                           urls={getFbsRowPhotoCandidates(fbsPendingStickerRow)}
-                          className="h-64 w-48 flex-shrink-0 rounded-lg border border-amber-200 bg-white object-cover"
-                          emptyClassName="h-64 w-48 flex-shrink-0 rounded-lg border border-dashed border-amber-200 bg-white/60"
+                          className="h-72 w-full rounded-lg border border-amber-200 bg-white object-contain"
+                          emptyClassName="h-72 w-full rounded-lg border border-dashed border-amber-200 bg-white/60"
                         />
                       ) : null}
                       <div className="min-w-0">
@@ -8270,7 +8328,9 @@ export const WBSupplyManager = ({
                     </div>
                   )}
                 </div>
-                <div className="flex flex-wrap gap-2">
+                {/* Кнопки сеткой в две колонки: в узкой колонке ряд из семи
+                    кнопок переносился бы лесенкой разной ширины. */}
+                <div className="grid grid-cols-2 gap-2 [&>*]:px-3 [&>*]:py-2 [&>*]:text-[13px]">
                   {/* Первой кнопкой: поставку пополняют во время сборки, и
                       обновление состава нужнее любой выгрузки. */}
                   <button
@@ -8404,44 +8464,12 @@ export const WBSupplyManager = ({
                 </div>
               )}
 
-              <form onSubmit={handleFbsScanSubmit} className="flex flex-col md:flex-row gap-3">
-                <input
-                  ref={fbsScanInputRef}
-                  type="text"
-                  defaultValue=""
-                  onInput={onScanInputBurst}
-                  inputMode="none"
-                  autoComplete="off"
-                  autoCorrect="off"
-                  autoCapitalize="off"
-                  spellCheck={false}
-                  placeholder={fbsScanMode === 'sticker' ? 'Сканируйте значение из колонки «Стикер при считывании»...' : 'Сканируйте код Честного знака...'}
-                  className="flex-1 oc-input"
-                  autoFocus
-                />
-                <button
-                  type="submit"
-                  disabled={fbsScanLoading}
-                  className="px-4 py-2 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
-                >
-                  {fbsScanMode === 'sticker' ? 'Найти строку' : 'Сохранить ЧЗ'}
-                </button>
-                {fbsScanMode === 'honest_sign' && (
-                  <button
-                    type="button"
-                    onClick={() => { setFbsPendingStickerRow(null); setFbsScanMode('sticker'); fbsCue('sticker'); clearScanInput(); setFbsScanNotice({ type: 'info', text: 'Скан ЧЗ сброшен. Можно сканировать следующий стикер.' }); }}
-                    className="px-4 py-2 rounded-xl border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
-                  >
-                    Сбросить
-                  </button>
-                )}
-              </form>
             </div>
 
             {/* Отступа сверху нет намеренно: липкая панель прилипает к границе
                 padding-box, и с `pt-5` она вставала на два десятка пикселей
                 ниже края — в этот просвет затекали строки таблицы. */}
-            <div className="px-5 pb-5 overflow-auto">
+            <div className="flex-1 min-w-0 min-h-0 px-5 pb-5 overflow-auto">
               {/* Фильтр по состоянию сборки: на длинной поставке главное —
                   быстро увидеть, что ещё не отсканировано. */}
               {!fbsScanLoading && fbsScanRows.length > 0 && (() => {
@@ -8698,7 +8726,7 @@ export const WBSupplyManager = ({
                         </th>
                         {/* Колонка должна быть шире картинки: при w-16 ячейка
                             сжимала фото в вертикальную полоску. */}
-                        <th className="px-3 py-2 text-left w-40">Фото</th>
+                        <th className="px-3 py-2 text-left w-32">Фото</th>
                         <th className="px-3 py-2 text-left">Номер заказа</th>
                         <th className="px-3 py-2 text-left">Стикер</th>
                         <th className="px-3 py-2 text-left">Стикер при считывании</th>
@@ -8735,13 +8763,13 @@ export const WBSupplyManager = ({
                             <td className="px-3 py-2">
                               <FbsPhoto
                                 urls={getFbsRowPhotoCandidates(row)}
-                                className="h-36 w-28 flex-shrink-0 rounded-lg border border-slate-200 bg-white object-contain"
-                                emptyClassName="h-36 w-28 flex-shrink-0 rounded-lg border border-dashed border-slate-200 bg-slate-50"
+                                className="h-32 w-24 flex-shrink-0 rounded-lg border border-slate-200 bg-white object-contain"
+                                emptyClassName="h-32 w-24 flex-shrink-0 rounded-lg border border-dashed border-slate-200 bg-slate-50"
                               />
                             </td>
                             <td className="px-3 py-2 font-medium text-slate-900 whitespace-nowrap">
                               <div>{row.orderId || '—'}</div>
-                              {row.title ? <div className="mt-0.5 text-[11px] font-normal text-slate-500 max-w-[220px] truncate" title={row.title}>{row.title}</div> : null}
+                              {row.title ? <div className="mt-0.5 text-xs font-normal text-slate-500 max-w-[380px] truncate" title={row.title}>{row.title}</div> : null}
                               <div className="text-[11px] font-normal text-slate-400">{[row.article, row.size].filter(Boolean).join(' · ')}</div>
                             </td>
                             <td className="px-3 py-2 font-mono text-slate-700 whitespace-nowrap">
@@ -8861,6 +8889,7 @@ export const WBSupplyManager = ({
                   )}
                 </div>
               )}
+            </div>
             </div>
           </div>
         </div>
