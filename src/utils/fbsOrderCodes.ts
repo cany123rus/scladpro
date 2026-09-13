@@ -215,6 +215,8 @@ export type FbsScanRejectReason =
   | 'duplicate_in_supply'
   | 'already_in_supplier_base'
   | 'sticker_not_found'
+  /** Стикер задания, у которого марка уже отсканирована. */
+  | 'sticker_already_scanned'
   | 'supply_not_ready'
   | 'save_failed'
   /** Не отказ, а его отмена человеком: код записан повторно осознанно. */

@@ -1,4 +1,4 @@
-/* СкладПро service worker — app-shell offline cache.
+/* РЎРєР»Р°РґРџСЂРѕ service worker вЂ” app-shell offline cache.
  * Strategy:
  *  - Only same-origin GET requests are handled. Cross-origin (Supabase proxy,
  *    Cloud Run, Telegram, etc.) and non-GET always go straight to the network.
@@ -8,7 +8,7 @@
  *    caching successful responses for next time.
  *  - API calls (/api/...) are never cached.
  */
-const CACHE = 'scladpro-shell-v366';
+const CACHE = 'scladpro-shell-v367';
 const APP_SHELL = ['/', '/index.html', '/manifest.webmanifest', '/site-icon.jpg'];
 
 self.addEventListener('install', (event) => {
@@ -34,8 +34,8 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return;        // cross-origin: passthrough
   if (url.pathname.startsWith('/api/')) return;            // never cache API
 
-  // Navigations -> network-first, и обновляем кэш свежим index.html (для оффлайн-фолбэка,
-  // чтобы он не указывал на удалённые после деплоя JS-чанки -> белый экран).
+  // Navigations -> network-first, Рё РѕР±РЅРѕРІР»СЏРµРј РєСЌС€ СЃРІРµР¶РёРј index.html (РґР»СЏ РѕС„С„Р»Р°Р№РЅ-С„РѕР»Р±СЌРєР°,
+  // С‡С‚РѕР±С‹ РѕРЅ РЅРµ СѓРєР°Р·С‹РІР°Р» РЅР° СѓРґР°Р»С‘РЅРЅС‹Рµ РїРѕСЃР»Рµ РґРµРїР»РѕСЏ JS-С‡Р°РЅРєРё -> Р±РµР»С‹Р№ СЌРєСЂР°РЅ).
   if (req.mode === 'navigate') {
     event.respondWith(
       fetch(req)
@@ -70,7 +70,7 @@ self.addEventListener('fetch', (event) => {
 self.addEventListener('push', (event) => {
   let data = {};
   try { data = event.data ? event.data.json() : {}; } catch { data = { body: event.data && event.data.text ? event.data.text() : '' }; }
-  const title = data.title || 'СкладПро';
+  const title = data.title || 'РЎРєР»Р°РґРџСЂРѕ';
   const options = {
     body: data.body || '',
     icon: data.icon || '/site-icon.jpg',

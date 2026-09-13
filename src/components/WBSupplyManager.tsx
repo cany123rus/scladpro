@@ -4791,8 +4791,19 @@ export const WBSupplyManager = ({
 
     setFbsScanBulkBusy(true);
     try {
-      // Этикетки первыми, лист подбора — вторым окном печати: они идут на
-      // разные принтеры (термопринтер 58×40 и A4).
+      /*
+       * Лист подбора — всегда файлом, и первым.
+       *
+       * Два окна печати подряд браузер не показывает: пока открыто окно со
+       * стикерами, второе молча пропадало, и «Стикеры + Лист» печатали только
+       * стикеры. Файл скачивается без окна, а печатают его, когда удобно.
+       */
+      if (withPicking) {
+        setFbsScanNotice({ type: 'info', text: 'Собираю лист подбора…' });
+        const picking = await buildSelectedPickingListPdf(rows);
+        picking.save(`Лист подбора ${activeSupplyId || ''} ${rows.length}.pdf`);
+        setFbsScanNotice({ type: 'success', text: `Лист подбора на ${rows.length} заданий скачан.` });
+      }
       if (withLabels) {
         await printChzLabels(rows, {
           // У совмещённой этикетки стикер уже внутри — второй экземпляр не нужен.
@@ -4801,12 +4812,6 @@ export const WBSupplyManager = ({
           tab: null,
           kind: fbsLabelKind,
         });
-      }
-      if (withPicking) {
-        setFbsScanNotice({ type: 'info', text: 'Собираю лист подбора…' });
-        const picking = await buildSelectedPickingListPdf(rows);
-        await printPdfDirect(picking);
-        setFbsScanNotice({ type: 'success', text: `Лист подбора на ${rows.length} заданий отправлен в печать.` });
       }
     } catch (e: any) {
       setFbsScanNotice({ type: 'error', text: e?.message || 'Не удалось напечатать выбранное' });
@@ -5108,6 +5113,34 @@ export const WBSupplyManager = ({
         clearScanInput();
         return;
       }
+
+      /*
+       * У задания марка уже есть — второй раз его не сканируем.
+       *
+       * Иначе повторный скан стикера молча перезаписывал марку: товар из
+       * соседней кучи или стикер, поднесённый дважды, заменял верный код.
+       * Если марку правда нужно сменить — «Сбросить ЧЗ» в строке задания.
+       */
+      const alreadyScanned = findFbsScanSavedEntry(row, fbsScansRef.current)?.item?.honestSignCode
+        || fbsScanSavingKeysRef.current[row.storageKey];
+      if (alreadyScanned) {
+        setFbsScanNotice({
+          type: 'error',
+          text: `У заказа ${row.orderId} ЧЗ уже отсканирован — повторно не сканируется. Сканируйте следующий стикер. Сменить марку: «Сбросить ЧЗ» в строке заказа.`,
+        });
+        void logFbsScanReject({
+          supplierId: selectedSupplierId,
+          supplyId: activeSupplyId || '',
+          orderId: row.orderId,
+          rawValue: raw,
+          reason: 'sticker_already_scanned',
+          detail: 'у задания уже есть ЧЗ',
+        });
+        fbsCue('error');
+        clearScanInput();
+        return;
+      }
+
       setFbsScanNotice({ type: 'success', text: `Найден заказ ${row.orderId}. Теперь сканируйте ЧЗ.` });
       setFbsPendingStickerRow(row);
       setFbsScanMode('honest_sign');
@@ -6941,8 +6974,6 @@ export const WBSupplyManager = ({
         if (Number.isFinite(oid) && digits) localStickerById.set(oid, digits);
       }
       const stickerLabels = new Map<number, string>([...localStickerById.entries(), ...fetchedStickerLabels.entries()]);
-      const fbsSupplyScans = await loadFbsSupplyScanMap(activeSupplyId, selectedSupplierId);
-
       // 2. Sort
       const sortedSupplyOrders = sortOrdersForPicking(supplyOrders);
 
@@ -6994,10 +7025,8 @@ export const WBSupplyManager = ({
           const fromApi = Number.isFinite(orderIdNum) ? stickerLabels.get(orderIdNum) : '';
           const fromOrder = extractStickerLabel(o);
           const stickerRaw = normalizeStickerDigits(fromApi || fromOrder || '');
+          // Только стикер: по листу сверяют наклейку на вещи, марку там не читают.
           const stickerText = formatStickerDigits(stickerRaw || '');
-          const scanStorageKey = normalizeFbsStorageKey({ stickerDigits: stickerRaw, orderId: String(o.id ?? o.orderId ?? o.order_id ?? '') });
-          const scannedHonestSign = stickerRaw ? String(fbsSupplyScans?.[scanStorageKey]?.honestSignCode || '') : '';
-          const stickerOrScanText = scannedHonestSign || stickerText;
           const imgCandidates = getImageCandidates(o.photoUrl, o.nmId, [productPhotoByNmId.get(Number(o.nmId)) || '']);
           const imgData = imgCandidates.map((u) => imageDataByUrl.get(u) || '').find(Boolean) || '';
 
@@ -7009,7 +7038,7 @@ export const WBSupplyManager = ({
               o.size,
               o.color,
               o.article,
-              stickerOrScanText
+              stickerText
           ];
       });
 
@@ -7033,7 +7062,7 @@ export const WBSupplyManager = ({
 
         (autoTable as any)(doc, {
           startY: 30,
-          head: [['№ задания', 'Фото', 'Наименование', 'Размер', 'Цвет', 'Артикул', 'Стикер / ЧЗ']],
+          head: [['№ задания', 'Фото', 'Наименование', 'Размер', 'Цвет', 'Артикул', 'Стикер']],
           body: pageRows,
           styles: { fontSize: 8, cellPadding: 2, valign: 'middle', font: 'Roboto' },
           headStyles: { font: 'Roboto', fontStyle: 'normal' },
@@ -7076,8 +7105,8 @@ export const WBSupplyManager = ({
         });
       }
       
-      await printPdfDirect(doc);
-      setSuccessMsg(`Лист подбора на ${sortedSupplyOrders.length} заказов отправлен в печать`);
+      doc.save(`Лист подбора ${String(supplyName || '').replace(/[\\/:*?"<>|]+/g, '_')} ${sortedSupplyOrders.length}.pdf`);
+      setSuccessMsg(`Лист подбора на ${sortedSupplyOrders.length} заказов скачан`);
       setTimeout(() => setSuccessMsg(null), 2500);
       
     } catch (err: any) {
@@ -7256,7 +7285,7 @@ export const WBSupplyManager = ({
         },
       });
 
-      await printPdfDirect(doc);
+      doc.save(`Лист подбора (групп.) ${String(supplyName || '').replace(/[\\/:*?"<>|]+/g, '_')} ${rows.length}.pdf`);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -9603,7 +9632,7 @@ export const WBSupplyManager = ({
                               {([
                                 { mode: 'labels', title: 'Стикеры', hint: fbsLabelKind === 'combo' ? 'совмещённая этикетка' : fbsBulkWithStickers ? 'стикер WB + этикетка ЧЗ' : 'этикетки ЧЗ' },
                                 { mode: 'picking', title: 'Лист подбора', hint: 'A4, файлом' },
-                                { mode: 'both', title: 'Стикеры + Лист', hint: 'два файла' },
+                                { mode: 'both', title: 'Стикеры + Лист', hint: 'печать + файл' },
                               ] as const).map((item) => (
                                 <button
                                   key={item.mode}
@@ -9719,7 +9748,7 @@ export const WBSupplyManager = ({
                                 type="button"
                                 onClick={() => printSingleFbsSticker(row)}
                                 disabled={fbsStickerPrintingId === String(row.orderId)}
-                                title="Скачать стикер этого задания заново"
+                                title="Напечатать стикер этого задания заново"
                                 className="mt-1 inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2 py-0.5 text-[11px] font-sans text-slate-600 hover:bg-slate-50 disabled:opacity-50"
                               >
                                 <Printer className="w-3 h-3" />

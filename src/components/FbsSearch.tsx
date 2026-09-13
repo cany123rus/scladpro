@@ -6,7 +6,7 @@ import { compareSizes } from '../utils/sizeOrder';
 import { loadPhotoDataUrls } from '../utils/productPhotos';
 import { fetchStickers, type StickerImage } from '../utils/stickers';
 import { ensureExcel, ensurePdfLibs, lazyLibs } from '../pages/dashboardLazyLibs';
-import { printImagesDirect, printPdfDirect } from '../utils/printDirect';
+import { printImagesDirect } from '../utils/printDirect';
 import {
   encodeGsForExcel,
   fixCyrillicKeyboardLayout,
@@ -975,8 +975,9 @@ export function FbsSearch({
         },
       });
 
-      await printPdfDirect(doc);
-      showToast('Лист подбора отправлен в печать', 'success');
+      // Лист подбора — файлом: его печатают на A4, отдельно от стикеров.
+      doc.save(`Лист подбора ${list.name}.pdf`);
+      showToast('Лист подбора скачан', 'success');
     } catch (e: any) {
       showToast(`Не удалось собрать PDF: ${e?.message || e}`, 'error');
     } finally {
@@ -1650,7 +1651,7 @@ export function FbsSearch({
                     <ScanLine className="w-4 h-4" /> {scanOn ? 'Закончить скан' : 'Скан ЧЗ'}
                   </button>
                   <button type="button" className="btn-ghost" onClick={() => void exportPickingPdf()} disabled={busy}>
-                    <Printer className="w-4 h-4" /> Печать листа
+                    <Download className="w-4 h-4" /> Скачать лист
                   </button>
                   <button
                     type="button"
