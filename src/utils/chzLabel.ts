@@ -208,6 +208,15 @@ export interface FbsComboLayout {
   partBX: number;
   partBY: number;
   partBFont: number;
+  /**
+   * Два маленьких QR задания по бокам от номера — как на стикере WB.
+   * Двигаются вместе с номером. 0 — не рисовать.
+   */
+  sideQrSize: number;
+  /** От центра номера до внутреннего края каждого бокового QR, мм. */
+  sideQrGap: number;
+  /** Центр боковых QR по вертикали относительно линии крупных цифр, мм (минус — выше). */
+  sideQrDy: number;
 }
 
 export const DEFAULT_FBS_COMBO_LAYOUT: FbsComboLayout = {
@@ -231,6 +240,9 @@ export const DEFAULT_FBS_COMBO_LAYOUT: FbsComboLayout = {
   partBX: 43,
   partBY: 38,
   partBFont: 12,
+  sideQrSize: 6,
+  sideQrGap: 7.5,
+  sideQrDy: -3.5,
 };
 
 export function readChzTailLayout(raw: unknown): ChzTailLayout {
@@ -414,7 +426,23 @@ export async function drawFbsComboLabel(
         includetext: false,
         backgroundcolor: 'ffffff',
       });
-      doc.addImage(canvas.toDataURL('image/png'), 'PNG', layout.qrX, layout.qrY, layout.symbolSize, layout.symbolSize);
+      const qrImage = canvas.toDataURL('image/png');
+      doc.addImage(qrImage, 'PNG', layout.qrX, layout.qrY, layout.symbolSize, layout.symbolSize);
+
+      /*
+       * Два маленьких QR по бокам номера — те же, что у WB вокруг цифр.
+       *
+       * Содержимое у всех QR на стикере WB одно (проверено на живой этикетке),
+       * поэтому это копии большого: сканер у стола ловит любой, даже когда
+       * большой QR закрыт рукой или загнулся на упаковке.
+       */
+      const side = Number(layout.sideQrSize || 0);
+      if (side > 0) {
+        const top = layout.partBY + Number(layout.sideQrDy || 0) - side / 2;
+        const gap = Number(layout.sideQrGap || 0);
+        doc.addImage(qrImage, 'PNG', layout.partBX - gap - side, top, side, side);
+        doc.addImage(qrImage, 'PNG', layout.partBX + gap, top, side, side);
+      }
     } catch (e) {
       console.warn('Не нарисовали QR задания', e);
     }

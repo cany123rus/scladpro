@@ -18990,6 +18990,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       codeTextYpx: DEFAULT_FBS_COMBO_LAYOUT.codeTextY * WB_PREVIEW_SCALE,
       partBXpx: DEFAULT_FBS_COMBO_LAYOUT.partBX * WB_PREVIEW_SCALE,
       partBYpx: DEFAULT_FBS_COMBO_LAYOUT.partBY * WB_PREVIEW_SCALE,
+      sideQrSize: DEFAULT_FBS_COMBO_LAYOUT.sideQrSize,
+      sideQrGap: DEFAULT_FBS_COMBO_LAYOUT.sideQrGap,
+      sideQrDy: DEFAULT_FBS_COMBO_LAYOUT.sideQrDy,
     },
   });
 
@@ -19278,6 +19281,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         partBX: pxToMmX(wbLayoutEditor.fbsCombo.partBXpx),
         partBY: pxToMmY(wbLayoutEditor.fbsCombo.partBYpx),
         partBFont: wbLayoutEditor.fbsCombo.partBFont,
+        sideQrSize: wbLayoutEditor.fbsCombo.sideQrSize ?? DEFAULT_FBS_COMBO_LAYOUT.sideQrSize,
+        sideQrGap: wbLayoutEditor.fbsCombo.sideQrGap ?? DEFAULT_FBS_COMBO_LAYOUT.sideQrGap,
+        sideQrDy: wbLayoutEditor.fbsCombo.sideQrDy ?? DEFAULT_FBS_COMBO_LAYOUT.sideQrDy,
       },
     };
   };
@@ -22780,6 +22786,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           { key: 'partBFont', label: 'Номер задания, конец (крупно)', min: 8, max: 18, step: 0.5, unit: '' },
                           { key: 'partAFont', label: 'Номер задания, начало (мелко)', min: 4, max: 9, step: 0.1, unit: '' },
                           { key: 'partGap', label: 'Начало номера, подъём над концом', min: 3, max: 14, step: 0.1, unit: ' мм' },
+                          { key: 'sideQrSize', label: 'QR по бокам номера, сторона (0 — убрать)', min: 0, max: 12, step: 0.1, unit: ' мм' },
+                          { key: 'sideQrGap', label: 'QR по бокам, отступ от центра номера', min: 3, max: 18, step: 0.1, unit: ' мм' },
+                          { key: 'sideQrDy', label: 'QR по бокам, сдвиг по высоте', min: -12, max: 4, step: 0.1, unit: ' мм' },
                         ] as const).map(({ key, label, min, max, step, unit }) => (
                           <div key={`fbsCombo-${key}`}>
                             <label className="mt-2 block text-[11px] font-medium text-slate-500">{label}: {Number((wbLayoutEditor.fbsCombo as any)[key]).toFixed(1)}{unit}</label>
@@ -22796,8 +22805,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           значение, а место отдано марке. Товарного ШК, артикула и размера нет тем более.
                           У марки 72×72 модуля: на 28 мм это 0,39 мм на модуль, с запасом против
                           проверенной этикетки; ниже 22 мм она уходит к границе допустимого по ГИС МТ.
-                          У оригинального стикера WB есть ещё четыре служебных кода по углам — здесь их нет,
-                          поэтому макет стоит обкатать на приёмке одной небольшой поставкой.
+                          Маленькие QR по бокам номера — копии большого (у WB все QR на стикере одинаковые).
+                          Меньше 6 мм сканер может не взять: проверьте пробной печатью.
+                          Макет стоит обкатать на приёмке одной небольшой поставкой.
                         </div>
                       </div>
                     </div>
@@ -23066,6 +23076,20 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             height: `${mmToPreviewY(wbLayoutEditor.fbsCombo.partGap) + ptToPreviewPx(wbLayoutEditor.fbsCombo.partAFont) + ptToPreviewPx(wbLayoutEditor.fbsCombo.partBFont) * 0.3}px`,
                           }}
                         />
+                        {Number(wbLayoutEditor.fbsCombo.sideQrSize || 0) > 0 && (['left', 'right'] as const).map((sideKey) => {
+                          const f = wbLayoutEditor.fbsCombo;
+                          const size = Number(f.sideQrSize || 0);
+                          const leftPx = f.partBXpx + mmToPreviewX(sideKey === 'left' ? -Number(f.sideQrGap || 0) - size : Number(f.sideQrGap || 0));
+                          const topPx = f.partBYpx + mmToPreviewY(Number(f.sideQrDy || 0) - size / 2);
+                          return (
+                            <WbLayoutHandle
+                              key={`fbsCombo-side-${sideKey}`}
+                              title={sideKey === 'left' ? 'QR слева от номера' : 'QR справа от номера'} tone="cyan"
+                              onMouseDown={(e) => startWbBlockDrag(e, 'fbsCombo', 'partBXpx', 'partBYpx', f.partBXpx, f.partBYpx)}
+                              style={{ left: `${leftPx}px`, top: `${topPx}px`, width: `${mmToPreviewX(size)}px`, height: `${mmToPreviewY(size)}px` }}
+                            />
+                          );
+                        })}
                         <WbLayoutHandle
                           title="Код марки текстом" tone="rose"
                           onMouseDown={(e) => startWbBlockDrag(e, 'fbsCombo', 'codeTextXpx', 'codeTextYpx', wbLayoutEditor.fbsCombo.codeTextXpx, wbLayoutEditor.fbsCombo.codeTextYpx)}
