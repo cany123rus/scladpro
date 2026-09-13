@@ -641,6 +641,16 @@ export const WBSupplyManager = ({
   const [showAllSupplies, setShowAllSupplies] = useState(true);
   const [fbsScanModalOpen, setFbsScanModalOpen] = useState(false);
   /*
+   * Окно скана свёрнуто в плашку в углу.
+   *
+   * Поставка, сканы, фильтр и выбор при этом живут дальше — это состояние
+   * компонента, а не окна, — и развернуть его можно мгновенно, без повторной
+   * загрузки из WB. Сканер в свёрнутом виде тоже работает.
+   */
+  const [fbsScanMinimized, setFbsScanMinimized] = useState(false);
+  // Поставка, для которой открыто окно скана (см. защиту ниже).
+  const fbsScanSupplyIdRef = useRef<string | null>(null);
+  /*
    * Окно «Грузоместа» поставки на ПВЗ.
    *
    * ordersCount — сколько заданий в поставке: WB разрешает грузомест не
@@ -1445,7 +1455,7 @@ export const WBSupplyManager = ({
     const observer = new ResizeObserver(measure);
     observer.observe(node);
     return () => observer.disconnect();
-  }, [fbsScanModalOpen, fbsScanLoading, fbsScanRows.length, fbsSoundOn]);
+  }, [fbsScanModalOpen, fbsScanLoading, fbsScanRows.length, fbsSoundOn, fbsScanMinimized]);
 
   useEffect(() => {
     if (!fbsScanModalOpen || fbsScanLoading) return;
@@ -1457,7 +1467,7 @@ export const WBSupplyManager = ({
       }
     }, 80);
     return () => clearTimeout(timer);
-  }, [fbsScanModalOpen, fbsScanLoading, fbsScanMode, fbsPendingStickerRow]);
+  }, [fbsScanModalOpen, fbsScanLoading, fbsScanMode, fbsPendingStickerRow, fbsScanMinimized]);
 
   /*
    * Сканер работает при любом фокусе, пока открыто окно «Скан ЧЗ».
@@ -3810,6 +3820,8 @@ export const WBSupplyManager = ({
 
   const openFbsScanModal = async () => {
     if (!activeSupplyId) return;
+    setFbsScanMinimized(false);
+    fbsScanSupplyIdRef.current = activeSupplyId;
     setFbsScanModalOpen(true);
     setFbsScanLoading(true);
     setFbsScanMode('sticker');
@@ -7725,6 +7737,86 @@ export const WBSupplyManager = ({
     }
   };
 
+  /** Закрыть окно скана совсем — со сбросом незаконченного шага. */
+  const closeFbsScanModal = () => {
+    setFbsScanModalOpen(false);
+    setFbsScanMinimized(false);
+    setFbsPendingStickerRow(null);
+    setFbsScanMode('sticker');
+    clearScanInput();
+    fbsScanSupplyIdRef.current = null;
+  };
+
+  /*
+   * Свёрнутое окно не должно пережить смену поставки.
+   *
+   * Скан записывается в «активную» поставку. Пока окно было на весь экран,
+   * сменить её было нечем. Свёрнутое же оставляет доступным список, и щелчок
+   * по другой поставке молча перевёл бы сканы — со строками первой поставки —
+   * во вторую: марки легли бы не на те задания. Поэтому при смене поставки
+   * окно скана закрываем и говорим об этом.
+   */
+  useEffect(() => {
+    if (!fbsScanModalOpen) return;
+    const scanSupply = fbsScanSupplyIdRef.current;
+    if (!scanSupply || scanSupply === activeSupplyId) return;
+
+    const name = supplies.find((s) => s.id === scanSupply)?.name || scanSupply;
+    closeFbsScanModal();
+    setSuccessMsg(`Окно скана поставки «${name}» закрыто: выбрана другая поставка. Отсканированное сохранено — откройте «Скан ЧЗ» заново.`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSupplyId]);
+
+  /*
+   * Поле скана — одно на оба вида окна.
+   *
+   * В развёрнутом окне оно в левой колонке, в свёрнутом — в плашке в углу.
+   * Рисуется ровно в одном месте за раз, поэтому ref переезжает вместе с ним,
+   * и весь разбор скана, звук и автоотправка в WB работают одинаково.
+   */
+  const renderFbsScanForm = (compact: boolean) => (
+    <form onSubmit={handleFbsScanSubmit} className={compact ? 'flex gap-2' : 'flex flex-col gap-2'}>
+      <input
+        ref={fbsScanInputRef}
+        type="text"
+        defaultValue=""
+        onInput={onScanInputBurst}
+        inputMode="none"
+        autoComplete="off"
+        autoCorrect="off"
+        autoCapitalize="off"
+        spellCheck={false}
+        placeholder={
+          fbsScanMode === 'sticker'
+            ? (compact ? 'Сканируйте стикер…' : 'Сканируйте значение из колонки «Стикер при считывании»...')
+            : (compact ? 'Сканируйте ЧЗ…' : 'Сканируйте код Честного знака...')
+        }
+        className={compact ? 'min-w-0 flex-1 oc-input !py-1.5 text-sm' : 'flex-1 oc-input'}
+        autoFocus
+      />
+      {!compact && (
+        <button
+          type="submit"
+          disabled={fbsScanLoading}
+          className="px-4 py-2 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
+        >
+          {fbsScanMode === 'sticker' ? 'Найти строку' : 'Сохранить ЧЗ'}
+        </button>
+      )}
+      {fbsScanMode === 'honest_sign' && (
+        <button
+          type="button"
+          onClick={() => { setFbsPendingStickerRow(null); setFbsScanMode('sticker'); fbsCue('sticker'); clearScanInput(); setFbsScanNotice({ type: 'info', text: 'Скан ЧЗ сброшен. Можно сканировать следующий стикер.' }); }}
+          className={compact
+            ? 'shrink-0 px-2 py-1.5 rounded-lg border border-slate-300 bg-white text-xs text-slate-700 hover:bg-slate-50'
+            : 'px-4 py-2 rounded-xl border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}
+        >
+          Сбросить
+        </button>
+      )}
+    </form>
+  );
+
   return (
     <div className={embeddedMode ? 'font-sans text-slate-800' : 'p-3 md:p-6 bg-slate-50 min-h-screen font-sans text-slate-800'}>
       {!embeddedMode && (
@@ -8280,7 +8372,116 @@ export const WBSupplyManager = ({
         );
       })()}
 
-      {fbsScanModalOpen && (
+      {/*
+        Свёрнутое окно скана — плашка в правом нижнем углу.
+
+        Держит самое нужное у стола: прогресс, текущий шаг с фото товара,
+        последнее сообщение и поле скана. Всё остальное — в развёрнутом окне.
+      */}
+      {fbsScanModalOpen && fbsScanMinimized && (
+        <div className="fixed bottom-4 right-4 z-50 w-[340px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-900/20">
+          <div className="flex items-center gap-2 bg-gradient-to-r from-indigo-600 to-violet-600 px-3 py-2 text-white">
+            <CheckSquare className="h-4 w-4 shrink-0" />
+            <button
+              type="button"
+              onClick={() => setFbsScanMinimized(false)}
+              title="Развернуть окно скана"
+              className="min-w-0 flex-1 truncate text-left text-sm font-semibold hover:underline"
+            >
+              Скан ЧЗ · {supplies.find((s) => s.id === activeSupplyId)?.name || activeSupplyId || '—'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setFbsScanMinimized(false)}
+              title="Развернуть"
+              className="rounded-md p-1 hover:bg-white/15"
+            >
+              <LayoutGrid className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={closeFbsScanModal}
+              title="Закрыть окно скана"
+              className="rounded-md p-1 hover:bg-white/15"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          <div className="space-y-2 p-3">
+            <div className="flex items-center gap-2">
+              <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-100">
+                <div
+                  className="h-full rounded-full bg-emerald-500 transition-all"
+                  style={{ width: `${fbsScanStats.totalRows ? Math.round((fbsScanStats.scannedCount / fbsScanStats.totalRows) * 100) : 0}%` }}
+                />
+              </div>
+              <div className="whitespace-nowrap text-xs tabular-nums text-slate-600">
+                <b className="text-slate-900">{fbsScanStats.scannedCount}</b> из {fbsScanStats.totalRows}
+              </div>
+            </div>
+
+            {fbsScanMode === 'honest_sign' && fbsPendingStickerRow ? (
+              <div className="flex gap-2 rounded-xl border border-amber-200 bg-amber-50 p-2 text-amber-900">
+                <FbsPhoto
+                  urls={getFbsRowPhotoCandidates(fbsPendingStickerRow)}
+                  className="h-20 w-16 shrink-0 rounded-md border border-amber-200 bg-white object-contain"
+                  emptyClassName="h-20 w-16 shrink-0 rounded-md border border-dashed border-amber-200 bg-white/60"
+                />
+                <div className="min-w-0 text-xs">
+                  <div className="font-bold">2 · Сканируйте ЧЗ</div>
+                  <div className="mt-0.5 line-clamp-2 font-medium">{fbsPendingStickerRow.title || '—'}</div>
+                  <div className="opacity-80">{[fbsPendingStickerRow.article, fbsPendingStickerRow.size].filter(Boolean).join(' · ')}</div>
+                  <div className="font-mono opacity-80">{fbsPendingStickerRow.orderId}</div>
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-900">
+                1 · Сканируйте стикер
+              </div>
+            )}
+
+            {fbsScanOverride ? (
+              <div className="rounded-xl border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900">
+                <div className="font-semibold">Код уже использовался: {fbsScanOverride.where}</div>
+                <div className="mt-1.5 flex gap-2">
+                  <button
+                    type="button"
+                    disabled={fbsScanOverrideBusy}
+                    onClick={() => forceSaveFbsScanEntry(fbsScanOverride.row, fbsScanOverride.code, fbsScanOverride.where)}
+                    className="rounded-lg bg-amber-600 px-2 py-1 font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
+                  >
+                    {fbsScanOverrideBusy ? 'Записываем…' : 'Записать всё равно'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setFbsScanOverride(null); clearScanInput(); }}
+                    className="rounded-lg border border-amber-300 bg-white px-2 py-1 hover:bg-amber-100"
+                  >
+                    Отмена
+                  </button>
+                </div>
+              </div>
+            ) : fbsScanNotice ? (
+              <div
+                className={`line-clamp-3 rounded-xl border px-2.5 py-1.5 text-xs ${
+                  fbsScanNotice.type === 'error'
+                    ? 'border-rose-200 bg-rose-50 text-rose-700'
+                    : fbsScanNotice.type === 'success'
+                      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                      : 'border-indigo-200 bg-indigo-50 text-indigo-700'
+                }`}
+              >
+                {fbsScanNotice.text}
+              </div>
+            ) : null}
+
+            {renderFbsScanForm(true)}
+          </div>
+        </div>
+      )}
+
+      {fbsScanModalOpen && !fbsScanMinimized && (
         /*
          * Окно на весь экран, в две колонки.
          *
@@ -8290,7 +8491,9 @@ export const WBSupplyManager = ({
          * таблица занимает всю высоту справа. На узком экране колонки
          * складываются друг под друга, как было.
          */
-        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-2 lg:p-3" onClick={() => { setFbsScanModalOpen(false); setFbsPendingStickerRow(null); setFbsScanMode('sticker'); clearScanInput(); }}>
+        // Щелчок мимо окна его сворачивает, а не закрывает: промахнуться мышью
+        // у стола легко, и терять из-за этого начатый шаг нельзя.
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-2 lg:p-3" onClick={() => setFbsScanMinimized(true)}>
           <div className="bg-white rounded-2xl shadow-2xl w-full h-full max-w-[1920px] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
             <div className="px-5 py-3 border-b border-slate-200 flex items-center justify-between gap-4">
               <div className="flex min-w-0 items-center gap-4">
@@ -8314,7 +8517,15 @@ export const WBSupplyManager = ({
                     <span className="ml-2 text-slate-400">осталось {Math.max(0, fbsScanStats.totalRows - fbsScanStats.scannedCount)}</span>
                   </div>
                 </div>
-                <button onClick={() => { setFbsScanModalOpen(false); setFbsPendingStickerRow(null); setFbsScanMode('sticker'); clearScanInput(); }} className="p-2 rounded-lg hover:bg-slate-100 text-slate-500">
+                <button
+                  type="button"
+                  onClick={() => setFbsScanMinimized(true)}
+                  title="Свернуть в угол экрана — сканировать можно и так"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-100"
+                >
+                  <span className="text-base leading-none">▁</span> Свернуть
+                </button>
+                <button onClick={closeFbsScanModal} title="Закрыть окно скана" className="p-2 rounded-lg hover:bg-slate-100 text-slate-500">
                   <X className="w-5 h-5" />
                 </button>
               </div>
@@ -8323,38 +8534,7 @@ export const WBSupplyManager = ({
             <div className="flex-1 min-h-0 flex flex-col lg:flex-row">
             <div className="lg:w-[420px] xl:w-[460px] shrink-0 overflow-auto p-4 border-b lg:border-b-0 lg:border-r border-slate-200 bg-slate-50 space-y-3">
               {/* Поле скана — первым: курсор живёт в нём, и сборщик смотрит сюда. */}
-              <form onSubmit={handleFbsScanSubmit} className="flex flex-col gap-2">
-                <input
-                  ref={fbsScanInputRef}
-                  type="text"
-                  defaultValue=""
-                  onInput={onScanInputBurst}
-                  inputMode="none"
-                  autoComplete="off"
-                  autoCorrect="off"
-                  autoCapitalize="off"
-                  spellCheck={false}
-                  placeholder={fbsScanMode === 'sticker' ? 'Сканируйте значение из колонки «Стикер при считывании»...' : 'Сканируйте код Честного знака...'}
-                  className="flex-1 oc-input"
-                  autoFocus
-                />
-                <button
-                  type="submit"
-                  disabled={fbsScanLoading}
-                  className="px-4 py-2 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
-                >
-                  {fbsScanMode === 'sticker' ? 'Найти строку' : 'Сохранить ЧЗ'}
-                </button>
-                {fbsScanMode === 'honest_sign' && (
-                  <button
-                    type="button"
-                    onClick={() => { setFbsPendingStickerRow(null); setFbsScanMode('sticker'); fbsCue('sticker'); clearScanInput(); setFbsScanNotice({ type: 'info', text: 'Скан ЧЗ сброшен. Можно сканировать следующий стикер.' }); }}
-                    className="px-4 py-2 rounded-xl border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
-                  >
-                    Сбросить
-                  </button>
-                )}
-              </form>
+              {renderFbsScanForm(false)}
               {/* Панель шага — во всю ширину, кнопки под ней.
                   Раньше они делили строку, и пять длинных кнопок сжимали
                   подсказку в колонку шириной в одно слово. */}
