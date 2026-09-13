@@ -11,9 +11,19 @@
  * пугать, ни успокаивать. Если заказы были меньше чем в 3 днях из 7 — просто
  * сумма ÷ 7 и пометка, что прогноз неточный.
  *
+ * Кому уходит:
+ *  - владельцу — сводка по всем кабинетам: первым сообщением список всех
+ *    позиций, которым запаса не хватит на 3 дня, дальше подробно по кабинетам;
+ *  - поставщику — отдельное сообщение, только если у него что-то кончается,
+ *    и только по его категориям. Если чат поставщика совпадает с чатом
+ *    владельца, отдельное сообщение не шлём — сводка там уже есть.
+ *
  * Настройки — app_settings `chz_stock_report_v1`:
- *   { chatIds: string[], botTokenKey: string, lowDays: number }
- * По умолчанию: чат владельца из `backup_chat_id`, бот `telegram_bot_token`.
+ *   { chatIds: string[], botTokenKey: string, supplierBotTokenKeys: string[],
+ *     lowDays: number, needDays: number, notifySuppliers: boolean }
+ * По умолчанию: чат владельца из `backup_chat_id`, бот `telegram_bot_token`;
+ * поставщикам — бот приёмки `telegram_reception_bot_token` (через него сайт уже
+ * пишет поставщикам), при ошибке — основной бот.
  *
  * Тело запроса: { dryRun?: true } — собрать текст и вернуть, ничего не отправляя;
  * { force?: true } — отправить, даже если сегодня уже отправляли.
@@ -105,9 +115,16 @@ async function loadSettings() {
   const { data } = await supabase
     .from('app_settings')
     .select('key, value')
-    .in('key', ['chz_stock_report_v1', 'backup_chat_id', 'telegram_bot_token', 'chz_stock_report_last_v1']);
+    .in('key', ['chz_stock_report_v1', 'backup_chat_id', 'telegram_bot_token', 'telegram_reception_bot_token', 'chz_stock_report_last_v1']);
   const map = new Map((data || []).map((r: any) => [r.key, String(r.value ?? '')]));
-  let cfg: { chatIds?: string[]; botTokenKey?: string; lowDays?: number } = {};
+  let cfg: {
+    chatIds?: string[];
+    botTokenKey?: string;
+    supplierBotTokenKeys?: string[];
+    lowDays?: number;
+    needDays?: number;
+    notifySuppliers?: boolean;
+  } = {};
   try { cfg = JSON.parse(map.get('chz_stock_report_v1') || '{}'); } catch { cfg = {}; }
   const chatIds = (cfg.chatIds && cfg.chatIds.length ? cfg.chatIds : [map.get('backup_chat_id') || '']).filter(Boolean);
   let botToken = map.get(cfg.botTokenKey || 'telegram_bot_token') || '';
@@ -115,7 +132,18 @@ async function loadSettings() {
     const { data: t } = await supabase.from('app_settings').select('value').eq('key', cfg.botTokenKey).maybeSingle();
     botToken = String(t?.value || '');
   }
-  return { chatIds, botToken: botToken.trim(), lowDays: Number(cfg.lowDays || 3), lastSent: map.get('chz_stock_report_last_v1') || '' };
+  const supplierBotTokens = (cfg.supplierBotTokenKeys?.length ? cfg.supplierBotTokenKeys : ['telegram_reception_bot_token', 'telegram_bot_token'])
+    .map((k) => String(map.get(k) || '').trim())
+    .filter(Boolean);
+  return {
+    chatIds,
+    botToken: botToken.trim(),
+    supplierBotTokens: Array.from(new Set(supplierBotTokens)),
+    lowDays: Number(cfg.lowDays || 3),
+    needDays: Number(cfg.needDays || 7),
+    notifySuppliers: cfg.notifySuppliers !== false,
+    lastSent: map.get('chz_stock_report_last_v1') || '',
+  };
 }
 
 async function fetchOrders(token: string, fromMs: number) {
@@ -200,8 +228,19 @@ async function buildSupplierLines(supplier: { id: string; wb_api_token: string }
   return { lines: Array.from(lines.values()), ordersCount: orders.length };
 }
 
+type Row = Line & { yesterday: number; rate: number; rough: boolean; daysLeft: number | null; urgent: boolean };
+
+const rowTitle = (r: Row) => `${esc(r.category)}${r.gender ? `, ${genderTitle(r.gender)}` : ''}`;
+const rowLeft = (r: Row) => {
+  if (r.daysLeft === null) return 'расхода нет';
+  if (r.stock <= 0) return '<b>закончился</b>';
+  const d = Math.floor(r.daysLeft);
+  return `хватит на ${d < 1 ? 'меньше дня' : `${d} ${plural(d, 'день', 'дня', 'дней')}`}`;
+};
+/** Сколько кодов докупить, чтобы хватило на needDays дней. */
+const rowNeed = (r: Row, needDays: number) => Math.max(0, Math.ceil(r.rate * needDays - r.stock));
+
 function renderSupplier(name: string, lines: Line[], lowDays: number, dateTitle: string) {
-  type Row = Line & { yesterday: number; rate: number; rough: boolean; daysLeft: number | null; urgent: boolean };
   const rows: Row[] = lines
     .map((l) => {
       const { rate, rough } = dailyRate(l.daily);
@@ -213,15 +252,8 @@ function renderSupplier(name: string, lines: Line[], lowDays: number, dateTitle:
 
   if (!rows.length) return null;
 
-  const title = (r: Row) => `${esc(r.category)}${r.gender ? `, ${genderTitle(r.gender)}` : ''}`;
-  const left = (r: Row) => {
-    if (r.daysLeft === null) return 'расхода нет';
-    if (r.stock <= 0) return '<b>закончился</b>';
-    const d = Math.floor(r.daysLeft);
-    return `хватит на ${d < 1 ? 'меньше дня' : `${d} ${plural(d, 'день', 'дня', 'дней')}`}`;
-  };
   const line = (r: Row) =>
-    `• ${title(r)}: вчера <b>${fmt(r.yesterday)}</b> · осталось <b>${fmt(r.stock)}</b> · ${left(r)}` +
+    `• ${rowTitle(r)}: вчера <b>${fmt(r.yesterday)}</b> · осталось <b>${fmt(r.stock)}</b> · ${rowLeft(r)}` +
     (r.rate > 0 ? ` <i>(~${fmtRate(r.rate)}/день${r.rough ? ', мало заказов' : ''})</i>` : '');
 
   const urgent = rows.filter((r) => r.urgent);
@@ -239,8 +271,39 @@ function renderSupplier(name: string, lines: Line[], lowDays: number, dateTitle:
   if (rest.length) {
     parts.push('', urgent.length ? '✅ Остальное:' : '✅ Запаса хватает:', ...rest.map(line));
   }
-  return { text: parts.join('\n'), urgent: urgent.length };
+  return { text: parts.join('\n'), urgent };
 }
+
+/** Сообщение самому поставщику — только о том, что у него кончается. */
+function renderForSupplier(name: string, urgent: Row[], lowDays: number, needDays: number) {
+  return [
+    `⚠️ <b>Заканчивается честный знак</b> — ${esc(name.trim())}`,
+    `Запаса меньше чем на ${lowDays} ${plural(lowDays, 'день', 'дня', 'дней')}:`,
+    '',
+    ...urgent.map((r) => `• <b>${rowTitle(r)}</b>: осталось <b>${fmt(r.stock)}</b> · расход ~${fmtRate(r.rate)}/день · на ${needDays} ${plural(needDays, 'день', 'дня', 'дней')} нужно ещё <b>~${fmt(rowNeed(r, needDays))}</b>`),
+    '',
+    'Пришлите, пожалуйста, новые коды ЧЗ по этим категориям.',
+  ].join('\n');
+}
+
+/** Отправка поставщику: бот приёмки, при ошибке — следующий бот из списка. */
+async function sendToSupplier(tokens: string[], chatId: string, text: string) {
+  let lastError: unknown = null;
+  for (const token of tokens) {
+    try {
+      await sendTelegram(token, chatId, text);
+      return;
+    } catch (e) {
+      lastError = e;
+    }
+  }
+  throw lastError || new Error('нет бота для отправки поставщику');
+}
+
+const validChatId = (raw: unknown) => {
+  const id = String(raw ?? '').trim();
+  return /^-?\d{5,}$/.test(id) ? id : '';
+};
 
 async function sendTelegram(botToken: string, chatId: string, text: string) {
   const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
@@ -278,7 +341,7 @@ Deno.serve(async (req) => {
 
     let query = supabase
       .from('suppliers')
-      .select('id, name, wb_api_token')
+      .select('id, name, wb_api_token, telegram_chat_id')
       .not('wb_api_token', 'is', null)
       .order('name');
     if (onlySupplier) query = query.eq('id', onlySupplier);
@@ -287,7 +350,10 @@ Deno.serve(async (req) => {
 
     const messages: string[] = [];
     const problems: string[] = [];
+    const urgentList: string[] = [];
+    const supplierNotices: Array<{ name: string; chatId: string; text: string }> = [];
     let urgentTotal = 0;
+    const ownerChats = new Set(settings.chatIds.map((c) => String(c).trim()));
 
     for (const s of suppliers || []) {
       if (!String(s.wb_api_token || '').trim()) continue;
@@ -297,7 +363,21 @@ Deno.serve(async (req) => {
         const rendered = renderSupplier(String(s.name || ''), lines, settings.lowDays, dateTitle);
         if (rendered) {
           messages.push(rendered.text);
-          urgentTotal += rendered.urgent;
+          urgentTotal += rendered.urgent.length;
+          const supplierName = String(s.name || '').trim();
+          for (const r of rendered.urgent) {
+            urgentList.push(
+              `• ${esc(supplierName)} — <b>${rowTitle(r)}</b>: осталось ${fmt(r.stock)} · ~${fmtRate(r.rate)}/день · на ${settings.needDays} дн. нужно ~${fmt(rowNeed(r, settings.needDays))}`,
+            );
+          }
+          const chatId = validChatId((s as any).telegram_chat_id);
+          if (rendered.urgent.length && settings.notifySuppliers && chatId && !ownerChats.has(chatId)) {
+            supplierNotices.push({
+              name: supplierName,
+              chatId,
+              text: renderForSupplier(supplierName, rendered.urgent, settings.lowDays, settings.needDays),
+            });
+          }
         }
       } catch (e) {
         problems.push(`${String(s.name || '').trim()}: ${(e as Error).message}`);
@@ -311,11 +391,24 @@ Deno.serve(async (req) => {
 
     // Сводка первым сообщением — чтобы срочное было видно в уведомлении.
     const header = urgentTotal > 0
-      ? `🚨 <b>Честный знак: ${urgentTotal} ${plural(urgentTotal, 'позиция', 'позиции', 'позиций')} закончится в ближайшие ${settings.lowDays} ${plural(settings.lowDays, 'день', 'дня', 'дней')}</b>`
+      ? [
+          `🚨 <b>Честный знак: ${urgentTotal} ${plural(urgentTotal, 'позиция', 'позиции', 'позиций')} закончится в ближайшие ${settings.lowDays} ${plural(settings.lowDays, 'день', 'дня', 'дней')}</b>`,
+          '',
+          ...urgentList,
+        ].join('\n')
       : '✅ <b>Честный знак: запаса хватает</b>';
     const all = isTest ? [`🧪 <b>Тестовая отправка</b>\n${header}`, ...messages] : [header, ...messages];
 
-    if (dryRun) return json({ ok: true, dryRun: true, chats: settings.chatIds.length, messages: all });
+    if (dryRun) {
+      return json({
+        ok: true,
+        dryRun: true,
+        chats: settings.chatIds.length,
+        messages: all,
+        // чаты поставщиков не показываем — только кому и что ушло бы
+        supplierNotices: supplierNotices.map((n) => ({ name: n.name, text: n.text })),
+      });
+    }
 
     for (const chatId of settings.chatIds) {
       for (const text of all) {
@@ -331,11 +424,26 @@ Deno.serve(async (req) => {
         if (chunk) await sendTelegram(settings.botToken, chatId, chunk);
       }
     }
+    // Поставщикам — только в настоящем утреннем отчёте, не в тестовой отправке.
+    const supplierResults: Array<{ name: string; ok: boolean; error?: string }> = [];
     if (!isTest) {
+      for (const n of supplierNotices) {
+        try {
+          await sendToSupplier(settings.supplierBotTokens, n.chatId, n.text);
+          supplierResults.push({ name: n.name, ok: true });
+        } catch (e) {
+          supplierResults.push({ name: n.name, ok: false, error: (e as Error).message });
+        }
+      }
+      const failed = supplierResults.filter((r) => !r.ok);
+      if (failed.length) {
+        const text = `⚠️ <b>Не дошло поставщикам</b>\n${failed.map((f) => `• ${esc(f.name)}: ${esc(f.error || '')}`).join('\n')}`;
+        for (const chatId of settings.chatIds) await sendTelegram(settings.botToken, chatId, text).catch(() => undefined);
+      }
       await supabase.from('app_settings').upsert([{ key: 'chz_stock_report_last_v1', value: todayKey }], { onConflict: 'key' });
     }
 
-    return json({ ok: true, sent: all.length, chats: settings.chatIds.length, urgent: urgentTotal, problems });
+    return json({ ok: true, sent: all.length, chats: settings.chatIds.length, urgent: urgentTotal, problems, suppliers: supplierResults });
   } catch (e) {
     return json({ ok: false, error: (e as Error).message }, 500);
   }
