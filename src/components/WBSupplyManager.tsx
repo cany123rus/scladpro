@@ -72,6 +72,13 @@ import {
   sameChzCode,
   sendOrderSgtins,
 } from '../utils/wbOrderMeta';
+import {
+  createSupplyBoxes,
+  deleteSupplyBoxes,
+  fetchSupplyBoxStickers,
+  listSupplyBoxes,
+  maxBoxesForOrders,
+} from '../utils/wbSupplyBoxes';
 
 /*
  * Подразделы грузятся отдельными чанками.
@@ -633,6 +640,21 @@ export const WBSupplyManager = ({
   const [newSupplyName, setNewSupplyName] = useState('');
   const [showAllSupplies, setShowAllSupplies] = useState(true);
   const [fbsScanModalOpen, setFbsScanModalOpen] = useState(false);
+  /*
+   * Окно «Грузоместа» поставки на ПВЗ.
+   *
+   * ordersCount — сколько заданий в поставке: WB разрешает грузомест не
+   * больше половины. null — ещё считаем, подсказку не показываем.
+   */
+  const [boxesModal, setBoxesModal] = useState<{
+    supplyId: string;
+    ids: string[];
+    ordersCount: number | null;
+    busy: '' | 'load' | 'create' | 'print' | 'delete';
+    error: string;
+    info: string;
+  } | null>(null);
+  const [boxesAmount, setBoxesAmount] = useState('1');
   const [fbsScanLoading, setFbsScanLoading] = useState(false);
   const [fbsScanRows, setFbsScanRows] = useState<FbsSupplyScanOrderRow[]>([]);
   const [fbsScansBySticker, setFbsScansBySticker] = useState<Record<string, FbsSupplyScanSavedItem>>({});
@@ -3892,6 +3914,129 @@ export const WBSupplyManager = ({
       setFbsScanNotice({ type: 'success', text: `ЧЗ для заказа ${row.orderId} сброшен. Можно сканировать заново.` });
     } catch (e: any) {
       setFbsScanNotice({ type: 'error', text: e?.message || 'Не удалось сбросить ЧЗ' });
+    }
+  };
+
+  /** Открыть окно грузомест: список у WB и число заданий для подсказки лимита. */
+  const openBoxesModal = async (supplyId: string) => {
+    if (!supplyId || !selectedSupplierId) return;
+    setBoxesAmount('1');
+    setBoxesModal({ supplyId, ids: [], ordersCount: null, busy: 'load', error: '', info: '' });
+
+    const [idsResult, ordersResult] = await Promise.allSettled([
+      listSupplyBoxes(selectedSupplierId, supplyId),
+      fetchOrdersForSupply(supplyId, { enrich: false, cacheTtlMs: 60_000 }),
+    ]);
+
+    setBoxesModal((prev) => {
+      if (!prev || prev.supplyId !== supplyId) return prev;
+      return {
+        ...prev,
+        busy: '',
+        ids: idsResult.status === 'fulfilled' ? idsResult.value : [],
+        ordersCount: ordersResult.status === 'fulfilled' ? (ordersResult.value || []).length : null,
+        error: idsResult.status === 'rejected' ? `Не прочитали грузоместа: ${idsResult.reason?.message || idsResult.reason}` : '',
+      };
+    });
+  };
+
+  /**
+   * Стикеры грузомест одним PDF 58×40 — на тот же термопринтер, что и
+   * стикеры заданий. Вкладку открывает вызывающий до первого await.
+   */
+  const printBoxStickers = async (supplyId: string, ids: string[], tab: Window | null) => {
+    const stickers = await fetchSupplyBoxStickers(selectedSupplierId, supplyId, ids);
+    const images = stickers.filter((s) => s.file).map((s) => ({ file: s.file, type: 'png' as const }));
+    if (!images.length) throw new Error('WB не вернул стикеры грузомест');
+
+    const pdf = await buildStickersPdf(jsPDF, images);
+    if (tab) {
+      const blobUrl = String(pdf.output('bloburl'));
+      tab.location.href = blobUrl;
+      setTimeout(() => { try { URL.revokeObjectURL(blobUrl); } catch {} }, 60000);
+    } else {
+      pdf.save(`Грузоместа ${supplyId}.pdf`);
+    }
+    return images.length;
+  };
+
+  const openPrintTab = (title: string) => {
+    const tab = window.open('', '_blank');
+    if (tab) {
+      tab.document.write(`<title>${title}</title><p style="font:14px sans-serif;padding:16px">Готовлю стикеры…</p>`);
+      tab.document.close();
+    }
+    return tab;
+  };
+
+  /** Создать грузоместа у WB и сразу напечатать их стикеры. */
+  const createBoxesAndPrint = async () => {
+    const modal = boxesModal;
+    if (!modal || modal.busy) return;
+    const amount = Math.floor(Number(boxesAmount));
+    if (!Number.isFinite(amount) || amount < 1 || amount > 1000) {
+      setBoxesModal({ ...modal, error: 'Укажите количество от 1 до 1000', info: '' });
+      return;
+    }
+
+    const tab = openPrintTab('Стикеры грузомест');
+    setBoxesModal({ ...modal, busy: 'create', error: '', info: '' });
+    try {
+      const created = await createSupplyBoxes(selectedSupplierId, modal.supplyId, amount);
+      if (!created.length) throw new Error('WB не вернул номера созданных грузомест');
+
+      // Список перечитываем у WB: так видно и те, что создали в кабинете.
+      const ids = await listSupplyBoxes(selectedSupplierId, modal.supplyId).catch(() => [...modal.ids, ...created]);
+      setBoxesModal((prev) => (prev ? { ...prev, ids, busy: 'print' } : prev));
+
+      let printed = 0;
+      let printError = '';
+      try {
+        printed = await printBoxStickers(modal.supplyId, created, tab);
+      } catch (e: any) {
+        printError = e?.message || String(e);
+        try { tab?.close(); } catch {}
+      }
+
+      setBoxesModal((prev) => (prev ? {
+        ...prev,
+        busy: '',
+        error: printError ? `Грузоместа созданы (${created.length}), но стикеры не получены: ${printError}. Нажмите «Печать всех».` : '',
+        info: printError ? '' : `Создано грузомест: ${created.length}. Стикеры (${printed}) открыты в новой вкладке.`,
+      } : prev));
+    } catch (e: any) {
+      try { tab?.close(); } catch {}
+      setBoxesModal((prev) => (prev ? { ...prev, busy: '', error: e?.message || String(e), info: '' } : prev));
+    }
+  };
+
+  const printAllBoxStickers = async () => {
+    const modal = boxesModal;
+    if (!modal || modal.busy || !modal.ids.length) return;
+    const tab = openPrintTab('Стикеры грузомест');
+    setBoxesModal({ ...modal, busy: 'print', error: '', info: '' });
+    try {
+      const printed = await printBoxStickers(modal.supplyId, modal.ids, tab);
+      setBoxesModal((prev) => (prev ? { ...prev, busy: '', info: `Стикеры (${printed}) открыты в новой вкладке.` } : prev));
+    } catch (e: any) {
+      try { tab?.close(); } catch {}
+      setBoxesModal((prev) => (prev ? { ...prev, busy: '', error: e?.message || String(e) } : prev));
+    }
+  };
+
+  /** Удалить грузоместо у WB — пока поставка на сборке. */
+  const deleteBox = async (id: string) => {
+    const modal = boxesModal;
+    if (!modal || modal.busy) return;
+    if (!window.confirm(`Удалить грузоместо ${id} у WB? Его стикер станет недействительным.`)) return;
+
+    setBoxesModal({ ...modal, busy: 'delete', error: '', info: '' });
+    try {
+      await deleteSupplyBoxes(selectedSupplierId, modal.supplyId, [id]);
+      const ids = await listSupplyBoxes(selectedSupplierId, modal.supplyId).catch(() => modal.ids.filter((x) => x !== id));
+      setBoxesModal((prev) => (prev ? { ...prev, ids, busy: '', info: `Грузоместо ${id} удалено.` } : prev));
+    } catch (e: any) {
+      setBoxesModal((prev) => (prev ? { ...prev, busy: '', error: e?.message || String(e) } : prev));
     }
   };
 
@@ -7769,6 +7914,15 @@ export const WBSupplyManager = ({
                                         >
                                             <CheckSquare className="w-3 h-3" /> Скан ЧЗ
                                         </button>
+                                        {/* Грузоместа — для поставок на ПВЗ. Открыть можно и у
+                                            закрытой поставки: посмотреть и перепечатать стикеры. */}
+                                        <button
+                                            onClick={(e) => { e.stopPropagation(); openBoxesModal(supply.id); }}
+                                            title="Создать грузоместа у WB и напечатать их стикеры — для отгрузки на ПВЗ"
+                                            className="flex items-center gap-1 bg-white border border-orange-300 text-orange-700 px-2 py-1 rounded text-xs hover:bg-orange-50"
+                                        >
+                                            <Package className="w-3 h-3" /> Грузоместа
+                                        </button>
                                     </div>
                                 )}
                             </div>
@@ -7778,6 +7932,138 @@ export const WBSupplyManager = ({
             </div>
         </div>
       )}
+
+      {boxesModal && (() => {
+        const supply = supplies.find((s) => s.id === boxesModal.supplyId);
+        const closed = Boolean(supply?.closedAt);
+        const limit = boxesModal.ordersCount === null ? null : maxBoxesForOrders(boxesModal.ordersCount);
+        const room = limit === null ? null : Math.max(0, limit - boxesModal.ids.length);
+        const busy = boxesModal.busy;
+
+        return (
+          <div
+            className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4"
+            onClick={() => { if (!busy) setBoxesModal(null); }}
+          >
+            <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+              <div className="px-5 py-4 bg-gradient-to-r from-orange-500 to-amber-500 text-white flex items-start justify-between gap-4">
+                <div>
+                  <div className="text-lg font-bold flex items-center gap-2"><Package className="w-5 h-5" /> Грузоместа</div>
+                  <div className="text-sm opacity-90">{supply?.name || boxesModal.supplyId} · <span className="font-mono">{boxesModal.supplyId}</span></div>
+                </div>
+                <button onClick={() => { if (!busy) setBoxesModal(null); }} className="p-1.5 rounded-lg hover:bg-white/20">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="p-5 space-y-4 overflow-auto">
+                <div className="text-sm text-slate-600">
+                  Грузоместа нужны для поставок на ПВЗ. WB разрешает не больше половины заданий поставки.
+                  {boxesModal.ordersCount !== null && (
+                    <> Заданий: <b>{boxesModal.ordersCount}</b>, можно до <b>{limit}</b>{room !== null && boxesModal.ids.length > 0 ? <>, осталось <b>{room}</b></> : null}.</>
+                  )}
+                </div>
+
+                {closed ? (
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                    Поставка закрыта — новые грузоместа WB не создаст. Стикеры существующих можно перепечатать.
+                  </div>
+                ) : (
+                  <div className="flex items-end gap-2">
+                    <label className="flex-1">
+                      <span className="block text-xs font-medium text-slate-500 mb-1">Сколько создать</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={1000}
+                        value={boxesAmount}
+                        onChange={(e) => setBoxesAmount(e.target.value)}
+                        className="oc-input w-full"
+                        disabled={Boolean(busy)}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={createBoxesAndPrint}
+                      disabled={Boolean(busy)}
+                      className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-orange-600 text-white font-semibold hover:bg-orange-700 disabled:opacity-50"
+                    >
+                      {busy === 'create' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                      {busy === 'create' ? 'Создаю…' : busy === 'print' ? 'Стикеры…' : 'Создать и напечатать'}
+                    </button>
+                  </div>
+                )}
+
+                {room !== null && !closed && Number(boxesAmount) > room && (
+                  <div className="text-xs text-amber-700">
+                    Больше, чем разрешит WB ({room}). Запрос, скорее всего, будет отклонён.
+                  </div>
+                )}
+
+                {boxesModal.error && (
+                  <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{boxesModal.error}</div>
+                )}
+                {boxesModal.info && (
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{boxesModal.info}</div>
+                )}
+
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="text-sm font-semibold text-slate-800">
+                      У WB {busy === 'load' ? '…' : `${boxesModal.ids.length}`}
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => openBoxesModal(boxesModal.supplyId)}
+                        disabled={Boolean(busy)}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl border border-slate-300 bg-white text-xs text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${busy === 'load' ? 'animate-spin' : ''}`} /> Обновить
+                      </button>
+                      <button
+                        type="button"
+                        onClick={printAllBoxStickers}
+                        disabled={Boolean(busy) || !boxesModal.ids.length}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl border border-orange-300 bg-orange-50 text-xs font-semibold text-orange-700 hover:bg-orange-100 disabled:opacity-40"
+                      >
+                        <Printer className="w-3.5 h-3.5" /> Печать всех
+                      </button>
+                    </div>
+                  </div>
+
+                  {busy === 'load' ? (
+                    <div className="text-sm text-slate-500 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Читаю у WB…</div>
+                  ) : !boxesModal.ids.length ? (
+                    <div className="text-sm text-slate-400">Грузомест пока нет.</div>
+                  ) : (
+                    <div className="rounded-xl border border-slate-200 divide-y divide-slate-100 max-h-72 overflow-auto">
+                      {boxesModal.ids.map((id, index) => (
+                        <div key={id} className="flex items-center justify-between px-3 py-2 text-sm">
+                          <span className="font-mono text-slate-700">
+                            <span className="text-slate-400 mr-2 tabular-nums">{index + 1}.</span>{id}
+                          </span>
+                          {!closed && (
+                            <button
+                              type="button"
+                              onClick={() => deleteBox(id)}
+                              disabled={Boolean(busy)}
+                              title="Удалить у WB — можно, пока поставка на сборке"
+                              className="text-xs text-rose-600 hover:text-rose-700 disabled:opacity-40"
+                            >
+                              Удалить
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {fbsScanModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => { setFbsScanModalOpen(false); setFbsPendingStickerRow(null); setFbsScanMode('sticker'); clearScanInput(); }}>
