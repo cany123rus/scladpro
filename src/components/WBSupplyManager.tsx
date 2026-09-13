@@ -778,7 +778,8 @@ export const WBSupplyManager = ({
   const [fbsScanBulkBusy, setFbsScanBulkBusy] = useState(false);
   // Что кладём в пакет: стикер WB перед каждой этикеткой ЧЗ и лист подбора.
   const [fbsBulkWithStickers, setFbsBulkWithStickers] = useState(true);
-  const [fbsBulkWithPicking, setFbsBulkWithPicking] = useState(false);
+  // Меню «Печать (N)»: стикеры, лист подбора или оба.
+  const [fbsPrintMenuOpen, setFbsPrintMenuOpen] = useState(false);
   // Макет этикетки. Выбор запоминаем: на рабочем месте он один и тот же.
   const [fbsLabelKind, setFbsLabelKind] = useState<FbsLabelKind>(() => {
     try {
@@ -4690,15 +4691,27 @@ export const WBSupplyManager = ({
     return doc;
   };
 
-  /** Пакетная печать по отмеченным строкам. */
-  const printSelectedFbsRows = async () => {
+  /**
+   * Пакетная печать по отмеченным строкам.
+   *
+   * Что печатать, выбирают в меню у кнопки: стикеры, лист подбора или оба.
+   * Раньше это решали две галочки, и одна из них по умолчанию была включена —
+   * стикеры выходили, даже когда нужен был только лист.
+   */
+  const printSelectedFbsRows = async (mode: 'labels' | 'picking' | 'both') => {
     const rows = fbsScanSelectedRows;
+    setFbsPrintMenuOpen(false);
     if (!rows.length) {
       setFbsScanNotice({ type: 'error', text: 'Не отмечено ни одной строки' });
       return;
     }
 
-    const tab = window.open('', '_blank');
+    const withLabels = mode !== 'picking';
+    const withPicking = mode !== 'labels';
+
+    // Вкладку под этикетки — сразу, пока жив жест клика. Листу подбора она
+    // не нужна: он скачивается файлом.
+    const tab = withLabels ? window.open('', '_blank') : null;
     if (tab) {
       tab.document.write('<title>Этикетки ЧЗ</title><p style="font:14px sans-serif;padding:16px">Готовлю этикетки…</p>');
       tab.document.close();
@@ -4706,10 +4719,14 @@ export const WBSupplyManager = ({
 
     setFbsScanBulkBusy(true);
     try {
-      if (fbsBulkWithPicking) {
+      if (withPicking) {
         setFbsScanNotice({ type: 'info', text: 'Собираю лист подбора…' });
         const picking = await buildSelectedPickingListPdf(rows);
         picking.save(`Лист подбора ${activeSupplyId || ''} ${rows.length}.pdf`);
+        if (!withLabels) {
+          setFbsScanNotice({ type: 'success', text: `Лист подбора на ${rows.length} заданий скачан.` });
+          return;
+        }
       }
 
       await printChzLabels(rows, {
@@ -8403,13 +8420,15 @@ export const WBSupplyManager = ({
                   </button>
                   {/* Грузоместа — здесь, в окне сборки: коробки для ПВЗ создают
                       и клеят по ходу сборки поставки, а не заранее. */}
+                  {/* Выделена цветом и шириной: среди выгрузок и шаблонов её искали
+                      глазами, а нужна она на каждой поставке на ПВЗ. */}
                   <button
                     type="button"
                     onClick={() => activeSupplyId && openBoxesModal(activeSupplyId)}
                     title="Создать грузоместа у WB и напечатать их стикеры — для отгрузки на ПВЗ"
-                    className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-orange-300 bg-orange-50 hover:bg-orange-100 text-sm font-semibold text-orange-700"
+                    className="col-span-2 order-first inline-flex items-center justify-center gap-2 !py-3 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 shadow-sm shadow-orange-500/30 !text-base font-bold text-white"
                   >
-                    <Package className="w-4 h-4" /> Грузоместа
+                    <Package className="w-5 h-5" /> Грузоместа
                   </button>
                   <button
                     type="button"
@@ -8719,26 +8738,50 @@ export const WBSupplyManager = ({
                         />
                         Стикеры WB
                       </label>
-                      <label className="inline-flex items-center gap-2 text-sm text-slate-700">
-                        <input
-                          type="checkbox"
-                          checked={fbsBulkWithPicking}
-                          onChange={(e) => setFbsBulkWithPicking(e.target.checked)}
-                          className="h-4 w-4 rounded border-slate-300"
-                        />
-                        Лист подбора
-                      </label>
+                      {/* «Печать (N)» с меню: что именно печатать, решают в момент
+                          печати, а не галочками заранее. */}
+                      <div className="relative ml-auto">
+                        <button
+                          type="button"
+                          onClick={() => setFbsPrintMenuOpen((open) => !open)}
+                          disabled={!fbsScanSelectedRows.length || fbsScanBulkBusy}
+                          aria-haspopup="menu"
+                          aria-expanded={fbsPrintMenuOpen}
+                          className="inline-flex items-center gap-2 px-4 py-1.5 rounded-xl text-sm font-semibold bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40"
+                        >
+                          <Printer className="w-4 h-4" />
+                          {fbsScanBulkBusy ? 'Готовлю…' : <>Печать <span className="tabular-nums">({fbsScanSelectedRows.length})</span></>}
+                          <span className={`text-xs transition-transform ${fbsPrintMenuOpen ? 'rotate-180' : ''}`}>▾</span>
+                        </button>
 
-                      <button
-                        type="button"
-                        onClick={printSelectedFbsRows}
-                        disabled={!fbsScanSelectedRows.length || fbsScanBulkBusy}
-                        title="Этикетки ЧЗ по отмеченным строкам. Со стикером WB они идут парой: стикер, сразу за ним ЧЗ"
-                        className="ml-auto inline-flex items-center gap-2 px-4 py-1.5 rounded-xl text-sm font-semibold bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40"
-                      >
-                        <Printer className="w-4 h-4" />
-                        {fbsScanBulkBusy ? 'Готовлю…' : 'Печать выбранных'}
-                      </button>
+                        {fbsPrintMenuOpen && (
+                          <>
+                            {/* Щелчок мимо меню его закрывает. */}
+                            <div className="fixed inset-0 z-40" onClick={() => setFbsPrintMenuOpen(false)} />
+                            <div
+                              role="menu"
+                              className="absolute right-0 top-full z-50 mt-1 w-64 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-xl"
+                            >
+                              {([
+                                { mode: 'labels', title: 'Стикеры', hint: fbsLabelKind === 'combo' ? 'совмещённая этикетка' : fbsBulkWithStickers ? 'стикер WB + этикетка ЧЗ' : 'этикетки ЧЗ' },
+                                { mode: 'picking', title: 'Лист подбора', hint: 'A4, файлом' },
+                                { mode: 'both', title: 'Стикеры + Лист', hint: 'два файла' },
+                              ] as const).map((item) => (
+                                <button
+                                  key={item.mode}
+                                  type="button"
+                                  role="menuitem"
+                                  onClick={() => printSelectedFbsRows(item.mode)}
+                                  className="flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left text-sm text-slate-800 hover:bg-indigo-50"
+                                >
+                                  <span className="font-semibold">{item.title}</span>
+                                  <span className="text-xs text-slate-400">{item.hint}</span>
+                                </button>
+                              ))}
+                            </div>
+                          </>
+                        )}
+                      </div>
                     </div>
                   </div>
                 );
