@@ -8,7 +8,7 @@
  *    caching successful responses for next time.
  *  - API calls (/api/...) are never cached.
  */
-const CACHE = 'scladpro-shell-v369';
+const CACHE = 'scladpro-shell-v370';
 const APP_SHELL = ['/', '/index.html', '/manifest.webmanifest', '/site-icon.jpg'];
 
 self.addEventListener('install', (event) => {

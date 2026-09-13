@@ -1805,6 +1805,27 @@ export const WBSupplyManager = ({
     setSelectedOrderIds(newSet);
   };
 
+  /**
+   * nmId заказов ФБС за последние days дней — для прогноза расхода ЧЗ.
+   * Один элемент — один заказ: в ФБС в задании всегда одна вещь.
+   */
+  const loadFbsOrderNmIds = async (days: number): Promise<number[]> => {
+    const dateFrom = Math.floor(Date.now() / 1000) - days * 86_400;
+    const ids: number[] = [];
+    let next = 0;
+    for (let page = 0; page < 30; page++) {
+      const data = await wbFetch(`https://marketplace-api.wildberries.ru/api/v3/orders?limit=1000&next=${next}&dateFrom=${dateFrom}`);
+      const batch: any[] = data?.orders || [];
+      for (const o of batch) {
+        const nm = Number(o?.nmId);
+        if (nm > 0) ids.push(nm);
+      }
+      if (batch.length < 1000 || typeof data?.next !== 'number' || data.next === next) break;
+      next = data.next;
+    }
+    return ids;
+  };
+
   const toggleAllOrders = () => {
     if (selectedOrderIds.size === orders.length) {
       setSelectedOrderIds(new Set());
@@ -8583,7 +8604,11 @@ export const WBSupplyManager = ({
         <>
         {/* Наличие ЧЗ у выбранного поставщика и прогноз, когда кончится. */}
         {selectedSupplierId && selectedSupplierId !== '__all__' && (
-          <FbsChzStockPanel supplierId={selectedSupplierId} supplierName={selectedSupplier?.name} />
+          <FbsChzStockPanel
+            supplierId={selectedSupplierId}
+            supplierName={selectedSupplier?.name}
+            loadOrderNmIds={loadFbsOrderNmIds}
+          />
         )}
 
         {/*

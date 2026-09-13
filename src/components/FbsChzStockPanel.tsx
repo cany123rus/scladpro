@@ -1,14 +1,15 @@
-import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, ChevronDown, RefreshCw, ShieldCheck } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { AlertTriangle, ChevronDown, RefreshCw } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
 /**
  * Честный знак поставщика: сколько осталось и на сколько хватит.
  *
  * Остаток — коды в базе ЧЗ, которые ещё не напечатаны и не отсканированы.
- * Расход — марки, отсканированные на заданиях ФБС за последние 30 дней;
- * категория и пол берутся из карточки товара. Срок — остаток, делённый на
- * средний расход в день: прикидка, а не обещание — продажи скачут.
+ * Расход — заказы ФБС из WB за последние 14 дней: сколько заказали, столько
+ * марок и уйдёт. Категория и пол — из карточки товара. По сканам считать было
+ * нельзя: где сканирование в базе началось недавно, расход выходил заниженным.
+ * Срок — остаток, делённый на средний расход в день: прикидка, а не обещание.
  */
 
 type ForecastRow = {
@@ -21,7 +22,18 @@ type ForecastRow = {
 
 type Status = 'out' | 'critical' | 'low' | 'ok' | 'idle';
 
-const PERIOD_DAYS = 30;
+const PERIOD_DAYS = 14;
+const MONTH_DAYS = 30;
+
+/** Знак «Честного знака»: чёрная плашка с жёлтой галочкой. */
+function ChzMark({ className = 'h-9 w-9' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 40 40" className={className} aria-hidden="true">
+      <rect width="40" height="40" rx="10" fill="#111827" />
+      <path d="M10 21.5 17 28.5 30.5 12" fill="none" stroke="#FACC15" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
 
 const GENDER_TITLES: Record<string, string> = {
   male: 'Мужской',
@@ -58,7 +70,7 @@ const forecast = (inBase: number, used: number, periodDays: number) => {
   const endDate = daysLeft !== null && inBase > 0
     ? new Date(Date.now() + daysLeft * 86_400_000)
     : null;
-  return { perDay, daysLeft, status, endDate, needMonth: Math.ceil(perDay * PERIOD_DAYS) };
+  return { perDay, daysLeft, status, endDate, needMonth: Math.ceil(perDay * MONTH_DAYS) };
 };
 
 const fmtDate = (d: Date) => d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', timeZone: 'Europe/Moscow' });
@@ -68,7 +80,7 @@ const fmtPerDay = (n: number) => (n >= 10 ? Math.round(n).toLocaleString('ru-RU'
 function ForecastLine({ inBase, used, periodDays }: { inBase: number; used: number; periodDays: number }) {
   const f = forecast(inBase, used, periodDays);
   if (f.perDay <= 0) {
-    return <span className="text-slate-500">расхода по ФБС за {PERIOD_DAYS} дней не было</span>;
+    return <span className="text-slate-500">заказов ФБС за {PERIOD_DAYS} дней не было</span>;
   }
   if (inBase <= 0) {
     return (
@@ -87,8 +99,24 @@ function ForecastLine({ inBase, used, periodDays }: { inBase: number; used: numb
   );
 }
 
-export default function FbsChzStockPanel({ supplierId, supplierName }: { supplierId?: string; supplierName?: string }) {
+export default function FbsChzStockPanel({
+  supplierId,
+  supplierName,
+  loadOrderNmIds,
+}: {
+  supplierId?: string;
+  supplierName?: string;
+  /** nmId заказов ФБС из WB за days дней — по одному на заказ. */
+  loadOrderNmIds?: (days: number) => Promise<number[]>;
+}) {
   const [rows, setRows] = useState<ForecastRow[]>([]);
+  // Откуда расход: заказы WB или, если WB не ответил, сканы ЧЗ.
+  const [source, setSource] = useState<'orders' | 'scans'>('orders');
+  const [sourceNote, setSourceNote] = useState('');
+  // Функция приходит новой на каждый рендер раздела — держим последнюю в ref,
+  // чтобы не перезапрашивать WB без причины.
+  const loadOrdersRef = useRef(loadOrderNmIds);
+  loadOrdersRef.current = loadOrderNmIds;
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [reloadTick, setReloadTick] = useState(0);
@@ -101,24 +129,41 @@ export default function FbsChzStockPanel({ supplierId, supplierName }: { supplie
     let cancelled = false;
     setLoading(true);
     setError('');
-    supabase
-      .rpc('hs_fbs_stock_forecast', { p_supplier: supplierId, p_days: PERIOD_DAYS })
-      .then(({ data, error: rpcError }) => {
-        if (cancelled) return;
-        if (rpcError) {
-          setError(rpcError.message || 'Не удалось загрузить остатки ЧЗ');
-          setRows([]);
-          return;
-        }
-        setRows((data || []).map((r: any) => ({
-          category: String(r?.category || 'Без категории'),
-          gender: r?.gender === 'male' || r?.gender === 'female' ? r.gender : null,
-          inBase: Number(r?.in_base || 0),
-          used: Number(r?.used || 0),
-          periodDays: Number(r?.period_days || PERIOD_DAYS),
-        })));
-      })
-      .then(() => { if (!cancelled) setLoading(false); }, () => { if (!cancelled) setLoading(false); });
+    (async () => {
+      let nmIds: number[] | null = null;
+      let note = '';
+      try {
+        if (!loadOrdersRef.current) throw new Error('нет доступа к заказам WB');
+        nmIds = await loadOrdersRef.current(PERIOD_DAYS);
+      } catch (e: any) {
+        nmIds = null;
+        note = String(e?.message || e || 'WB не ответил');
+      }
+      if (cancelled) return;
+
+      const { data, error: rpcError } = await supabase.rpc('hs_fbs_stock_forecast', {
+        p_supplier: supplierId,
+        p_nm_ids: nmIds,
+        p_days: PERIOD_DAYS,
+      });
+      if (cancelled) return;
+      if (rpcError) {
+        setError(rpcError.message || 'Не удалось загрузить остатки ЧЗ');
+        setRows([]);
+        return;
+      }
+      setSource(nmIds ? 'orders' : 'scans');
+      setSourceNote(note);
+      setRows((data || []).map((r: any) => ({
+        category: String(r?.category || 'Без категории'),
+        gender: r?.gender === 'male' || r?.gender === 'female' ? r.gender : null,
+        inBase: Number(r?.in_base || 0),
+        used: Number(r?.used || 0),
+        periodDays: Number(r?.period_days || PERIOD_DAYS),
+      })));
+    })()
+      .catch((e) => { if (!cancelled) setError(String(e?.message || e)); })
+      .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [supplierId, reloadTick]);
 
@@ -158,26 +203,26 @@ export default function FbsChzStockPanel({ supplierId, supplierName }: { supplie
 
   return (
     <section className="mb-5 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-      <div className="flex flex-wrap items-center gap-3 bg-gradient-to-r from-emerald-600 to-teal-600 px-4 py-3 text-white">
+      <div className="flex flex-wrap items-center gap-3 bg-gradient-to-r from-yellow-300 to-amber-300 px-4 py-3 text-slate-900">
         <button type="button" onClick={toggle} className="flex min-w-0 flex-1 items-center gap-3 text-left">
-          <span className="rounded-xl bg-white/15 p-2"><ShieldCheck className="h-5 w-5" /></span>
+          <ChzMark />
           <span className="min-w-0">
-            <span className="block text-base font-bold leading-tight">Честный знак</span>
-            <span className="block truncate text-xs text-white/80">
-              {supplierName ? `${supplierName} · ` : ''}остаток в базе и расход по ФБС за {PERIOD_DAYS} дней
+            <span className="block text-base font-extrabold leading-tight">Честный знак</span>
+            <span className="block truncate text-xs text-slate-700">
+              {supplierName ? `${supplierName} · ` : ''}остаток в базе и расход по {source === 'orders' ? 'заказам' : 'сканам'} ФБС за {PERIOD_DAYS} дней
             </span>
           </span>
         </button>
 
         <div className="flex flex-wrap items-center gap-2 text-sm">
-          <span className="rounded-lg bg-white/15 px-2.5 py-1">
+          <span className="rounded-lg bg-black/10 px-2.5 py-1">
             В базе: <b className="tabular-nums">{fmtNum(totals.inBase)}</b>
           </span>
-          <span className="rounded-lg bg-white/15 px-2.5 py-1">
+          <span className="rounded-lg bg-black/10 px-2.5 py-1" title={`Заказов ФБС за ${PERIOD_DAYS} дней: ${fmtNum(totals.used)}`}>
             Расход: <b className="tabular-nums">~{fmtPerDay(totals.f.perDay)}</b>/день
           </span>
           {totals.alarms > 0 && (
-            <span className="inline-flex items-center gap-1 rounded-lg bg-rose-500 px-2.5 py-1 font-semibold">
+            <span className="inline-flex items-center gap-1 rounded-lg bg-rose-600 px-2.5 py-1 font-semibold text-white">
               <AlertTriangle className="h-4 w-4" />
               {totals.alarms} {plural(totals.alarms, 'категория', 'категории', 'категорий')} на исходе
             </span>
@@ -187,11 +232,11 @@ export default function FbsChzStockPanel({ supplierId, supplierName }: { supplie
             onClick={() => setReloadTick((t) => t + 1)}
             disabled={loading}
             title="Обновить остатки"
-            className="rounded-lg p-1.5 hover:bg-white/20 disabled:opacity-60"
+            className="rounded-lg p-1.5 hover:bg-black/10 disabled:opacity-60"
           >
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
           </button>
-          <button type="button" onClick={toggle} title={open ? 'Свернуть' : 'Развернуть'} className="rounded-lg p-1.5 hover:bg-white/20">
+          <button type="button" onClick={toggle} title={open ? 'Свернуть' : 'Развернуть'} className="rounded-lg p-1.5 hover:bg-black/10">
             <ChevronDown className={`h-4 w-4 transition-transform ${open ? 'rotate-180' : ''}`} />
           </button>
         </div>
@@ -205,7 +250,7 @@ export default function FbsChzStockPanel({ supplierId, supplierName }: { supplie
             <div className="text-sm text-slate-500">Считаю остатки…</div>
           ) : !groups.length ? (
             <div className="text-sm text-slate-500">
-              В базе нет кодов этого поставщика и за {PERIOD_DAYS} дней не было сканов ЧЗ на ФБС.
+              В базе нет кодов этого поставщика и за {PERIOD_DAYS} дней не было заказов ФБС.
             </div>
           ) : (
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2 2xl:grid-cols-3">
@@ -249,9 +294,14 @@ export default function FbsChzStockPanel({ supplierId, supplierName }: { supplie
               })}
             </div>
           )}
+          {source === 'scans' && (
+            <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              Заказы из WB не загрузились{sourceNote ? ` (${sourceNote})` : ''} — расход временно посчитан по сканам ЧЗ за {PERIOD_DAYS} дней и может быть ниже реального.
+            </p>
+          )}
           <p className="mt-3 text-[11px] text-slate-400">
-            Срок — прикидка: остаток делим на средний расход за {Math.round(totals.periodDays)} {plural(Math.round(totals.periodDays), 'день', 'дня', 'дней')}.
-            Категория и пол расхода — из карточек товаров WB. Коды без пола в базе подходят к любому полу своей категории.
+            Срок — прикидка: остаток делим на средний расход в день по {source === 'orders' ? 'заказам' : 'сканам'} ФБС за {PERIOD_DAYS} дней.
+            Категория и пол — из карточек товаров WB. Коды без пола в базе подходят к любому полу своей категории.
           </p>
         </div>
       )}
