@@ -713,6 +713,13 @@ export const WBSupplyManager = ({
   } | null>(null);
   const [boxesAmount, setBoxesAmount] = useState('1');
   const [fbsScanLoading, setFbsScanLoading] = useState(false);
+  /*
+   * «Обновить» в окне скана — фоном. Раньше кнопка включала общий режим
+   * загрузки, и таблица на всё время ожидания пропадала. Теперь на экране
+   * остаются прежние данные, сканировать можно, а новые подменяют таблицу,
+   * только когда загрузились и если что-то изменилось.
+   */
+  const [fbsScanRefreshing, setFbsScanRefreshing] = useState(false);
   const [fbsScanRows, setFbsScanRows] = useState<FbsSupplyScanOrderRow[]>([]);
   const [fbsScansBySticker, setFbsScansBySticker] = useState<Record<string, FbsSupplyScanSavedItem>>({});
   const [fbsScanMode, setFbsScanMode] = useState<'sticker' | 'honest_sign'>('sticker');
@@ -2918,7 +2925,9 @@ export const WBSupplyManager = ({
     state.dirty = false;
     try {
       const saved = await saveFbsSupplyScanMap(supplyId, fbsScansRef.current, supplierId);
-      applyFbsScans(saved);
+      // Пока писали, окно могли переключить на другую поставку (закладки):
+      // тогда сохранённое принадлежит прежней, и показывать его здесь нельзя.
+      if (fbsScanSupplyIdRef.current === supplyId) applyFbsScans(saved);
     } catch (e: any) {
       // Снапшот — кэш, но молчать нельзя: пока он отстаёт, окно на другом
       // рабочем месте покажет поставку без этих сканов.
@@ -3958,21 +3967,57 @@ export const WBSupplyManager = ({
     // Человек нажал «обновить» — значит, состав изменился. Кэш печати сбрасываем,
     // иначе следующий лист подбора выйдет по старому составу.
     supplyOrdersCacheRef.current.clear();
-    setFbsScanLoading(true);
-    setFbsScanNotice({ type: 'info', text: 'Забираю состав поставки из WB…' });
+    if (fbsScanRefreshing) return;
+    const supplyAtStart = activeSupplyId;
+    setFbsScanRefreshing(true);
+    setFbsScanNotice({ type: 'info', text: 'Обновляю в фоне: состав поставки из WB и сканы с других рабочих мест…' });
     try {
-      const [{ rows, apiRows }, savedMap] = await Promise.all([
+      const [{ rows, apiRows }, savedMap, dbScans] = await Promise.all([
         loadPreparedFbsScanRows(activeSupplyId, selectedSupplierId, { ignoreCache: true }),
         loadFbsSupplyScanMap(activeSupplyId, selectedSupplierId),
+        fetchFbsSupplyScans(selectedSupplierId, activeSupplyId).catch((e) => {
+          console.error('не прочитали сканы поставки из базы', e);
+          return null;
+        }),
       ]);
 
+      // Пока грузили, окно переключили на другую поставку — результат не наш.
+      if (fbsScanSupplyIdRef.current !== supplyAtStart) return;
+
       if (!rows.length) {
-        setFbsScanNotice({ type: 'error', text: 'WB не отдал ни одного заказа по этой поставке. Проверьте, что поставка не закрыта.' });
+        // Прежний список не трогаем: пустой ответ WB — не повод его стирать.
+        setFbsScanNotice({ type: 'error', text: 'WB не отдал ни одного заказа по этой поставке. Список оставлен прежним — проверьте, что поставка не закрыта.' });
         return;
       }
 
-      setFbsScanRows(rows);
-      applyFbsScans(savedMap);
+      // Таблицу подменяем, только если состав действительно изменился.
+      const rowsChanged = JSON.stringify(rows) !== JSON.stringify(fbsScanRowsRef.current);
+      if (rowsChanged) {
+        fbsScanRowsSupplyRef.current = activeSupplyId;
+        fbsScanRowsRef.current = rows;
+        setFbsScanRows(rows);
+      }
+
+      /*
+       * Сканы: снапшот — основа, свои несохранённые — поверх, база — правда.
+       *
+       * Раньше бралась только копия-снапшот. Она пишется с задержкой, поэтому
+       * кнопка не показывала сканы с других компьютеров и на миг прятала свои
+       * последние. Теперь сводим с базой, как при открытии окна, и убираем
+       * сброшенные на другом месте: человек сам попросил актуальную картину.
+       */
+      const base: Record<string, FbsSupplyScanSavedItem> = { ...(savedMap || {}) };
+      const nowMs = Date.now();
+      Object.entries(fbsScansRef.current).forEach(([key, item]) => {
+        if (!item?.honestSignCode) return;
+        const fresh = nowMs - new Date(item.updatedAt || 0).getTime() < 30_000;
+        if (fbsScanSavingKeysRef.current[key] || fresh) base[key] = item;
+      });
+      const scansMap = dbScans ? mergeFbsScanMapWithDb(base, dbScans, rows, true).map : base;
+      if (JSON.stringify(scansMap) !== JSON.stringify(fbsScansRef.current)) {
+        applyFbsScans(scansMap);
+        releaseFbsPendingTakenElsewhere(scansMap);
+      }
 
       const completeness = getFbsScanCompletenessStats(rows);
       // Сохраняем только полный набор: недособранный лист затёр бы прежний.
@@ -3981,7 +4026,7 @@ export const WBSupplyManager = ({
       }
 
       const added = rows.length - before;
-      const scanned = Object.keys(savedMap || {}).length;
+      const scanned = Object.values(scansMap).filter((item) => item?.honestSignCode).length;
       if (!completeness.isFullyReady) {
         setFbsScanNotice({
           type: 'error',
@@ -4004,9 +4049,9 @@ export const WBSupplyManager = ({
         });
       }
     } catch (e: any) {
-      setFbsScanNotice({ type: 'error', text: e?.message || 'Не удалось обновить состав поставки из WB' });
+      setFbsScanNotice({ type: 'error', text: `Не удалось обновить (${e?.message || 'ошибка'}). На экране прежние данные.` });
     } finally {
-      setFbsScanLoading(false);
+      setFbsScanRefreshing(false);
     }
   };
 
@@ -7996,6 +8041,10 @@ export const WBSupplyManager = ({
       return;
     }
 
+    // Отложенная запись снапшота должна уйти под ключом текущей поставки —
+    // до того, как в окне окажутся сканы следующей.
+    void flushFbsScanMap();
+
     const keepMinimized = fbsScanModalOpen ? fbsScanMinimized : false;
     fbsScanSwitchRef.current = { ...bookmark, keepMinimized };
     // Сразу помечаем, чей это скан: защита ниже не должна принять
@@ -8017,9 +8066,19 @@ export const WBSupplyManager = ({
     if (supplierAlreadyActive) setActiveSupplyId(bookmark.supplyId);
   };
 
+  /*
+   * Убрать закладку. Если это текущий скан — окно не закрываем, а открываем
+   * следующую закладку (или предыдущую, если убрали последнюю). Закрывается
+   * окно, только когда закладок не осталось.
+   */
   const removeFbsScanBookmark = (bookmark: FbsScanBookmark) => {
-    setFbsScanBookmarks((prev) => prev.filter((b) => b.key !== bookmark.key));
-    if (bookmark.key === currentFbsScanBookmarkKey) closeFbsScanModal();
+    const index = fbsScanBookmarks.findIndex((b) => b.key === bookmark.key);
+    const rest = fbsScanBookmarks.filter((b) => b.key !== bookmark.key);
+    setFbsScanBookmarks(rest);
+    if (bookmark.key !== currentFbsScanBookmarkKey) return;
+    const nextBookmark = rest[index] || rest[index - 1] || null;
+    if (nextBookmark) switchFbsScanBookmark(nextBookmark);
+    else closeFbsScanModal();
   };
 
   /*
@@ -8129,6 +8188,197 @@ export const WBSupplyManager = ({
     setSuccessMsg(`Скан поставки «${name}» отложен в закладки: выбрана другая ${supplyChanged ? 'поставка' : 'вкладка с другим кабинетом'}. Отсканированное сохранено.`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSupplyId, selectedSupplierId]);
+
+  /*
+   * Живые сканы между рабочими местами.
+   *
+   * Окно «Скан ЧЗ», открытое на двух компьютерах, не видело сканы друг друга
+   * до повторного открытия. Теперь открытое окно подписано на строки своей
+   * поставки в fbs_order_codes (realtime с фильтром supply_id) — только пока
+   * открыто. Опросов нет: пока никто не сканирует, нет ни одного запроса.
+   *
+   *  - скан на другом месте приходит строкой и сразу отмечается здесь;
+   *    свой же скан, вернувшийся эхом, узнаётся по совпадению кода и
+   *    пропускается без работы;
+   *  - сброс на другом месте приходит событием без данных строки (только id),
+   *    поэтому тогда перечитываем сканы поставки одним запросом;
+   *  - после переподключения realtime и при возврате во вкладку — та же
+   *    сверка, но без удалений: пропущенные события могли быть только
+   *    добавлениями, а удалять по неполной картине нельзя.
+   */
+  const fbsScanSavingKeysRef = useRef(fbsScanSavingKeys);
+  useEffect(() => { fbsScanSavingKeysRef.current = fbsScanSavingKeys; }, [fbsScanSavingKeys]);
+  const fbsPendingStickerRowRef = useRef(fbsPendingStickerRow);
+  useEffect(() => { fbsPendingStickerRowRef.current = fbsPendingStickerRow; }, [fbsPendingStickerRow]);
+
+  /** Ждём ЧЗ по заказу, который уже закрыли на другом месте, — сбрасываем шаг. */
+  const releaseFbsPendingTakenElsewhere = (map: Record<string, FbsSupplyScanSavedItem>) => {
+    const pending = fbsPendingStickerRowRef.current;
+    if (!pending) return;
+    const orderId = String(pending.orderId || '').trim();
+    const taken = Object.values(map).some((item) => String(item?.orderId || '').trim() === orderId && item?.honestSignCode);
+    if (!taken) return;
+    setFbsPendingStickerRow(null);
+    setFbsScanMode('sticker');
+    clearScanInput();
+    fbsCue('error');
+    setFbsScanNotice({ type: 'error', text: `Заказ ${orderId} уже отсканирован на другом рабочем месте. Отложите товар и сканируйте следующий стикер.` });
+  };
+
+  /**
+   * Свести карту сканов окна со строками базы (база — источник правды).
+   *
+   * Коды, заменённые на другом месте, обновляются; сканы с других мест
+   * добавляются; с allowRemovals убираются сканы, которых в базе больше нет, —
+   * кроме своих, ещё едущих в базу, и совсем свежих (до 30 секунд).
+   */
+  const mergeFbsScanMapWithDb = (
+    current: Record<string, FbsSupplyScanSavedItem>,
+    dbScans: Awaited<ReturnType<typeof fetchFbsSupplyScans>>,
+    rows: FbsSupplyScanOrderRow[],
+    allowRemovals: boolean,
+  ) => {
+    const dbByOrder = new Map<string, (typeof dbScans)[number]>();
+    dbScans.forEach((scan) => {
+      const id = String(scan.orderId || '').trim();
+      if (id && scan.chzCode) dbByOrder.set(id, scan);
+    });
+
+    const next: Record<string, FbsSupplyScanSavedItem> = { ...current };
+    let changed = 0;
+    const now = Date.now();
+
+    for (const [key, item] of Object.entries(current)) {
+      const orderId = String(item?.orderId || '').trim();
+      if (!orderId || !item?.honestSignCode) continue;
+      const db = dbByOrder.get(orderId);
+      if (db) {
+        const code = normalizeDataMatrixText(db.chzCode);
+        if (code && code !== normalizeDataMatrixText(String(item.honestSignCode))) {
+          next[key] = { ...item, honestSignCode: code, updatedAt: db.scannedAt || item.updatedAt };
+          changed += 1;
+        }
+        continue;
+      }
+      if (!allowRemovals) continue;
+      // Свой скан, который ещё едет в базу, не трогаем.
+      if (fbsScanSavingKeysRef.current[key]) continue;
+      const age = now - new Date(item.updatedAt || 0).getTime();
+      if (Number.isFinite(age) && age < 30_000) continue;
+      delete next[key];
+      changed += 1;
+    }
+
+    const restored = restoreFbsScansFromDb(next, dbScans, rows);
+    return { map: restored.map, changed: changed + restored.added };
+  };
+
+  const reconcileFbsScansWithDb = async (supplierId: string, supplyId: string, allowRemovals: boolean) => {
+    const dbScans = await fetchFbsSupplyScans(supplierId, supplyId);
+    // Пока ждали ответ, окно могли закрыть или переключить на другую поставку.
+    if (fbsScanSupplyIdRef.current !== supplyId || fbsScanSupplierIdRef.current !== supplierId) return;
+    if (fbsScanRowsSupplyRef.current !== supplyId) return;
+
+    const merged = mergeFbsScanMapWithDb(fbsScansRef.current, dbScans, fbsScanRowsRef.current, allowRemovals);
+    if (!merged.changed) return;
+    applyFbsScans(merged.map);
+    releaseFbsPendingTakenElsewhere(merged.map);
+  };
+
+  useEffect(() => {
+    if (embeddedMode || !fbsScanModalOpen || fbsScanLoading) return;
+    const supplyId = fbsScanSupplyIdRef.current;
+    const supplierId = fbsScanSupplierIdRef.current;
+    if (!supplyId || !supplierId || supplyId !== activeSupplyId) return;
+
+    let deleteTimer: ReturnType<typeof setTimeout> | null = null;
+    let subscribedOnce = false;
+
+    const applyRemoteRow = (r: any) => {
+      if (!r || String(r.supplier_id || '') !== supplierId) return;
+      const code = normalizeDataMatrixText(String(r.chz_code || ''));
+      const orderId = String(r.order_id || '').trim();
+      if (!code || !orderId) return;
+      if (fbsScanSupplyIdRef.current !== supplyId) return;
+
+      const current = fbsScansRef.current;
+      const existingKey = Object.keys(current).find((k) => String(current[k]?.orderId || '').trim() === orderId);
+      // Своё эхо или уже известный скан — ничего не делаем.
+      if (existingKey && normalizeDataMatrixText(String(current[existingKey]?.honestSignCode || '')) === code) return;
+
+      const row = fbsScanRowsRef.current.find((x) => String(x.orderId || '').trim() === orderId);
+      const storageKey = row?.storageKey || existingKey || `order:${orderId}`;
+      const next: Record<string, FbsSupplyScanSavedItem> = { ...current };
+      if (existingKey && existingKey !== storageKey) delete next[existingKey];
+      next[storageKey] = {
+        storageKey,
+        stickerDigits: row?.stickerDigits || String(r.sticker_digits || ''),
+        stickerScanText: row?.stickerScanText || String(r.sticker_text || ''),
+        honestSignCode: code,
+        updatedAt: String(r.scanned_at || new Date().toISOString()),
+        orderId,
+        title: row?.title || String(r.title || ''),
+        article: row?.article || String(r.article || ''),
+        size: row?.size || String(r.size || ''),
+      };
+      applyFbsScans(next);
+      releaseFbsPendingTakenElsewhere(next);
+    };
+
+    const channel = supabase
+      .channel(`fbs_scan_live:${supplyId}:${Math.random().toString(36).slice(2, 8)}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'fbs_order_codes', filter: `supply_id=eq.${supplyId}` },
+        (payload: any) => {
+          if (payload.eventType === 'DELETE') {
+            if (deleteTimer) clearTimeout(deleteTimer);
+            deleteTimer = setTimeout(() => {
+              void reconcileFbsScansWithDb(supplierId, supplyId, true).catch((e) => console.error('сверка сканов после сброса', e));
+            }, 800);
+            return;
+          }
+          applyRemoteRow(payload.new);
+        },
+      )
+      .subscribe((status: string) => {
+        if (status !== 'SUBSCRIBED') return;
+        // Первая подписка сразу после загрузки — данные свежие. Повторная
+        // значит переподключение: за это время события могли пропасть.
+        if (subscribedOnce) {
+          void reconcileFbsScansWithDb(supplierId, supplyId, false).catch((e) => console.error('сверка сканов после переподключения', e));
+        }
+        subscribedOnce = true;
+      });
+
+    return () => {
+      if (deleteTimer) clearTimeout(deleteTimer);
+      supabase.removeChannel(channel);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fbsScanModalOpen, fbsScanLoading, activeSupplyId]);
+
+  // Вернулись во вкладку — сверка без удалений, не чаще раза в 15 секунд.
+  useEffect(() => {
+    if (embeddedMode || !fbsScanModalOpen) return;
+    let last = 0;
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (Date.now() - last < 15_000) return;
+      const supplyId = fbsScanSupplyIdRef.current;
+      const supplierId = fbsScanSupplierIdRef.current;
+      if (!supplyId || !supplierId || fbsScanRowsSupplyRef.current !== supplyId) return;
+      last = Date.now();
+      void reconcileFbsScansWithDb(supplierId, supplyId, false).catch((e) => console.error('сверка сканов при возврате', e));
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onVisible);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fbsScanModalOpen]);
 
   /** Ярлыки закладок — одни и те же в плашке, в окне и в лотке. */
   const renderFbsScanBookmarks = () => {
@@ -8809,6 +9059,15 @@ export const WBSupplyManager = ({
             </button>
             <button
               type="button"
+              onClick={refreshFbsScanRowsFromWb}
+              disabled={fbsScanLoading || fbsScanRefreshing}
+              title="Обновить: состав поставки из WB и сканы с других рабочих мест"
+              className="rounded-md p-1 hover:bg-white/15 disabled:opacity-50"
+            >
+              <RefreshCw className={`h-4 w-4 ${fbsScanLoading || fbsScanRefreshing ? 'animate-spin' : ''}`} />
+            </button>
+            <button
+              type="button"
               onClick={() => setFbsScanMinimized(false)}
               title="Развернуть"
               className="rounded-md p-1 hover:bg-white/15"
@@ -9021,11 +9280,11 @@ export const WBSupplyManager = ({
                   <button
                     type="button"
                     onClick={refreshFbsScanRowsFromWb}
-                    disabled={fbsScanLoading}
-                    title="Забрать актуальный состав поставки из WB. Отсканированные ЧЗ сохранятся"
+                    disabled={fbsScanLoading || fbsScanRefreshing}
+                    title="Забрать актуальный состав поставки из WB и сканы с других рабочих мест. Отсканированные ЧЗ сохранятся"
                     className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-blue-400 bg-blue-100 hover:bg-blue-200 disabled:opacity-50 text-sm font-semibold text-blue-800"
                   >
-                    <RefreshCw className={`w-4 h-4 ${fbsScanLoading ? 'animate-spin' : ''}`} /> Обновить данные
+                    <RefreshCw className={`w-4 h-4 ${fbsScanLoading || fbsScanRefreshing ? 'animate-spin' : ''}`} /> {fbsScanRefreshing ? 'Обновляю…' : 'Обновить данные'}
                   </button>
                   {/* Грузоместа — здесь, в окне сборки: коробки для ПВЗ создают
                       и клеят по ходу сборки поставки, а не заранее. */}
