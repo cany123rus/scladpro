@@ -675,10 +675,28 @@ export const WBSupplyManager = ({
   }, [fbsScanModalOpen]);
   useEffect(() => () => onScanWindowChange?.(false), []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Ушли в другой раздел с развёрнутым окном — сворачиваем, а не закрываем.
+  /*
+   * Ушли в другой раздел с развёрнутым окном — сворачиваем, а не закрываем.
+   *
+   * Только в момент ухода: раньше проверка срабатывала постоянно, и развернуть
+   * плашку в другом разделе было нельзя — окно тут же сворачивалось обратно.
+   */
+  const prevSectionActiveRef = useRef(sectionActive);
   useEffect(() => {
-    if (!sectionActive && fbsScanModalOpen && !fbsScanMinimized) setFbsScanMinimized(true);
-  }, [sectionActive, fbsScanModalOpen, fbsScanMinimized]);
+    const left = prevSectionActiveRef.current && !sectionActive;
+    prevSectionActiveRef.current = sectionActive;
+    if (left && fbsScanModalOpen && !fbsScanMinimized) setFbsScanMinimized(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sectionActive]);
+
+  // Свёрнуто ли окно — для обработчика клавиш, без переподписки.
+  const fbsScanMinimizedRef = useRef(fbsScanMinimized);
+  useEffect(() => { fbsScanMinimizedRef.current = fbsScanMinimized; }, [fbsScanMinimized]);
+
+  // Поставщик, под которым открыт скан (см. защиту в closeFbsScanModal).
+  const fbsScanSupplierIdRef = useRef<string | null>(null);
+  // Для какой поставки загружены строки скана.
+  const fbsScanRowsSupplyRef = useRef<string | null>(null);
   /*
    * Окно «Грузоместа» поставки на ПВЗ.
    *
@@ -1488,8 +1506,8 @@ export const WBSupplyManager = ({
 
   useEffect(() => {
     if (!fbsScanModalOpen || fbsScanLoading) return;
-    // В разделе со своим сканером фокус не забираем: он нужен полю этого раздела.
-    if (!scanCaptureAllowed) return;
+    // В разделе со своим сканером фокус не забираем, пока окно свёрнуто.
+    if (!scanCaptureAllowed && fbsScanMinimized) return;
     const timer = setTimeout(() => {
       try {
         fbsScanInputRef.current?.focus({ preventScroll: true });
@@ -1524,8 +1542,9 @@ export const WBSupplyManager = ({
       if (!input || input.disabled) return;
       if (e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey) return;
       if (boxesModal) return;
-      // В разделе со своим сканером (сборка ФБО, поиск ФБС) коды нужны ему.
-      if (!scanCaptureAllowedRef.current) return;
+      // В разделе со своим сканером (сборка ФБО, поиск ФБС) коды нужны ему —
+      // пока окно свёрнуто. Развёрнутое окно закрывает раздел, и сканер его.
+      if (!scanCaptureAllowedRef.current && fbsScanMinimizedRef.current) return;
 
       const target = e.target as HTMLElement | null;
       if (target === input) return;
@@ -3854,10 +3873,11 @@ export const WBSupplyManager = ({
     return { rows, sheetRows, apiRows, mergedRows, sheetMeta, source: 'wb' as const };
   };
 
-  const openFbsScanModal = async () => {
+  const openFbsScanModal = async (opts?: { keepMinimized?: boolean }) => {
     if (!activeSupplyId) return;
-    setFbsScanMinimized(false);
+    setFbsScanMinimized(Boolean(opts?.keepMinimized));
     fbsScanSupplyIdRef.current = activeSupplyId;
+    fbsScanSupplierIdRef.current = selectedSupplierId || null;
     setFbsScanModalOpen(true);
     setFbsScanLoading(true);
     setFbsScanMode('sticker');
@@ -3877,6 +3897,7 @@ export const WBSupplyManager = ({
           return [];
         }),
       ]);
+      fbsScanRowsSupplyRef.current = activeSupplyId;
       setFbsScanRows(rows);
       // Что уже стоит у WB — фоном: окно сканирования ждать этого не должно.
       void refreshFbsWbSgtin(rows.map((r) => r.orderId), { silent: true });
@@ -5023,6 +5044,15 @@ export const WBSupplyManager = ({
     const typed = String((fbsScanInputRef.current?.value ?? fbsScanInputValue) || '').trim();
     if (!typed) return;
 
+    // Поставка ещё грузится (например, после переключения закладки): строк нет,
+    // и скан ушёл бы в «не найдено». Держим его и отправим, когда загрузится.
+    if (fbsScanLoading || fbsScanSwitchRef.current) {
+      fbsScanQueuedRef.current = typed;
+      clearScanInput();
+      setFbsScanNotice({ type: 'info', text: 'Поставка загружается — скан обработаю, как только она откроется.' });
+      return;
+    }
+
     /*
      * Русская раскладка.
      *
@@ -5067,6 +5097,15 @@ export const WBSupplyManager = ({
 
       const row = findFbsRowByStickerScan(raw);
       if (!row) {
+        // Задание из отложенной поставки — переключаемся туда и продолжаем там.
+        const bookmark = findFbsScanBookmarkBySticker(raw);
+        if (bookmark) {
+          fbsScanReplayStickerRef.current = raw;
+          setFbsScanNotice({ type: 'info', text: `Стикер из поставки «${bookmark.supplyName}» (${bookmark.supplierName}) — переключаю скан туда…` });
+          clearScanInput();
+          switchFbsScanBookmark(bookmark);
+          return;
+        }
         setFbsScanNotice({ type: 'error', text: 'Стикер не найден в текущей поставке. Проверь файл поставки или сам скан.' });
         void logFbsScanReject({
           supplierId: selectedSupplierId,
@@ -5376,7 +5415,9 @@ export const WBSupplyManager = ({
         setSupplies(suppliesList.filter((s: WBSupply) => !s.closedAt));
       }
       
-      if (!activeSupplyId) {
+      // Не выбираем поставку сами, если открыт или открывается скан: список
+      // приходит через секунду-две, и подмена поставки выбила бы скан закладки.
+      if (!activeSupplyId && !fbsScanSupplyIdRef.current) {
         const active = suppliesList.find((s: WBSupply) => !s.closedAt) || suppliesList[0];
         if (active) setActiveSupplyId(active.id);
       }
@@ -7823,24 +7864,314 @@ export const WBSupplyManager = ({
   };
 
   /*
-   * Свёрнутое окно не должно пережить смену поставки.
+   * Закладки сканов: несколько поставок разных кабинетов под рукой.
    *
-   * Скан записывается в «активную» поставку. Пока окно было на весь экран,
-   * сменить её было нечем. Свёрнутое же оставляет доступным список, и щелчок
-   * по другой поставке молча перевёл бы сканы — со строками первой поставки —
-   * во вторую: марки легли бы не на те задания. Поэтому при смене поставки
-   * окно скана закрываем и говорим об этом.
+   * Живой скан всегда один — сканер тоже один, и каждая запись марки берёт
+   * поставщика и поставку из состояния раздела. Остальные сканы лежат
+   * закладками: щелчок по ярлыку переключает поставщика и поставку и открывает
+   * их скан заново. Сканы уже в базе, поэтому переключение занимает секунды.
+   * Незаконченный шаг (стикер отсканирован, ЧЗ ещё нет) закладка помнит и
+   * восстанавливает, если задание всё ещё без марки.
+   *
+   * У каждой закладки есть индекс стикеров её поставки. Стикер, которого нет в
+   * текущей поставке, ищется по закладкам — и скан сам переключается туда, где
+   * это задание. Только на шаге стикера: марку в другую поставку не переносим.
+   *
+   * Храним в браузере: закладки — рабочее место сборщика, а не общие данные.
+   */
+  const FBS_SCAN_BOOKMARKS_KEY = 'fbs_scan_bookmarks_v1';
+  const FBS_SCAN_BOOKMARKS_MAX = 8;
+
+  type FbsScanBookmark = {
+    key: string;
+    supplierId: string;
+    supplierName: string;
+    supplyId: string;
+    supplyName: string;
+    scanned: number;
+    total: number;
+    pendingStorageKey?: string;
+    /** Нормализованные значения стикеров поставки: «при считывании», текст и цифры. */
+    stickerKeys?: string[];
+    updatedAt: string;
+  };
+
+  const [fbsScanBookmarks, setFbsScanBookmarks] = useState<FbsScanBookmark[]>(() => {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(FBS_SCAN_BOOKMARKS_KEY) || '[]');
+      return Array.isArray(parsed) ? parsed.filter((b: any) => b?.supplierId && b?.supplyId) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    try { localStorage.setItem(FBS_SCAN_BOOKMARKS_KEY, JSON.stringify(fbsScanBookmarks)); } catch {}
+  }, [fbsScanBookmarks]);
+
+  const fbsScanBookmarkKey = (supplierId: string, supplyId: string) => `${supplierId}|${supplyId}`;
+  const currentFbsScanBookmarkKey = fbsScanModalOpen && fbsScanSupplierIdRef.current && fbsScanSupplyIdRef.current
+    ? fbsScanBookmarkKey(fbsScanSupplierIdRef.current, fbsScanSupplyIdRef.current)
+    : '';
+
+  /** Ключи стикеров строк — те же правила, что в findFbsRowByStickerScan. */
+  const buildFbsStickerKeys = (rows: FbsSupplyScanOrderRow[]) => {
+    const keys = new Set<string>();
+    for (const row of rows) {
+      const scan = normalizeScannedStickerLookupKey(row.stickerScanText || '');
+      const text = normalizeScannedStickerLookupKey(row.stickerText || '');
+      if (scan) keys.add(`s:${scan}`);
+      if (text) keys.add(`s:${text}`);
+      if (row.stickerDigits) keys.add(`d:${row.stickerDigits}`);
+    }
+    return Array.from(keys);
+  };
+
+  /** Закладка (не текущая), в поставке которой есть этот стикер. */
+  const findFbsScanBookmarkBySticker = (raw: string): FbsScanBookmark | null => {
+    const scanText = normalizeScannedStickerLookupKey(raw);
+    const digits = normalizeStickerDigits(raw);
+    if (!scanText && !digits) return null;
+    return fbsScanBookmarks.find((b) => {
+      if (b.key === currentFbsScanBookmarkKey || !b.stickerKeys?.length) return false;
+      return (scanText && b.stickerKeys.includes(`s:${scanText}`)) || (digits && b.stickerKeys.includes(`d:${digits}`));
+    }) || null;
+  };
+
+  // Переключение на закладку: ждём, пока раздел сменит поставщика и поставку.
+  const fbsScanSwitchRef = useRef<(FbsScanBookmark & { keepMinimized: boolean }) | null>(null);
+  // Незаконченный шаг, который надо вернуть после загрузки строк поставки.
+  const fbsScanRestorePendingRef = useRef<string | null>(null);
+  // Стикер, ради которого переключились: после загрузки находим по нему заказ.
+  const fbsScanReplayStickerRef = useRef<string | null>(null);
+  // Шаг только что восстановлен — очередь ждёт, пока он окажется в состоянии.
+  const fbsScanStepJustSetRef = useRef(false);
+  // Скан, пришедший, пока поставка загружалась: обработаем после загрузки.
+  const fbsScanQueuedRef = useRef<string | null>(null);
+
+  // Текущий скан — в закладки, с прогрессом, незаконченным шагом и стикерами.
+  useEffect(() => {
+    if (embeddedMode || !fbsScanModalOpen || fbsScanLoading || fbsScanSwitchRef.current) return;
+    const supplierId = fbsScanSupplierIdRef.current;
+    const supplyId = fbsScanSupplyIdRef.current;
+    if (!supplierId || !supplyId || supplyId !== activeSupplyId || supplierId !== selectedSupplierId) return;
+    if (!fbsScanStats.totalRows) return;
+
+    const key = fbsScanBookmarkKey(supplierId, supplyId);
+    const pendingStorageKey = fbsScanMode === 'honest_sign' ? fbsPendingStickerRow?.storageKey : undefined;
+    setFbsScanBookmarks((prev) => {
+      const old = prev.find((b) => b.key === key);
+      const supplyName = supplies.find((x) => x.id === supplyId)?.name || old?.supplyName || supplyId;
+      if (old && old.scanned === fbsScanStats.scannedCount && old.total === fbsScanStats.totalRows
+        && old.pendingStorageKey === pendingStorageKey && old.supplyName === supplyName && old.stickerKeys?.length) {
+        return prev;
+      }
+      const next: FbsScanBookmark = {
+        key,
+        supplierId,
+        supplierName: suppliers.find((x) => x.id === supplierId)?.name || old?.supplierName || supplierId,
+        supplyId,
+        supplyName,
+        scanned: fbsScanStats.scannedCount,
+        total: fbsScanStats.totalRows,
+        pendingStorageKey,
+        stickerKeys: old && old.total === fbsScanStats.totalRows && old.stickerKeys?.length
+          ? old.stickerKeys
+          : buildFbsStickerKeys(fbsScanRows),
+        updatedAt: new Date().toISOString(),
+      };
+      return [next, ...prev.filter((b) => b.key !== key)].slice(0, FBS_SCAN_BOOKMARKS_MAX);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fbsScanModalOpen, fbsScanLoading, fbsScanStats.scannedCount, fbsScanStats.totalRows, fbsPendingStickerRow, fbsScanMode, activeSupplyId, selectedSupplierId, supplies]);
+
+  const switchFbsScanBookmark = (bookmark: FbsScanBookmark) => {
+    if (bookmark.key === currentFbsScanBookmarkKey) {
+      setFbsScanMinimized(false);
+      return;
+    }
+    if (!suppliers.some((x) => x.id === bookmark.supplierId)) {
+      setError(`Кабинет закладки «${bookmark.supplierName}» не найден — закладка удалена.`);
+      setFbsScanBookmarks((prev) => prev.filter((b) => b.key !== bookmark.key));
+      return;
+    }
+
+    const keepMinimized = fbsScanModalOpen ? fbsScanMinimized : false;
+    fbsScanSwitchRef.current = { ...bookmark, keepMinimized };
+    // Сразу помечаем, чей это скан: защита ниже не должна принять
+    // переключение за случайную смену поставки.
+    fbsScanSupplierIdRef.current = bookmark.supplierId;
+    fbsScanSupplyIdRef.current = bookmark.supplyId;
+    setFbsPendingStickerRow(null);
+    setFbsScanMode('sticker');
+    clearScanInput();
+    /*
+     * Если кабинет меняется, поставку сейчас не ставим: смена кабинета сама
+     * сбрасывает поставку, и сброс пришёлся бы уже после открытия скана —
+     * защита приняла бы его за выбор другой поставки и закрыла скан. Поставку
+     * поставит эффект ниже, когда кабинет сменится.
+     */
+    const supplierAlreadyActive = selectedSupplierId === bookmark.supplierId;
+    if (!embeddedMode) setActiveTab('fbs');
+    setSelectedSupplierIdFbs(bookmark.supplierId);
+    if (supplierAlreadyActive) setActiveSupplyId(bookmark.supplyId);
+  };
+
+  const removeFbsScanBookmark = (bookmark: FbsScanBookmark) => {
+    setFbsScanBookmarks((prev) => prev.filter((b) => b.key !== bookmark.key));
+    if (bookmark.key === currentFbsScanBookmarkKey) closeFbsScanModal();
+  };
+
+  /*
+   * Доводим переключение до конца.
+   *
+   * Смена поставщика сама сбрасывает выбранную поставку (эффект «Clear data
+   * when supplier changes»), поэтому ставим поставку снова, пока она не
+   * совпадёт с закладкой, и только тогда открываем скан.
    */
   useEffect(() => {
-    if (!fbsScanModalOpen) return;
-    const scanSupply = fbsScanSupplyIdRef.current;
-    if (!scanSupply || scanSupply === activeSupplyId) return;
-
-    const name = supplies.find((s) => s.id === scanSupply)?.name || scanSupply;
-    closeFbsScanModal();
-    setSuccessMsg(`Окно скана поставки «${name}» закрыто: выбрана другая поставка. Отсканированное сохранено — откройте «Скан ЧЗ» заново.`);
+    const sw = fbsScanSwitchRef.current;
+    if (!sw) return;
+    if (selectedSupplierId !== sw.supplierId) return;
+    if (activeSupplyId !== sw.supplyId) {
+      setActiveSupplyId(sw.supplyId);
+      return;
+    }
+    fbsScanSwitchRef.current = null;
+    fbsScanRestorePendingRef.current = sw.pendingStorageKey || null;
+    void openFbsScanModal({ keepMinimized: sw.keepMinimized });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeSupplyId]);
+  }, [selectedSupplierId, activeSupplyId]);
+
+  // После загрузки: стикер, ради которого переключились, или незаконченный шаг.
+  useEffect(() => {
+    if (fbsScanLoading || !fbsScanRows.length) return;
+
+    const replay = fbsScanReplayStickerRef.current;
+    if (replay) {
+      fbsScanReplayStickerRef.current = null;
+      fbsScanRestorePendingRef.current = null;
+      const row = findFbsRowByStickerScan(replay);
+      if (row && !findFbsScanSavedEntry(row, fbsScansBySticker)?.item?.honestSignCode) {
+        fbsScanStepJustSetRef.current = true;
+        setFbsPendingStickerRow(row);
+        setFbsScanMode('honest_sign');
+        fbsCue('chz');
+        const supplyName = supplies.find((x) => x.id === activeSupplyId)?.name || activeSupplyId || '';
+        setFbsScanNotice({ type: 'success', text: `Переключился на поставку «${supplyName}»: найден заказ ${row.orderId}. Сканируйте ЧЗ.` });
+      } else if (row) {
+        setFbsScanNotice({ type: 'info', text: `Переключился на поставку заказа ${row.orderId}, но ЧЗ по нему уже отсканирован.` });
+      } else {
+        setFbsScanNotice({ type: 'error', text: 'Переключился на закладку, но стикера в поставке уже нет — обновите данные.' });
+        fbsCue('error');
+      }
+      return;
+    }
+
+    const key = fbsScanRestorePendingRef.current;
+    if (!key) return;
+    fbsScanRestorePendingRef.current = null;
+    const row = fbsScanRows.find((r) => r.storageKey === key);
+    if (!row || findFbsScanSavedEntry(row, fbsScansBySticker)?.item?.honestSignCode) return;
+    fbsScanStepJustSetRef.current = true;
+    setFbsPendingStickerRow(row);
+    setFbsScanMode('honest_sign');
+    setFbsScanNotice({ type: 'info', text: `Продолжаем: заказ ${row.orderId} ждёт ЧЗ.` });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fbsScanLoading, fbsScanRows]);
+
+  // Скан, пришедший во время загрузки, — отправляем, когда поставка готова.
+  useEffect(() => {
+    const queued = fbsScanQueuedRef.current;
+    const input = fbsScanInputRef.current;
+    // Очереди нет — флаг восстановленного шага защищать нечего.
+    if (!queued) { fbsScanStepJustSetRef.current = false; return; }
+    if (fbsScanLoading || !fbsScanRows.length || !input) return;
+    // Строки ещё от прежней поставки (идёт переключение) — ждём новые.
+    if (fbsScanSwitchRef.current || fbsScanRowsSupplyRef.current !== activeSupplyId) return;
+    // Восстановленный шаг ещё не применился — дождёмся следующего рендера,
+    // иначе ЧЗ обработался бы как стикер.
+    if (fbsScanStepJustSetRef.current) {
+      fbsScanStepJustSetRef.current = false;
+      return;
+    }
+    fbsScanQueuedRef.current = null;
+    const timer = setTimeout(() => {
+      input.value = queued;
+      input.form?.requestSubmit();
+    }, 0);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fbsScanLoading, fbsScanRows, fbsScanMode, fbsPendingStickerRow, activeSupplyId]);
+
+  /*
+   * Скан не должен пережить смену поставки или поставщика.
+   *
+   * Скан записывается в «активную» поставку под выбранным поставщиком. Пока
+   * окно свёрнуто, доступны список поставок и другие вкладки ФБС — у каждой
+   * свой выбранный поставщик. Щелчок по другой поставке или переход во
+   * вкладку с другим кабинетом молча перевёл бы сканы не туда: марки легли бы
+   * на чужие задания или ушли бы под чужим кабинетом. Поэтому такой скан
+   * откладываем в закладку и закрываем — вернуться к нему можно одним щелчком.
+   */
+  useEffect(() => {
+    if (!fbsScanModalOpen || fbsScanSwitchRef.current) return;
+    const scanSupply = fbsScanSupplyIdRef.current;
+    const scanSupplier = fbsScanSupplierIdRef.current;
+    const supplyChanged = Boolean(scanSupply) && scanSupply !== activeSupplyId;
+    const supplierChanged = Boolean(scanSupplier) && scanSupplier !== selectedSupplierId;
+    if (!supplyChanged && !supplierChanged) return;
+
+    const name = fbsScanBookmarks.find((b) => b.supplyId === scanSupply)?.supplyName
+      || supplies.find((x) => x.id === scanSupply)?.name
+      || scanSupply;
+    closeFbsScanModal();
+    setSuccessMsg(`Скан поставки «${name}» отложен в закладки: выбрана другая ${supplyChanged ? 'поставка' : 'вкладка с другим кабинетом'}. Отсканированное сохранено.`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSupplyId, selectedSupplierId]);
+
+  /** Ярлыки закладок — одни и те же в плашке, в окне и в лотке. */
+  const renderFbsScanBookmarks = () => {
+    if (embeddedMode || !fbsScanBookmarks.length) return null;
+    return (
+      <div className="flex flex-wrap gap-1.5">
+        {fbsScanBookmarks.map((b) => {
+          const current = b.key === currentFbsScanBookmarkKey;
+          const done = b.total > 0 && b.scanned >= b.total;
+          return (
+            <div
+              key={b.key}
+              className={`inline-flex max-w-full items-center overflow-hidden rounded-lg border text-[11px] ${
+                current
+                  ? 'border-indigo-500 bg-indigo-600 text-white'
+                  : 'border-slate-300 bg-white text-slate-700 hover:border-indigo-400'
+              }`}
+            >
+              <button
+                type="button"
+                onClick={() => switchFbsScanBookmark(b)}
+                title={`${b.supplierName} · ${b.supplyName} (${b.supplyId})${b.pendingStorageKey ? ' · есть незаконченный шаг' : ''}`}
+                className="flex min-w-0 items-center gap-1 px-2 py-1 text-left"
+              >
+                <span className="max-w-[90px] truncate font-semibold">{b.supplierName.replace(/^ИП\s+/i, '')}</span>
+                <span className="opacity-70">…{b.supplyId.slice(-5)}</span>
+                <span className={`tabular-nums ${done ? 'font-bold' : ''}`}>{done ? '✓ ' : ''}{b.scanned}/{b.total}</span>
+                {b.pendingStorageKey ? <span title="Незаконченный шаг">⏸</span> : null}
+              </button>
+              <button
+                type="button"
+                onClick={() => removeFbsScanBookmark(b)}
+                title={current ? 'Убрать закладку и закрыть скан' : 'Убрать закладку'}
+                className={`px-1.5 py-1 ${current ? 'hover:bg-indigo-700' : 'text-slate-400 hover:bg-slate-100 hover:text-slate-700'}`}
+              >
+                ×
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
 
   /*
    * Поле скана — одно на оба вида окна.
@@ -8448,6 +8779,16 @@ export const WBSupplyManager = ({
         );
       })()}
 
+      {/* Отложенные сканы при закрытом окне: вернуться к любому одним щелчком. */}
+      {!embeddedMode && !fbsScanModalOpen && sectionActive && fbsScanBookmarks.length > 0 && (
+        <div className="fixed bottom-4 right-20 z-40 w-[340px] max-w-[calc(100vw-6rem)] rounded-2xl border border-slate-200 bg-white p-2.5 shadow-xl">
+          <div className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-slate-600">
+            <CheckSquare className="h-3.5 w-3.5 text-indigo-600" /> Отложенные сканы ЧЗ
+          </div>
+          {renderFbsScanBookmarks()}
+        </div>
+      )}
+
       {/*
         Свёрнутое окно скана — плашка в правом нижнем углу.
 
@@ -8455,7 +8796,7 @@ export const WBSupplyManager = ({
         последнее сообщение и поле скана. Всё остальное — в развёрнутом окне.
       */}
       {fbsScanModalOpen && fbsScanMinimized && (
-        <div className="fixed bottom-4 right-20 z-[9980] w-[340px] max-w-[calc(100vw-6rem)] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-900/20">
+        <div className="fixed bottom-4 right-20 z-40 w-[340px] max-w-[calc(100vw-6rem)] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-900/20">
           <div className="flex items-center gap-2 bg-gradient-to-r from-indigo-600 to-violet-600 px-3 py-2 text-white">
             <CheckSquare className="h-4 w-4 shrink-0" />
             <button
@@ -8485,6 +8826,7 @@ export const WBSupplyManager = ({
           </div>
 
           <div className="space-y-2 p-3">
+            {fbsScanBookmarks.length > 1 && renderFbsScanBookmarks()}
             <div className="flex items-center gap-2">
               <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-100">
                 <div
@@ -8576,6 +8918,12 @@ export const WBSupplyManager = ({
         // у стола легко, и терять из-за этого начатый шаг нельзя.
         <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-2 lg:p-3" onClick={() => setFbsScanMinimized(true)}>
           <div className="bg-white rounded-2xl shadow-2xl w-full h-full max-w-[1920px] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+            {fbsScanBookmarks.length > 1 && (
+              <div className="flex items-center gap-2 border-b border-slate-100 bg-slate-50 px-5 py-2">
+                <span className="shrink-0 text-xs font-semibold text-slate-500">Сканы:</span>
+                {renderFbsScanBookmarks()}
+              </div>
+            )}
             <div className="px-5 py-3 border-b border-slate-200 flex items-center justify-between gap-4">
               <div className="flex min-w-0 items-center gap-4">
                 <div className="text-lg font-bold text-slate-900 shrink-0">Скан ЧЗ</div>
