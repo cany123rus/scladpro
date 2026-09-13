@@ -92,16 +92,47 @@ async function syncSupplier(supabase: any, supplier: any, days: number, beginArg
     }
   }
 
-  // 4) upsert in chunks
-  for (let i = 0; i < rows.length; i += 500) {
-    const { error } = await supabase.from('wb_adv_stats_daily').upsert(rows.slice(i, i + 500), { onConflict: 'supplier_id,advert_id,date' })
+  /*
+   * 4) Пишем только изменившиеся строки.
+   *
+   * Синхронизация идёт каждые 30 минут и раньше перезаписывала весь период
+   * целиком: 1,19 млн обновлений таблицы на 2 тысячи строк (замер 13.09.2026) —
+   * почти всё одинаковыми значениями. Теперь сверяемся с тем, что уже лежит, и
+   * отправляем только новые дни и дни, где WB поменял цифры.
+   */
+  const METRICS = ['campaign_name', 'views', 'clicks', 'sum', 'atbs', 'orders', 'shks', 'sum_price'] as const
+  const dates = rows.map((r) => r.date).sort()
+  const existing = new Map<string, any>()
+  if (dates.length) {
+    for (let from = 0; ; from += 1000) {
+      const { data, error } = await supabase
+        .from('wb_adv_stats_daily')
+        .select('advert_id, date, campaign_name, views, clicks, sum, atbs, orders, shks, sum_price')
+        .eq('supplier_id', supplier.id)
+        .gte('date', dates[0])
+        .lte('date', dates[dates.length - 1])
+        .range(from, from + 999)
+      if (error) throw error
+      ;(data || []).forEach((r: any) => existing.set(`${r.advert_id}|${String(r.date).slice(0, 10)}`, r))
+      if (!data || data.length < 1000) break
+    }
+  }
+
+  const changed = rows.filter((r) => {
+    const old = existing.get(`${r.advert_id}|${r.date}`)
+    if (!old) return true
+    return METRICS.some((k) => (k === 'campaign_name' ? String(old[k] ?? '') !== String(r[k] ?? '') : Number(old[k] ?? 0) !== Number(r[k] ?? 0)))
+  })
+
+  for (let i = 0; i < changed.length; i += 500) {
+    const { error } = await supabase.from('wb_adv_stats_daily').upsert(changed.slice(i, i + 500), { onConflict: 'supplier_id,advert_id,date' })
     if (error) throw error
   }
 
   // 5) retention 90 days
   await supabase.from('wb_adv_stats_daily').delete().eq('supplier_id', supplier.id).lt('date', isoDaysAgo(90))
 
-  return { ok: true, campaigns: ids.length, message: `${rows.length} rows` }
+  return { ok: true, campaigns: ids.length, message: `${rows.length} rows, changed ${changed.length}` }
 }
 
 Deno.serve(async (req) => {

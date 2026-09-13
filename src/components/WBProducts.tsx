@@ -3,8 +3,8 @@ import React, { useEffect, useState, useRef, useMemo, useCallback, useDeferredVa
 import { Loader2, AlertCircle, Image as ImageIcon, ExternalLink, RefreshCw, Printer, Minus, Plus, Search, Filter, X, Package, Pencil, Database, CheckCircle2, Trash2 } from 'lucide-react';
 import JsBarcode from 'jsbarcode';
 import html2canvas from 'html2canvas';
-import { jsPDF } from 'jspdf';
-import bwipjs from 'bwip-js';
+// jsPDF и bwip-js — по требованию: раздел открывается без 1,2 МБ библиотек печати.
+import { ensureBwip, ensurePdfLibs, lazyLibs } from '../pages/dashboardLazyLibs';
 import { supabase } from '../lib/supabase';
 import { restoreDataMatrixGs } from '../utils/honestSign';
 import { FixedSizeList as List, ListChildComponentProps } from 'react-window';
@@ -123,6 +123,9 @@ const Sticker = ({ variant, honestSignCode, supplierName }: { variant: ProductVa
              * короче, которого в ГИС МТ не существует. В скан-файл для WB
              * разделители возвращает тот же restoreDataMatrixGs.
              */
+            // bwip-js подгружен в handlePrint до того, как этот стикер рисуется.
+            const bwipjs = lazyLibs.bwipjs;
+            if (!bwipjs) throw new Error('bwip-js ещё не загружен');
             bwipjs.toCanvas(dmCanvasRef.current, {
                 bcid: 'datamatrix',
                 text: restoreDataMatrixGs(codeToEncode),
@@ -934,6 +937,11 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
       `);
       preview.document.close();
     }
+
+    // Библиотеки печати — после открытия окна (иначе его заблокирует браузер)
+    // и до setIsPrinting: стикеры в области печати рисуют DataMatrix сразу.
+    await Promise.all([ensurePdfLibs(), ensureBwip()]);
+    const { jsPDF, bwipjs } = lazyLibs;
 
     setIsPrinting(true);
     

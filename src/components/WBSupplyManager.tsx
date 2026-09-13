@@ -25,12 +25,13 @@ import {
   Database,
   ShieldCheck
 } from 'lucide-react';
-import { jsPDF } from 'jspdf';
-import autoTable from 'jspdf-autotable';
-import JsBarcode from 'jsbarcode';
-import html2canvas from 'html2canvas';
-import bwipjs from 'bwip-js';
-import ExcelJS from 'exceljs/dist/exceljs.min.js';
+/*
+ * jsPDF, autoTable, bwip-js и ExcelJS — только по требованию (dashboardLazyLibs).
+ * Статический импорт заставлял браузер при каждом открытии раздела ФБС тянуть
+ * 2,2 МБ библиотек печати, даже если сегодня только сканируют. html2canvas и
+ * jsbarcode были импортированы, но нигде не использовались.
+ */
+import { ensureBwip, ensureExcel, ensurePdfLibs, lazyLibs } from '../pages/dashboardLazyLibs';
 import { supabase } from '../lib/supabase';
 import {
   GS_SEPARATOR,
@@ -3639,6 +3640,9 @@ export const WBSupplyManager = ({
   };
 
   const parseFbsScanSheetFile = async (file: File) => {
+    // Библиотеки печати/Excel грузятся по требованию — не при открытии раздела.
+    await ensureExcel();
+    const { ExcelJS } = lazyLibs;
     const workbook = new ExcelJS.Workbook();
     const buf = await file.arrayBuffer();
     await workbook.xlsx.load(buf as ArrayBuffer);
@@ -4164,6 +4168,9 @@ export const WBSupplyManager = ({
    * стикеры заданий. Вкладку открывает вызывающий до первого await.
    */
   const printBoxStickers = async (supplyId: string, ids: string[], tab: Window | null) => {
+    // Библиотеки печати/Excel грузятся по требованию — не при открытии раздела.
+    await ensurePdfLibs();
+    const { jsPDF, autoTable } = lazyLibs;
     const stickers = await fetchSupplyBoxStickers(selectedSupplierId, supplyId, ids);
     const images = stickers.filter((s) => s.file).map((s) => ({ file: s.file, type: 'png' as const }));
     if (!images.length) throw new Error('WB не вернул стикеры грузомест');
@@ -4298,6 +4305,9 @@ export const WBSupplyManager = ({
       const sticker = stickers.get(orderId);
       if (!sticker) throw new Error('WB не вернул стикер для этого задания');
 
+      // После window.open: иначе браузер счёл бы вкладку всплывающим окном.
+      await ensurePdfLibs();
+      const { jsPDF } = lazyLibs;
       const pdf = await buildStickersPdf(jsPDF, [sticker]);
 
       if (tab) {
@@ -4424,6 +4434,9 @@ export const WBSupplyManager = ({
     stickersByOrderId: Map<number, StickerImage>,
     kind: FbsLabelKind,
   ) => {
+    // Библиотеки печати/Excel грузятся по требованию — не при открытии раздела.
+    await Promise.all([ensurePdfLibs(), ensureBwip()]);
+    const { jsPDF, autoTable, bwipjs } = lazyLibs;
     const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: [58, 40], compress: true });
     await addChzLabelFont(pdf);
 
@@ -4629,6 +4642,9 @@ export const WBSupplyManager = ({
    * принтерах.
    */
   const buildSelectedPickingListPdf = async (rows: FbsSupplyScanOrderRow[]) => {
+    // Библиотеки печати/Excel грузятся по требованию — не при открытии раздела.
+    await ensurePdfLibs();
+    const { jsPDF, autoTable } = lazyLibs;
     const doc = new jsPDF();
     await addChzLabelFont(doc);
     try { doc.setFont('Roboto'); } catch {}
@@ -4757,6 +4773,9 @@ export const WBSupplyManager = ({
   };
 
   const downloadFbsScanTemplateExcel = async () => {
+    // Библиотеки печати/Excel грузятся по требованию — не при открытии раздела.
+    await ensureExcel();
+    const { ExcelJS } = lazyLibs;
     if (!activeSupplyId) return;
     try {
       setFbsScanNotice({ type: 'info', text: 'Проверяю количество заказов в WB перед формированием Excel...' });
@@ -4869,6 +4888,9 @@ export const WBSupplyManager = ({
   };
 
   const downloadFbsScanResultExcel = async () => {
+    // Библиотеки печати/Excel грузятся по требованию — не при открытии раздела.
+    await ensureExcel();
+    const { ExcelJS } = lazyLibs;
     if (!activeSupplyId) return;
     try {
       const [{ rows, apiRows, source }, savedMap] = await Promise.all([
@@ -5825,6 +5847,9 @@ export const WBSupplyManager = ({
   }, [supplyOrderSummaryRows]);
 
   const parseFbsOrdersFile = async (file: File) => {
+    // Библиотеки печати/Excel грузятся по требованию — не при открытии раздела.
+    await ensureExcel();
+    const { ExcelJS } = lazyLibs;
       setFbsOrdersLoading(true);
       setError(null);
       try {
@@ -6563,6 +6588,9 @@ export const WBSupplyManager = ({
   const fbsAvailableSourceNames = fbsSourceNames.filter((nm) => !fbsUsedBlockItems.has(normalizeBlockName(String(nm || ''))) || fbsNewBlockItems.includes(nm) || fbsEditingBlockItems.includes(nm));
 
   const generateSupplyOrderDocument = async (customFileName?: string) => {
+    // Библиотеки печати/Excel грузятся по требованию — не при открытии раздела.
+    await ensurePdfLibs();
+    const { jsPDF, autoTable } = lazyLibs;
       const itemsToOrder = buildSupplyOrderItems();
 
       if (itemsToOrder.length === 0) {
@@ -6720,6 +6748,9 @@ export const WBSupplyManager = ({
   };
 
   const generateSupplyOrderExcel = async () => {
+    // Библиотеки печати/Excel грузятся по требованию — не при открытии раздела.
+    await ensureExcel();
+    const { ExcelJS } = lazyLibs;
       const itemsToOrder = buildSupplyOrderItems();
       if (itemsToOrder.length === 0) {
           setError('Выберите товары для заказа');
@@ -6786,6 +6817,9 @@ export const WBSupplyManager = ({
   // --- PDF Generation ---
 
   const generatePickingList = async () => {
+    // Библиотеки печати/Excel грузятся по требованию — не при открытии раздела.
+    await ensurePdfLibs();
+    const { jsPDF, autoTable } = lazyLibs;
     if (!activeSupplyId) return;
     setLoading(true);
     try {
@@ -6992,6 +7026,9 @@ export const WBSupplyManager = ({
   };
 
   const generateGroupedSupplierPickingList = async () => {
+    // Библиотеки печати/Excel грузятся по требованию — не при открытии раздела.
+    await ensurePdfLibs();
+    const { jsPDF, autoTable } = lazyLibs;
     if (!activeSupplyId) return;
     setLoading(true);
     try {
@@ -7167,6 +7204,9 @@ export const WBSupplyManager = ({
   };
 
   const generateSupplyBarcode = async () => {
+    // Библиотеки печати/Excel грузятся по требованию — не при открытии раздела.
+    await Promise.all([ensurePdfLibs(), ensureBwip()]);
+    const { jsPDF, autoTable, bwipjs } = lazyLibs;
     if (!activeSupplyId) return;
     
     try {
@@ -7341,6 +7381,9 @@ export const WBSupplyManager = ({
   };
 
   const downloadFBSStickers = async () => {
+    // Библиотеки печати/Excel грузятся по требованию — не при открытии раздела.
+    await Promise.all([ensurePdfLibs(), ensureBwip()]);
+    const { jsPDF, autoTable, bwipjs } = lazyLibs;
     if (!activeSupplyId) return;
     setLoading(true);
     try {

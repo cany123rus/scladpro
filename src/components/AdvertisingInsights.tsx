@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Upload, Target, TrendingUp, TrendingDown, AlertTriangle, Copy, FileSpreadsheet } from 'lucide-react';
-import ExcelJS from 'exceljs/dist/exceljs.min.js';
+// ExcelJS (915 кБ) — по требованию, только при загрузке или выгрузке файла.
+import { ensureExcel, lazyLibs } from '../pages/dashboardLazyLibs';
 import { ADS_AUTOPILOT_CONFIG, evaluateAdsRow, buildTelegramDigest } from '../services/adsAutopilot';
 
 type Row = {
@@ -53,6 +54,8 @@ export const AdvertisingInsights = () => {
     setSourceInfo('');
 
     try {
+      await ensureExcel();
+      const { ExcelJS } = lazyLibs;
       const workbook = new ExcelJS.Workbook();
       await workbook.xlsx.load(await file.arrayBuffer());
 
@@ -160,6 +163,8 @@ export const AdvertisingInsights = () => {
 
   const exportRecommendationsExcel = async () => {
     if (!rows.length) return;
+    await ensureExcel();
+    const { ExcelJS } = lazyLibs;
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet('Рекомендации');
 

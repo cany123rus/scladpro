@@ -6581,19 +6581,27 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
   useEffect(() => {
     fetchSuppliers();
+  }, [selectedSupplierId]);
 
+  /*
+   * Живое обновление списка поставщиков.
+   *
+   * Канал подписывается один раз: раньше он пересоздавался при каждой смене
+   * поставщика, и каждое переподключение заново оформляло подписку запросами к
+   * базе. Слушатель products убран — раздел «Товары» удалён, а таблица
+   * исключена из realtime.
+   */
+  useEffect(() => {
     const channel = supabase
       .channel('db_changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'suppliers' }, () => fetchSuppliers())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, () => {
-        fetchProducts(selectedSupplierId || '');
-      })
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [selectedSupplierId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const showToast = (message: string, type: NotificationType = 'success') => {
     const newNotification = { id: getSafeId(), message, type, time: new Date() };
@@ -12480,20 +12488,28 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   };
 
   // Presence: «онлайн» считаем по свежести last_seen (heartbeat), а не по липкому флагу is_online.
-  const ONLINE_WINDOW_MS = 150000; // 2.5 минуты
+  // Окно «онлайн» — с запасом над интервалом отметки (2 мин), иначе человек
+  // с медленной сетью мигал бы офлайном между отметками.
+  const ONLINE_WINDOW_MS = 300000; // 5 минут
   const [presenceTick, setPresenceTick] = useState(0);
   const isEmployeeOnline = (emp: any) => {
     const ls = emp?.last_seen ? new Date(emp.last_seen).getTime() : 0;
     return ls > 0 && (Date.now() - ls) < ONLINE_WINDOW_MS;
   };
-  // Heartbeat текущего сотрудника: обновляем last_seen при загрузке, каждые 45с и при возврате во вкладку.
+  /*
+   * Отметка «онлайн»: при загрузке, раз в 2 минуты и при возврате во вкладку.
+   *
+   * Было раз в 45 секунд — 2,2 тысячи записей в сутки (13.09.2026), и каждую
+   * realtime рассылал всем открытым вкладкам. Точность «кто онлайн» до пары
+   * минут этого не стоит.
+   */
   useEffect(() => {
     const empId = currentEmployee?.id;
     if (!empId) return;
     let alive = true;
     const beat = () => { supabase.from('employees').update({ last_seen: new Date().toISOString(), is_online: true }).eq('id', empId).then(() => {}, () => {}); };
     beat();
-    const iv = setInterval(() => { if (alive && document.visibilityState === 'visible') beat(); }, 45000);
+    const iv = setInterval(() => { if (alive && document.visibilityState === 'visible') beat(); }, 120000);
     const onVis = () => { if (document.visibilityState === 'visible') beat(); };
     document.addEventListener('visibilitychange', onVis);
     return () => { alive = false; clearInterval(iv); document.removeEventListener('visibilitychange', onVis); };
@@ -12793,58 +12809,17 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     };
   };
 
-  // Cross-device/live sync: refresh relevant views when DB changes anywhere
-  useEffect(() => {
-    let refreshTimer: any = null;
-
-    const refreshVisibleData = () => {
-      if (refreshTimer) clearTimeout(refreshTimer);
-      refreshTimer = setTimeout(() => {
-        fetchSuppliers();
-        fetchEmployees();
-
-        if (activeTab === 'supplies') fetchSuppliesList();
-        if (activeTab === 'reception') fetchReceptions(receptionSupplierId);
-        if (activeTab === 'barters' && barterSelectedSupplierId) fetchBarterMoneyHistory(barterSelectedSupplierId);
-        if (activeTab === 'reports') fetchReportsData();
-
-        if (currentSupply?.id) {
-          fetchBoxesList(currentSupply.id);
-          fetchSupplyStats(currentSupply.id);
-        }
-        if (currentBox?.id) fetchBoxItems(currentBox.id);
-      }, 250);
-    };
-
-    const syncTables = [
-      'suppliers',
-      'products',
-      'supplies',
-      'boxes',
-      'supply_items',
-      'receptions',
-      'employees',
-      'orders',
-      'tasks',
-      'activity_logs',
-      'work_logs',
-      'work_rates',
-      'temporary_workers_logs',
-      'app_settings',
-      'supplier_marketing_money_log'
-    ];
-
-    const channel = supabase.channel('cross_device_live_sync');
-    syncTables.forEach((table) => {
-      channel.on('postgres_changes', { event: '*', schema: 'public', table }, refreshVisibleData);
-    });
-    channel.subscribe();
-
-    return () => {
-      if (refreshTimer) clearTimeout(refreshTimer);
-      supabase.removeChannel(channel);
-    };
-  }, [activeTab, selectedSupplierId, receptionSupplierId, currentSupply?.id, currentBox?.id, barterSelectedSupplierId]);
+  /*
+   * «Живая синхронизация между устройствами» удалена 13.09.2026.
+   *
+   * Канал подписывался на 15 таблиц, 6 из которых в realtime не включены, и
+   * поэтому не регистрировался вовсе: в realtime.subscription его не было ни
+   * разу, то есть он не работал. Будь он рабочим, было бы хуже: на каждое
+   * изменение любой из таблиц, включая отметку «онлайн» раз в 45 секунд и
+   * запись сканов в app_settings, все открытые вкладки перезапрашивали бы
+   * поставщиков и сотрудников. Нужные живые обновления остались точечными:
+   * поставщики, сотрудники, задачи.
+   */
 
   // Global Scan Listener for NEW_BOX
   useEffect(() => {
@@ -13111,10 +13086,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
     const check = async () => {
       try {
-        const [{ data: rowSessions }, { data: rowDevices }] = await Promise.all([
-          supabase.from('app_settings').select('value').eq('key', 'revoked_employee_sessions_v1').maybeSingle(),
-          supabase.from('app_settings').select('value').eq('key', 'revoked_employee_devices_v1').maybeSingle(),
-        ]);
+        // Один запрос на оба ключа вместо двух.
+        const { data: rows } = await supabase
+          .from('app_settings')
+          .select('key, value')
+          .in('key', ['revoked_employee_sessions_v1', 'revoked_employee_devices_v1']);
+        const rowSessions = (rows || []).find((r: any) => r.key === 'revoked_employee_sessions_v1');
+        const rowDevices = (rows || []).find((r: any) => r.key === 'revoked_employee_devices_v1');
 
         let mapSessions: Record<string, string[]> = {};
         let mapDevices: Record<string, string[]> = {};
@@ -13130,9 +13108,25 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       } catch {}
     };
 
+    /*
+     * Раз в 10 минут и при каждом возврате во вкладку.
+     *
+     * Раньше — раз в минуту двумя запросами: 9,5 тысячи обращений в сутки
+     * (22% трафика, замер 13.09.2026) к настройкам, которых в базе даже не
+     * было — сеанс ни разу не отзывали. Отозванного сотрудника выкинет, как
+     * только он вернётся к вкладке, а в фоне — не позже чем через 10 минут.
+     */
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void check();
+    };
     check();
-    const t = setInterval(check, 60000);
-    return () => { mounted = false; clearInterval(t); };
+    const t = setInterval(onVisible, 10 * 60_000);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      mounted = false;
+      clearInterval(t);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [currentEmployee?.id]);
 
   useEffect(() => {

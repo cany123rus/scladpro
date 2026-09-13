@@ -43,9 +43,26 @@ export function PrintRelay() {
         setJobs((data || []) as PrintJob[]);
       } catch { /* ignore */ }
     };
-    poll();
-    const t = setInterval(poll, 5000);
-    return () => { alive = false; clearInterval(t); };
+    /*
+     * Раз в 30 секунд и только на видимой вкладке.
+     *
+     * Раньше опрос шёл каждые 5 секунд всегда, даже в свёрнутом окне: 21,5
+     * тысячи запросов в сутки — половина всего трафика сайта (замер 13.09.2026),
+     * при том что таблица print_jobs за всё время не получила ни одного
+     * задания. Задание с планшета теперь приходит с задержкой до 30 секунд,
+     * а при возврате во вкладку проверяется сразу.
+     */
+    const tick = () => {
+      if (document.visibilityState === 'visible') void poll();
+    };
+    tick();
+    const t = setInterval(tick, 30_000);
+    document.addEventListener('visibilitychange', tick);
+    return () => {
+      alive = false;
+      clearInterval(t);
+      document.removeEventListener('visibilitychange', tick);
+    };
   }, []);
 
   const printJob = (job: PrintJob) => {
