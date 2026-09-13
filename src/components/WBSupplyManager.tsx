@@ -699,7 +699,7 @@ export const WBSupplyManager = ({
   const [fbsScanSavingKeys, setFbsScanSavingKeys] = useState<Record<string, true>>({});
   const [fbsScanFailedKeys, setFbsScanFailedKeys] = useState<Record<string, string>>({});
   // Что показывать в листе: всё, только несобранное или только собранное.
-  const [fbsScanFilter, setFbsScanFilter] = useState<'all' | 'pending' | 'done'>('all');
+  const [fbsScanFilter, setFbsScanFilter] = useState<'all' | 'pending' | 'done' | 'wb_error' | 'wb_missing'>('all');
   /*
    * Сколько строк рисуем.
    *
@@ -3269,6 +3269,90 @@ export const WBSupplyManager = ({
   };
 
   /*
+   * Досылка марок, которых у WB нет.
+   *
+   * Отправка при скане срабатывает только в той вкладке, где сканируют, и
+   * только если в ней новая версия сайта. 13.09.2026 так и вышло: сборщик
+   * сканировал на странице, открытой до обновления, и 16 марок в WB не ушли,
+   * пока их не отправили кнопкой. Поэтому любое открытое окно скана с
+   * включённой автоотправкой само перечитывает WB раз в минуту и досылает
+   * пропущенное — кто бы и где бы ни сканировал.
+   *
+   * Каждое задание досылаем один раз за открытие окна: если WB отказал, повтор
+   * по кругу только сжигал бы лимит (отказ WB считает за десять запросов).
+   * Закрытую поставку не трогаем вовсе — WB её марки уже не примет.
+   */
+  /*
+   * Страница устарела: на сайте уже новая версия.
+   *
+   * Складской ПК держит вкладку открытой сутками, и после выкладки там
+   * продолжает работать старый код — так 13.09.2026 марки не ушли в WB при
+   * скане. Сверяем главный скрипт этой страницы с тем, что сейчас отдаёт
+   * сайт. Адрес /api/… выбран намеренно: service worker его не кэширует, а
+   * хостинг отвечает на него тем же index.html.
+   */
+  const [appOutdated, setAppOutdated] = useState(false);
+  useEffect(() => {
+    const running = document
+      .querySelector('script[type="module"][src*="/assets/index-"]')
+      ?.getAttribute('src') || '';
+    if (!running) return;
+
+    let stopped = false;
+    const check = async () => {
+      try {
+        const res = await fetch(`/api/app-version?t=${Date.now()}`, { cache: 'no-store' });
+        const html = await res.text();
+        const live = html.match(/src="(\/assets\/index-[^"]+\.js)"/)?.[1] || '';
+        if (!stopped && live && live !== running) setAppOutdated(true);
+      } catch {
+        // нет сети — проверим в следующий раз
+      }
+    };
+    void check();
+    const timer = setInterval(check, 3 * 60_000);
+    return () => { stopped = true; clearInterval(timer); };
+  }, []);
+
+  const fbsWbCatchUpTriedRef = useRef<Set<string>>(new Set());
+  // Таймер перечитывания живёт минутами — строки берёт свежие, а не из замыкания.
+  const fbsScanRowsRef = useRef<FbsSupplyScanOrderRow[]>([]);
+  useEffect(() => { fbsScanRowsRef.current = fbsScanRows; }, [fbsScanRows]);
+
+  useEffect(() => {
+    fbsWbCatchUpTriedRef.current = new Set();
+  }, [activeSupplyId, fbsScanModalOpen]);
+
+  useEffect(() => {
+    if (!fbsScanModalOpen || !fbsWbAutoSend || fbsWbSgtinBusy) return;
+    const supply = supplies.find((s) => s.id === activeSupplyId);
+    if (!supply || supply.closedAt) return;
+
+    const todo: Array<{ orderId: string; code: string }> = [];
+    for (const row of fbsScanRows) {
+      if (getFbsWbIssue(row) !== 'missing') continue;
+      const orderId = String(row.orderId || '').trim();
+      if (fbsWbCatchUpTriedRef.current.has(orderId)) continue;
+      const code = findFbsScanSavedEntry(row, fbsScansBySticker)?.item?.honestSignCode || '';
+      if (!code) continue;
+      fbsWbCatchUpTriedRef.current.add(orderId);
+      todo.push({ orderId, code });
+    }
+    if (todo.length) void pushFbsSgtinsToWb(todo);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fbsWbSgtin, fbsScansBySticker, fbsScanRows, fbsScanModalOpen, fbsWbAutoSend, fbsWbSgtinBusy, activeSupplyId]);
+
+  useEffect(() => {
+    if (!fbsScanModalOpen || !fbsWbAutoSend) return;
+    const timer = setInterval(() => {
+      const ids = fbsScanRowsRef.current.map((r) => r.orderId);
+      if (ids.length) void refreshFbsWbSgtin(ids, { silent: true });
+    }, 60_000);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fbsScanModalOpen, fbsWbAutoSend, activeSupplyId, selectedSupplierId]);
+
+  /*
    * Хвост отложенного снапшота.
    *
    * Закрыли окно, ушли со страницы, размонтировали раздел — дописываем то, что
@@ -3353,6 +3437,30 @@ export const WBSupplyManager = ({
    * initialization» — ровно при открытии «Скан ЧЗ».
    */
 
+  /**
+   * Что с маркой задания у WB — одним словом, для фильтров и сводки.
+   *
+   *  ok      — WB проверил марку;
+   *  wait    — отправляется или WB ещё проверяет;
+   *  bad     — WB отказал или проверка не пройдена;
+   *  differ  — у WB на задании другая марка, чем у нас;
+   *  missing — у нас марка есть, у WB нет;
+   *  null    — у нас марки нет или WB о задании ничего не сказал.
+   */
+  const getFbsWbIssue = (row: FbsSupplyScanOrderRow): 'ok' | 'wait' | 'bad' | 'differ' | 'missing' | null => {
+    const ours = findFbsScanSavedEntry(row, fbsScansBySticker)?.item?.honestSignCode || '';
+    const wb = fbsWbSgtin[String(row.orderId || '').trim()];
+    if (!ours || !wb) return null;
+    if (wb.phase === 'error') return 'bad';
+    if (wb.phase === 'sending' || wb.phase === 'sent') return 'wait';
+    if (!wb.value) return 'missing';
+    if (!sameChzCode(wb.value, ours)) return 'differ';
+    const { verdict } = describeSgtinDecision(wb.decision || '');
+    if (verdict === 'ok') return 'ok';
+    if (verdict === 'bad') return 'bad';
+    return 'wait';
+  };
+
   /*
    * Строки, которые сейчас видно в таблице.
    *
@@ -3363,10 +3471,15 @@ export const WBSupplyManager = ({
   const fbsScanVisibleRows = useMemo(() => {
     return (fbsScanRows || []).filter((row) => {
       if (fbsScanFilter === 'all') return true;
+      if (fbsScanFilter === 'wb_error') {
+        const issue = getFbsWbIssue(row);
+        return issue === 'bad' || issue === 'differ';
+      }
+      if (fbsScanFilter === 'wb_missing') return getFbsWbIssue(row) === 'missing';
       const done = Boolean(findFbsScanSavedEntry(row, fbsScansBySticker)?.item?.honestSignCode);
       return fbsScanFilter === 'done' ? done : !done;
     });
-  }, [fbsScanRows, fbsScanFilter, fbsScansBySticker]);
+  }, [fbsScanRows, fbsScanFilter, fbsScansBySticker, fbsWbSgtin]);
 
   /** Отмеченные строки — в том же порядке, что и в таблице. */
   const fbsScanSelectedRows = useMemo(
@@ -3872,6 +3985,7 @@ export const WBSupplyManager = ({
     try {
       const next = { ...(fbsScansBySticker || {}) };
       const currentEntry = findFbsScanSavedEntry(row, next);
+      const resetCode = normalizeDataMatrixText(String(currentEntry?.item?.honestSignCode || ''));
       if (currentEntry?.key) delete next[currentEntry.key];
       else delete next[row.storageKey];
       const saved = await saveFbsSupplyScanMap(activeSupplyId, next, selectedSupplierId);
@@ -3880,6 +3994,39 @@ export const WBSupplyManager = ({
       await deleteFbsOrderCode(selectedSupplierId, row.orderId).catch((e) => {
         console.error('fbs_order_codes delete failed', e);
       });
+
+      /*
+       * И из общей базы кодов — отметку «Отсканировано».
+       *
+       * Иначе сброс был неполным: марка оставалась в базе как отсканированная,
+       * и повторный скан того же кода (сбросили по ошибке, сканируют заново)
+       * упирался в «уже отсканирован раньше» и требовал подтверждения.
+       *
+       * Не удаляем, если тот же код ещё стоит на другом задании — например,
+       * записан туда через «Записать всё равно»: там защита от дубля нужна.
+       */
+      if (resetCode) {
+        try {
+          const { data: stillUsed } = await supabase
+            .from('fbs_order_codes')
+            .select('order_id')
+            .eq('supplier_id', selectedSupplierId)
+            .eq('chz_code', resetCode)
+            .neq('order_id', String(row.orderId || ''))
+            .limit(1);
+          if (!stillUsed?.length) {
+            await supabase
+              .from('unified_honest_sign_codes')
+              .delete()
+              .eq('supplier_id', selectedSupplierId)
+              .eq('code', resetCode)
+              .or('file_name.eq.Отсканировано,status.eq.scanned');
+          }
+        } catch (e) {
+          console.error('unified_honest_sign_codes reset failed', e);
+        }
+      }
+
       applyFbsScans(saved);
       if (fbsPendingStickerRow?.storageKey === row.storageKey) {
         setFbsPendingStickerRow(null);
@@ -7914,15 +8061,6 @@ export const WBSupplyManager = ({
                                         >
                                             <CheckSquare className="w-3 h-3" /> Скан ЧЗ
                                         </button>
-                                        {/* Грузоместа — для поставок на ПВЗ. Открыть можно и у
-                                            закрытой поставки: посмотреть и перепечатать стикеры. */}
-                                        <button
-                                            onClick={(e) => { e.stopPropagation(); openBoxesModal(supply.id); }}
-                                            title="Создать грузоместа у WB и напечатать их стикеры — для отгрузки на ПВЗ"
-                                            className="flex items-center gap-1 bg-white border border-orange-300 text-orange-700 px-2 py-1 rounded text-xs hover:bg-orange-50"
-                                        >
-                                            <Package className="w-3 h-3" /> Грузоместа
-                                        </button>
                                     </div>
                                 )}
                             </div>
@@ -7941,8 +8079,9 @@ export const WBSupplyManager = ({
         const busy = boxesModal.busy;
 
         return (
+          // Поверх окна скана: открывается из него и должно быть сверху.
           <div
-            className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4"
+            className="fixed inset-0 z-[60] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4"
             onClick={() => { if (!busy) setBoxesModal(null); }}
           >
             <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
@@ -8143,6 +8282,16 @@ export const WBSupplyManager = ({
                   >
                     <RefreshCw className={`w-4 h-4 ${fbsScanLoading ? 'animate-spin' : ''}`} /> Обновить данные
                   </button>
+                  {/* Грузоместа — здесь, в окне сборки: коробки для ПВЗ создают
+                      и клеят по ходу сборки поставки, а не заранее. */}
+                  <button
+                    type="button"
+                    onClick={() => activeSupplyId && openBoxesModal(activeSupplyId)}
+                    title="Создать грузоместа у WB и напечатать их стикеры — для отгрузки на ПВЗ"
+                    className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-orange-300 bg-orange-50 hover:bg-orange-100 text-sm font-semibold text-orange-700"
+                  >
+                    <Package className="w-4 h-4" /> Грузоместа
+                  </button>
                   <button
                     type="button"
                     onClick={downloadFbsScanTemplateExcel}
@@ -8181,6 +8330,25 @@ export const WBSupplyManager = ({
                   </label>
                 </div>
               </div>
+
+              {appOutdated && (
+                <div className="flex items-center gap-3 rounded-xl border border-rose-300 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+                  <AlertCircle className="w-5 h-5 flex-shrink-0" />
+                  <div className="min-w-0">
+                    <div className="font-semibold">Страница устарела — на сайте новая версия</div>
+                    <div className="opacity-80 mt-0.5">
+                      Сохранённые сканы не пропадут. Обновите страницу, иначе новые функции (отправка марок в WB) здесь не работают.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => window.location.reload()}
+                    className="ml-auto shrink-0 px-3 py-2 rounded-lg bg-rose-600 text-white text-sm font-semibold hover:bg-rose-700"
+                  >
+                    Обновить
+                  </button>
+                </div>
+              )}
 
               {fbsLayoutHint && (
                 <div className="flex items-start gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
@@ -8278,10 +8446,25 @@ export const WBSupplyManager = ({
                   быстро увидеть, что ещё не отсканировано. */}
               {!fbsScanLoading && fbsScanRows.length > 0 && (() => {
                 const pendingCount = Math.max(0, fbsScanStats.totalRows - fbsScanStats.scannedCount);
-                const tabs: Array<{ id: 'all' | 'pending' | 'done'; label: string; count: number }> = [
+                let wbErrorCount = 0;
+                let wbMissingCount = 0;
+                for (const row of fbsScanRows) {
+                  const issue = getFbsWbIssue(row);
+                  if (issue === 'bad' || issue === 'differ') wbErrorCount += 1;
+                  else if (issue === 'missing') wbMissingCount += 1;
+                }
+                const tabs: Array<{ id: typeof fbsScanFilter; label: string; count: number; tone?: 'danger' | 'warn' }> = [
                   { id: 'all', label: 'Все', count: fbsScanStats.totalRows },
                   { id: 'pending', label: 'Не отсканированы', count: pendingCount },
                   { id: 'done', label: 'Отсканированы', count: fbsScanStats.scannedCount },
+                  // Вкладки WB — только когда есть что показать или они уже выбраны:
+                  // пустая «Ошибка WB (0)» на каждой поставке — лишний шум.
+                  ...((wbErrorCount > 0 || fbsScanFilter === 'wb_error')
+                    ? [{ id: 'wb_error' as const, label: 'Ошибка ЧЗ в WB', count: wbErrorCount, tone: 'danger' as const }]
+                    : []),
+                  ...((wbMissingCount > 0 || fbsScanFilter === 'wb_missing')
+                    ? [{ id: 'wb_missing' as const, label: 'Не отправлены в WB', count: wbMissingCount, tone: 'warn' as const }]
+                    : []),
                 ];
                 return (
                   // sticky относительно этого скролл-контейнера: список
@@ -8298,8 +8481,16 @@ export const WBSupplyManager = ({
                         onClick={() => setFbsScanFilter(tab.id)}
                         className={`px-3 py-1.5 rounded-xl text-sm border transition ${
                           fbsScanFilter === tab.id
-                            ? 'border-indigo-500 bg-indigo-50 text-indigo-700 font-semibold'
-                            : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-50'
+                            ? tab.tone === 'danger'
+                              ? 'border-rose-500 bg-rose-50 text-rose-700 font-semibold'
+                              : tab.tone === 'warn'
+                                ? 'border-amber-500 bg-amber-50 text-amber-800 font-semibold'
+                                : 'border-indigo-500 bg-indigo-50 text-indigo-700 font-semibold'
+                            : tab.tone === 'danger'
+                              ? 'border-rose-300 bg-white text-rose-700 hover:bg-rose-50'
+                              : tab.tone === 'warn'
+                                ? 'border-amber-300 bg-white text-amber-800 hover:bg-amber-50'
+                                : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-50'
                         }`}
                       >
                         {tab.label} <span className="tabular-nums">({tab.count})</span>
@@ -8339,17 +8530,8 @@ export const WBSupplyManager = ({
                     {(() => {
                       const counts = { ok: 0, wait: 0, bad: 0, missing: 0, differ: 0 };
                       for (const row of fbsScanRows) {
-                        const ours = findFbsScanSavedEntry(row, fbsScansBySticker)?.item?.honestSignCode || '';
-                        const wb = fbsWbSgtin[String(row.orderId || '').trim()];
-                        if (!ours || !wb) continue;
-                        if (wb.phase === 'error') { counts.bad += 1; continue; }
-                        if (wb.phase === 'sending' || wb.phase === 'sent') { counts.wait += 1; continue; }
-                        if (!wb.value) { counts.missing += 1; continue; }
-                        if (!sameChzCode(wb.value, ours)) { counts.differ += 1; continue; }
-                        const { verdict } = describeSgtinDecision(wb.decision || '');
-                        if (verdict === 'ok') counts.ok += 1;
-                        else if (verdict === 'bad') counts.bad += 1;
-                        else counts.wait += 1;
+                        const issue = getFbsWbIssue(row);
+                        if (issue) counts[issue] += 1;
                       }
 
                       return (
