@@ -1,3 +1,5 @@
+import { supabase } from '../lib/supabase';
+
 export type TelegramParseMode = 'Markdown' | 'MarkdownV2' | 'HTML';
 
 const TELEGRAM_API_BASE = 'https://api.telegram.org';
@@ -25,8 +27,22 @@ const request = async <T = any>(token: string, method: string, body?: BodyInit) 
 };
 
 export const telegramService = {
-  getUpdates(token: string, limit = 100) {
-    return fetch(`${TELEGRAM_API_BASE}/bot${token}/getUpdates?limit=${limit}&allowed_updates=["message"]`).then((r) => r.json());
+  /**
+   * Последние входящие сообщения основного бота — в том виде, что отдавал getUpdates.
+   *
+   * У бота вебхук (кнопка «Запросить остаток ЧЗ»), а при вебхуке Telegram
+   * getUpdates не отдаёт. Вебхук scladprobot-webhook складывает сообщения в
+   * таблицу telegram_updates — читаем оттуда. Токен больше не нужен, параметр
+   * оставлен, чтобы не менять вызовы.
+   */
+  async getUpdates(_token: string, limit = 100) {
+    const { data, error } = await supabase
+      .from('telegram_updates')
+      .select('update_id, message')
+      .order('update_id', { ascending: false })
+      .limit(limit);
+    if (error) return { ok: false, description: error.message, result: [] };
+    return { ok: true, result: (data || []).slice().reverse() };
   },
 
   getFile(token: string, fileId: string) {

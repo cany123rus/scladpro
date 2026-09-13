@@ -22,13 +22,15 @@
  *   { chatIds: string[], botTokenKey: string, supplierBotTokenKeys: string[],
  *     lowDays: number, needDays: number, notifySuppliers: boolean }
  * По умолчанию: чат владельца из `backup_chat_id`, бот `telegram_bot_token`;
- * поставщикам — бот приёмки `telegram_reception_bot_token` (через него сайт уже
- * пишет поставщикам), при ошибке — основной бот.
+ * поставщикам — тоже основной бот (в нём кнопка «Запросить остаток ЧЗ»), а если
+ * поставщик его не запускал — бот приёмки `telegram_reception_bot_token`.
  *
  * Тело запроса: { dryRun?: true } — собрать текст и вернуть, ничего не отправляя;
  * { force?: true } — отправить, даже если сегодня уже отправляли.
  * { supplierId?: uuid } — только один кабинет (тестовая отправка); отметку
  *   «сегодня отправлено» не ставит, утренний отчёт уйдёт как обычно.
+ * { replyTo: { chatId } } — ответ на кнопку «Запросить остаток ЧЗ» в боте:
+ *   чату владельца — по всем кабинетам, чату поставщика — по его кабинетам.
  */
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -43,6 +45,10 @@ const json = (body: unknown, status = 200) =>
 const supabase = createClient(Deno.env.get('SUPABASE_URL') ?? '', Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '');
 
 const DAYS = 7;
+
+/** Кнопка в основном боте: её же ловит вебхук scladprobot-webhook. */
+const CHZ_BUTTON = '📊 Запросить остаток ЧЗ';
+const BOT_KEYBOARD = { keyboard: [[{ text: CHZ_BUTTON }]], resize_keyboard: true, is_persistent: true };
 const DAY_MS = 86_400_000;
 const MSK_OFFSET_MS = 3 * 3_600_000;
 
@@ -132,7 +138,7 @@ async function loadSettings() {
     const { data: t } = await supabase.from('app_settings').select('value').eq('key', cfg.botTokenKey).maybeSingle();
     botToken = String(t?.value || '');
   }
-  const supplierBotTokens = (cfg.supplierBotTokenKeys?.length ? cfg.supplierBotTokenKeys : ['telegram_reception_bot_token', 'telegram_bot_token'])
+  const supplierBotTokens = (cfg.supplierBotTokenKeys?.length ? cfg.supplierBotTokenKeys : ['telegram_bot_token', 'telegram_reception_bot_token'])
     .map((k) => String(map.get(k) || '').trim())
     .filter(Boolean);
   return {
@@ -286,12 +292,13 @@ function renderForSupplier(name: string, urgent: Row[], lowDays: number, needDay
   ].join('\n');
 }
 
-/** Отправка поставщику: бот приёмки, при ошибке — следующий бот из списка. */
+/** Отправка поставщику: основной бот, если поставщик его не запускал — бот приёмки. */
 async function sendToSupplier(tokens: string[], chatId: string, text: string) {
   let lastError: unknown = null;
-  for (const token of tokens) {
+  for (const [i, token] of tokens.entries()) {
     try {
-      await sendTelegram(token, chatId, text);
+      // Кнопка есть только в основном боте (первый в списке).
+      await sendTelegram(token, chatId, text, i === 0 ? BOT_KEYBOARD : undefined);
       return;
     } catch (e) {
       lastError = e;
@@ -300,16 +307,41 @@ async function sendToSupplier(tokens: string[], chatId: string, text: string) {
   throw lastError || new Error('нет бота для отправки поставщику');
 }
 
+/** Сообщения по очереди; длинные режем по строкам, кнопку вешаем на последнее. */
+async function sendAll(botToken: string, chatId: string, texts: string[]) {
+  const chunks: string[] = [];
+  for (const text of texts) {
+    let chunk = '';
+    for (const row of text.split('\n')) {
+      if (chunk && chunk.length + row.length + 1 > 3900) {
+        chunks.push(chunk);
+        chunk = '';
+      }
+      chunk = chunk ? `${chunk}\n${row}` : row;
+    }
+    if (chunk) chunks.push(chunk);
+  }
+  for (let i = 0; i < chunks.length; i++) {
+    await sendTelegram(botToken, chatId, chunks[i], i === chunks.length - 1 ? BOT_KEYBOARD : undefined);
+  }
+}
+
 const validChatId = (raw: unknown) => {
   const id = String(raw ?? '').trim();
   return /^-?\d{5,}$/.test(id) ? id : '';
 };
 
-async function sendTelegram(botToken: string, chatId: string, text: string) {
+async function sendTelegram(botToken: string, chatId: string, text: string, replyMarkup?: unknown) {
   const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML', disable_web_page_preview: true }),
+    body: JSON.stringify({
+      chat_id: chatId,
+      text,
+      parse_mode: 'HTML',
+      disable_web_page_preview: true,
+      ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+    }),
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok || !body?.ok) throw new Error(`Telegram: ${body?.description || res.status}`);
@@ -322,7 +354,9 @@ Deno.serve(async (req) => {
   const dryRun = Boolean(body?.dryRun);
   const force = Boolean(body?.force);
   const onlySupplier = typeof body?.supplierId === 'string' ? body.supplierId : '';
-  const isTest = Boolean(onlySupplier);
+  const replyChat = validChatId(body?.replyTo?.chatId);
+  // Тест и ответ на кнопку — не утренний отчёт: без отметки и без рассылки поставщикам.
+  const isTest = Boolean(onlySupplier) || Boolean(replyChat);
 
   try {
     const settings = await loadSettings();
@@ -345,8 +379,18 @@ Deno.serve(async (req) => {
       .not('wb_api_token', 'is', null)
       .order('name');
     if (onlySupplier) query = query.eq('id', onlySupplier);
-    const { data: suppliers, error } = await query;
+    const { data: allSuppliers, error } = await query;
     if (error) throw error;
+
+    // Ответ на кнопку: владельцу — всё, поставщику — только его кабинеты.
+    const isOwnerReply = Boolean(replyChat) && settings.chatIds.map((c) => String(c).trim()).includes(replyChat);
+    const suppliers = replyChat && !isOwnerReply
+      ? (allSuppliers || []).filter((x: any) => validChatId(x.telegram_chat_id) === replyChat)
+      : allSuppliers;
+    if (replyChat && !isOwnerReply && !suppliers?.length) {
+      await sendTelegram(settings.botToken, replyChat, 'Этот чат не привязан ни к одному поставщику. Обратитесь к администратору склада.', BOT_KEYBOARD);
+      return json({ ok: true, reply: 'не поставщик' });
+    }
 
     const messages: string[] = [];
     const problems: string[] = [];
@@ -397,7 +441,14 @@ Deno.serve(async (req) => {
           ...urgentList,
         ].join('\n')
       : '✅ <b>Честный знак: запаса хватает</b>';
-    const all = isTest ? [`🧪 <b>Тестовая отправка</b>\n${header}`, ...messages] : [header, ...messages];
+    const all = replyChat
+      ? [header, ...messages]
+      : isTest ? [`🧪 <b>Тестовая отправка</b>\n${header}`, ...messages] : [header, ...messages];
+
+    if (replyChat && !dryRun) {
+      await sendAll(settings.botToken, replyChat, all);
+      return json({ ok: true, reply: isOwnerReply ? 'владелец' : 'поставщик', sent: all.length });
+    }
 
     if (dryRun) {
       return json({
@@ -411,18 +462,7 @@ Deno.serve(async (req) => {
     }
 
     for (const chatId of settings.chatIds) {
-      for (const text of all) {
-        // Лимит Telegram — 4096 символов. Режем по строкам, чтобы не разорвать теги.
-        let chunk = '';
-        for (const row of text.split('\n')) {
-          if (chunk && chunk.length + row.length + 1 > 3900) {
-            await sendTelegram(settings.botToken, chatId, chunk);
-            chunk = '';
-          }
-          chunk = chunk ? `${chunk}\n${row}` : row;
-        }
-        if (chunk) await sendTelegram(settings.botToken, chatId, chunk);
-      }
+      await sendAll(settings.botToken, chatId, all);
     }
     // Поставщикам — только в настоящем утреннем отчёте, не в тестовой отправке.
     const supplierResults: Array<{ name: string; ok: boolean; error?: string }> = [];
