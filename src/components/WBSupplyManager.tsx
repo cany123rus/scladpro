@@ -1104,14 +1104,21 @@ export const WBSupplyManager = ({
   // строки приходят из Excel-файла поставки, где есть только артикул.
   const [calcPhotoByArticle, setCalcPhotoByArticle] = useState<Record<string, string>>({});
 
+  /**
+   * Для карты фото — одна ссылка на фото и артикул, а не карточка целиком:
+   * у крупного кабинета это 2,3 МБ против сотни килобайт.
+   */
+  const PHOTO_MAP_SELECT = 'nm_id, photoBig:product_json->photos->0->>big, photoTm:product_json->photos->0->>tm, vendorCode:product_json->>vendorCode';
+
   /** Из строк wb_products_cache собираем обе карты фото за один проход. */
   const buildPhotoMaps = (cacheRows: any[]) => {
     const byNm: Record<string, string> = {};
     const byArticle: Record<string, string> = {};
     (cacheRows || []).forEach((r: any) => {
-      const p = r?.product_json || {};
+      // Строка — либо целая карточка, либо только поля из PHOTO_MAP_SELECT.
+      const p = r?.product_json || r || {};
       const nm = String(r?.nm_id || p?.nmID || '').trim();
-      const first = (Array.isArray(p?.photos) && p.photos[0]) || '';
+      const first = (Array.isArray(p?.photos) && p.photos[0]) || r?.photoBig || r?.photoTm || '';
       let src = typeof first === 'string' ? first : (first?.big || first?.tm || first?.c246x328 || '');
       src = String(src || '').trim();
       if (src.startsWith('//')) src = `https:${src}`;
@@ -1389,7 +1396,7 @@ export const WBSupplyManager = ({
       try {
         const { data: cacheRows } = await supabase
           .from('wb_products_cache')
-          .select('nm_id, product_json')
+          .select(PHOTO_MAP_SELECT)
           .eq('supplier_id', selectedSupplierId)
           .limit(10000);
 
@@ -1435,6 +1442,8 @@ export const WBSupplyManager = ({
   }, [selectedSupplierIdSupplyOrder]);
 
   useEffect(() => {
+    // Тяжёлая (до 4 МБ) — грузим, только когда открыта вкладка «Заказ поставки».
+    if (activeTab !== 'supply_order') return;
     const loadOrderHistory = async () => {
       if (!selectedSupplierId) {
         setOrderHistory([]);
@@ -1450,7 +1459,7 @@ export const WBSupplyManager = ({
       }
     };
     loadOrderHistory();
-  }, [selectedSupplierId]);
+  }, [selectedSupplierId, activeTab]);
 
   // Track current token to trigger updates
   const selectedSupplier = suppliers.find(s => s.id === selectedSupplierId);
@@ -3474,12 +3483,30 @@ export const WBSupplyManager = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fbsWbSgtin, fbsScansBySticker, fbsScanRows, fbsScanModalOpen, fbsWbAutoSend, fbsWbSgtinBusy, activeSupplyId]);
 
+  /*
+   * Перечитывание марок у WB.
+   *
+   * Окно скана живёт свёрнутым во всех разделах, поэтому опрос раз в минуту по
+   * всей поставке шёл целый день, даже со скрытой вкладкой. Теперь: раз в
+   * 3 минуты, только когда вкладку видно, и только по заданиям, где наша марка
+   * есть, а WB её ещё не подтвердил.
+   */
+  const fbsWbPollIdsRef = useRef<() => string[]>(() => []);
+  fbsWbPollIdsRef.current = () => fbsScanRowsRef.current
+    .filter((row) => {
+      if (!findFbsScanSavedEntry(row, fbsScansBySticker)?.item?.honestSignCode) return false;
+      const issue = getFbsWbIssue(row);
+      return issue !== 'ok' && issue !== 'bad';
+    })
+    .map((row) => row.orderId);
+
   useEffect(() => {
     if (!fbsScanModalOpen || !fbsWbAutoSend) return;
     const timer = setInterval(() => {
-      const ids = fbsScanRowsRef.current.map((r) => r.orderId);
+      if (document.visibilityState !== 'visible') return;
+      const ids = fbsWbPollIdsRef.current();
       if (ids.length) void refreshFbsWbSgtin(ids, { silent: true });
-    }, 60_000);
+    }, 3 * 60_000);
     return () => clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fbsScanModalOpen, fbsWbAutoSend, activeSupplyId, selectedSupplierId]);
@@ -4440,12 +4467,12 @@ export const WBSupplyManager = ({
     for (let i = 0; i < ids.length; i += 500) {
       const { data } = await supabase
         .from('wb_products_cache')
-        .select('nm_id, product_json')
+        .select('nm_id, sizes:product_json->sizes')
         .eq('supplier_id', supplierId)
         .in('nm_id', ids.slice(i, i + 500));
 
       (data || []).forEach((row: any) => {
-        const sizes = Array.isArray(row?.product_json?.sizes) ? row.product_json.sizes : [];
+        const sizes = Array.isArray(row?.sizes) ? row.sizes : [];
         const bySize: Record<string, string> = {};
         let only = '';
         sizes.forEach((s: any) => {
@@ -6465,7 +6492,7 @@ export const WBSupplyManager = ({
           try {
             const { data: cacheRows } = await supabase
               .from('wb_products_cache')
-              .select('nm_id, product_json')
+              .select(PHOTO_MAP_SELECT)
               .eq('supplier_id', selectedSupplierId)
               .limit(10000);
             const { byNm, byArticle } = buildPhotoMaps(cacheRows || []);
@@ -7372,12 +7399,12 @@ export const WBSupplyManager = ({
     for (let i = 0; i < ids.length; i += 500) {
       const { data } = await supabase
         .from('wb_products_cache')
-        .select('nm_id, product_json')
+        .select('nm_id, characteristics:product_json->characteristics, subjectName:product_json->>subjectName')
         .eq('supplier_id', supplierId)
         .in('nm_id', ids.slice(i, i + 500));
 
       (data || []).forEach((row: any) => {
-        const card = row?.product_json || {};
+        const card = row || {};
         const genderRaw = (card.characteristics || []).find((c: any) => String(c?.name || '').trim().toLowerCase() === 'пол');
         const genderValue = String(genderRaw?.value?.[0] || '').trim().toLowerCase();
         meta.set(Number(row.nm_id), {

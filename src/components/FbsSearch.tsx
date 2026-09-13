@@ -485,7 +485,9 @@ export function FbsSearch({
       for (let from = 0; from < 50_000; from += PAGE) {
         const { data, error } = await supabase
           .from('wb_products_cache')
-          .select('nm_id, supplier_id, product_json')
+          // Только нужные поля карточки: фото, артикул, размеры с баркодами.
+          .select('nm_id, supplier_id, photos:product_json->photos, vendorCode:product_json->>vendorCode, sizes:product_json->sizes')
+          .order('supplier_id').order('nm_id')
           .range(from, from + PAGE - 1);
         if (error || cancelled) return;
 
@@ -493,11 +495,11 @@ export function FbsSearch({
         for (const row of rows) {
           const nmId = Number(row?.nm_id);
           if (!nmId) continue;
-          const photo = row?.product_json?.photos?.[0];
+          const photo = row?.photos?.[0];
           const url = norm(photo?.big || photo?.c516x688 || photo?.c246x328 || photo?.tm || photo?.small);
           const owner = norm(row?.supplier_id);
-          const vendorCode = norm(row?.product_json?.vendorCode);
-          for (const size of row?.product_json?.sizes ?? []) {
+          const vendorCode = norm(row?.vendorCode);
+          for (const size of row?.sizes ?? []) {
             /*
              * Ключ «артикул + размер» — им достаём баркод для листов подбора,
              * где колонки «Баркод» нет вовсе. Размер нормализуем: в карточке

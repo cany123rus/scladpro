@@ -10953,6 +10953,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [receptionsListAll, setReceptionsListAll] = useState<any[]>([]);
   const [receptionMetaMap, setReceptionMetaMap] = useState<Record<string, { count: number; quantity: number; preview?: string }>>({});
   const [receptionMetaRefreshing, setReceptionMetaRefreshing] = useState(false);
+  const [receptionPhotoUploading, setReceptionPhotoUploading] = useState(0);
+  const receptionMetaLoadedRef = useRef(false);
   const [currentReception, setCurrentReception] = useState<any | null>(null);
   const [receptionDate, setReceptionDate] = useState(mskTodayYmd());
   const fileInputRefReception = useRef<HTMLInputElement>(null);
@@ -11000,7 +11002,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     }
   }, []);
 
+  /*
+   * Счётчики приёмок грузим, только когда открыт раздел «Приёмка».
+   *
+   * Раньше это шло при старте дашборда у каждого сотрудника, а в настройке
+   * лежали превью — целые фото в base64, 7 МБ на каждый вход.
+   */
   useEffect(() => {
+    if (activeTab !== 'reception' || receptionMetaLoadedRef.current) return;
+    receptionMetaLoadedRef.current = true;
     const loadReceptionMeta = async () => {
       try {
         const { data } = await supabase.from('app_settings').select('value').eq('key', 'reception_meta_v1').limit(1);
@@ -11012,18 +11022,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       }
     };
     loadReceptionMeta();
-  }, []);
+  }, [activeTab]);
 
   const updateReceptionMetaByPhotos = useCallback((receptionId: string, photos: Array<{ url?: string; quantity?: string }> = []) => {
     setReceptionMetaMap((prev) => {
       const quantity = photos.reduce((sum, p: any) => sum + (parseInt(String(p?.quantity || '0'), 10) || 0), 0);
       const next = {
         ...(prev || {}),
-        [receptionId]: {
-          count: photos.length,
-          quantity,
-          preview: photos[0]?.url || prev?.[receptionId]?.preview || '',
-        },
+        // Без превью: оно нигде не показывалось, а весило как само фото.
+        [receptionId]: { count: photos.length, quantity },
       };
       persistReceptionMeta(next);
       return next;
@@ -11040,11 +11047,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         (data || []).forEach((row: any) => {
           const photos = Array.isArray(row?.photos) ? row.photos : [];
           const quantity = photos.reduce((sum: number, p: any) => sum + (parseInt(String(p?.quantity || '0'), 10) || 0), 0);
-          next[String(row.id)] = {
-            count: photos.length,
-            quantity,
-            preview: photos[0]?.url || next[String(row.id)]?.preview || '',
-          };
+          next[String(row.id)] = { count: photos.length, quantity };
         });
         persistReceptionMeta(next);
         return next;
@@ -11113,13 +11116,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     try {
       const patch: Record<string, { count: number; quantity: number; preview?: string }> = {};
       // Single query for all visible receptions instead of one request per id (N+1).
-      const { data: rows } = await supabase.from('receptions').select('id, photos').in('id', ids);
+      const { data: rows } = await supabase.from('receptions').select('id, photos').in('id', ids); // photos — лишь ссылки
       (rows || []).forEach((row: any) => {
         const id = String(row?.id || '');
         if (!id) return;
         const photos = Array.isArray(row?.photos) ? row.photos : [];
         const quantity = photos.reduce((sum: number, p: any) => sum + (parseInt(String(p?.quantity || '0'), 10) || 0), 0);
-        patch[id] = { count: photos.length, quantity, preview: photos[0]?.url || '' };
+        patch[id] = { count: photos.length, quantity };
       });
 
       if (Object.keys(patch).length > 0) {
@@ -11239,32 +11242,55 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     }
   };
 
-  const handleReceptionPhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      const files = Array.from(e.target.files);
+  /**
+   * Фото приёмки — в хранилище файлов, в строку приёмки идёт только ссылка.
+   *
+   * Раньше фото ложилось в базу base64: приёмки занимали 92 МБ, одна открывалась
+   * до 10 МБ, и каждое сохранение копировало все фото ещё и в журнал действий.
+   * Снимок с телефона ужимаем до 2000 px — для сверки количества этого хватает.
+   */
+  const shrinkReceptionPhoto = async (file: File): Promise<{ blob: Blob; ext: string; type: string }> => {
+    try {
+      const bitmap = await createImageBitmap(file);
+      const scale = Math.min(1, 2000 / Math.max(bitmap.width, bitmap.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(bitmap.width * scale);
+      canvas.height = Math.round(bitmap.height * scale);
+      canvas.getContext('2d')!.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      bitmap.close?.();
+      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.85));
+      if (blob && blob.size < file.size) return { blob, ext: 'jpg', type: 'image/jpeg' };
+    } catch {
+      // формат, который браузер не декодирует (например HEIC), — грузим как есть
+    }
+    const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
+    return { blob: file, ext, type: file.type || 'image/jpeg' };
+  };
 
-      files.forEach(file => {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          if (e.target?.result) {
-            setReceptionPhotos(prev => {
-              const newPhotos = [...prev, {
-                id: Math.random().toString(36).substr(2, 9),
-                url: e.target!.result as string,
-                quantity: ''
-              }];
-              // Auto-save if we have a current reception
-              if (currentReception) {
-                // We can't easily await here inside the callback without more logic,
-                // but the user can click "Save" or "Finish".
-                // Or we can trigger a save effect. For now, manual save or finish is fine.
-              }
-              return newPhotos;
-            });
-          }
-        };
-        reader.readAsDataURL(file);
-      });
+  const handleReceptionPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const input = e.target;
+    const files = Array.from(input.files || []);
+    input.value = '';
+    if (!files.length) return;
+
+    const receptionId = String(currentReception?.id || 'no-reception');
+    setReceptionPhotoUploading((n) => n + files.length);
+    for (const file of files) {
+      const id = Math.random().toString(36).slice(2, 11);
+      try {
+        const { blob, ext, type } = await shrinkReceptionPhoto(file);
+        const objectPath = `${receptionId}/${Date.now()}-${id}.${ext}`;
+        const { error } = await supabase.storage
+          .from('reception-photos')
+          .upload(objectPath, blob, { contentType: type, cacheControl: '31536000', upsert: false });
+        if (error) throw error;
+        const url = supabase.storage.from('reception-photos').getPublicUrl(objectPath).data.publicUrl;
+        setReceptionPhotos((prev) => [...prev, { id, url, quantity: '' }]);
+      } catch (err: any) {
+        showToast(`Фото «${file.name}» не загрузилось: ${err?.message || 'ошибка сети'}`, 'error');
+      } finally {
+        setReceptionPhotoUploading((n) => Math.max(0, n - 1));
+      }
     }
   };
 
@@ -12065,7 +12091,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   };
 
   const logAssemblyChange = async (entity: string, op: 'create' | 'update' | 'delete', beforeData: any | null, afterData: any | null) => {
-    const details = JSON.stringify({ kind: 'assembly_change', entity, op, before: beforeData, after: afterData });
+    // Фото в журнал не пишем: 59 записей о приёмках весили 72 МБ из-за копий фото.
+    const slim = (data: any) => (data && typeof data === 'object' && Array.isArray(data.photos)
+      ? { ...data, photos: undefined, photos_in_record: data.photos.length }
+      : data);
+    const details = JSON.stringify({ kind: 'assembly_change', entity, op, before: slim(beforeData), after: slim(afterData) });
     await logAction(`Сборка: изменение ${entity}`, details, currentEmployee?.id);
   };
 
@@ -22514,7 +22544,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     </div>
                     <button
                       onClick={handleSaveReception}
-                      className="self-start sm:self-auto px-4 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 flex items-center"
+                      disabled={receptionPhotoUploading > 0}
+                      className="self-start sm:self-auto px-4 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 flex items-center disabled:opacity-50"
                     >
                       <Save className="h-4 w-4 mr-2" /> Сохранить
                     </button>
@@ -22566,7 +22597,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           onClick={() => fileInputRefReception.current?.click()}
                           className="flex-1 py-3 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 font-medium flex items-center justify-center"
                         >
-                          <Camera className="h-5 w-5 mr-2" /> Добавить фото
+                          <Camera className="h-5 w-5 mr-2" /> {receptionPhotoUploading > 0 ? `Загружаю фото (${receptionPhotoUploading})…` : 'Добавить фото'}
                         </button>
                         <button
                           onClick={async () => {
@@ -22580,15 +22611,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               setSendingReception(false);
                             }
                           }}
-                          disabled={sendingReception}
-                          className="flex-1 py-3 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-medium flex items-center justify-center"
+                          disabled={sendingReception || receptionPhotoUploading > 0}
+                          className="flex-1 py-3 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-medium flex items-center justify-center disabled:opacity-50"
                         >
                           {sendingReception ? 'Отправка...' : 'Отправить в ТГ'}
                         </button>
                         <button
                           onClick={handleFinishReception}
-                          disabled={sendingReception}
-                          className="flex-1 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium flex items-center justify-center"
+                          disabled={sendingReception || receptionPhotoUploading > 0}
+                          className="flex-1 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium flex items-center justify-center disabled:opacity-50"
                         >
                           {sendingReception ? 'Отправка...' : 'Закончить приемку'}
                         </button>
