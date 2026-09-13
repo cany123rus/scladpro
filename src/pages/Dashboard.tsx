@@ -364,6 +364,15 @@ const CalcLine = ({ label, value, sign, strong, muted }: any) => (
   </div>
 );
 
+/**
+ * Разделы со своим сканером: сборка ФБО («Поставки») и поиск ФБС.
+ *
+ * Свёрнутая плашка «Скан ЧЗ» туда сканер не перехватывает — иначе код ФБО мог
+ * бы записаться маркой на задание ФБС. Сканировать в плашку там можно, щёлкнув
+ * в её поле.
+ */
+const FBS_SCAN_OWN_SCANNER_TABS: string[] = ['supplies', 'fbs_search'];
+
 export default function Dashboard({ forcedTab }: DashboardProps) {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
@@ -376,6 +385,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       return 'tasks';
     }
   });
+  // Открыто окно «Скан ЧЗ» — раздел ФБС держим в памяти и в других разделах.
+  const [fbsScanKeepAlive, setFbsScanKeepAlive] = useState(false);
   const [selectedWarehouseRack, setSelectedWarehouseRack] = useState<{ rowTitle: string; rackName: string; shelves: string[] } | null>(null);
   const [warehouseFill, setWarehouseFill] = useState({ rack: '', shelf: '', article: '', size: '', color: '', supplier: '' });
   const [warehouseEditTarget, setWarehouseEditTarget] = useState<{ shelf: string; index: number } | null>(null);
@@ -24587,11 +24598,28 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
             </div>
           )}
 
-          {/* FBS TAB */}
-          {activeTab === 'fbs' && (
-             <React.Suspense fallback={<SectionSkeleton />}>
-               <WBSupplyManager suppliers={suppliers} />
-             </React.Suspense>
+          {/*
+            FBS TAB.
+
+            Пока открыто окно «Скан ЧЗ», раздел остаётся в памяти и при уходе в
+            другой раздел: иначе свёрнутая плашка пропала бы вместе с поставкой,
+            сканами и начатым шагом. Обёртка всегда одна и та же — меняется только
+            класс, — поэтому React не пересоздаёт раздел при переключении. Сама
+            плашка fixed и из свёрнутой обёртки видна поверх любого раздела.
+          */}
+          {(activeTab === 'fbs' || fbsScanKeepAlive) && (
+            <div className={activeTab === 'fbs' ? '' : 'h-0 overflow-hidden'}>
+              <React.Suspense fallback={<SectionSkeleton />}>
+                <WBSupplyManager
+                  suppliers={suppliers}
+                  sectionActive={activeTab === 'fbs'}
+                  // В разделах со своим сканером (сборка ФБО, поиск ФБС) плашка
+                  // не перехватывает сканер — там коды нужны самим разделам.
+                  scanCaptureAllowed={activeTab === 'fbs' || !FBS_SCAN_OWN_SCANNER_TABS.includes(activeTab)}
+                  onScanWindowChange={setFbsScanKeepAlive}
+                />
+              </React.Suspense>
+            </div>
           )}
 
           {/* HONEST SIGN TAB */}

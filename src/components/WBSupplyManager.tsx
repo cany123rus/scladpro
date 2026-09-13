@@ -576,10 +576,19 @@ export const WBSupplyManager = ({
   suppliers = [],
   initialTab = 'fbs',
   embeddedTab,
+  sectionActive = true,
+  scanCaptureAllowed = true,
+  onScanWindowChange,
 }: {
   suppliers?: Supplier[];
   initialTab?: WBSupplyManagerTab;
   embeddedTab?: WBSupplyManagerTab;
+  /** Раздел ФБС сейчас на экране. false — открыт другой раздел, а ФБС держится в памяти ради плашки скана. */
+  sectionActive?: boolean;
+  /** Можно ли плашке перехватывать сканер без щелчка в её поле (в разделах со своим сканером — нет). */
+  scanCaptureAllowed?: boolean;
+  /** Сообщает Dashboard, открыто ли окно скана: пока открыто, раздел не выгружается. */
+  onScanWindowChange?: (open: boolean) => void;
 }) => {
   const forcedTab = embeddedTab || null;
   const embeddedMode = Boolean(forcedTab);
@@ -651,6 +660,25 @@ export const WBSupplyManager = ({
   const [fbsScanMinimized, setFbsScanMinimized] = useState(false);
   // Поставка, для которой открыто окно скана (см. защиту ниже).
   const fbsScanSupplyIdRef = useRef<string | null>(null);
+
+  // Перехват сканера читается из обработчика клавиш — через ref, без переподписки.
+  const scanCaptureAllowedRef = useRef(scanCaptureAllowed);
+  useEffect(() => { scanCaptureAllowedRef.current = scanCaptureAllowed; }, [scanCaptureAllowed]);
+
+  /*
+   * Окно скана открыто — Dashboard держит раздел ФБС в памяти и в других
+   * разделах, чтобы свёрнутая плашка жила там же.
+   */
+  useEffect(() => {
+    onScanWindowChange?.(fbsScanModalOpen);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fbsScanModalOpen]);
+  useEffect(() => () => onScanWindowChange?.(false), []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Ушли в другой раздел с развёрнутым окном — сворачиваем, а не закрываем.
+  useEffect(() => {
+    if (!sectionActive && fbsScanModalOpen && !fbsScanMinimized) setFbsScanMinimized(true);
+  }, [sectionActive, fbsScanModalOpen, fbsScanMinimized]);
   /*
    * Окно «Грузоместа» поставки на ПВЗ.
    *
@@ -1460,6 +1488,8 @@ export const WBSupplyManager = ({
 
   useEffect(() => {
     if (!fbsScanModalOpen || fbsScanLoading) return;
+    // В разделе со своим сканером фокус не забираем: он нужен полю этого раздела.
+    if (!scanCaptureAllowed) return;
     const timer = setTimeout(() => {
       try {
         fbsScanInputRef.current?.focus({ preventScroll: true });
@@ -1468,7 +1498,7 @@ export const WBSupplyManager = ({
       }
     }, 80);
     return () => clearTimeout(timer);
-  }, [fbsScanModalOpen, fbsScanLoading, fbsScanMode, fbsPendingStickerRow, fbsScanMinimized]);
+  }, [fbsScanModalOpen, fbsScanLoading, fbsScanMode, fbsPendingStickerRow, fbsScanMinimized, scanCaptureAllowed]);
 
   /*
    * Сканер работает при любом фокусе, пока открыто окно «Скан ЧЗ».
@@ -1494,6 +1524,8 @@ export const WBSupplyManager = ({
       if (!input || input.disabled) return;
       if (e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey) return;
       if (boxesModal) return;
+      // В разделе со своим сканером (сборка ФБО, поиск ФБС) коды нужны ему.
+      if (!scanCaptureAllowedRef.current) return;
 
       const target = e.target as HTMLElement | null;
       if (target === input) return;
@@ -8266,11 +8298,12 @@ export const WBSupplyManager = ({
                                         >
                                             <Download className="w-3 h-3" /> Excel для скана
                                         </button>
+                                        {/* Главное действие на поставке — выделено цветом и размером. */}
                                         <button
                                             onClick={(e) => { e.stopPropagation(); openFbsScanModal(); }}
-                                            className="flex items-center gap-1 bg-white border border-emerald-300 text-emerald-700 px-2 py-1 rounded text-xs hover:bg-emerald-50"
+                                            className="flex items-center gap-1.5 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white font-bold px-3 py-1.5 rounded-lg text-sm shadow-sm shadow-emerald-500/30"
                                         >
-                                            <CheckSquare className="w-3 h-3" /> Скан ЧЗ
+                                            <CheckSquare className="w-4 h-4" /> Скан ЧЗ
                                         </button>
                                     </div>
                                 )}
@@ -8422,7 +8455,7 @@ export const WBSupplyManager = ({
         последнее сообщение и поле скана. Всё остальное — в развёрнутом окне.
       */}
       {fbsScanModalOpen && fbsScanMinimized && (
-        <div className="fixed bottom-4 right-4 z-50 w-[340px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-900/20">
+        <div className="fixed bottom-4 right-20 z-[9980] w-[340px] max-w-[calc(100vw-6rem)] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-900/20">
           <div className="flex items-center gap-2 bg-gradient-to-r from-indigo-600 to-violet-600 px-3 py-2 text-white">
             <CheckSquare className="h-4 w-4 shrink-0" />
             <button
@@ -8520,6 +8553,11 @@ export const WBSupplyManager = ({
             ) : null}
 
             {renderFbsScanForm(true)}
+            {!scanCaptureAllowed && (
+              <div className="rounded-lg bg-slate-100 px-2.5 py-1.5 text-[11px] text-slate-600">
+                В этом разделе свой сканер. Чтобы сканировать в ЧЗ, щёлкните в поле выше.
+              </div>
+            )}
           </div>
         </div>
       )}
