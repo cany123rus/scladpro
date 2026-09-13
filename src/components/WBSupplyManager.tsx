@@ -41,7 +41,7 @@ import {
   normalizeScanStickerText,
   restoreDataMatrixGs,
 } from '../utils/honestSign';
-import { explainWbAccess } from '../utils/wbTokenScopes';
+import { explainWbAccess, hasWbScope } from '../utils/wbTokenScopes';
 import { buildStickersPdf, fetchStickers, renderStickerImage } from '../utils/stickers';
 import { printImagesDirect, printPdfDirect } from '../utils/printDirect';
 import FbsChzStockPanel from './FbsChzStockPanel';
@@ -1198,15 +1198,31 @@ export const WBSupplyManager = ({
 
   // --- Effects ---
 
+  /*
+   * Кабинеты для раздела ФБС — только с доступом к «Маркетплейсу».
+   *
+   * У «Постельки» токен без этой категории: заказы, поставки и стикеры WB ей
+   * не отдаёт, и в выборе поставщика она только мешала. Кабинет без токена
+   * (неразобранный) не прячем — решит сервер.
+   */
+  const fbsSuppliers = useMemo(
+    () => suppliers.filter((s) => hasWbScope(String(s.wb_api_token || ''), 'marketplace')),
+    [suppliers],
+  );
+  const fbsSupplierIds = useMemo(() => new Set(fbsSuppliers.map((s) => s.id)), [fbsSuppliers]);
+
   useEffect(() => {
     if (suppliers.length === 0) return;
-    if (!selectedSupplierIdFbs) setSelectedSupplierIdFbs(suppliers[0].id);
-    if (!selectedSupplierIdOrdersDb) setSelectedSupplierIdOrdersDb(suppliers[0].id);
+    const first = (fbsSuppliers[0] || suppliers[0]).id;
+    // Выбранный раньше кабинет без «Маркетплейса» — меняем на первый подходящий.
+    const fix = (id: string) => !id || (id !== '__all__' && fbsSuppliers.length > 0 && !fbsSupplierIds.has(id));
+    if (fix(selectedSupplierIdFbs)) setSelectedSupplierIdFbs(first);
+    if (fix(selectedSupplierIdOrdersDb)) setSelectedSupplierIdOrdersDb(first);
     if (!selectedSupplierIdSupplyOrder) setSelectedSupplierIdSupplyOrder(suppliers[0].id);
-    if (!selectedSupplierIdCalc) setSelectedSupplierIdCalc(suppliers[0].id);
+    if (fix(selectedSupplierIdCalc)) setSelectedSupplierIdCalc(first);
     if (!selectedSupplierIdFbsOrders) setSelectedSupplierIdFbsOrders('__all__');
     if (!selectedSupplierIdFboAcceptance) setSelectedSupplierIdFboAcceptance('__all__');
-  }, [suppliers, selectedSupplierIdFbs, selectedSupplierIdOrdersDb, selectedSupplierIdSupplyOrder, selectedSupplierIdCalc, selectedSupplierIdFbsOrders, selectedSupplierIdFboAcceptance]);
+  }, [suppliers, fbsSuppliers, fbsSupplierIds, selectedSupplierIdFbs, selectedSupplierIdOrdersDb, selectedSupplierIdSupplyOrder, selectedSupplierIdCalc, selectedSupplierIdFbsOrders, selectedSupplierIdFboAcceptance]);
 
   useEffect(() => {
     const loadFbsOrdersMeta = async () => {
@@ -8526,7 +8542,7 @@ export const WBSupplyManager = ({
                       else if (activeTab === 'fbs_calc') setSelectedSupplierIdCalc(value);
                     }}
                   >
-                    {suppliers.map(s => (
+                    {fbsSuppliers.map(s => (
                       <option key={s.id} value={s.id}>{s.name}</option>
                     ))}
                   </select>
@@ -9924,7 +9940,7 @@ export const WBSupplyManager = ({
             >
               <option value="__all__">Все поставщики</option>
               <option value="">Выберите поставщика...</option>
-              {suppliers.map((s) => (
+              {fbsSuppliers.map((s) => (
                 <option key={s.id} value={s.id}>{s.name}</option>
               ))}
             </select>
@@ -10755,7 +10771,7 @@ export const WBSupplyManager = ({
               value={selectedSupplierIdCalc}
               onChange={(e) => setSelectedSupplierIdCalc(e.target.value)}
             >
-              {suppliers.map((s) => (
+              {fbsSuppliers.map((s) => (
                 <option key={s.id} value={s.id}>{s.name}</option>
               ))}
             </select>
