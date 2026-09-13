@@ -6800,13 +6800,24 @@ export const WBSupplyManager = ({
       let chzTailLayout = DEFAULT_CHZ_TAIL_LAYOUT;
       let comboLayout = DEFAULT_FBS_COMBO_LAYOUT;
       let unmatchedOrders = 0;
+      /*
+       * Нехватка марок — предупреждение, а не отказ.
+       *
+       * Раньше при пустой базе кодов печать обрывалась ошибкой, а при частичной
+       * нехватке в совмещённом режиме выходили пустые листы. Стикер WB нужен
+       * заданию в любом случае, поэтому печатаем его всегда, а о заданиях без
+       * марки говорим после — отдельным сообщением, которое не исчезает само.
+       */
+      let chzShortage = '';
 
-      if (fbsStickersWithChz) {
-        const pool = await takeFreeChzCodes(selectedSupplierId, orderedStickers.length);
-        if (pool.length === 0) {
-          throw new Error('В базе кодов нет свободных марок для этого кабинета — загрузите коды или снимите галочку');
-        }
+      const pool = fbsStickersWithChz
+        ? await takeFreeChzCodes(selectedSupplierId, orderedStickers.length)
+        : [];
+      if (fbsStickersWithChz && pool.length === 0) {
+        chzShortage = 'Свободных марок ЧЗ в базе нет — все стикеры напечатаны обычными стикерами WB, без ЧЗ.';
+      }
 
+      if (fbsStickersWithChz && pool.length > 0) {
         const { data: layoutRow } = await supabase
           .from('app_settings')
           .select('value')
@@ -6845,13 +6856,11 @@ export const WBSupplyManager = ({
         }
 
         if (chzByOrderId.size === 0) {
-          throw new Error(
-            'Ни одна свободная марка не подошла заданиям: не совпали пол и категория. '
-            + 'Проверьте, что коды загружены с указанием пола и категории товара.',
-          );
-        }
-        if (unmatchedOrders > 0) {
-          setSuccessMsg(`Марки подобраны для ${chzByOrderId.size} заданий из ${orderedStickers.length}. Остальные стикеры выйдут без ЧЗ: подходящей марки нет.`);
+          chzShortage = 'Ни одна свободная марка не подошла заданиям (не совпали пол, размер или категория) — '
+            + 'все стикеры напечатаны обычными стикерами WB, без ЧЗ.';
+        } else if (unmatchedOrders > 0) {
+          chzShortage = `Марки хватило на ${chzByOrderId.size} заданий из ${orderedStickers.length}. `
+            + `Остальные ${unmatchedOrders} напечатаны обычными стикерами WB, без ЧЗ.`;
         }
       }
 
@@ -6964,7 +6973,21 @@ export const WBSupplyManager = ({
                    }
                  };
 
-                 if (!comboMode) {
+                 const orderId = Number(sticker?.orderId ?? sticker?.id ?? sticker?.order_id);
+                 const code = fbsStickersWithChz ? chzByOrderId.get(orderId) : undefined;
+
+                 /*
+                  * Совмещённая страница — только когда марка есть.
+                  *
+                  * Раньше в совмещённом режиме стикер WB не рисовался вовсе, и
+                  * заданию, которому марки не хватило, доставался пустой лист:
+                  * на складе его наклеить нельзя, а задание без стикера не
+                  * примут. Нет марки — печатаем обычный стикер WB, как без
+                  * галочки.
+                  */
+                 const comboPage = comboMode && Boolean(code);
+
+                 if (!comboPage) {
                    try {
                      await drawSticker();
                    } catch (e) {
@@ -6974,14 +6997,12 @@ export const WBSupplyManager = ({
 
                  // Этикетка ЧЗ идёт следующей страницей — сразу за своим заданием.
                  if (fbsStickersWithChz) {
-                   const orderId = Number(sticker?.orderId ?? sticker?.id ?? sticker?.order_id);
-                   const code = chzByOrderId.get(orderId);
                    if (code) {
                      const order = orderById.get(orderId) || {};
                      const barcode = String(order?.skus?.[0] || order?.barcode || '');
                      const partA = String(sticker?.partA || '');
                      const partB = String(sticker?.partB || '');
-                     if (!comboMode) pdf.addPage([58, 40], 'landscape');
+                     if (!comboPage) pdf.addPage([58, 40], 'landscape');
                      try {
                        if (fbsLabelKind === 'combo') {
                          await drawFbsComboLabel(pdf, bwipjs, comboLayout, {
@@ -7036,6 +7057,7 @@ export const WBSupplyManager = ({
                  if (fbsStickersWithChz && chzByOrderId.size > 0) {
                    await bindPrintedChzToOrders(chzByOrderId, orderById);
                  }
+                 if (chzShortage) setError(chzShortage);
                  return;
                } catch (e) {
                  console.warn('single stickers pdf failed on profile, trying lighter profile', profile, e);
