@@ -5,6 +5,7 @@ import JsBarcode from 'jsbarcode';
 import html2canvas from 'html2canvas';
 // jsPDF и bwip-js — по требованию: раздел открывается без 1,2 МБ библиотек печати.
 import { ensureBwip, ensurePdfLibs, lazyLibs } from '../pages/dashboardLazyLibs';
+import { printPdfDirect } from '../utils/printDirect';
 import { supabase } from '../lib/supabase';
 import { restoreDataMatrixGs } from '../utils/honestSign';
 import { FixedSizeList as List, ListChildComponentProps } from 'react-window';
@@ -923,9 +924,10 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
 
     if (variantsToPrint.length === 0) return;
 
-    // Open preview window synchronously (important for mobile popup blockers).
+    // Окно-заглушку открываем только на телефоне/планшете — там PDF отдаётся ссылкой.
+    // На компьютере печать идёт сразу в окно печати, без вкладки и файла.
     // Для отправки на ПК окно не открываем.
-    const preview = target === 'pc' ? null : window.open('', 'WBStickerPrintPreview', 'width=980,height=780');
+    const preview = target === 'pc' || isDesktopView ? null : window.open('', 'WBStickerPrintPreview', 'width=980,height=780');
     if (preview) {
       preview.document.write(`
         <html>
@@ -1376,23 +1378,9 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
         } else {
           doc.save(fileName);
         }
-      } else if (preview) {
-        preview.document.write(`
-          <html>
-            <head><title>Предпросмотр печати</title></head>
-            <body style="margin:0;background:#f3f4f6;font-family:Arial,sans-serif;">
-              <div style="padding:10px;display:flex;justify-content:space-between;align-items:center;background:#fff;border-bottom:1px solid #ddd;">
-                <strong>Предпросмотр стикеров 58x40</strong>
-                <button onclick="frames['pdfFrame'].focus();frames['pdfFrame'].print();" style="padding:8px 14px;border:none;background:#4f46e5;color:#fff;border-radius:8px;cursor:pointer;">Печать</button>
-              </div>
-              <iframe name="pdfFrame" src="${blobUrl}" style="width:100%;height:calc(100vh - 52px);border:0;"></iframe>
-            </body>
-          </html>
-        `);
-        preview.document.close();
       } else {
-        // Fallback for strict mobile browsers that block popups
-        doc.save(`wb-stickers-${Date.now()}.pdf`);
+        // Компьютер: сразу окно печати, без предпросмотра во вкладке и без файла.
+        await printPdfDirect(doc, { widthMm: 58, heightMm: 40 });
       }
 
       // Move used codes to "Printed QR" (best-effort + offline queue)

@@ -43,6 +43,7 @@ import {
 } from '../utils/honestSign';
 import { explainWbAccess } from '../utils/wbTokenScopes';
 import { buildStickersPdf, fetchStickers, renderStickerImage } from '../utils/stickers';
+import { printImagesDirect, printPdfDirect } from '../utils/printDirect';
 import type { StickerImage } from '../utils/stickers';
 import { getWBImageUrl, getWBImageUrls } from '../utils/wbImages';
 import {
@@ -4265,32 +4266,13 @@ export const WBSupplyManager = ({
    * Стикеры грузомест одним PDF 58×40 — на тот же термопринтер, что и
    * стикеры заданий. Вкладку открывает вызывающий до первого await.
    */
-  const printBoxStickers = async (supplyId: string, ids: string[], tab: Window | null) => {
-    // Библиотеки печати/Excel грузятся по требованию — не при открытии раздела.
-    await ensurePdfLibs();
-    const { jsPDF, autoTable } = lazyLibs;
+  /** Стикеры грузомест — сразу в окно печати, без файла и вкладки. */
+  const printBoxStickers = async (supplyId: string, ids: string[]) => {
     const stickers = await fetchSupplyBoxStickers(selectedSupplierId, supplyId, ids);
     const images = stickers.filter((s) => s.file).map((s) => ({ file: s.file, type: 'png' as const }));
     if (!images.length) throw new Error('WB не вернул стикеры грузомест');
-
-    const pdf = await buildStickersPdf(jsPDF, images);
-    if (tab) {
-      const blobUrl = String(pdf.output('bloburl'));
-      tab.location.href = blobUrl;
-      setTimeout(() => { try { URL.revokeObjectURL(blobUrl); } catch {} }, 60000);
-    } else {
-      pdf.save(`Грузоместа ${supplyId}.pdf`);
-    }
+    await printImagesDirect(images);
     return images.length;
-  };
-
-  const openPrintTab = (title: string) => {
-    const tab = window.open('', '_blank');
-    if (tab) {
-      tab.document.write(`<title>${title}</title><p style="font:14px sans-serif;padding:16px">Готовлю стикеры…</p>`);
-      tab.document.close();
-    }
-    return tab;
   };
 
   /** Создать грузоместа у WB и сразу напечатать их стикеры. */
@@ -4303,7 +4285,6 @@ export const WBSupplyManager = ({
       return;
     }
 
-    const tab = openPrintTab('Стикеры грузомест');
     setBoxesModal({ ...modal, busy: 'create', error: '', info: '' });
     try {
       const created = await createSupplyBoxes(selectedSupplierId, modal.supplyId, amount);
@@ -4316,20 +4297,18 @@ export const WBSupplyManager = ({
       let printed = 0;
       let printError = '';
       try {
-        printed = await printBoxStickers(modal.supplyId, created, tab);
+        printed = await printBoxStickers(modal.supplyId, created);
       } catch (e: any) {
         printError = e?.message || String(e);
-        try { tab?.close(); } catch {}
       }
 
       setBoxesModal((prev) => (prev ? {
         ...prev,
         busy: '',
         error: printError ? `Грузоместа созданы (${created.length}), но стикеры не получены: ${printError}. Нажмите «Печать всех».` : '',
-        info: printError ? '' : `Создано грузомест: ${created.length}. Стикеры (${printed}) открыты в новой вкладке.`,
+        info: printError ? '' : `Создано грузомест: ${created.length}. Стикеры (${printed}) отправлены в печать.`,
       } : prev));
     } catch (e: any) {
-      try { tab?.close(); } catch {}
       setBoxesModal((prev) => (prev ? { ...prev, busy: '', error: e?.message || String(e), info: '' } : prev));
     }
   };
@@ -4337,13 +4316,24 @@ export const WBSupplyManager = ({
   const printAllBoxStickers = async () => {
     const modal = boxesModal;
     if (!modal || modal.busy || !modal.ids.length) return;
-    const tab = openPrintTab('Стикеры грузомест');
     setBoxesModal({ ...modal, busy: 'print', error: '', info: '' });
     try {
-      const printed = await printBoxStickers(modal.supplyId, modal.ids, tab);
-      setBoxesModal((prev) => (prev ? { ...prev, busy: '', info: `Стикеры (${printed}) открыты в новой вкладке.` } : prev));
+      const printed = await printBoxStickers(modal.supplyId, modal.ids);
+      setBoxesModal((prev) => (prev ? { ...prev, busy: '', info: `Стикеры (${printed}) отправлены в печать.` } : prev));
     } catch (e: any) {
-      try { tab?.close(); } catch {}
+      setBoxesModal((prev) => (prev ? { ...prev, busy: '', error: e?.message || String(e) } : prev));
+    }
+  };
+
+  /** Стикер одного грузоместа — когда наклейку испортили или нужна одна коробка. */
+  const printOneBoxSticker = async (id: string) => {
+    const modal = boxesModal;
+    if (!modal || modal.busy) return;
+    setBoxesModal({ ...modal, busy: 'print', error: '', info: '' });
+    try {
+      await printBoxStickers(modal.supplyId, [id]);
+      setBoxesModal((prev) => (prev ? { ...prev, busy: '', info: `Стикер ${id} отправлен в печать.` } : prev));
+    } catch (e: any) {
       setBoxesModal((prev) => (prev ? { ...prev, busy: '', error: e?.message || String(e) } : prev));
     }
   };
@@ -4390,12 +4380,6 @@ export const WBSupplyManager = ({
      * открывать после await, жест уже «истёк» и блокировщик режет окно —
      * поэтому сначала открываем пустую вкладку, а готовый PDF подставляем в неё.
      */
-    const tab = window.open('', '_blank');
-    if (tab) {
-      tab.document.write('<title>Стикер задания</title><p style="font:14px sans-serif;padding:16px">Готовлю стикер…</p>');
-      tab.document.close();
-    }
-
     setFbsStickerPrintingId(String(row.orderId));
     setFbsScanNotice({ type: 'info', text: `Запрашиваю стикер задания ${row.orderId} у WB…` });
     try {
@@ -4403,25 +4387,9 @@ export const WBSupplyManager = ({
       const sticker = stickers.get(orderId);
       if (!sticker) throw new Error('WB не вернул стикер для этого задания');
 
-      // После window.open: иначе браузер счёл бы вкладку всплывающим окном.
-      await ensurePdfLibs();
-      const { jsPDF } = lazyLibs;
-      const pdf = await buildStickersPdf(jsPDF, [sticker]);
-
-      if (tab) {
-        const blobUrl = String(pdf.output('bloburl'));
-        tab.location.href = blobUrl;
-        // Ссылку держим живой, пока вкладка её открывает: ранний revoke даёт
-        // пустую страницу.
-        setTimeout(() => { try { URL.revokeObjectURL(blobUrl); } catch {} }, 60000);
-        setFbsScanNotice({ type: 'success', text: `Стикер задания ${row.orderId} открыт в новой вкладке.` });
-      } else {
-        // Блокировщик всплывающих окон — тогда просто отдаём файл.
-        pdf.save(`Стикер ${row.orderId}.pdf`);
-        setFbsScanNotice({ type: 'success', text: `Браузер запретил новую вкладку — стикер ${row.orderId} скачан файлом.` });
-      }
+      await printImagesDirect([sticker]);
+      setFbsScanNotice({ type: 'success', text: `Стикер задания ${row.orderId} отправлен в печать.` });
     } catch (e: any) {
-      try { tab?.close(); } catch {}
       setFbsScanNotice({ type: 'error', text: e?.message || 'Не удалось получить стикер' });
     } finally {
       setFbsStickerPrintingId('');
@@ -4693,39 +4661,25 @@ export const WBSupplyManager = ({
       missingStickers > 0 ? `WB не отдал стикеров: ${missingStickers}` : '',
     ].filter(Boolean).join('; ');
 
-    if (opts.tab) {
-      const blobUrl = String(pdf.output('bloburl'));
-      opts.tab.location.href = blobUrl;
-      setTimeout(() => { try { URL.revokeObjectURL(blobUrl); } catch {} }, 60000);
-    } else {
-      pdf.save(opts.fileName);
-    }
+    await printPdfDirect(pdf, { widthMm: 58, heightMm: 40 });
 
     setFbsScanNotice({
       type: 'success',
-      text: `Этикеток ЧЗ: ${items.length}.${tail ? ` (${tail})` : ''}`
-        + (opts.tab ? ' Открыто в новой вкладке.' : ' Браузер запретил вкладку — файл скачан.'),
+      text: `Этикеток ЧЗ: ${items.length}.${tail ? ` (${tail})` : ''} Отправлено в печать.`,
     });
   };
 
   /** Этикетка ЧЗ одной строки — когда её испортили при упаковке. */
   const printSingleChzLabel = async (row: FbsSupplyScanOrderRow) => {
-    const tab = window.open('', '_blank');
-    if (tab) {
-      tab.document.write('<title>Этикетка ЧЗ</title><p style="font:14px sans-serif;padding:16px">Готовлю этикетку…</p>');
-      tab.document.close();
-    }
-
     setFbsChzPrintingKey(row.storageKey);
     try {
       await printChzLabels([row], {
         withStickers: false,
         fileName: `ЧЗ ${row.orderId || row.storageKey}.pdf`,
-        tab,
+        tab: null,
         kind: fbsLabelKind,
       });
     } catch (e: any) {
-      try { tab?.close(); } catch {}
       setFbsScanNotice({ type: 'error', text: e?.message || 'Не удалось напечатать этикетку ЧЗ' });
     } finally {
       setFbsChzPrintingKey('');
@@ -4835,35 +4789,26 @@ export const WBSupplyManager = ({
     const withLabels = mode !== 'picking';
     const withPicking = mode !== 'labels';
 
-    // Вкладку под этикетки — сразу, пока жив жест клика. Листу подбора она
-    // не нужна: он скачивается файлом.
-    const tab = withLabels ? window.open('', '_blank') : null;
-    if (tab) {
-      tab.document.write('<title>Этикетки ЧЗ</title><p style="font:14px sans-serif;padding:16px">Готовлю этикетки…</p>');
-      tab.document.close();
-    }
-
     setFbsScanBulkBusy(true);
     try {
+      // Этикетки первыми, лист подбора — вторым окном печати: они идут на
+      // разные принтеры (термопринтер 58×40 и A4).
+      if (withLabels) {
+        await printChzLabels(rows, {
+          // У совмещённой этикетки стикер уже внутри — второй экземпляр не нужен.
+          withStickers: fbsBulkWithStickers && fbsLabelKind !== 'combo',
+          fileName: `Этикетки ${activeSupplyId || ''} ${rows.length}.pdf`,
+          tab: null,
+          kind: fbsLabelKind,
+        });
+      }
       if (withPicking) {
         setFbsScanNotice({ type: 'info', text: 'Собираю лист подбора…' });
         const picking = await buildSelectedPickingListPdf(rows);
-        picking.save(`Лист подбора ${activeSupplyId || ''} ${rows.length}.pdf`);
-        if (!withLabels) {
-          setFbsScanNotice({ type: 'success', text: `Лист подбора на ${rows.length} заданий скачан.` });
-          return;
-        }
+        await printPdfDirect(picking);
+        setFbsScanNotice({ type: 'success', text: `Лист подбора на ${rows.length} заданий отправлен в печать.` });
       }
-
-      await printChzLabels(rows, {
-        // У совмещённой этикетки стикер уже внутри — второй экземпляр не нужен.
-        withStickers: fbsBulkWithStickers && fbsLabelKind !== 'combo',
-        fileName: `Этикетки ${activeSupplyId || ''} ${rows.length}.pdf`,
-        tab,
-        kind: fbsLabelKind,
-      });
     } catch (e: any) {
-      try { tab?.close(); } catch {}
       setFbsScanNotice({ type: 'error', text: e?.message || 'Не удалось напечатать выбранное' });
     } finally {
       setFbsScanBulkBusy(false);
@@ -7131,9 +7076,8 @@ export const WBSupplyManager = ({
         });
       }
       
-      const ts = new Date().toISOString().replace(/[:.]/g, '-');
-      doc.save(`picking_list_${supplyName}_${sortedSupplyOrders.length}orders_${ts}.pdf`);
-      setSuccessMsg(`Лист сформирован: ${sortedSupplyOrders.length} заказов`);
+      await printPdfDirect(doc);
+      setSuccessMsg(`Лист подбора на ${sortedSupplyOrders.length} заказов отправлен в печать`);
       setTimeout(() => setSuccessMsg(null), 2500);
       
     } catch (err: any) {
@@ -7312,8 +7256,7 @@ export const WBSupplyManager = ({
         },
       });
 
-      const ts = new Date().toISOString().replace(/[:.]/g, '-');
-      doc.save(`picking_grouped_${supplyName}_${rows.length}groups_${supplyOrders.length}orders_${ts}.pdf`);
+      await printPdfDirect(doc);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -7347,7 +7290,7 @@ export const WBSupplyManager = ({
 
         const imgData = canvas.toDataURL('image/png');
         doc.addImage(imgData, 'PNG', 10, 10, 80, 40);
-        doc.save(`supply_barcode_${activeSupplyId}.pdf`);
+        await printPdfDirect(doc, { widthMm: 100, heightMm: 60 });
 
     } catch (err: any) {
         setError(err.message);
@@ -7875,7 +7818,7 @@ export const WBSupplyManager = ({
              for (const profile of renderProfiles) {
                try {
                  const pdf = await buildPdfForSlice(orderedStickers, profile);
-                 pdf.save(`stickers_fbs_${activeSupplyId}.pdf`);
+                 await printPdfDirect(pdf, { widthMm: 58, heightMm: 40 });
                  if (fbsStickersWithChz && chzByOrderId.size > 0) {
                    await bindPrintedChzToOrders(chzByOrderId, orderById);
                  }
@@ -8814,78 +8757,94 @@ export const WBSupplyManager = ({
                                 </div>
                                 
                                 {activeSupplyId === supply.id && (
-                                    <div className="mt-3 flex flex-wrap gap-2">
-                                        <button 
-                                            onClick={(e) => { e.stopPropagation(); generatePickingList(); }}
-                                            className="flex items-center gap-1 bg-white border border-slate-300 px-2 py-1 rounded text-xs hover:bg-slate-50"
-                                        >
-                                            <FileText className="w-3 h-3" /> Лист
-                                        </button>
-                                        <button 
-                                            onClick={(e) => { e.stopPropagation(); generateGroupedSupplierPickingList(); }}
-                                            className="flex items-center gap-1 bg-white border border-slate-300 px-2 py-1 rounded text-xs hover:bg-slate-50"
-                                        >
-                                            <List className="w-3 h-3" /> Лист (групп.)
-                                        </button>
-                                        <button 
-                                            onClick={(e) => { e.stopPropagation(); generateSupplyBarcode(); }}
-                                            className="flex items-center gap-1 bg-white border border-slate-300 px-2 py-1 rounded text-xs hover:bg-slate-50"
-                                        >
-                                            <Barcode className="w-3 h-3" /> ШК
-                                        </button>
-                                        <button
-                                            onClick={(e) => { e.stopPropagation(); downloadFBSStickers(); }}
-                                            className="flex items-center gap-1 bg-white border border-slate-300 px-2 py-1 rounded text-xs hover:bg-slate-50"
-                                        >
-                                            <Printer className="w-3 h-3" /> {fbsStickersWithChz ? 'Стикеры + ЧЗ' : 'Стикеры'}
-                                        </button>
-                                        {/* Пока код берётся из базы по очереди, без привязки к товару и
-                                            размеру, поэтому по умолчанию выключено и подписано «проверка». */}
-                                        <label
-                                            onClick={(e) => e.stopPropagation()}
-                                            title="За каждым стикером WB пойдёт этикетка с ЧЗ. Код берётся из базы по очереди, без привязки к товару и размеру"
-                                            className="flex items-center gap-1 bg-white border border-amber-300 text-amber-700 px-2 py-1 rounded text-xs cursor-pointer hover:bg-amber-50"
-                                        >
-                                            <input
-                                                type="checkbox"
-                                                checked={fbsStickersWithChz}
-                                                onChange={(e) => setFbsStickersWithChz(e.target.checked)}
-                                                className="w-3 h-3"
-                                            />
-                                            с ЧЗ (проверка)
-                                        </label>
-                                        {/* Макет выбирается здесь же, у кнопки печати: решение «чем
-                                            печатать» принимают в момент печати поставки. */}
-                                        {fbsStickersWithChz && (
-                                            <select
-                                                onClick={(e) => e.stopPropagation()}
-                                                value={fbsLabelKind}
-                                                onChange={(e) => {
-                                                    const next = e.target.value as FbsLabelKind;
-                                                    setFbsLabelKind(next);
-                                                    try { localStorage.setItem('fbs_label_kind_v1', next); } catch {}
-                                                }}
-                                                title="Макет этикетки с ЧЗ. Настраивается в разделе «Конструктор этикеток»"
-                                                className="bg-white border border-amber-300 text-amber-800 px-2 py-1 rounded text-xs"
-                                            >
-                                                {(Object.keys(FBS_LABEL_KIND_TITLES) as FbsLabelKind[]).map((id) => (
-                                                    <option key={id} value={id}>{FBS_LABEL_KIND_TITLES[id]}</option>
-                                                ))}
-                                            </select>
-                                        )}
-                                        <button
-                                            onClick={(e) => { e.stopPropagation(); downloadFbsScanTemplateExcel(); }}
-                                            className="flex items-center gap-1 bg-white border border-indigo-300 text-indigo-700 px-2 py-1 rounded text-xs hover:bg-indigo-50"
-                                        >
-                                            <Download className="w-3 h-3" /> Excel для скана
-                                        </button>
-                                        {/* Главное действие на поставке — выделено цветом и размером. */}
+                                    /*
+                                     * Действия поставки — одним стилем, по важности.
+                                     *
+                                     * «Скан ЧЗ» — главное действие у стола: во всю ширину и
+                                     * крупнее всех. Печать — вторым рядом, остальное — мельче.
+                                     * Цвет у каждой кнопки свой, чтобы находить её глазом, а не
+                                     * читая подписи.
+                                     */
+                                    <div className="mt-3 space-y-2" onClick={(e) => e.stopPropagation()}>
                                         <button
                                             onClick={(e) => { e.stopPropagation(); openFbsScanModal(); }}
-                                            className="flex items-center gap-1.5 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white font-bold px-3 py-1.5 rounded-lg text-sm shadow-sm shadow-emerald-500/30"
+                                            className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 px-4 py-3 text-base font-extrabold text-white shadow-md shadow-emerald-500/30 ring-1 ring-emerald-600/20 transition hover:from-emerald-600 hover:to-teal-600 active:scale-[0.99]"
                                         >
-                                            <CheckSquare className="w-4 h-4" /> Скан ЧЗ
+                                            <CheckSquare className="w-5 h-5" /> Скан ЧЗ
                                         </button>
+
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <button
+                                                onClick={(e) => { e.stopPropagation(); downloadFBSStickers(); }}
+                                                className="flex items-center justify-center gap-1.5 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-500 px-3 py-2 text-sm font-bold text-white shadow-sm shadow-indigo-500/25 transition hover:from-indigo-600 hover:to-violet-600"
+                                            >
+                                                <Printer className="w-4 h-4" /> {fbsStickersWithChz ? 'Стикеры + ЧЗ' : 'Стикеры'}
+                                            </button>
+                                            <button
+                                                onClick={(e) => { e.stopPropagation(); generatePickingList(); }}
+                                                className="flex items-center justify-center gap-1.5 rounded-lg bg-gradient-to-r from-sky-500 to-blue-500 px-3 py-2 text-sm font-bold text-white shadow-sm shadow-sky-500/25 transition hover:from-sky-600 hover:to-blue-600"
+                                            >
+                                                <FileText className="w-4 h-4" /> Лист подбора
+                                            </button>
+                                        </div>
+
+                                        <div className="grid grid-cols-3 gap-2">
+                                            <button
+                                                onClick={(e) => { e.stopPropagation(); generateGroupedSupplierPickingList(); }}
+                                                title="Лист подбора с группировкой по товару"
+                                                className="flex items-center justify-center gap-1 rounded-lg bg-gradient-to-r from-cyan-500 to-sky-500 px-2 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:from-cyan-600 hover:to-sky-600"
+                                            >
+                                                <List className="w-3.5 h-3.5" /> Лист (групп.)
+                                            </button>
+                                            <button
+                                                onClick={(e) => { e.stopPropagation(); generateSupplyBarcode(); }}
+                                                title="Штрихкод поставки"
+                                                className="flex items-center justify-center gap-1 rounded-lg bg-gradient-to-r from-slate-600 to-slate-700 px-2 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:from-slate-700 hover:to-slate-800"
+                                            >
+                                                <Barcode className="w-3.5 h-3.5" /> ШК
+                                            </button>
+                                            <button
+                                                onClick={(e) => { e.stopPropagation(); downloadFbsScanTemplateExcel(); }}
+                                                title="Excel-шаблон для скана"
+                                                className="flex items-center justify-center gap-1 rounded-lg bg-gradient-to-r from-amber-500 to-orange-500 px-2 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:from-amber-600 hover:to-orange-600"
+                                            >
+                                                <Download className="w-3.5 h-3.5" /> Excel
+                                            </button>
+                                        </div>
+
+                                        {/* Пока код берётся из базы по очереди, без привязки к товару и
+                                            размеру, поэтому по умолчанию выключено и подписано «проверка».
+                                            Макет выбирается здесь же, у кнопки печати. */}
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            <label
+                                                title="За каждым стикером WB пойдёт этикетка с ЧЗ. Код берётся из базы по очереди, без привязки к товару и размеру"
+                                                className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-2 py-1 text-xs font-medium text-amber-800 hover:bg-amber-100"
+                                            >
+                                                <input
+                                                    type="checkbox"
+                                                    checked={fbsStickersWithChz}
+                                                    onChange={(e) => setFbsStickersWithChz(e.target.checked)}
+                                                    className="w-3.5 h-3.5"
+                                                />
+                                                Стикеры с ЧЗ (проверка)
+                                            </label>
+                                            {fbsStickersWithChz && (
+                                                <select
+                                                    value={fbsLabelKind}
+                                                    onChange={(e) => {
+                                                        const next = e.target.value as FbsLabelKind;
+                                                        setFbsLabelKind(next);
+                                                        try { localStorage.setItem('fbs_label_kind_v1', next); } catch {}
+                                                    }}
+                                                    title="Макет этикетки с ЧЗ. Настраивается в разделе «Конструктор этикеток»"
+                                                    className="rounded-lg border border-amber-300 bg-white px-2 py-1 text-xs text-amber-800"
+                                                >
+                                                    {(Object.keys(FBS_LABEL_KIND_TITLES) as FbsLabelKind[]).map((id) => (
+                                                        <option key={id} value={id}>{FBS_LABEL_KIND_TITLES[id]}</option>
+                                                    ))}
+                                                </select>
+                                            )}
+                                        </div>
                                     </div>
                                 )}
                             </div>
@@ -9007,17 +8966,28 @@ export const WBSupplyManager = ({
                           <span className="font-mono text-slate-700">
                             <span className="text-slate-400 mr-2 tabular-nums">{index + 1}.</span>{id}
                           </span>
-                          {!closed && (
+                          <div className="flex items-center gap-3">
                             <button
                               type="button"
-                              onClick={() => deleteBox(id)}
+                              onClick={() => printOneBoxSticker(id)}
                               disabled={Boolean(busy)}
-                              title="Удалить у WB — можно, пока поставка на сборке"
-                              className="text-xs text-rose-600 hover:text-rose-700 disabled:opacity-40"
+                              title="Напечатать стикер этого грузоместа"
+                              className="inline-flex items-center gap-1 rounded-lg border border-orange-300 bg-orange-50 px-2 py-0.5 text-xs font-semibold text-orange-700 hover:bg-orange-100 disabled:opacity-40"
                             >
-                              Удалить
+                              <Printer className="h-3 w-3" /> Печать
                             </button>
-                          )}
+                            {!closed && (
+                              <button
+                                type="button"
+                                onClick={() => deleteBox(id)}
+                                disabled={Boolean(busy)}
+                                title="Удалить у WB — можно, пока поставка на сборке"
+                                className="text-xs text-rose-600 hover:text-rose-700 disabled:opacity-40"
+                              >
+                                Удалить
+                              </button>
+                            )}
+                          </div>
                         </div>
                       ))}
                     </div>

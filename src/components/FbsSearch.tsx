@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Search, Upload, Trash2, Package, Download, RefreshCw, ClipboardList, ScanLine, RotateCcw, FileDown, Tag } from 'lucide-react';
+import { Search, Upload, Trash2, Package, Download, RefreshCw, ClipboardList, ScanLine, RotateCcw, Printer, Tag } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { planPicking } from '../utils/boxPicking';
 import { compareSizes } from '../utils/sizeOrder';
 import { loadPhotoDataUrls } from '../utils/productPhotos';
-import { buildStickersPdf, fetchStickers, type StickerImage } from '../utils/stickers';
+import { fetchStickers, type StickerImage } from '../utils/stickers';
 import { ensureExcel, ensurePdfLibs, lazyLibs } from '../pages/dashboardLazyLibs';
+import { printImagesDirect, printPdfDirect } from '../utils/printDirect';
 import {
   encodeGsForExcel,
   fixCyrillicKeyboardLayout,
@@ -974,8 +975,8 @@ export function FbsSearch({
         },
       });
 
-      doc.save(`Лист подбора ${list.name}.pdf`);
-      showToast('PDF готов', 'success');
+      await printPdfDirect(doc);
+      showToast('Лист подбора отправлен в печать', 'success');
     } catch (e: any) {
       showToast(`Не удалось собрать PDF: ${e?.message || e}`, 'error');
     } finally {
@@ -1039,10 +1040,8 @@ export function FbsSearch({
       const found = ordered.map((o) => byId.get(o.id)).filter(Boolean) as StickerImage[];
       if (found.length === 0) throw new Error('WB не вернул ни одного стикера');
 
-      // ensurePdfLibs ничего не возвращает: библиотеки берутся из lazyLibs после await.
-      await ensurePdfLibs();
-      const pdf = await buildStickersPdf(lazyLibs.jsPDF, found);
-      pdf.save(`Стикеры — ${picking.list.name}.pdf`);
+      // Картинки стикеров — сразу в окно печати, в порядке листа подбора.
+      await printImagesDirect(found);
 
       const missing = ordered.length - found.length;
       showToast(
@@ -1651,16 +1650,16 @@ export function FbsSearch({
                     <ScanLine className="w-4 h-4" /> {scanOn ? 'Закончить скан' : 'Скан ЧЗ'}
                   </button>
                   <button type="button" className="btn-ghost" onClick={() => void exportPickingPdf()} disabled={busy}>
-                    <FileDown className="w-4 h-4" /> Скачать PDF
+                    <Printer className="w-4 h-4" /> Печать листа
                   </button>
                   <button
                     type="button"
                     className="btn-ghost"
                     onClick={() => void exportStickers()}
                     disabled={busy}
-                    title="Стикеры заданий одним PDF, в том же порядке, что и лист подбора"
+                    title="Стикеры заданий в печать, в том же порядке, что и лист подбора"
                   >
-                    <Tag className="w-4 h-4" /> Скачать стикеры
+                    <Tag className="w-4 h-4" /> Печать стикеров
                   </button>
                   <button type="button" className="btn-ghost" onClick={() => void exportScanFile()} disabled={busy || scanByTask.size === 0}>
                     <Download className="w-4 h-4" /> Скан-файл для WB

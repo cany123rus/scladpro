@@ -55,6 +55,7 @@ import { downloadJsonRowsAsExcel, ensureExcelFileSize, ensureExcelRowLimit, ensu
 import { readFirstSheetAsJsonFast } from '../utils/excelWorkerClient';
 import { mergeWarehouseUpdates, removeWarehouseShelfItem, upsertWarehouseShelfItem } from '../utils/warehouseActions';
 import { ensurePdfLibs, ensureExcel, ensureBwip, lazyLibs } from './dashboardLazyLibs';
+import { printPdfDirect } from '../utils/printDirect';
 import { ExcelUploader, SuppliesFBOSection, WBProductsSection, ReportsSection, EmployeesSection, TelegramSettingsSection, DatamatrixCode, WbLayoutHandle } from './dashboardComponents';
 import { DashboardDatabaseTab } from './DashboardDatabaseTab';
 import { drawReportHeader, drawMetaLines, drawKpiChips, reportFooter, reportTableStyles } from './pdfReportKit';
@@ -1022,7 +1023,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
             }
         }
 
-        doc.save(`${fileName || 'codes'}.pdf`);
+        await printPdfDirect(doc, { widthMm: 58, heightMm: 40 });
 
     } catch (e) {
         console.error(e);
@@ -7917,8 +7918,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         doc.text(footerLabel, layout.fboBoxes.footerX, layout.fboBoxes.footerY, { align: 'center' });
       }
 
-      doc.save(`fbo_boxes_${supplierName.replace(/\s+/g, '_')}_${total}_${mskTodayYmd()}.pdf`);
-      showToast(`Сформировано этикеток: ${total}`, 'success');
+      await printPdfDirect(doc, { widthMm: 58, heightMm: 40 });
+      showToast(`Этикеток коробов: ${total} — отправлено в печать`, 'success');
     } catch (e: any) {
       showToast('Ошибка генерации этикеток коробов: ' + (e?.message || 'неизвестно'), 'error');
     } finally {
@@ -8130,12 +8131,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       doc.text(`Коробка • ${currentSupply.name}`, 29, 33.2, { align: 'center' });
     });
 
-    const blobUrl = doc.output('bloburl');
-    const preview = window.open('', 'SupplyBoxesPrintPreview', 'width=980,height=780');
-    if (preview) {
-      preview.document.write(`<html><head><title>Печать коробок 58x40</title></head><body style="margin:0;background:#f3f4f6;font-family:Arial,sans-serif;"><div style="padding:10px;display:flex;justify-content:space-between;align-items:center;background:#fff;border-bottom:1px solid #ddd;"><strong>Печать коробок 58x40</strong><button onclick="frames['pdfFrame'].focus();frames['pdfFrame'].print();" style="padding:8px 14px;border:none;background:#4f46e5;color:#fff;border-radius:8px;cursor:pointer;">Печать</button></div><iframe name="pdfFrame" src="${blobUrl}" style="width:100%;height:calc(100vh - 52px);border:0;"></iframe></body></html>`);
-      preview.document.close();
-    }
+    await printPdfDirect(doc, { widthMm: 58, heightMm: 40 });
   };
 
   useEffect(() => {
@@ -19450,13 +19446,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const handleTestPrintWbLayout = async (template: 'withChz' | 'withoutChz' | 'fboBoxes' | 'nameSequence' | 'chzTail' | 'fbsCombo') => {
     try {
       const doc = await buildWbLayoutLabelDoc(template);
-      const blobUrl = doc.output('bloburl');
-      const preview = window.open('', 'WBLayoutTestPrint', 'width=980,height=780');
-      if (preview) {
-        const templateLabel = template === 'withChz' ? 'с ЧЗ' : template === 'withoutChz' ? 'без ЧЗ' : template === 'fboBoxes' ? 'Короба FBO' : 'Номер + имя';
-        preview.document.write(`<html><head><title>Пробная печать</title></head><body style="margin:0;background:#f3f4f6;font-family:Arial,sans-serif;"><div style="padding:10px;display:flex;justify-content:space-between;align-items:center;background:#fff;border-bottom:1px solid #ddd;"><strong>Пробная печать макета ${templateLabel}</strong><button onclick="frames['pdfFrame'].focus();frames['pdfFrame'].print();" style="padding:8px 14px;border:none;background:#4f46e5;color:#fff;border-radius:8px;cursor:pointer;">Печать</button></div><iframe name="pdfFrame" src="${blobUrl}" style="width:100%;height:calc(100vh - 52px);border:0;"></iframe></body></html>`);
-        preview.document.close();
-      }
+      await printPdfDirect(doc, { widthMm: 58, heightMm: 40 });
     } catch (e: any) {
       showToast(`Ошибка пробной печати: ${e?.message || 'неизвестно'}`, 'error');
     }
@@ -19543,12 +19533,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         doc.text(nameLines, layout.nameSequence.nameX, layout.nameSequence.nameY, { align: 'center' });
       }
 
-      const blobUrl = doc.output('bloburl');
-      const preview = window.open('', 'NameSequenceLabelsPrintPreview', 'width=980,height=780');
-      if (preview) {
-        preview.document.write(`<html><head><title>Печать номерных этикеток 58x40</title></head><body style="margin:0;background:#f3f4f6;font-family:Arial,sans-serif;"><div style="padding:10px;display:flex;justify-content:space-between;align-items:center;background:#fff;border-bottom:1px solid #ddd;"><strong>Печать номерных этикеток 58x40</strong><button onclick="frames['pdfFrame'].focus();frames['pdfFrame'].print();" style="padding:8px 14px;border:none;background:#4f46e5;color:#fff;border-radius:8px;cursor:pointer;">Печать</button></div><iframe name="pdfFrame" src="${blobUrl}" style="width:100%;height:calc(100vh - 52px);border:0;"></iframe></body></html>`);
-        preview.document.close();
-      }
+      await printPdfDirect(doc, { widthMm: 58, heightMm: 40 });
 
       setShowNameSequencePrintModal(false);
       showToast(`Сформировано этикеток: ${qty}`, 'success');
@@ -19627,8 +19612,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         }
       }
 
-      doc.save(`labels_58x40_${new Date().toISOString().slice(0,10)}.pdf`);
-      showToast(`Сформировано этикеток: ${qty}`, 'success');
+      await printPdfDirect(doc, { widthMm: 58, heightMm: 40 });
+      showToast(`Этикеток: ${qty} — отправлено в печать`, 'success');
     } catch (e: any) {
       showToast(`Ошибка генерации этикеток: ${e?.message || 'неизвестно'}`, 'error');
     }
@@ -20948,7 +20933,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       className="btn-primary mt-4 w-full min-h-[48px]"
                     >
                       {fboBoxesGenerating ? <RefreshCw className="h-5 w-5 animate-spin" /> : <Printer className="h-5 w-5" />}
-                      {fboBoxesGenerating ? 'Генерация...' : 'Сгенерировать ШК коробов'}
+                      {fboBoxesGenerating ? 'Готовлю…' : 'Печать ШК коробов'}
                     </button>
                     </div>
                   </div>
