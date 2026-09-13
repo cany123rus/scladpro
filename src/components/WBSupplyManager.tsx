@@ -9644,14 +9644,31 @@ export const WBSupplyManager = ({
                         Выбрано: <span className="font-semibold tabular-nums">{fbsScanSelectedRows.length}</span>
                       </span>
 
-                      {/* Макет выбирают у кнопки «Стикеры» на самой поставке —
-                          здесь только показываем, каким будет печать. */}
-                      <span
-                        title="Макет меняется у кнопки «Стикеры» на поставке, настраивается в «Конструкторе этикеток»"
-                        className="rounded-xl border border-slate-200 bg-slate-50 px-2 py-1.5 text-sm text-slate-600"
+                      {/* Макет печати — тот же выбор, что у кнопки «Стикеры» на
+                          поставке: одна настройка на рабочее место, меняется в
+                          любом из двух мест. */}
+                      <label
+                        title="Макет этикетки для печати стикеров и ЧЗ. Сами макеты настраиваются в «Конструкторе этикеток»"
+                        className="inline-flex items-center gap-1.5 text-sm text-slate-600"
                       >
-                        Макет: {FBS_LABEL_KIND_TITLES[fbsLabelKind]}
-                      </span>
+                        Макет:
+                        <select
+                          value={fbsLabelKind}
+                          onChange={(e) => {
+                            const next = e.target.value as FbsLabelKind;
+                            setFbsLabelKind(next);
+                            try { localStorage.setItem('fbs_label_kind_v1', next); } catch {}
+                            // Снимаем фокус: пока он на списке, сканер «печатал» бы
+                            // в список, перебирая макеты, вместо поля скана.
+                            e.currentTarget.blur();
+                          }}
+                          className="rounded-xl border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-800 focus:border-indigo-500 focus:outline-none"
+                        >
+                          {(Object.keys(FBS_LABEL_KIND_TITLES) as FbsLabelKind[]).map((id) => (
+                            <option key={id} value={id}>{FBS_LABEL_KIND_TITLES[id]}</option>
+                          ))}
+                        </select>
+                      </label>
 
                       <label
                         className={`inline-flex items-center gap-2 text-sm ${fbsLabelKind === 'combo' ? 'text-slate-400' : 'text-slate-700'}`}
