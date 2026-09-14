@@ -7008,6 +7008,42 @@ export const WBSupplyManager = ({
 
   // --- PDF Generation ---
 
+  /**
+   * Отменённые задания — по статусам WB.
+   *
+   * Одна проверка на печать стикеров, выдачу ЧЗ и оба листа подбора: отменённое
+   * задание не поедет, и ни марка, ни строка в листе ему не нужны. checked=false
+   * значит, что WB статусы не отдал, — тогда ничего не отсекаем, но говорим об этом.
+   */
+  const fetchCanceledFbsOrders = async (ids: number[]) => {
+    const canceled = new Map<number, string>();
+    const token = getSupplierToken();
+    const clean = Array.from(new Set(ids.filter((id) => Number.isFinite(id) && id > 0)));
+    if (!token || !clean.length) return { canceled, checked: false };
+    try {
+      for (let i = 0; i < clean.length; i += 1000) {
+        const res = await withTimeout(fetch('https://marketplace-api.wildberries.ru/api/v3/orders/status', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: token },
+          body: JSON.stringify({ orders: clean.slice(i, i + 1000) }),
+        }), 30000, 'Таймаут статусов заданий WB');
+        if (!res.ok) throw new Error(`WB статусы: ${res.status}`);
+        const json = await res.json();
+        for (const st of json?.orders || []) {
+          const wbStatus = String(st?.wbStatus || '').toLowerCase();
+          const supplierStatus = String(st?.supplierStatus || '').toLowerCase();
+          if (supplierStatus === 'cancel' || wbStatus.startsWith('canceled') || wbStatus === 'declined_by_client' || wbStatus === 'defect') {
+            canceled.set(Number(st?.id), wbStatus || supplierStatus);
+          }
+        }
+      }
+      return { canceled, checked: true };
+    } catch (e) {
+      console.warn('статусы заданий WB не получены', e);
+      return { canceled, checked: false };
+    }
+  };
+
   const generatePickingList = async () => {
     // Библиотеки печати/Excel грузятся по требованию — не при открытии раздела.
     await ensurePdfLibs();
@@ -7040,7 +7076,7 @@ export const WBSupplyManager = ({
         return candidates.length === 0 ? true : candidates.some((c) => c.includes(targetSupplyId) || targetSupplyId.includes(c));
       });
 
-      const supplyOrders = relaxedFiltered
+      const mappedOrders = relaxedFiltered
         .map((o: any) => ({
           ...o,
           title: o.title || o.subject || 'Без названия',
@@ -7049,6 +7085,15 @@ export const WBSupplyManager = ({
           color: o.color || '-',
           article: o.article || o.vendorCode || '-',
         }));
+
+      // Отменённые задания в лист не попадают: собирать их не нужно.
+      const pickingCancel = await fetchCanceledFbsOrders(
+        mappedOrders.map((o: any) => Number(o.id ?? o.orderId ?? o.order_id)),
+      );
+      const supplyOrders = mappedOrders.filter((o: any) => !pickingCancel.canceled.has(Number(o.id ?? o.orderId ?? o.order_id)));
+      if (supplyOrders.length === 0) {
+        throw new Error('Все задания поставки отменены — лист подбора пуст');
+      }
 
       const orderIds = Array.from(new Set(
         supplyOrders
@@ -7202,8 +7247,12 @@ export const WBSupplyManager = ({
       }
       
       doc.save(`Лист подбора ${String(supplyName || '').replace(/[\\/:*?"<>|]+/g, '_')} ${sortedSupplyOrders.length}.pdf`);
-      setSuccessMsg(`Лист подбора на ${sortedSupplyOrders.length} заказов скачан`);
-      setTimeout(() => setSuccessMsg(null), 2500);
+      setSuccessMsg(
+        `Лист подбора на ${sortedSupplyOrders.length} заказов скачан`
+        + (pickingCancel.canceled.size ? `. Отменённые не вошли: ${pickingCancel.canceled.size}` : '')
+        + (pickingCancel.checked ? '' : '. Статусы WB не проверены — отменённые могли попасть в лист'),
+      );
+      setTimeout(() => setSuccessMsg(null), pickingCancel.canceled.size || !pickingCancel.checked ? 8000 : 2500);
       
     } catch (err: any) {
       setError(err.message);
@@ -7228,13 +7277,22 @@ export const WBSupplyManager = ({
         throw new Error('По выбранной поставке не найдены заказы');
       }
 
-      const supplyOrders = supplyOrdersRaw.map((o: any) => ({
-        ...o,
-        title: o.title || o.subject || 'Без названия',
-        size: o.size || o.techSize || o.wbSize || '-',
-        color: String(o.color || '-').replace(/[\r\n]+/g, ' / ').replace(/\s{2,}/g, ' ').trim(),
-        article: o.article || o.vendorCode || '-',
-      }));
+      const groupedCancel = await fetchCanceledFbsOrders(
+        supplyOrdersRaw.map((o: any) => Number(o.id ?? o.orderId ?? o.order_id)),
+      );
+      // Отменённые задания в лист не попадают: собирать их не нужно.
+      const supplyOrders = supplyOrdersRaw
+        .filter((o: any) => !groupedCancel.canceled.has(Number(o.id ?? o.orderId ?? o.order_id)))
+        .map((o: any) => ({
+          ...o,
+          title: o.title || o.subject || 'Без названия',
+          size: o.size || o.techSize || o.wbSize || '-',
+          color: String(o.color || '-').replace(/[\r\n]+/g, ' / ').replace(/\s{2,}/g, ' ').trim(),
+          article: o.article || o.vendorCode || '-',
+        }));
+      if (supplyOrders.length === 0) {
+        throw new Error('Все задания поставки отменены — лист подбора пуст');
+      }
 
       type Group = {
         title: string;
@@ -7382,6 +7440,14 @@ export const WBSupplyManager = ({
       });
 
       doc.save(`Лист подбора (групп.) ${String(supplyName || '').replace(/[\\/:*?"<>|]+/g, '_')} ${rows.length}.pdf`);
+      if (groupedCancel.canceled.size || !groupedCancel.checked) {
+        setSuccessMsg(
+          `Лист подбора (групп.) скачан`
+          + (groupedCancel.canceled.size ? `. Отменённые не вошли: ${groupedCancel.canceled.size}` : '')
+          + (groupedCancel.checked ? '' : '. Статусы WB не проверены — отменённые могли попасть в лист'),
+        );
+        setTimeout(() => setSuccessMsg(null), 8000);
+      }
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -7646,33 +7712,11 @@ export const WBSupplyManager = ({
        * в корзину. Такие задания не печатаем вовсе и показываем в отчёте. Если
        * WB статусы не отдал, печатаем как раньше — но пишем, что проверки не было.
        */
-      const tokenForStatus = getSupplierToken();
-      const canceledIds = new Set<number>();
-      let statusChecked = false;
-      if (tokenForStatus) {
-        try {
-          for (let i = 0; i < allOrderIds.length; i += 1000) {
-            const res = await withTimeout(fetch('https://marketplace-api.wildberries.ru/api/v3/orders/status', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', Authorization: tokenForStatus },
-              body: JSON.stringify({ orders: allOrderIds.slice(i, i + 1000) }),
-            }), 30000, 'Таймаут статусов заданий WB');
-            if (!res.ok) throw new Error(`WB статусы: ${res.status}`);
-            const json = await res.json();
-            for (const st of json?.orders || []) {
-              const wbStatus = String(st?.wbStatus || '').toLowerCase();
-              const supplierStatus = String(st?.supplierStatus || '').toLowerCase();
-              if (supplierStatus === 'cancel' || wbStatus.startsWith('canceled') || wbStatus === 'declined_by_client' || wbStatus === 'defect') {
-                canceledIds.add(Number(st?.id));
-                reportRow(Number(st?.id), 'canceled', `Задание отменено (${wbStatus || supplierStatus}) — стикер не печатался, марка не выдавалась`);
-              }
-            }
-          }
-          statusChecked = true;
-        } catch (e) {
-          console.warn('статусы заданий WB не получены', e);
-        }
-      }
+      const { canceled: canceledMap, checked: statusChecked } = await fetchCanceledFbsOrders(allOrderIds);
+      const canceledIds = new Set<number>(canceledMap.keys());
+      canceledMap.forEach((status, id) => {
+        reportRow(id, 'canceled', `Задание отменено (${status}) — стикер не печатался, марка не выдавалась`);
+      });
 
       const orderIds = allOrderIds.filter((id) => !canceledIds.has(id));
       if (orderIds.length === 0) {
