@@ -783,6 +783,27 @@ export const WBSupplyManager = ({
    * Код подбирается по категории, полу и размеру, печатается на этикетке и сразу
    * прикрепляется к заданию. Галочка запоминается на рабочем месте.
    */
+  /**
+   * Отчёт после печати стикеров: какие задания остались без ЧЗ и почему.
+   * Показывается окном, а не строкой ошибки: список нужен, пока его разбирают.
+   */
+  const [chzPrintReport, setChzPrintReport] = useState<null | {
+    supplyId: string;
+    supplyName: string;
+    printed: number;
+    withChz: number;
+    newChz: number;
+    onlyMissing: boolean;
+    statusChecked: boolean;
+    rows: Array<{
+      orderId: string;
+      sticker: string;
+      article: string;
+      size: string;
+      kind: 'canceled' | 'no_sticker' | 'no_code' | 'no_card' | 'claim_lost';
+      reason: string;
+    }>;
+  }>(null);
   const [fbsStickersWithChz, setFbsStickersWithChzState] = useState<boolean>(() => {
     try { return localStorage.getItem('fbs_stickers_with_chz_v1') === '1'; } catch { return false; }
   });
@@ -7546,7 +7567,14 @@ export const WBSupplyManager = ({
     }
   };
 
-  const downloadFBSStickers = async () => {
+  /**
+   * Печать стикеров поставки.
+   *
+   * onlyMissing — «Допечатать без ЧЗ»: только задания, у которых марки ещё нет,
+   * чтобы не перепечатывать всю поставку ради пары заданий.
+   */
+  const downloadFBSStickers = async (opts: { onlyMissing?: boolean } = {}) => {
+    const onlyMissing = Boolean(opts.onlyMissing);
     // Библиотеки печати/Excel грузятся по требованию — не при открытии раздела.
     await Promise.all([ensurePdfLibs(), ensureBwip()]);
     const { jsPDF, autoTable, bwipjs } = lazyLibs;
@@ -7581,14 +7609,74 @@ export const WBSupplyManager = ({
         return id;
       };
 
-      const orderIds = Array.from(new Set(
+      const allOrderIds = Array.from(new Set(
         sortedSupplyOrders
           .map((o: any) => extractSafeOrderId(o))
           .filter((id: number | null): id is number => Number.isFinite(id as number) && (id as number) > 0)
       ));
 
-      if (orderIds.length === 0) {
+      if (allOrderIds.length === 0) {
         throw new Error('В поставке не найдены ID заказов для печати стикеров');
+      }
+
+      const orderByIdAll = new Map<number, any>();
+      sortedSupplyOrders.forEach((o: any) => {
+        const id = extractSafeOrderId(o);
+        if (id) orderByIdAll.set(id, o);
+      });
+
+      /** Строки отчёта — задания, оставшиеся без ЧЗ. */
+      const reportRows: NonNullable<typeof chzPrintReport>['rows'] = [];
+      const reportRow = (orderId: number, kind: NonNullable<typeof chzPrintReport>['rows'][number]['kind'], reason: string, sticker?: any) => {
+        const order = orderByIdAll.get(orderId) || {};
+        reportRows.push({
+          orderId: String(orderId),
+          sticker: sticker ? `${String(sticker?.partA || '')} ${String(sticker?.partB || '')}`.trim() : '',
+          article: String(order?.article || ''),
+          size: String(order?.size || ''),
+          kind,
+          reason,
+        });
+      };
+
+      /*
+       * Статусы заданий у WB — до выдачи марок.
+       *
+       * Отменённое задание не поедет: марка на нём сгорела бы, а стикер ушёл бы
+       * в корзину. Такие задания не печатаем вовсе и показываем в отчёте. Если
+       * WB статусы не отдал, печатаем как раньше — но пишем, что проверки не было.
+       */
+      const tokenForStatus = getSupplierToken();
+      const canceledIds = new Set<number>();
+      let statusChecked = false;
+      if (tokenForStatus) {
+        try {
+          for (let i = 0; i < allOrderIds.length; i += 1000) {
+            const res = await withTimeout(fetch('https://marketplace-api.wildberries.ru/api/v3/orders/status', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: tokenForStatus },
+              body: JSON.stringify({ orders: allOrderIds.slice(i, i + 1000) }),
+            }), 30000, 'Таймаут статусов заданий WB');
+            if (!res.ok) throw new Error(`WB статусы: ${res.status}`);
+            const json = await res.json();
+            for (const st of json?.orders || []) {
+              const wbStatus = String(st?.wbStatus || '').toLowerCase();
+              const supplierStatus = String(st?.supplierStatus || '').toLowerCase();
+              if (supplierStatus === 'cancel' || wbStatus.startsWith('canceled') || wbStatus === 'declined_by_client' || wbStatus === 'defect') {
+                canceledIds.add(Number(st?.id));
+                reportRow(Number(st?.id), 'canceled', `Задание отменено (${wbStatus || supplierStatus}) — стикер не печатался, марка не выдавалась`);
+              }
+            }
+          }
+          statusChecked = true;
+        } catch (e) {
+          console.warn('статусы заданий WB не получены', e);
+        }
+      }
+
+      const orderIds = allOrderIds.filter((id) => !canceledIds.has(id));
+      if (orderIds.length === 0) {
+        throw new Error('Все задания поставки отменены — печатать нечего');
       }
 
       const token = getSupplierToken();
@@ -7647,7 +7735,11 @@ export const WBSupplyManager = ({
         }
       }
 
-      const orderedStickers = orderIds
+      orderIds.forEach((id) => {
+        if (!stickersByOrderId.has(id)) reportRow(id, 'no_sticker', 'WB не отдал стикер задания — повторите печать позже');
+      });
+
+      let orderedStickers = orderIds
         .map((id) => stickersByOrderId.get(id))
         .filter(Boolean);
 
@@ -7658,11 +7750,7 @@ export const WBSupplyManager = ({
        * кодов в базе меньше — печатаем сколько есть и говорим об этом, а не
        * молча отдаём половину поставки без маркировки.
        */
-      const orderById = new Map<number, any>();
-      sortedSupplyOrders.forEach((o: any) => {
-        const id = extractSafeOrderId(o);
-        if (id) orderById.set(id, o);
-      });
+      const orderById = orderByIdAll;
 
       /** Заказ → марка на этикетке (уже прикреплённая или новая). Нет ключа — стикер без ЧЗ. */
       const chzByOrderId = new Map<number, string>();
@@ -7691,7 +7779,7 @@ export const WBSupplyManager = ({
        * сохранённые сканы окна, и базу заказов: там же привязки с других мест.
        */
       const existingChzByOrderId = new Map<number, string>();
-      if (fbsStickersWithChz) {
+      if (fbsStickersWithChz || onlyMissing) {
         const [savedMap, dbScans] = await Promise.all([
           loadFbsSupplyScanMap(activeSupplyId, selectedSupplierId).catch(() => ({} as Record<string, FbsSupplyScanSavedItem>)),
           fetchFbsSupplyScans(selectedSupplierId, activeSupplyId).catch(() => []),
@@ -7706,6 +7794,27 @@ export const WBSupplyManager = ({
           const code = normalizeDataMatrixText(String(row?.chzCode || ''));
           if (id > 0 && code && !existingChzByOrderId.has(id)) existingChzByOrderId.set(id, code);
         }
+        if (onlyMissing) {
+          // Задания с маркой уже напечатаны — их не трогаем вовсе.
+          orderedStickers = orderedStickers.filter((st: any) => !existingChzByOrderId.has(Number(st?.orderId ?? st?.id ?? st?.order_id)));
+          if (orderedStickers.length === 0) {
+            if (reportRows.length) {
+              setChzPrintReport({
+                supplyId: activeSupplyId,
+                supplyName: supplies.find((x) => x.id === activeSupplyId)?.name || activeSupplyId,
+                printed: 0,
+                withChz: 0,
+                newChz: 0,
+                onlyMissing: true,
+                statusChecked,
+                rows: reportRows,
+              });
+            } else {
+              setSuccessMsg('У всех заданий поставки уже есть ЧЗ — допечатывать нечего.');
+            }
+            return;
+          }
+        }
         for (const sticker of orderedStickers) {
           const orderId = Number(sticker?.orderId ?? sticker?.id ?? sticker?.order_id);
           const code = existingChzByOrderId.get(orderId);
@@ -7719,6 +7828,10 @@ export const WBSupplyManager = ({
         : [];
       if (fbsStickersWithChz && needNewCodes > 0 && pool.length === 0) {
         chzShortage = `Свободных марок ЧЗ в базе нет — ${needNewCodes} заданий напечатаны обычными стикерами WB, их нужно сканировать.`;
+        for (const st of orderedStickers) {
+          const id = Number(st?.orderId ?? st?.id ?? st?.order_id);
+          if (!chzByOrderId.has(id)) reportRow(id, 'no_code', 'В базе нет свободных кодов ЧЗ этого поставщика', st);
+        }
       }
 
       if (fbsStickersWithChz && (pool.length > 0 || chzByOrderId.size > 0)) {
@@ -7753,6 +7866,12 @@ export const WBSupplyManager = ({
           });
           if (!match) {
             unmatchedOrders += 1;
+            if (!card) {
+              reportRow(orderId, 'no_card', 'Нет карточки товара в кэше — неизвестны категория и пол. Обновите базу товаров', sticker);
+            } else {
+              const genderText = card.gender === 'male' ? 'мужской' : card.gender === 'female' ? 'женский' : 'пол не указан';
+              reportRow(orderId, 'no_code', `Нет свободного кода: ${card.subject || 'без категории'}, ${genderText}, размер ${String(order?.size || '—')}`, sticker);
+            }
             continue;
           }
 
@@ -7786,7 +7905,11 @@ export const WBSupplyManager = ({
           if (claimed.size > 0) notifyChzStockChanged(selectedSupplierId);
           for (const [orderId, code] of Array.from(newChzByOrderId.entries())) {
             if (claimed.has(code)) chzByOrderId.set(orderId, code);
-            else { newChzByOrderId.delete(orderId); unmatchedOrders += 1; }
+            else {
+              newChzByOrderId.delete(orderId);
+              unmatchedOrders += 1;
+              reportRow(orderId, 'claim_lost', 'Подобранный код в тот же момент забрал другой компьютер — нажмите «Допечатать без ЧЗ»', stickersByOrderId.get(orderId));
+            }
           }
         }
 
@@ -7989,7 +8112,20 @@ export const WBSupplyManager = ({
                  if (fbsStickersWithChz && newChzByOrderId.size > 0) {
                    await bindPrintedChzToOrders(newChzByOrderId, orderById);
                  }
-                 if (chzShortage) setError(chzShortage);
+                 if (fbsStickersWithChz || reportRows.length) {
+                   setChzPrintReport({
+                     supplyId: activeSupplyId,
+                     supplyName: supplies.find((x) => x.id === activeSupplyId)?.name || activeSupplyId,
+                     printed: orderedStickers.length,
+                     withChz: chzByOrderId.size,
+                     newChz: newChzByOrderId.size,
+                     onlyMissing,
+                     statusChecked,
+                     rows: reportRows,
+                   });
+                 } else if (chzShortage) {
+                   setError(chzShortage);
+                 }
                  return;
                } catch (e) {
                  console.warn('single stickers pdf failed on profile, trying lighter profile', profile, e);
@@ -8990,6 +9126,16 @@ export const WBSupplyManager = ({
                                                 ЧЗ из базы
                                             </label>
                                             {fbsStickersWithChz && (
+                                                <button
+                                                    type="button"
+                                                    onClick={(e) => { e.stopPropagation(); void downloadFBSStickers({ onlyMissing: true }); }}
+                                                    title="Напечатать этикетки только тем заданиям, у которых ещё нет ЧЗ. Задания с маркой не перепечатываются"
+                                                    className="flex items-center gap-1 rounded-lg border border-indigo-300 bg-indigo-50 px-2 py-1 text-xs font-semibold text-indigo-700 hover:bg-indigo-100"
+                                                >
+                                                    <Printer className="w-3.5 h-3.5" /> Допечатать без ЧЗ
+                                                </button>
+                                            )}
+                                            {fbsStickersWithChz && (
                                                 <select
                                                     value={fbsLabelKind}
                                                     onChange={(e) => {
@@ -9016,6 +9162,76 @@ export const WBSupplyManager = ({
         </div>
         </>
       )}
+
+      {chzPrintReport && (() => {
+        const r = chzPrintReport;
+        const groups: Array<{ kind: string; title: string; tone: string }> = [
+          { kind: 'no_code', title: 'Нет подходящего кода в базе — сканировать', tone: 'amber' },
+          { kind: 'no_card', title: 'Нет карточки товара — сканировать', tone: 'amber' },
+          { kind: 'claim_lost', title: 'Код забрал другой компьютер', tone: 'amber' },
+          { kind: 'no_sticker', title: 'WB не отдал стикер', tone: 'rose' },
+          { kind: 'canceled', title: 'Отменённые задания — не печатались', tone: 'slate' },
+        ];
+        const needsChz = r.rows.filter((row) => row.kind !== 'canceled').length;
+        return (
+          <div className="fixed inset-0 z-[70] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setChzPrintReport(null)}>
+            <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+              <div className={`px-5 py-4 text-white flex items-start justify-between gap-4 ${needsChz ? 'bg-gradient-to-r from-amber-500 to-orange-500' : 'bg-gradient-to-r from-emerald-500 to-teal-500'}`}>
+                <div>
+                  <div className="text-lg font-bold flex items-center gap-2"><Printer className="w-5 h-5" /> {r.onlyMissing ? 'Допечатка без ЧЗ' : 'Печать стикеров'}</div>
+                  <div className="text-sm opacity-90">{r.supplyName}</div>
+                </div>
+                <button onClick={() => setChzPrintReport(null)} className="p-1.5 rounded-lg hover:bg-white/20"><X className="w-5 h-5" /></button>
+              </div>
+              <div className="p-5 overflow-auto space-y-4">
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  <div className="rounded-xl bg-slate-50 p-3"><div className="text-2xl font-extrabold tabular-nums">{r.printed}</div><div className="text-xs text-slate-500">напечатано</div></div>
+                  <div className="rounded-xl bg-emerald-50 p-3"><div className="text-2xl font-extrabold tabular-nums text-emerald-700">{r.withChz}</div><div className="text-xs text-emerald-700">с ЧЗ (новых {r.newChz})</div></div>
+                  <div className={`rounded-xl p-3 ${needsChz ? 'bg-amber-50' : 'bg-slate-50'}`}><div className={`text-2xl font-extrabold tabular-nums ${needsChz ? 'text-amber-700' : ''}`}>{needsChz}</div><div className="text-xs text-slate-500">без ЧЗ</div></div>
+                </div>
+                {!r.statusChecked && (
+                  <div className="rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700">Статусы заданий у WB получить не удалось — отменённые задания могли попасть в печать.</div>
+                )}
+                {!r.rows.length && (
+                  <div className="rounded-xl bg-emerald-50 px-3 py-2 text-sm text-emerald-800">Все напечатанные задания получили ЧЗ, отменённых нет.</div>
+                )}
+                {groups.map((g) => {
+                  const rows = r.rows.filter((row) => row.kind === g.kind);
+                  if (!rows.length) return null;
+                  return (
+                    <div key={g.kind}>
+                      <div className="mb-1.5 text-sm font-bold text-slate-800">{g.title}: {rows.length}</div>
+                      <div className="rounded-xl border border-slate-200 divide-y divide-slate-100">
+                        {rows.map((row) => (
+                          <div key={`${g.kind}-${row.orderId}`} className="px-3 py-2 text-sm">
+                            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+                              {row.sticker ? <span className="font-mono font-bold text-slate-900">{row.sticker}</span> : null}
+                              <span className="font-mono text-xs text-slate-500">задание {row.orderId}</span>
+                              <span className="text-slate-700">{[row.article, row.size].filter(Boolean).join(' · ')}</span>
+                            </div>
+                            <div className="text-xs text-slate-500">{row.reason}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="px-5 py-3 border-t border-slate-100 flex flex-wrap justify-end gap-2">
+                {r.rows.some((row) => row.kind === 'claim_lost' || row.kind === 'no_sticker') && (
+                  <button
+                    onClick={() => { setChzPrintReport(null); void downloadFBSStickers({ onlyMissing: true }); }}
+                    className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700"
+                  >
+                    Допечатать без ЧЗ
+                  </button>
+                )}
+                <button onClick={() => setChzPrintReport(null)} className="px-4 py-2 rounded-xl border border-slate-300 text-sm text-slate-700 hover:bg-slate-50">Понятно</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {boxesModal && (() => {
         const supply = supplies.find((s) => s.id === boxesModal.supplyId);
