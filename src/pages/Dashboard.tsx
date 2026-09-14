@@ -61,7 +61,7 @@ import { DashboardDatabaseTab } from './DashboardDatabaseTab';
 import { drawReportHeader, drawMetaLines, drawKpiChips, reportFooter, reportTableStyles } from './pdfReportKit';
 
 import { DASHBOARD_TAB_IDS, isDashboardTabId } from '../constants/dashboardTabs';
-import { restoreDataMatrixGs } from '../utils/honestSign';
+import { normalizeDataMatrixText, parseChzCodesText, restoreDataMatrixGs } from '../utils/honestSign';
 import {
   DEFAULT_CHZ_TAIL_LAYOUT,
   DEFAULT_FBS_COMBO_LAYOUT,
@@ -574,6 +574,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
     if (lowered === 'костюмы' || lowered === 'костюмы спортивные') {
       return 'Костюмы / Костюмы спортивные';
+    }
+    // Свитеры и жилеты — одна категория ЧЗ: марки у них общие.
+    if (['свитеры', 'свитер', 'жилеты', 'жилет', 'жилетки', 'жилетка', 'свитеры / жилеты'].includes(lowered)) {
+      return 'Свитеры / Жилеты';
     }
 
     return raw;
@@ -6278,7 +6282,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     }
   };
 
-  const importHonestSignCodes = async (codes: string[], fileName: string) => {
+  const importHonestSignCodes = async (rawCodes: string[], fileName: string) => {
+    /*
+     * Коды храним в том виде, в каком их отдаёт сканер: без невидимого GS.
+     * Раньше CSV из «Честного знака» ложился как есть, с GS внутри, и при скане
+     * код не совпадал с базой: остаток не уменьшался, а код записывался второй раз.
+     */
+    const codes = rawCodes.map((c) => normalizeDataMatrixText(String(c || ''))).filter(Boolean);
     if (codes.length === 0) {
       showToast('Файл пуст или не содержит кодов', 'error');
       return;
@@ -6374,7 +6384,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     }
   };
 
-  const parseCodesFromFile = async (file: File): Promise<string[]> => {
+  /**
+   * Коды из файла базы ЧЗ.
+   *
+   * CSV из «Честного знака» разбираем сами, а не как таблицу: в хвосте кода
+   * встречаются «;», «,» и кавычки, и табличный разбор режет код на части.
+   * Пересохранённый через Excel файл тоже собирается обратно — см. parseChzCodesText.
+   * Строки, из которых полный код не собрать, возвращаются отдельно.
+   */
+  const parseCodesFromFile = async (file: File): Promise<{ codes: string[]; broken: Array<{ line: number; value: string }> }> => {
     const fileSizeError = ensureExcelFileSize(file);
     if (fileSizeError) {
       throw new Error(fileSizeError);
@@ -6382,6 +6400,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
     const lowerName = String(file.name || '').toLowerCase();
 
+    let text = '';
     if (lowerName.endsWith('.xlsx') || lowerName.endsWith('.xls')) {
       const data = await file.arrayBuffer();
       const jsonData = await readFirstSheetAsJson<any[]>(data, { header: 1 });
@@ -6389,16 +6408,35 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       if (rowLimitError) {
         throw new Error(rowLimitError);
       }
-      return jsonData.map(row => row[0] ? String(row[0]).trim() : '').filter(c => c.length > 0);
+      // Excel хранит GS как _x001D_ — возвращаем символ, дальше разбор общий.
+      text = jsonData
+        .map((row) => (row?.[0] != null ? String(row[0]).replace(/_x001D_/gi, String.fromCharCode(29)) : ''))
+        .join('\n');
+    } else {
+      text = await file.text();
     }
 
-    const text = await file.text();
-    const lines = text.split(/\r?\n/).map(line => line.trim()).filter(line => line.length > 0);
-    const rowLimitError = ensureExcelRowLimit(lines.length);
+    const parsed = parseChzCodesText(text);
+    const rowLimitError = ensureExcelRowLimit(parsed.totalLines);
     if (rowLimitError) {
       throw new Error(rowLimitError);
     }
-    return lines;
+    return { codes: parsed.codes, broken: parsed.broken };
+  };
+
+  /** Есть битые строки — спрашиваем, грузить ли целые. false — загрузку отменить. */
+  const confirmBrokenChzLines = (codes: string[], broken: Array<{ line: number; value: string }>) => {
+    if (!broken.length) return true;
+    const examples = broken.slice(0, 3).map((b) => `строка ${b.line}`).join(', ');
+    if (!codes.length) {
+      showToast(`В файле нет ни одного целого кода ЧЗ: ${broken.length} строк обрезаны или испорчены (${examples}). Загрузите исходный файл из «Честного знака».`, 'error');
+      return false;
+    }
+    return window.confirm(
+      `Целых кодов: ${codes.length}.\n` +
+      `В ${broken.length} строках полный код ЧЗ собрать не удалось (${examples}) — они обрезаны или испорчены.\n\n` +
+      'Загрузить только целые коды?',
+    );
   };
 
   const handleHonestSignBaseUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -6406,7 +6444,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     if (!file) return;
 
     try {
-      const codes = await parseCodesFromFile(file);
+      const { codes, broken } = await parseCodesFromFile(file);
+      if (!confirmBrokenChzLines(codes, broken)) return;
       await importHonestSignCodes(codes, file.name);
     } catch (error: any) {
       console.error('Honest Sign file upload error:', error);
@@ -6468,7 +6507,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
       const blob = await dlRes.blob();
       const file = new File([blob], originalName, { type: blob.type || 'application/octet-stream' });
-      const codes = await parseCodesFromFile(file);
+      const { codes, broken } = await parseCodesFromFile(file);
+      if (!confirmBrokenChzLines(codes, broken)) return;
 
       await importHonestSignCodes(codes, `tg_${originalName}`);
     } catch (e: any) {

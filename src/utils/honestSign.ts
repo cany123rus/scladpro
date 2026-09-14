@@ -119,6 +119,95 @@ export const fixCyrillicKeyboardLayout = (raw: string) => {
   return value.replace(/./g, (char) => RU_TO_EN_KEYS[char] ?? char);
 };
 
+/** Полный код маркировки: 01 + GTIN + 21 + серийный номер + хвост 91/92 (52 знака). */
+export const isFullChzCode = (code: string) => {
+  const value = normalizeDataMatrixText(code);
+  // restoreDataMatrixGs ставит разделители только в код правильной формы.
+  return restoreDataMatrixGs(value) !== value;
+};
+
+/**
+ * Разбор одной строки CSV так, как её пишет Excel.
+ *
+ * Excel режет код по «;» или «,» из криптохвоста на колонки, а поля с кавычками
+ * берёт в кавычки и удваивает внутренние. Склеиваем поля обратно тем же
+ * разделителем — получается исходная строка.
+ */
+const unquoteCsvLine = (line: string, delimiter: string) => {
+  if (!line.includes('"')) return line;
+  const fields: string[] = [];
+  let field = '';
+  let quoted = false;
+  let atFieldStart = true;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (quoted) {
+      if (ch === '"' && line[i + 1] === '"') { field += '"'; i++; continue; }
+      if (ch === '"') { quoted = false; continue; }
+      field += ch;
+      continue;
+    }
+    if (ch === '"' && atFieldStart) { quoted = true; atFieldStart = false; continue; }
+    if (ch === delimiter) { fields.push(field); field = ''; atFieldStart = true; continue; }
+    field += ch;
+    atFieldStart = false;
+  }
+  fields.push(field);
+  return fields.join(delimiter);
+};
+
+/**
+ * Коды ЧЗ из текстового файла (CSV/TXT) — в том виде, в каком их сравнивает сканер.
+ *
+ * Файл из «Честного знака» — одна строка на код, внутри два невидимых GS. В
+ * хвосте кода бывают «;», «,» и кавычки, поэтому в Excel такой файл выглядит
+ * «битым», а пересохранённый через Excel — действительно портится: кавычки,
+ * лишние колонки, пропавший GS. Всё это снимаем, а GS убираем совсем: сканер
+ * отдаёт код без него, и в базе коды должны совпадать со сканом символ в символ.
+ *
+ * Возвращает целые коды и строки, из которых полный код собрать не удалось.
+ */
+export const parseChzCodesText = (text: string) => {
+  const lines = String(text || '')
+    .replace(/^﻿/, '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const codes: string[] = [];
+  const broken: Array<{ line: number; value: string }> = [];
+
+  lines.forEach((rawLine, index) => {
+    // Заголовок таблицы, если его добавили вручную.
+    if (index === 0 && !/^\W*01\d/.test(rawLine) && /[А-Яа-яA-Za-z]{3,}/.test(rawLine.slice(0, 12))) return;
+
+    /*
+     * Варианты строки: как есть и без CSV-кавычек при каждом возможном
+     * разделителе. Строку как есть проверяем последней, если в ней есть
+     * кавычки: хвост кода проверяется только по длине, и «грязный» вариант с
+     * лишней кавычкой тоже может сойти за полный — а это уже чужой код.
+     */
+    const unquoted = [';', ',', '\t'].map((d) => unquoteCsvLine(rawLine, d));
+    const variants = (rawLine.includes('"') ? [...unquoted, rawLine] : [rawLine, ...unquoted])
+      .map((c) => normalizeDataMatrixText(c.trim()))
+      .filter((c, i, all) => all.indexOf(c) === i && isFullChzCode(c));
+
+    /*
+     * Если вариантов несколько, берём код стандартной длины: у одежды и обуви
+     * серийный номер 13 знаков, весь код — 83. Разные варианты одной строки
+     * значат, что строку испортили, и угадывать тут нельзя без этой опоры.
+     */
+    const full = variants.length === 1
+      ? variants[0]
+      : variants.find((c) => c.length === 83) || '';
+
+    if (full) codes.push(full);
+    else broken.push({ line: index + 1, value: rawLine.slice(0, 60) });
+  });
+
+  return { codes, broken, totalLines: lines.length };
+};
+
 /** Текст стикера без переносов и лишних пробелов. */
 export const normalizeScanStickerText = (raw: string) => String(raw || '')
   .replace(/[\r\n\t]+/g, ' ')

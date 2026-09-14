@@ -78,6 +78,10 @@ const normCategory = (raw: string | null | undefined) => {
   if (['костюмы', 'костюмы спортивные', 'костюмы / костюмы спортивные'].includes(c.toLowerCase())) {
     return 'Костюмы / Костюмы спортивные';
   }
+  // Свитеры и жилеты — одна категория ЧЗ.
+  if (['свитеры', 'свитер', 'жилеты', 'жилет', 'жилетки', 'жилетка', 'свитеры / жилеты'].includes(c.toLowerCase())) {
+    return 'Свитеры / Жилеты';
+  }
   return c;
 };
 const normGender = (raw: unknown): Gender => {
