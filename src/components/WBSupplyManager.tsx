@@ -44,7 +44,7 @@ import {
 import { explainWbAccess, hasWbScope } from '../utils/wbTokenScopes';
 import { buildStickersPdf, fetchStickers, renderStickerImage } from '../utils/stickers';
 import { printImagesDirect, printPdfDirect } from '../utils/printDirect';
-import FbsChzStockPanel from './FbsChzStockPanel';
+import FbsChzStockPanel, { notifyChzStockChanged } from './FbsChzStockPanel';
 import type { StickerImage } from '../utils/stickers';
 import { getWBImageUrl, getWBImageUrls } from '../utils/wbImages';
 import {
@@ -3081,6 +3081,9 @@ export const WBSupplyManager = ({
       if (error) throw error;
     }
 
+    // Отсканированная марка из базы уменьшила остаток — панель ЧЗ пересчитает сразу.
+    if (idsToUpdate.length > 0) notifyChzStockChanged(normalizedSupplierId);
+
     return { foreignCodes };
   };
 
@@ -4269,6 +4272,7 @@ export const WBSupplyManager = ({
               .eq('code', resetCode)
               .or('file_name.eq.Отсканировано,status.eq.scanned');
           }
+          notifyChzStockChanged(selectedSupplierId);
         } catch (e) {
           console.error('unified_honest_sign_codes reset failed', e);
         }
@@ -7539,6 +7543,7 @@ export const WBSupplyManager = ({
       );
 
       setSuccessMsg(`ЧЗ из базы прикреплены к заданиям и отправлены в WB: ${codesByOrderId.size}. Сканировать их в «Скан ЧЗ» не нужно.`);
+      notifyChzStockChanged(supplierId);
     } catch (e: any) {
       setError(`Этикетки напечатаны, но связка не сохранилась: ${e?.message || e}. Отсканируйте эти коды вручную.`);
     }
@@ -7781,6 +7786,7 @@ export const WBSupplyManager = ({
             if (claimError) throw new Error(`Не удалось закрепить коды из базы: ${claimError.message}`);
             (rows || []).forEach((r: any) => claimed.add(String(r?.code || '')));
           }
+          if (claimed.size > 0) notifyChzStockChanged(selectedSupplierId);
           for (const [orderId, code] of Array.from(newChzByOrderId.entries())) {
             if (claimed.has(code)) chzByOrderId.set(orderId, code);
             else { newChzByOrderId.delete(orderId); unmatchedOrders += 1; }

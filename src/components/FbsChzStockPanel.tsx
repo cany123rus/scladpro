@@ -23,6 +23,20 @@ type ForecastRow = {
 type Status = 'out' | 'critical' | 'low' | 'ok' | 'idle';
 
 const PERIOD_DAYS = 14;
+
+/**
+ * Событие «остаток ЧЗ изменился»: печать с кодами из базы, скан марки, сброс.
+ * Панель пересчитывает остаток сразу, без перевыбора поставщика.
+ */
+export const CHZ_STOCK_CHANGED_EVENT = 'fbs-chz-stock-changed';
+export const notifyChzStockChanged = (supplierId?: string) => {
+  try {
+    window.dispatchEvent(new CustomEvent(CHZ_STOCK_CHANGED_EVENT, { detail: { supplierId: supplierId || '' } }));
+  } catch { /* старый браузер без CustomEvent — обновится при следующем открытии */ }
+};
+
+/** Заказы WB за 14 дней меняются медленно — между пересчётами остатка их не перезапрашиваем. */
+const ORDERS_CACHE_MS = 10 * 60_000;
 const MONTH_DAYS = 30;
 
 /** Знак «Честного знака»: чёрная плашка с жёлтой галочкой. */
@@ -120,24 +134,58 @@ export default function FbsChzStockPanel({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [reloadTick, setReloadTick] = useState(0);
+  // Мягкий пересчёт: остаток заново, заказы WB — из кэша (если свежие).
+  const [softTick, setSoftTick] = useState(0);
+  const ordersCacheRef = useRef<{ supplierId: string; at: number; nmIds: number[] | null; note: string } | null>(null);
+  const forceOrdersRef = useRef(true);
   const [open, setOpen] = useState<boolean>(() => {
     try { return localStorage.getItem('fbs_chz_stock_open_v1') !== '0'; } catch { return true; }
   });
 
+  // Смена поставщика и кнопка «Обновить» — полный пересчёт с заказами WB.
+  useEffect(() => { forceOrdersRef.current = true; }, [supplierId, reloadTick]);
+
+  // Печать/скан/сброс марки у этого поставщика — пересчитываем остаток сразу.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const onChanged = (e: Event) => {
+      const target = String((e as CustomEvent)?.detail?.supplierId || '');
+      if (target && supplierId && target !== supplierId) return;
+      // Сканы идут пачкой — пересчитываем раз, когда поток затих.
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => setSoftTick((t) => t + 1), 1500);
+    };
+    window.addEventListener(CHZ_STOCK_CHANGED_EVENT, onChanged);
+    return () => {
+      if (timer) clearTimeout(timer);
+      window.removeEventListener(CHZ_STOCK_CHANGED_EVENT, onChanged);
+    };
+  }, [supplierId]);
+
   useEffect(() => {
     if (!supplierId) { setRows([]); return; }
     let cancelled = false;
-    setLoading(true);
+    const soft = !forceOrdersRef.current;
+    forceOrdersRef.current = false;
+    // При мягком пересчёте не мигаем «Считаю остатки…» — меняются только цифры.
+    if (!soft) setLoading(true);
     setError('');
     (async () => {
       let nmIds: number[] | null = null;
       let note = '';
-      try {
-        if (!loadOrdersRef.current) throw new Error('нет доступа к заказам WB');
-        nmIds = await loadOrdersRef.current(PERIOD_DAYS);
-      } catch (e: any) {
-        nmIds = null;
-        note = String(e?.message || e || 'WB не ответил');
+      const cached = ordersCacheRef.current;
+      if (soft && cached && cached.supplierId === supplierId && Date.now() - cached.at < ORDERS_CACHE_MS) {
+        nmIds = cached.nmIds;
+        note = cached.note;
+      } else {
+        try {
+          if (!loadOrdersRef.current) throw new Error('нет доступа к заказам WB');
+          nmIds = await loadOrdersRef.current(PERIOD_DAYS);
+        } catch (e: any) {
+          nmIds = null;
+          note = String(e?.message || e || 'WB не ответил');
+        }
+        ordersCacheRef.current = { supplierId, at: Date.now(), nmIds, note };
       }
       if (cancelled) return;
 
@@ -165,7 +213,7 @@ export default function FbsChzStockPanel({
       .catch((e) => { if (!cancelled) setError(String(e?.message || e)); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [supplierId, reloadTick]);
+  }, [supplierId, reloadTick, softTick]);
 
   const groups = useMemo(() => {
     const map = new Map<string, { category: string; inBase: number; used: number; periodDays: number; rows: ForecastRow[] }>();
