@@ -783,7 +783,14 @@ export const WBSupplyManager = ({
    * По умолчанию выключено: пока код подбирается из базы по очереди, без
    * привязки к товару и размеру, такие этикетки годятся только на проверку.
    */
-  const [fbsStickersWithChz, setFbsStickersWithChz] = useState(false);
+  // «ЧЗ из базы» при печати стикеров — запоминаем на рабочем месте.
+  const [fbsStickersWithChz, setFbsStickersWithChzState] = useState<boolean>(() => {
+    try { return localStorage.getItem('fbs_stickers_with_chz_v1') === '1'; } catch { return false; }
+  });
+  const setFbsStickersWithChz = (next: boolean) => {
+    setFbsStickersWithChzState(next);
+    try { localStorage.setItem('fbs_stickers_with_chz_v1', next ? '1' : '0'); } catch { /* приватный режим */ }
+  };
   /*
    * Высота панели фильтров — под неё подставляется шапка таблицы.
    *
@@ -7405,18 +7412,29 @@ export const WBSupplyManager = ({
   ): Promise<Array<{ code: string; category: string; gender: string }>> => {
     if (!supplierId || count <= 0) return [];
 
-    const { data, error } = await supabase
-      .from('unified_honest_sign_codes')
-      .select('code, category, gender, size')
-      .eq('supplier_id', supplierId)
-      .neq('file_name', 'Напечатанные QR')
-      .neq('file_name', 'Отсканировано')
-      .neq('status', 'printed')
-      .neq('status', 'scanned')
-      .order('created_at', { ascending: true })
-      .limit(Math.max(count * 4, count));
-
-    if (error) throw new Error(`Не удалось получить коды из базы: ${error.message}`);
+    /*
+     * Вся свободная база поставщика, а не «count × 4 самых старых».
+     *
+     * Подбор идёт по категории, полу и размеру: если старейшие коды — жилеты,
+     * а печатаем костюмы, из урезанной выборки не подошло бы ничего, хотя
+     * костюмные коды в базе есть. Постранично: PostgREST отдаёт по 1000.
+     */
+    const data: any[] = [];
+    for (let from = 0; from < 50_000; from += 1000) {
+      const { data: page, error } = await supabase
+        .from('unified_honest_sign_codes')
+        .select('code, category, gender, size')
+        .eq('supplier_id', supplierId)
+        .neq('file_name', 'Напечатанные QR')
+        .neq('file_name', 'Отсканировано')
+        .neq('status', 'printed')
+        .neq('status', 'scanned')
+        .order('created_at', { ascending: true })
+        .range(from, from + 999);
+      if (error) throw new Error(`Не удалось получить коды из базы: ${error.message}`);
+      data.push(...(page || []));
+      if (!page || page.length < 1000) break;
+    }
 
     return (data || [])
       .map((r: any) => ({
@@ -7496,15 +7514,7 @@ export const WBSupplyManager = ({
       const saved = await saveFbsSupplyScanMap(supplyId, next, supplierId);
       applyFbsScans(saved);
 
-      // Помечаем напечатанными — иначе они снова попадут в подбор.
-      const printedCodes = Array.from(codesByOrderId.values());
-      for (let i = 0; i < printedCodes.length; i += 200) {
-        await supabase
-          .from('unified_honest_sign_codes')
-          .update({ file_name: 'Напечатанные QR' })
-          .eq('supplier_id', supplierId)
-          .in('code', printedCodes.slice(i, i + 200));
-      }
+      // Напечатанными коды пометили ещё до печати (захват в downloadFBSStickers).
 
       // И в базу заказов — с пометкой, что связка из печати, а не со сканера.
       for (const [orderId, code] of codesByOrderId.entries()) {
@@ -7521,15 +7531,14 @@ export const WBSupplyManager = ({
         }).catch((e) => console.error('fbs_order_codes upsert failed', e));
       }
 
-      // Напечатанная марка уже на вещи — значит и на задание в WB её ставим сразу.
-      if (fbsWbAutoSendRef.current) {
-        void pushFbsSgtinsToWb(
-          Array.from(codesByOrderId.entries()).map(([orderId, code]) => ({ orderId: String(orderId), code })),
-          supplierId,
-        );
-      }
+      // Марка из базы напечатана на этикетке задания — на задание в WB её ставим
+      // сразу, без отдельной галочки: сканировать её никто не будет.
+      void pushFbsSgtinsToWb(
+        Array.from(codesByOrderId.entries()).map(([orderId, code]) => ({ orderId: String(orderId), code })),
+        supplierId,
+      );
 
-      setSuccessMsg(`Марки закреплены за заданиями: ${codesByOrderId.size}. Сканировать их в «Скан ЧЗ» не нужно.`);
+      setSuccessMsg(`ЧЗ из базы прикреплены к заданиям и отправлены в WB: ${codesByOrderId.size}. Сканировать их в «Скан ЧЗ» не нужно.`);
     } catch (e: any) {
       setError(`Этикетки напечатаны, но связка не сохранилась: ${e?.message || e}. Отсканируйте эти коды вручную.`);
     }
@@ -7653,8 +7662,10 @@ export const WBSupplyManager = ({
         if (id) orderById.set(id, o);
       });
 
-      /** Заказ → подобранная марка. Пустая ячейка значит «стикер без ЧЗ». */
+      /** Заказ → марка на этикетке (уже прикреплённая или новая). Нет ключа — стикер без ЧЗ. */
       const chzByOrderId = new Map<number, string>();
+      /** Только новые марки из базы — их прикрепляем и отправляем в WB после печати. */
+      const newChzByOrderId = new Map<number, string>();
       let chzLayout = DEFAULT_CHZ_LABEL_LAYOUT;
       let chzTailLayout = DEFAULT_CHZ_TAIL_LAYOUT;
       let comboLayout = DEFAULT_FBS_COMBO_LAYOUT;
@@ -7669,14 +7680,46 @@ export const WBSupplyManager = ({
        */
       let chzShortage = '';
 
-      const pool = fbsStickersWithChz
-        ? await takeFreeChzCodes(selectedSupplierId, orderedStickers.length)
+      /*
+       * У задания марка уже есть — печатаем её же, новую из базы не берём.
+       *
+       * Иначе повторная печать поставки (замялся рулон, потеряли стикер) выдала
+       * бы заданию второй код: старый уже наклеен и, возможно, ушёл в WB, а в
+       * базе числился бы новый — пересорт и списанный впустую код. Берём и
+       * сохранённые сканы окна, и базу заказов: там же привязки с других мест.
+       */
+      const existingChzByOrderId = new Map<number, string>();
+      if (fbsStickersWithChz) {
+        const [savedMap, dbScans] = await Promise.all([
+          loadFbsSupplyScanMap(activeSupplyId, selectedSupplierId).catch(() => ({} as Record<string, FbsSupplyScanSavedItem>)),
+          fetchFbsSupplyScans(selectedSupplierId, activeSupplyId).catch(() => []),
+        ]);
+        for (const item of Object.values(savedMap)) {
+          const id = Number(String(item?.orderId || '').trim());
+          const code = normalizeDataMatrixText(String(item?.honestSignCode || ''));
+          if (id > 0 && code) existingChzByOrderId.set(id, code);
+        }
+        for (const row of dbScans) {
+          const id = Number(String(row?.orderId || '').trim());
+          const code = normalizeDataMatrixText(String(row?.chzCode || ''));
+          if (id > 0 && code && !existingChzByOrderId.has(id)) existingChzByOrderId.set(id, code);
+        }
+        for (const sticker of orderedStickers) {
+          const orderId = Number(sticker?.orderId ?? sticker?.id ?? sticker?.order_id);
+          const code = existingChzByOrderId.get(orderId);
+          if (code) chzByOrderId.set(orderId, code);
+        }
+      }
+      const needNewCodes = orderedStickers.filter((st: any) => !chzByOrderId.has(Number(st?.orderId ?? st?.id ?? st?.order_id))).length;
+
+      const pool = fbsStickersWithChz && needNewCodes > 0
+        ? await takeFreeChzCodes(selectedSupplierId, needNewCodes)
         : [];
-      if (fbsStickersWithChz && pool.length === 0) {
-        chzShortage = 'Свободных марок ЧЗ в базе нет — все стикеры напечатаны обычными стикерами WB, без ЧЗ.';
+      if (fbsStickersWithChz && needNewCodes > 0 && pool.length === 0) {
+        chzShortage = `Свободных марок ЧЗ в базе нет — ${needNewCodes} заданий напечатаны обычными стикерами WB, их нужно сканировать.`;
       }
 
-      if (fbsStickersWithChz && pool.length > 0) {
+      if (fbsStickersWithChz && (pool.length > 0 || chzByOrderId.size > 0)) {
         const { data: layoutRow } = await supabase
           .from('app_settings')
           .select('value')
@@ -7691,9 +7734,10 @@ export const WBSupplyManager = ({
           Array.from(orderById.values()).map((o: any) => Number(o?.nmId || 0)),
         );
 
-        const used = new Set<string>();
+        const used = new Set<string>(chzByOrderId.values());
         for (const sticker of orderedStickers) {
           const orderId = Number(sticker?.orderId ?? sticker?.id ?? sticker?.order_id);
+          if (chzByOrderId.has(orderId)) continue;
           const order = orderById.get(orderId);
           if (!order) continue;
 
@@ -7711,15 +7755,41 @@ export const WBSupplyManager = ({
           }
 
           used.add(match.code);
-          chzByOrderId.set(orderId, match.code);
+          newChzByOrderId.set(orderId, match.code);
         }
 
-        if (chzByOrderId.size === 0) {
-          chzShortage = 'Ни одна свободная марка не подошла заданиям (не совпали пол, размер или категория) — '
-            + 'все стикеры напечатаны обычными стикерами WB, без ЧЗ.';
-        } else if (unmatchedOrders > 0) {
-          chzShortage = `Марки хватило на ${chzByOrderId.size} заданий из ${orderedStickers.length}. `
-            + `Остальные ${unmatchedOrders} напечатаны обычными стикерами WB, без ЧЗ.`;
+        /*
+         * Захват кодов до печати.
+         *
+         * Код помечается напечатанным только если он всё ещё свободен. Два
+         * компьютера, печатающие одновременно, иначе взяли бы один и тот же
+         * код — одна марка на две вещи. Не захваченный код (его увёл другой)
+         * задание не получает и уходит на скан.
+         */
+        if (newChzByOrderId.size > 0) {
+          const wanted = Array.from(newChzByOrderId.values());
+          const claimed = new Set<string>();
+          for (let i = 0; i < wanted.length; i += 200) {
+            const { data: rows, error: claimError } = await supabase
+              .from('unified_honest_sign_codes')
+              .update({ file_name: 'Напечатанные QR' })
+              .eq('supplier_id', selectedSupplierId)
+              .in('code', wanted.slice(i, i + 200))
+              .neq('file_name', 'Напечатанные QR')
+              .neq('file_name', 'Отсканировано')
+              .select('code');
+            if (claimError) throw new Error(`Не удалось закрепить коды из базы: ${claimError.message}`);
+            (rows || []).forEach((r: any) => claimed.add(String(r?.code || '')));
+          }
+          for (const [orderId, code] of Array.from(newChzByOrderId.entries())) {
+            if (claimed.has(code)) chzByOrderId.set(orderId, code);
+            else { newChzByOrderId.delete(orderId); unmatchedOrders += 1; }
+          }
+        }
+
+        if (unmatchedOrders > 0) {
+          chzShortage = `ЧЗ из базы: прикреплено ${chzByOrderId.size} из ${orderedStickers.length}. `
+            + `${unmatchedOrders} заданий без подходящего кода (категория, пол или размер) напечатаны обычными стикерами WB — их нужно сканировать.`;
         }
       }
 
@@ -7913,8 +7983,8 @@ export const WBSupplyManager = ({
                try {
                  const pdf = await buildPdfForSlice(orderedStickers, profile);
                  await printPdfDirect(pdf, { widthMm: 58, heightMm: 40 });
-                 if (fbsStickersWithChz && chzByOrderId.size > 0) {
-                   await bindPrintedChzToOrders(chzByOrderId, orderById);
+                 if (fbsStickersWithChz && newChzByOrderId.size > 0) {
+                   await bindPrintedChzToOrders(newChzByOrderId, orderById);
                  }
                  if (chzShortage) setError(chzShortage);
                  return;
@@ -8906,7 +8976,7 @@ export const WBSupplyManager = ({
                                             Макет выбирается здесь же, у кнопки печати. */}
                                         <div className="flex flex-wrap items-center gap-2">
                                             <label
-                                                title="За каждым стикером WB пойдёт этикетка с ЧЗ. Код берётся из базы по очереди, без привязки к товару и размеру"
+                                                title="Каждому заданию подбирается код из базы ЧЗ по категории, полу и размеру: печатается на этикетке, сразу прикрепляется к заданию и уходит в WB. Сканировать такие задания не нужно. Задания, которым код не подошёл, печатаются обычным стикером — их сканируют"
                                                 className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-2 py-1 text-xs font-medium text-amber-800 hover:bg-amber-100"
                                             >
                                                 <input
@@ -8915,7 +8985,7 @@ export const WBSupplyManager = ({
                                                     onChange={(e) => setFbsStickersWithChz(e.target.checked)}
                                                     className="w-3.5 h-3.5"
                                                 />
-                                                Стикеры с ЧЗ (проверка)
+                                                ЧЗ из базы
                                             </label>
                                             {fbsStickersWithChz && (
                                                 <select
