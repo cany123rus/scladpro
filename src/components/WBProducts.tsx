@@ -10,6 +10,7 @@ import { supabase } from '../lib/supabase';
 import { restoreDataMatrixGs } from '../utils/honestSign';
 import { FixedSizeList as List, ListChildComponentProps } from 'react-window';
 import { isWarehouseOfflineEnabled, warehouseOfflineClient } from '../lib/warehouseOffline';
+import { pgInList } from '../utils/pgFilters';
 
 interface WBCharacteristic {
   name?: string;
@@ -606,7 +607,7 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
       const { error } = await supabase
         .from('unified_honest_sign_codes')
         .update({ file_name: 'Напечатанные QR' })
-        .in('code', pending);
+        .filter('code', 'in', pgInList(pending));
 
       if (!error) localStorage.removeItem(WB_PRINT_PENDING_SYNC_KEY);
     } catch {}
@@ -1353,7 +1354,7 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
         const usedCodeValues = items.map(i => i.honestSignCode).filter(Boolean) as string[];
         if (usedCodeValues.length > 0) {
           try {
-            const { error } = await supabase.from('unified_honest_sign_codes').update({ file_name: 'Напечатанные QR' }).in('code', usedCodeValues);
+            const { error } = await supabase.from('unified_honest_sign_codes').update({ file_name: 'Напечатанные QR' }).filter('code', 'in', pgInList(usedCodeValues));
             if (error) queuePendingPrintedCodes(usedCodeValues);
           } catch { queuePendingPrintedCodes(usedCodeValues); }
         }
@@ -1394,7 +1395,7 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
           const { error } = await supabase
             .from('unified_honest_sign_codes')
             .update({ file_name: 'Напечатанные QR' })
-            .in('code', usedCodeValues);
+            .filter('code', 'in', pgInList(usedCodeValues));
           if (error) queuePendingPrintedCodes(usedCodeValues);
         } catch {
           queuePendingPrintedCodes(usedCodeValues);

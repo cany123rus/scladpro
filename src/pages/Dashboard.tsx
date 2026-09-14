@@ -87,6 +87,7 @@ const WB_LAYOUT_SAMPLE_CHZ = '0104640233723909215XH=oFmHzyr,Z91EE1292z8CrXhvLbaN
  */
 const WB_PREVIEW_SCALE = 737 / 58;
 import { getDefaultWarehouseOfflineUrl, getWarehouseOfflineUrl, isWarehouseOfflineEnabled, setWarehouseOfflineEnabled, setWarehouseOfflineUrl, warehouseOfflineClient, WarehouseOfflineSnapshot, WarehouseOfflineStatus } from '../lib/warehouseOffline';
+import { pgInList } from '../utils/pgFilters';
 import type {
   NotificationType, NotificationItem, ToastStyle, Supplier, Product,
   FboPalletSession, FboPallet, FboPalletWarehouse, FboPalletSupply, FboPalletItem,
@@ -6237,7 +6238,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       const { data: foundRows, error: findError } = await supabase
         .from('unified_honest_sign_codes')
         .select('id,code,category,supplier_id')
-        .in('code', codes)
+        .filter('code', 'in', pgInList(codes))
         .eq('supplier_id', honestSignSupplierId);
 
       if (findError) throw findError;
@@ -6333,7 +6334,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         const { data: existing, error: checkError } = await supabase
           .from('unified_honest_sign_codes')
           .select('code')
-          .in('code', chunk);
+          .filter('code', 'in', pgInList(chunk));
 
         if (checkError) throw checkError;
         if (existing) duplicates.push(...existing.map(c => c.code));
@@ -7460,7 +7461,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         const { data: dbItems, error: dbError } = await supabase
           .from('supply_items')
           .select('honest_sign_code, box:boxes(name, deleted_at, supply:supplies(name))')
-          .in('honest_sign_code', codes)
+          .filter('honest_sign_code', 'in', pgInList(codes))
           .is('deleted_at', null)
           .limit(10000);
         if (dbError) throw dbError;
@@ -9821,7 +9822,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     const { data: existing, error: existingError } = await supabase
       .from('unified_honest_sign_codes')
       .select('id, code, supplier_id, category')
-      .in('code', uniqueCodes);
+      .filter('code', 'in', pgInList(uniqueCodes));
 
     if (existingError) throw existingError;
 

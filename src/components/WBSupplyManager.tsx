@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   Package, 
   RefreshCw, 
@@ -61,6 +61,7 @@ import {
   readFbsComboLayout,
 } from '../utils/chzLabel';
 import type { ChzLabelLayout, ChzTailLayout, FbsComboLayout } from '../utils/chzLabel';
+import { pgInList } from '../utils/pgFilters';
 import {
   deleteFbsOrderCode,
   fetchFbsSupplyScans,
@@ -3034,7 +3035,7 @@ export const WBSupplyManager = ({
     const { data: existing, error: existingError } = await supabase
       .from('unified_honest_sign_codes')
       .select('id, code, supplier_id, category')
-      .in('code', uniqueCodes);
+      .filter('code', 'in', pgInList(uniqueCodes));
 
     if (existingError) throw existingError;
 
@@ -7893,53 +7894,53 @@ export const WBSupplyManager = ({
           Array.from(orderById.values()).map((o: any) => Number(o?.nmId || 0)),
         );
 
+        /*
+         * Подбор и захват кодов — в несколько кругов.
+         *
+         * Код закрепляется за заданием только если он всё ещё свободен. Если
+         * закрепить не вышло (его уже взяли), заданию сразу подбирается следующий
+         * подходящий код — без отдельной «очереди» и без повторной печати.
+         */
         const used = new Set<string>(chzByOrderId.values());
-        for (const sticker of orderedStickers) {
-          const orderId = Number(sticker?.orderId ?? sticker?.id ?? sticker?.order_id);
-          if (chzByOrderId.has(orderId)) continue;
-          const order = orderById.get(orderId);
-          if (!order) continue;
+        let toMatch = orderedStickers.filter((st: any) => !chzByOrderId.has(Number(st?.orderId ?? st?.id ?? st?.order_id)));
+        for (let round = 0; round < 5 && toMatch.length > 0; round++) {
+          const roundCodes = new Map<number, string>();
+          for (const sticker of toMatch) {
+            const orderId = Number(sticker?.orderId ?? sticker?.id ?? sticker?.order_id);
+            const order = orderById.get(orderId);
+            if (!order) continue;
 
-          // Размер берём из самого задания: в карточке их несколько, а уехать
-          // должен именно тот, что заказали.
-          const card = productMeta.get(Number(order?.nmId || 0));
-          const match = matchChzCodeForProduct(pool, used, {
-            gender: card?.gender || '',
-            subject: card?.subject || '',
-            size: String(order?.size || ''),
-          });
-          if (!match) {
-            unmatchedOrders += 1;
-            if (!card) {
-              reportRow(orderId, 'no_card', 'Нет карточки товара в кэше — неизвестны категория и пол. Обновите базу товаров', sticker);
-            } else {
-              const genderText = card.gender === 'male' ? 'мужской' : card.gender === 'female' ? 'женский' : 'пол не указан';
-              reportRow(orderId, 'no_code', `Нет свободного кода: ${card.subject || 'без категории'}, ${genderText}, размер ${String(order?.size || '—')}`, sticker);
+            // Размер берём из самого задания: в карточке их несколько, а уехать
+            // должен именно тот, что заказали.
+            const card = productMeta.get(Number(order?.nmId || 0));
+            const match = matchChzCodeForProduct(pool, used, {
+              gender: card?.gender || '',
+              subject: card?.subject || '',
+              size: String(order?.size || ''),
+            });
+            if (!match) {
+              unmatchedOrders += 1;
+              if (!card) {
+                reportRow(orderId, 'no_card', 'Нет карточки товара в кэше — неизвестны категория и пол. Обновите базу товаров', sticker);
+              } else {
+                const genderText = card.gender === 'male' ? 'мужской' : card.gender === 'female' ? 'женский' : 'пол не указан';
+                reportRow(orderId, 'no_code', `Нет свободного кода: ${card.subject || 'без категории'}, ${genderText}, размер ${String(order?.size || '—')}`, sticker);
+              }
+              continue;
             }
-            continue;
+            used.add(match.code);
+            roundCodes.set(orderId, match.code);
           }
 
-          used.add(match.code);
-          newChzByOrderId.set(orderId, match.code);
-        }
-
-        /*
-         * Захват кодов до печати.
-         *
-         * Код помечается напечатанным только если он всё ещё свободен. Два
-         * компьютера, печатающие одновременно, иначе взяли бы один и тот же
-         * код — одна марка на две вещи. Не захваченный код (его увёл другой)
-         * задание не получает и уходит на скан.
-         */
-        if (newChzByOrderId.size > 0) {
-          const wanted = Array.from(newChzByOrderId.values());
+          if (roundCodes.size === 0) break;
+          const wanted = Array.from(roundCodes.values());
           const claimed = new Set<string>();
           for (let i = 0; i < wanted.length; i += 200) {
             const { data: rows, error: claimError } = await supabase
               .from('unified_honest_sign_codes')
               .update({ file_name: 'Напечатанные QR' })
               .eq('supplier_id', selectedSupplierId)
-              .in('code', wanted.slice(i, i + 200))
+              .filter('code', 'in', pgInList(wanted.slice(i, i + 200)))
               .neq('file_name', 'Напечатанные QR')
               .neq('file_name', 'Отсканировано')
               .select('code');
@@ -7947,14 +7948,24 @@ export const WBSupplyManager = ({
             (rows || []).forEach((r: any) => claimed.add(String(r?.code || '')));
           }
           if (claimed.size > 0) notifyChzStockChanged(selectedSupplierId);
-          for (const [orderId, code] of Array.from(newChzByOrderId.entries())) {
-            if (claimed.has(code)) chzByOrderId.set(orderId, code);
-            else {
-              newChzByOrderId.delete(orderId);
-              unmatchedOrders += 1;
-              reportRow(orderId, 'claim_lost', 'Подобранный код в тот же момент забрал другой компьютер — нажмите «Допечатать без ЧЗ»', stickersByOrderId.get(orderId));
+
+          const lost = new Set<number>();
+          for (const [orderId, code] of Array.from(roundCodes.entries())) {
+            if (claimed.has(code)) {
+              chzByOrderId.set(orderId, code);
+              newChzByOrderId.set(orderId, code);
+            } else {
+              lost.add(orderId); // код занят — в следующем круге возьмём другой
             }
           }
+          toMatch = toMatch.filter((st: any) => lost.has(Number(st?.orderId ?? st?.id ?? st?.order_id)));
+        }
+        // Если и за пять кругов закрепить не вышло — задание уходит на скан.
+        for (const sticker of toMatch) {
+          const orderId = Number(sticker?.orderId ?? sticker?.id ?? sticker?.order_id);
+          if (chzByOrderId.has(orderId) || reportRows.some((r) => r.orderId === String(orderId))) continue;
+          unmatchedOrders += 1;
+          reportRow(orderId, 'claim_lost', 'Не удалось закрепить код из базы — отсканируйте марку или нажмите «Допечатать без ЧЗ»', sticker);
         }
 
         if (unmatchedOrders > 0) {
@@ -9212,7 +9223,7 @@ export const WBSupplyManager = ({
         const groups: Array<{ kind: string; title: string; tone: string }> = [
           { kind: 'no_code', title: 'Нет подходящего кода в базе — сканировать', tone: 'amber' },
           { kind: 'no_card', title: 'Нет карточки товара — сканировать', tone: 'amber' },
-          { kind: 'claim_lost', title: 'Код забрал другой компьютер', tone: 'amber' },
+          { kind: 'claim_lost', title: 'Не удалось закрепить код из базы', tone: 'amber' },
           { kind: 'no_sticker', title: 'WB не отдал стикер', tone: 'rose' },
           { kind: 'canceled', title: 'Отменённые задания — не печатались', tone: 'slate' },
         ];
