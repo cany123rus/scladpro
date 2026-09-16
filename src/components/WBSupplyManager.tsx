@@ -7537,9 +7537,18 @@ export const WBSupplyManager = ({
 
   /** Пол и предмет карточки — по ним марка и подбирается под заказ. */
   const loadProductMetaByNmId = async (supplierId: string, nmIds: number[]) => {
-    const meta = new Map<number, { gender: string; subject: string }>();
+    const meta = new Map<number, { gender: string; subject: string; fromWb?: boolean }>();
     const ids = Array.from(new Set(nmIds.filter((id) => Number.isFinite(id) && id > 0)));
     if (!supplierId || ids.length === 0) return meta;
+
+    const toMeta = (card: any) => {
+      const genderRaw = (card?.characteristics || []).find((c: any) => String(c?.name || '').trim().toLowerCase() === 'пол');
+      const genderValue = String(Array.isArray(genderRaw?.value) ? genderRaw.value[0] : genderRaw?.value || '').trim().toLowerCase();
+      return {
+        gender: genderValue.startsWith('муж') ? 'male' : genderValue.startsWith('жен') ? 'female' : '',
+        subject: String(card?.subjectName || '').trim().toLowerCase(),
+      };
+    };
 
     for (let i = 0; i < ids.length; i += 500) {
       const { data } = await supabase
@@ -7549,14 +7558,53 @@ export const WBSupplyManager = ({
         .in('nm_id', ids.slice(i, i + 500));
 
       (data || []).forEach((row: any) => {
-        const card = row || {};
-        const genderRaw = (card.characteristics || []).find((c: any) => String(c?.name || '').trim().toLowerCase() === 'пол');
-        const genderValue = String(genderRaw?.value?.[0] || '').trim().toLowerCase();
-        meta.set(Number(row.nm_id), {
-          gender: genderValue.startsWith('муж') ? 'male' : genderValue.startsWith('жен') ? 'female' : '',
-          subject: String(card.subjectName || '').trim().toLowerCase(),
-        });
+        meta.set(Number(row.nm_id), toMeta(row));
       });
+    }
+
+    /*
+     * Карточек нет в кэше или в них не заполнен пол — перечитываем из WB.
+     *
+     * Кэш обновляется кнопкой «Обновить базу товаров», и новые карточки в нём
+     * появляются не сразу: 16.09 девять заданий поставки остались без ЧЗ только
+     * потому, что их карточек в кэше ещё не было. Пол берём строго из карточки,
+     * ничего не угадываем. Свежую карточку сразу кладём в кэш.
+     */
+    const token = getSupplierToken();
+    const stale = ids.filter((id) => !meta.get(id)?.gender || !meta.get(id)?.subject);
+    if (token && hasWbScope(token, 'content') && stale.length) {
+      for (const nmId of stale.slice(0, 60)) {
+        try {
+          let res: Response | null = null;
+          for (let attempt = 0; attempt < 4; attempt++) {
+            try {
+              res = await fetch('https://content-api.wildberries.ru/content/v2/get/cards/list', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: token },
+                body: JSON.stringify({ settings: { cursor: { limit: 100 }, filter: { withPhoto: -1, textSearch: String(nmId) } } }),
+              });
+              if (res.status !== 429) break;
+            } catch {
+              // При превышении лимита WB отвечает без CORS-заголовков, и браузер
+              // видит это как обрыв сети — ждём и повторяем так же, как на 429.
+              res = null;
+            }
+            await new Promise((r) => setTimeout(r, 3000 * (attempt + 1)));
+          }
+          if (!res || !res.ok) continue;
+          const json = await res.json();
+          const card = (json?.cards || []).find((c: any) => Number(c?.nmID) === nmId);
+          if (!card) continue;
+          meta.set(nmId, { ...toMeta(card), fromWb: true });
+          await supabase
+            .from('wb_products_cache')
+            .upsert([{ supplier_id: supplierId, nm_id: nmId, product_json: card, updated_at: new Date().toISOString() }], { onConflict: 'supplier_id,nm_id' });
+        } catch (e) {
+          console.warn('карточка WB не получена', nmId, e);
+        }
+        // Лимит Content API — 100 запросов в минуту.
+        await new Promise((r) => setTimeout(r, 650));
+      }
     }
 
     return meta;
@@ -7921,7 +7969,9 @@ export const WBSupplyManager = ({
             if (!match) {
               unmatchedOrders += 1;
               if (!card) {
-                reportRow(orderId, 'no_card', 'Нет карточки товара в кэше — неизвестны категория и пол. Обновите базу товаров', sticker);
+                reportRow(orderId, 'no_card', 'Карточка товара не найдена ни в кэше, ни в WB — неизвестны категория и пол', sticker);
+              } else if (!card.gender) {
+                reportRow(orderId, 'no_card', `В карточке WB не заполнен «Пол» (${card.subject || 'без категории'}) — укажите пол в карточке и нажмите «Допечатать без ЧЗ»`, sticker);
               } else {
                 const genderText = card.gender === 'male' ? 'мужской' : card.gender === 'female' ? 'женский' : 'пол не указан';
                 reportRow(orderId, 'no_code', `Нет свободного кода: ${card.subject || 'без категории'}, ${genderText}, размер ${String(order?.size || '—')}`, sticker);
@@ -9222,7 +9272,7 @@ export const WBSupplyManager = ({
         const r = chzPrintReport;
         const groups: Array<{ kind: string; title: string; tone: string }> = [
           { kind: 'no_code', title: 'Нет подходящего кода в базе — сканировать', tone: 'amber' },
-          { kind: 'no_card', title: 'Нет карточки товара — сканировать', tone: 'amber' },
+          { kind: 'no_card', title: 'Нет карточки или в ней не указан пол — сканировать', tone: 'amber' },
           { kind: 'claim_lost', title: 'Не удалось закрепить код из базы', tone: 'amber' },
           { kind: 'no_sticker', title: 'WB не отдал стикер', tone: 'rose' },
           { kind: 'canceled', title: 'Отменённые задания — не печатались', tone: 'slate' },
