@@ -9191,6 +9191,16 @@ export const WBSupplyManager = ({
                                             </button>
                                         </div>
 
+                                        {/* Грузоместа — и здесь, и в окне «Скан ЧЗ»: коробки для ПВЗ
+                                            иногда создают до сборки, не открывая окно скана. */}
+                                        <button
+                                            onClick={(e) => { e.stopPropagation(); void openBoxesModal(supply.id); }}
+                                            title="Создать грузоместа у WB и напечатать их стикеры — для отгрузки на ПВЗ"
+                                            className="flex w-full items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-orange-500 to-amber-500 px-3 py-2 text-sm font-bold text-white shadow-sm shadow-orange-500/25 transition hover:from-orange-600 hover:to-amber-600"
+                                        >
+                                            <Package className="w-4 h-4" /> Грузоместа
+                                        </button>
+
                                         <div className="grid grid-cols-3 gap-2">
                                             <button
                                                 onClick={(e) => { e.stopPropagation(); generateGroupedSupplierPickingList(); }}
