@@ -798,13 +798,17 @@ export const WBSupplyManager = ({
     statusChecked: boolean;
     rows: Array<{
       orderId: string;
+      nmId: string;
       sticker: string;
       article: string;
       size: string;
       kind: 'canceled' | 'no_sticker' | 'no_code' | 'no_card' | 'claim_lost';
       reason: string;
+      needGender?: boolean;
     }>;
   }>(null);
+  /** Пол, выбранный в отчёте печати: nmId → пол либо 'busy' на время записи. */
+  const [chzGenderPick, setChzGenderPick] = useState<Record<string, 'male' | 'female' | 'busy'>>({});
   const [fbsStickersWithChz, setFbsStickersWithChzState] = useState<boolean>(() => {
     try { return localStorage.getItem('fbs_stickers_with_chz_v1') === '1'; } catch { return false; }
   });
@@ -7535,6 +7539,57 @@ export const WBSupplyManager = ({
       .filter((r: any) => r.code);
   };
 
+  /*
+   * Пол товара, проставленный вручную.
+   *
+   * У части предметов (бомберы) продавец не заполняет «Пол» в карточке WB, и
+   * подобрать марку не по чему. Тогда пол один раз указывают в отчёте печати —
+   * дальше он работает наравне с карточным.
+   */
+  const chzGenderOverrideKey = (supplierId: string) => `chz_gender_overrides_v1:${supplierId}`;
+
+  const loadChzGenderOverrides = async (supplierId: string): Promise<Record<string, 'male' | 'female'>> => {
+    if (!supplierId || supplierId === '__all__') return {};
+    try {
+      const { data } = await supabase.from('app_settings').select('value').eq('key', chzGenderOverrideKey(supplierId)).maybeSingle();
+      const parsed = data?.value ? (typeof data.value === 'string' ? JSON.parse(data.value) : data.value) : null;
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  };
+
+  const saveChzGenderOverride = async (supplierId: string, nmId: number, gender: 'male' | 'female') => {
+    const current = await loadChzGenderOverrides(supplierId);
+    const next = { ...current, [String(nmId)]: gender };
+    const { error: saveError } = await supabase
+      .from('app_settings')
+      .upsert([{ key: chzGenderOverrideKey(supplierId), value: JSON.stringify(next) }], { onConflict: 'key' });
+    if (saveError) throw new Error(saveError.message);
+    return next;
+  };
+
+  const pickChzGender = async (nmId: string, gender: 'male' | 'female') => {
+    const id = Number(nmId);
+    if (!Number.isFinite(id) || id <= 0) return;
+    if (!selectedSupplierId || selectedSupplierId === '__all__') {
+      setError('Выберите поставщика, чтобы сохранить пол товара');
+      return;
+    }
+    setChzGenderPick((prev) => ({ ...prev, [nmId]: 'busy' }));
+    try {
+      await saveChzGenderOverride(selectedSupplierId, id, gender);
+      setChzGenderPick((prev) => ({ ...prev, [nmId]: gender }));
+    } catch (e: any) {
+      setChzGenderPick((prev) => {
+        const next = { ...prev };
+        delete next[nmId];
+        return next;
+      });
+      setError(`Не удалось сохранить пол товара: ${e?.message || e}`);
+    }
+  };
+
   /** Пол и предмет карточки — по ним марка и подбирается под заказ. */
   const loadProductMetaByNmId = async (supplierId: string, nmIds: number[]) => {
     const meta = new Map<number, { gender: string; subject: string; fromWb?: boolean }>();
@@ -7606,6 +7661,16 @@ export const WBSupplyManager = ({
         await new Promise((r) => setTimeout(r, 650));
       }
     }
+
+    // Пол с сайта — только там, где карточка его не дала.
+    const overrides = await loadChzGenderOverrides(supplierId);
+    ids.forEach((id) => {
+      const manual = overrides[String(id)];
+      if (manual !== 'male' && manual !== 'female') return;
+      const current = meta.get(id);
+      if (current?.gender) return;
+      meta.set(id, { gender: manual, subject: current?.subject || '', fromWb: current?.fromWb });
+    });
 
     return meta;
   };
@@ -7742,15 +7807,23 @@ export const WBSupplyManager = ({
 
       /** Строки отчёта — задания, оставшиеся без ЧЗ. */
       const reportRows: NonNullable<typeof chzPrintReport>['rows'] = [];
-      const reportRow = (orderId: number, kind: NonNullable<typeof chzPrintReport>['rows'][number]['kind'], reason: string, sticker?: any) => {
+      const reportRow = (
+        orderId: number,
+        kind: NonNullable<typeof chzPrintReport>['rows'][number]['kind'],
+        reason: string,
+        sticker?: any,
+        needGender?: boolean,
+      ) => {
         const order = orderByIdAll.get(orderId) || {};
         reportRows.push({
           orderId: String(orderId),
+          nmId: String(order?.nmId || ''),
           sticker: sticker ? `${String(sticker?.partA || '')} ${String(sticker?.partB || '')}`.trim() : '',
           article: String(order?.article || ''),
           size: String(order?.size || ''),
           kind,
           reason,
+          needGender,
         });
       };
 
@@ -7971,7 +8044,7 @@ export const WBSupplyManager = ({
               if (!card) {
                 reportRow(orderId, 'no_card', 'Карточка товара не найдена ни в кэше, ни в WB — неизвестны категория и пол', sticker);
               } else if (!card.gender) {
-                reportRow(orderId, 'no_card', `В карточке WB не заполнен «Пол» (${card.subject || 'без категории'}) — укажите пол в карточке и нажмите «Допечатать без ЧЗ»`, sticker);
+                reportRow(orderId, 'no_card', `В карточке WB не заполнен «Пол» (${card.subject || 'без категории'}) — укажите пол кнопкой ниже`, sticker, true);
               } else {
                 const genderText = card.gender === 'male' ? 'мужской' : card.gender === 'female' ? 'женский' : 'пол не указан';
                 reportRow(orderId, 'no_code', `Нет свободного кода: ${card.subject || 'без категории'}, ${genderText}, размер ${String(order?.size || '—')}`, sticker);
@@ -9325,6 +9398,24 @@ export const WBSupplyManager = ({
                               <span className="text-slate-700">{[row.article, row.size].filter(Boolean).join(' · ')}</span>
                             </div>
                             <div className="text-xs text-slate-500">{row.reason}</div>
+                            {row.needGender && row.nmId && (
+                              <div className="mt-1 flex flex-wrap items-center gap-2">
+                                <span className="text-xs text-slate-500">Пол товара:</span>
+                                {(['male', 'female'] as const).map((g) => (
+                                  <button
+                                    key={g}
+                                    disabled={chzGenderPick[row.nmId] === 'busy'}
+                                    onClick={() => void pickChzGender(row.nmId, g)}
+                                    className={`px-2 py-0.5 rounded-lg border text-xs font-semibold transition ${chzGenderPick[row.nmId] === g ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-300 text-slate-700 hover:bg-slate-50'}`}
+                                  >
+                                    {g === 'male' ? 'Мужской' : 'Женский'}
+                                  </button>
+                                ))}
+                                {chzGenderPick[row.nmId] && chzGenderPick[row.nmId] !== 'busy' && (
+                                  <span className="text-xs text-emerald-700">сохранено — жмите «Допечатать без ЧЗ»</span>
+                                )}
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -9333,7 +9424,7 @@ export const WBSupplyManager = ({
                 })}
               </div>
               <div className="px-5 py-3 border-t border-slate-100 flex flex-wrap justify-end gap-2">
-                {r.rows.some((row) => row.kind === 'claim_lost' || row.kind === 'no_sticker') && (
+                {r.rows.some((row) => row.kind !== 'canceled') && (
                   <button
                     onClick={() => { setChzPrintReport(null); void downloadFBSStickers({ onlyMissing: true }); }}
                     className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700"
