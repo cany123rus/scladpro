@@ -55,6 +55,7 @@ import {
   drawChzTailLabel,
   drawFbsComboLabel,
   matchChzCodeForProduct,
+  normalizeHsCategoryName,
   normalizeHsSize,
   readChzLabelLayout,
   readChzTailLayout,
@@ -809,6 +810,56 @@ export const WBSupplyManager = ({
   }>(null);
   /** Пол, выбранный в отчёте печати: nmId → пол либо 'busy' на время записи. */
   const [chzGenderPick, setChzGenderPick] = useState<Record<string, 'male' | 'female' | 'busy'>>({});
+  /** Склады отгрузки кабинета — из них берутся названия поставок при сборке. */
+  const [wbWarehouses, setWbWarehouses] = useState<Array<{ id: number; name: string }>>([]);
+  /*
+   * Сборка поставок по складам отгрузки.
+   *
+   * Задание уезжает с конкретного склада продавца, и в одну поставку WB можно
+   * класть только задания одного склада. Раньше поставку на каждый склад
+   * создавали руками и руками же разносили задания. Здесь сначала показываем
+   * план (склад, сколько заданий, как назовём поставку), а создаём после «да».
+   */
+  const [assemblePlan, setAssemblePlan] = useState<null | {
+    busy: boolean;
+    running: boolean;
+    done: boolean;
+    error?: string;
+    groups: Array<{ warehouseId: number; warehouseName: string; orderIds: string[]; supplyName: string; status?: string }>;
+  }>(null);
+
+  /** Поставки, отмеченные галочкой, — для выгрузки листов и кодов подряд. */
+  const [selectedSupplyIds, setSelectedSupplyIds] = useState<Set<string>>(new Set());
+  /** Ход пакетной выгрузки: по какой поставке сейчас идём и что уже не вышло. */
+  const [bulkExport, setBulkExport] = useState<null | {
+    total: number;
+    index: number;
+    name: string;
+    stage: string;
+    errors: string[];
+    done: boolean;
+  }>(null);
+  /*
+   * План марок до печати.
+   *
+   * Печать сразу забирает коды из базы, и увидеть, чего не хватит, можно было
+   * только по факту — на уже наклеенных этикетках. Теперь сначала показываем,
+   * какому товару какая марка достанется и сколько их в базе, и только потом
+   * печатаем. Коды при этом не трогаются: план — чтение, не выдача.
+   */
+  const [chzPlan, setChzPlan] = useState<null | {
+    supplyId: string;
+    supplyName: string;
+    busy: boolean;
+    error?: string;
+    total: number;
+    alreadyWithChz: number;
+    canceled: number;
+    statusChecked: boolean;
+    groups: Array<{ key: string; category: string; gender: 'male' | 'female'; orders: number; matched: number; freeTotal: number }>;
+    noGender: Array<{ nmId: string; article: string; subject: string; count: number }>;
+    noCard: Array<{ nmId: string; article: string; count: number }>;
+  }>(null);
   const [fbsStickersWithChz, setFbsStickersWithChzState] = useState<boolean>(() => {
     try { return localStorage.getItem('fbs_stickers_with_chz_v1') === '1'; } catch { return false; }
   });
@@ -7049,23 +7100,25 @@ export const WBSupplyManager = ({
     }
   };
 
-  const generatePickingList = async () => {
+  /** Лист подбора поставки. Без аргумента — текущая, с ним — любая (пакетная выгрузка). */
+  const generatePickingList = async (supplyIdArg?: string) => {
     // Библиотеки печати/Excel грузятся по требованию — не при открытии раздела.
     await ensurePdfLibs();
     const { jsPDF, autoTable } = lazyLibs;
-    if (!activeSupplyId) return;
+    const pickingSupplyId = String(supplyIdArg || activeSupplyId || '');
+    if (!pickingSupplyId) return;
     setLoading(true);
     try {
       // 1. Fetch orders for this supply via robust resolver with fallback chain
-      let supplyOrdersRaw = await withTimeout(fetchOrdersForSupply(activeSupplyId, { enrich: true, fresh: true, cacheTtlMs: SUPPLY_ORDERS_CACHE_MS }), 30000, 'Таймаут загрузки заказов (1)');
+      let supplyOrdersRaw = await withTimeout(fetchOrdersForSupply(pickingSupplyId, { enrich: true, fresh: true, cacheTtlMs: SUPPLY_ORDERS_CACHE_MS }), 30000, 'Таймаут загрузки заказов (1)');
       if (!supplyOrdersRaw || supplyOrdersRaw.length === 0) {
-        supplyOrdersRaw = await withTimeout(fetchOrdersForSupply(activeSupplyId, { enrich: false, fresh: true, cacheTtlMs: SUPPLY_ORDERS_CACHE_MS }), 30000, 'Таймаут загрузки заказов (2)');
+        supplyOrdersRaw = await withTimeout(fetchOrdersForSupply(pickingSupplyId, { enrich: false, fresh: true, cacheTtlMs: SUPPLY_ORDERS_CACHE_MS }), 30000, 'Таймаут загрузки заказов (2)');
       }
       if (!supplyOrdersRaw || supplyOrdersRaw.length === 0) {
         throw new Error('По выбранной поставке не найдены заказы для листа подбора');
       }
 
-      const targetSupplyId = String(activeSupplyId || '').trim().toLowerCase();
+      const targetSupplyId = pickingSupplyId.trim().toLowerCase();
 
       const strictFiltered = supplyOrdersRaw.filter((o: any) => {
         const candidates = [o?.supplyId, o?.supplyID, o?.supply_id, o?.supply?.id]
@@ -7148,7 +7201,7 @@ export const WBSupplyManager = ({
           console.error('Error loading font', e);
       }
       
-      const supplyName = supplies.find(s => s.id === activeSupplyId)?.name || activeSupplyId;
+      const supplyName = supplies.find(s => s.id === pickingSupplyId)?.name || pickingSupplyId;
 
       const productPhotoByNmId = new Map<number, string>();
       (products || []).forEach((p: any) => {
@@ -7687,9 +7740,10 @@ export const WBSupplyManager = ({
   const bindPrintedChzToOrders = async (
     codesByOrderId: Map<number, string>,
     ordersById: Map<number, any>,
+    supplyIdArg?: string,
   ) => {
-    if (!activeSupplyId || codesByOrderId.size === 0) return;
-    const supplyId = activeSupplyId;
+    const supplyId = String(supplyIdArg || activeSupplyId || '');
+    if (!supplyId || codesByOrderId.size === 0) return;
     const supplierId = selectedSupplierId;
 
     try {
@@ -7714,7 +7768,9 @@ export const WBSupplyManager = ({
       });
 
       const saved = await saveFbsSupplyScanMap(supplyId, next, supplierId);
-      applyFbsScans(saved);
+      // Экран скана показывает текущую поставку: чужую карту в него не кладём
+      // (в пакетной выгрузке коды печатаются сразу по нескольким поставкам).
+      if (supplyId === activeSupplyId) applyFbsScans(saved);
 
       // Напечатанными коды пометили ещё до печати (захват в downloadFBSStickers).
 
@@ -7753,16 +7809,24 @@ export const WBSupplyManager = ({
    * onlyMissing — «Допечатать без ЧЗ»: только задания, у которых марки ещё нет,
    * чтобы не перепечатывать всю поставку ради пары заданий.
    */
-  const downloadFBSStickers = async (opts: { onlyMissing?: boolean } = {}) => {
+  const downloadFBSStickers = async (opts: { onlyMissing?: boolean; supplyId?: string; asFile?: boolean } = {}) => {
     const onlyMissing = Boolean(opts.onlyMissing);
+    /*
+     * supplyId и asFile — для пакетной выгрузки нескольких поставок подряд.
+     *
+     * Печать открывает системное окно, и второе подряд браузер блокирует —
+     * поэтому в пакетном режиме стикеры сохраняются файлом, как лист подбора.
+     */
+    const printSupplyId = String(opts.supplyId || activeSupplyId || '');
+    const asFile = Boolean(opts.asFile);
     // Библиотеки печати/Excel грузятся по требованию — не при открытии раздела.
     await Promise.all([ensurePdfLibs(), ensureBwip()]);
     const { jsPDF, autoTable, bwipjs } = lazyLibs;
-    if (!activeSupplyId) return;
+    if (!printSupplyId) return null;
     setLoading(true);
     try {
-      const supplyOrdersRaw = await withTimeout(fetchOrdersForSupply(activeSupplyId, { enrich: true, fresh: true, cacheTtlMs: SUPPLY_ORDERS_CACHE_MS }), 30000, 'Таймаут загрузки заказов для стикеров');
-      const targetSupplyId = String(activeSupplyId || '').trim().toLowerCase();
+      const supplyOrdersRaw = await withTimeout(fetchOrdersForSupply(printSupplyId, { enrich: true, fresh: true, cacheTtlMs: SUPPLY_ORDERS_CACHE_MS }), 30000, 'Таймаут загрузки заказов для стикеров');
+      const targetSupplyId = printSupplyId.trim().toLowerCase();
       const supplyOrders = (supplyOrdersRaw || [])
         .filter((o: any) => {
           const candidates = [o?.supplyId, o?.supplyID, o?.supply_id, o?.supply?.id]
@@ -7947,8 +8011,8 @@ export const WBSupplyManager = ({
       const existingChzByOrderId = new Map<number, string>();
       if (fbsStickersWithChz || onlyMissing) {
         const [savedMap, dbScans] = await Promise.all([
-          loadFbsSupplyScanMap(activeSupplyId, selectedSupplierId).catch(() => ({} as Record<string, FbsSupplyScanSavedItem>)),
-          fetchFbsSupplyScans(selectedSupplierId, activeSupplyId).catch(() => []),
+          loadFbsSupplyScanMap(printSupplyId, selectedSupplierId).catch(() => ({} as Record<string, FbsSupplyScanSavedItem>)),
+          fetchFbsSupplyScans(selectedSupplierId, printSupplyId).catch(() => []),
         ]);
         for (const item of Object.values(savedMap)) {
           const id = Number(String(item?.orderId || '').trim());
@@ -7964,10 +8028,10 @@ export const WBSupplyManager = ({
           // Задания с маркой уже напечатаны — их не трогаем вовсе.
           orderedStickers = orderedStickers.filter((st: any) => !existingChzByOrderId.has(Number(st?.orderId ?? st?.id ?? st?.order_id)));
           if (orderedStickers.length === 0) {
-            if (reportRows.length) {
+            if (reportRows.length && !asFile) {
               setChzPrintReport({
-                supplyId: activeSupplyId,
-                supplyName: supplies.find((x) => x.id === activeSupplyId)?.name || activeSupplyId,
+                supplyId: printSupplyId,
+                supplyName: supplies.find((x) => x.id === printSupplyId)?.name || printSupplyId,
                 printed: 0,
                 withChz: 0,
                 newChz: 0,
@@ -7975,10 +8039,10 @@ export const WBSupplyManager = ({
                 statusChecked,
                 rows: reportRows,
               });
-            } else {
+            } else if (!asFile) {
               setSuccessMsg('У всех заданий поставки уже есть ЧЗ — допечатывать нечего.');
             }
-            return;
+            return { supplyId: printSupplyId, printed: 0, withChz: 0, newChz: 0, statusChecked, rows: reportRows };
           }
         }
         for (const sticker of orderedStickers) {
@@ -8283,17 +8347,22 @@ export const WBSupplyManager = ({
                { canvasWidth: 290, canvasHeight: 200, imageType: 'JPEG' as const, jpegQuality: 0.84 }
              ];
 
+             const printSupplyName = supplies.find((x) => x.id === printSupplyId)?.name || printSupplyId;
              for (const profile of renderProfiles) {
                try {
                  const pdf = await buildPdfForSlice(orderedStickers, profile);
-                 await printPdfDirect(pdf, { widthMm: 58, heightMm: 40 });
-                 if (fbsStickersWithChz && newChzByOrderId.size > 0) {
-                   await bindPrintedChzToOrders(newChzByOrderId, orderById);
+                 if (asFile) {
+                   pdf.save(`Коды ${String(printSupplyName).replace(/[\\/:*?"<>|]+/g, '_')} ${orderedStickers.length}.pdf`);
+                 } else {
+                   await printPdfDirect(pdf, { widthMm: 58, heightMm: 40 });
                  }
-                 if (fbsStickersWithChz || reportRows.length) {
+                 if (fbsStickersWithChz && newChzByOrderId.size > 0) {
+                   await bindPrintedChzToOrders(newChzByOrderId, orderById, printSupplyId);
+                 }
+                 if (!asFile && (fbsStickersWithChz || reportRows.length)) {
                    setChzPrintReport({
-                     supplyId: activeSupplyId,
-                     supplyName: supplies.find((x) => x.id === activeSupplyId)?.name || activeSupplyId,
+                     supplyId: printSupplyId,
+                     supplyName: printSupplyName,
                      printed: orderedStickers.length,
                      withChz: chzByOrderId.size,
                      newChz: newChzByOrderId.size,
@@ -8301,10 +8370,17 @@ export const WBSupplyManager = ({
                      statusChecked,
                      rows: reportRows,
                    });
-                 } else if (chzShortage) {
+                 } else if (!asFile && chzShortage) {
                    setError(chzShortage);
                  }
-                 return;
+                 return {
+                   supplyId: printSupplyId,
+                   printed: orderedStickers.length,
+                   withChz: chzByOrderId.size,
+                   newChz: newChzByOrderId.size,
+                   statusChecked,
+                   rows: reportRows,
+                 };
                } catch (e) {
                  console.warn('single stickers pdf failed on profile, trying lighter profile', profile, e);
                }
@@ -8316,9 +8392,289 @@ export const WBSupplyManager = ({
       throw new Error('Стикеры не найдены');
 
     } catch (err: any) {
+      if (asFile) throw err; // пакетная выгрузка сама решает, что делать с ошибкой
       setError(err.message);
     } finally {
       setLoading(false);
+    }
+    return null;
+  };
+
+  const loadWbWarehouses = async () => {
+    const data = await wbFetch('https://marketplace-api.wildberries.ru/api/v3/warehouses');
+    const list = Array.isArray(data) ? data : (data?.warehouses || []);
+    const mapped = list
+      .map((w: any) => ({ id: Number(w?.id), name: String(w?.name || '').trim() }))
+      .filter((w: any) => Number.isFinite(w.id) && w.id > 0);
+    setWbWarehouses(mapped);
+    return mapped as Array<{ id: number; name: string }>;
+  };
+
+  /** Добавление заданий в поставку WB: пакетом, с запасными вариантами. */
+  const pushOrdersToSupply = async (supplyId: string, orderIds: string[]) => {
+    const encoded = encodeURIComponent(String(supplyId));
+    for (let i = 0; i < orderIds.length; i += 500) {
+      const chunk = orderIds.slice(i, i + 500);
+      try {
+        await wbFetch(`https://marketplace-api.wildberries.ru/api/v3/supplies/${encoded}/orders`, {
+          method: 'PATCH',
+          body: JSON.stringify({ orders: chunk }),
+        });
+        continue;
+      } catch (batchError) {
+        // По одному: WB иногда не принимает пакет целиком из-за одного задания.
+        let ok = 0;
+        let lastError: any = batchError;
+        for (const orderId of chunk) {
+          try {
+            await wbFetch(`https://marketplace-api.wildberries.ru/api/v3/supplies/${encoded}/orders/${encodeURIComponent(orderId)}`, { method: 'PATCH' });
+            ok += 1;
+          } catch (e) {
+            lastError = e;
+          }
+        }
+        if (ok === 0) throw lastError;
+        if (ok < chunk.length) throw new Error(`добавлено ${ok} из ${chunk.length} заданий`);
+      }
+    }
+  };
+
+  /** План сборки: какие поставки создадим и что в них положим. */
+  const openAssemblePlan = async () => {
+    setAssemblePlan({ busy: true, running: false, done: false, groups: [] });
+    try {
+      const warehouses = wbWarehouses.length ? wbWarehouses : await loadWbWarehouses();
+      const nameById = new Map(warehouses.map((w) => [w.id, w.name]));
+
+      const fresh = await wbFetch('https://marketplace-api.wildberries.ru/api/v3/orders/new');
+      const list: any[] = fresh?.orders || [];
+      setOrders(list);
+      const free = list.filter((o: any) => !o?.supplyId);
+      if (!free.length) throw new Error('Все новые задания уже разложены по поставкам');
+
+      const now = new Date();
+      const stamp = `${String(now.getDate()).padStart(2, '0')}.${String(now.getMonth() + 1).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+      const byWarehouse = new Map<number, any[]>();
+      free.forEach((o: any) => {
+        const id = Number(o?.warehouseId || 0);
+        const arr = byWarehouse.get(id) || [];
+        arr.push(o);
+        byWarehouse.set(id, arr);
+      });
+
+      const groups = Array.from(byWarehouse.entries())
+        .map(([warehouseId, arr]) => {
+          const warehouseName = nameById.get(warehouseId) || `Склад ${warehouseId}`;
+          return {
+            warehouseId,
+            warehouseName,
+            orderIds: arr.map((o: any) => String(o.id)),
+            supplyName: `${warehouseName} ${stamp}`,
+          };
+        })
+        .sort((a, b) => b.orderIds.length - a.orderIds.length);
+
+      setAssemblePlan({ busy: false, running: false, done: false, groups });
+    } catch (e: any) {
+      setAssemblePlan({ busy: false, running: false, done: false, groups: [], error: e?.message || String(e) });
+    }
+  };
+
+  /** Создание поставок по плану: на каждый склад своя, задания внутрь. */
+  const runAssemblePlan = async () => {
+    const plan = assemblePlan;
+    if (!plan || !plan.groups.length || plan.running) return;
+    const groups = plan.groups.map((g) => ({ ...g, status: 'создаю…' }));
+    setAssemblePlan({ ...plan, running: true, groups: [...groups] });
+
+    for (const group of groups) {
+      try {
+        const created = await wbFetch('https://marketplace-api.wildberries.ru/api/v3/supplies', {
+          method: 'POST',
+          body: JSON.stringify({ name: group.supplyName }),
+        });
+        const supplyId = String(created?.id || '').trim();
+        if (!supplyId) throw new Error('WB не вернул номер поставки');
+        await pushOrdersToSupply(supplyId, group.orderIds);
+        group.status = `${supplyId} · заданий ${group.orderIds.length}`;
+      } catch (e: any) {
+        group.status = `ошибка: ${e?.message || e}`;
+      }
+      setAssemblePlan((prev) => (prev ? { ...prev, groups: [...groups] } : prev));
+    }
+
+    setAssemblePlan((prev) => (prev ? { ...prev, running: false, done: true, groups: [...groups] } : prev));
+    await fetchSupplies();
+    await fetchNewOrders();
+  };
+
+  const toggleSupplySelection = (supplyId: string) => {
+    setSelectedSupplyIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(supplyId)) next.delete(supplyId);
+      else next.add(supplyId);
+      return next;
+    });
+  };
+
+  /**
+   * Листы подбора и коды по отмеченным поставкам — подряд, файлами.
+   *
+   * Печать открыть подряд нельзя: второе системное окно браузер блокирует.
+   * Поэтому на каждую поставку скачиваются два файла — сначала лист подбора,
+   * следом коды к нему, — и так по очереди, в порядке списка.
+   */
+  const runBulkSupplyExport = async () => {
+    const ids = supplies.filter((x) => selectedSupplyIds.has(x.id)).map((x) => x.id);
+    if (!ids.length) return;
+
+    const errors: string[] = [];
+    setBulkExport({ total: ids.length, index: 0, name: '', stage: '', errors: [], done: false });
+
+    for (let i = 0; i < ids.length; i++) {
+      const id = ids[i];
+      const name = supplies.find((x) => x.id === id)?.name || id;
+
+      setBulkExport({ total: ids.length, index: i + 1, name, stage: 'лист подбора', errors: [...errors], done: false });
+      try {
+        await generatePickingList(id);
+      } catch (e: any) {
+        errors.push(`${name}: лист — ${e?.message || e}`);
+      }
+      // Браузеру нужно время между сохранениями, иначе часть файлов теряется.
+      await new Promise((r) => setTimeout(r, 900));
+
+      setBulkExport({ total: ids.length, index: i + 1, name, stage: 'коды', errors: [...errors], done: false });
+      try {
+        await downloadFBSStickers({ supplyId: id, asFile: true });
+      } catch (e: any) {
+        errors.push(`${name}: коды — ${e?.message || e}`);
+      }
+      await new Promise((r) => setTimeout(r, 900));
+    }
+
+    setBulkExport({ total: ids.length, index: ids.length, name: '', stage: 'готово', errors, done: true });
+    if (!errors.length) {
+      setSuccessMsg(`Выгружено поставок: ${ids.length} — лист подбора и коды по каждой.`);
+      setTimeout(() => setSuccessMsg(null), 4000);
+    }
+  };
+
+  /**
+   * План марок поставки: кому какая марка достанется и сколько их в базе.
+   *
+   * Повторяет подбор из печати один в один, но ничего не закрепляет — коды
+   * остаются свободными до нажатия «Печатать».
+   */
+  const buildChzPlan = async (supplyId: string) => {
+    const supplyName = supplies.find((x) => x.id === supplyId)?.name || supplyId;
+    setChzPlan({
+      supplyId, supplyName, busy: true, total: 0, alreadyWithChz: 0, canceled: 0,
+      statusChecked: false, groups: [], noGender: [], noCard: [],
+    });
+    try {
+      const rawOrders = await withTimeout(
+        fetchOrdersForSupply(supplyId, { enrich: true, fresh: true, cacheTtlMs: SUPPLY_ORDERS_CACHE_MS }),
+        30000,
+        'Таймаут загрузки заказов поставки',
+      );
+      const target = supplyId.trim().toLowerCase();
+      const supplyOrders = (rawOrders || []).filter((o: any) => {
+        const candidates = [o?.supplyId, o?.supplyID, o?.supply_id, o?.supply?.id]
+          .map((v) => String(v || '').trim().toLowerCase())
+          .filter(Boolean);
+        return candidates.length === 0 ? true : candidates.some((c) => c === target);
+      });
+      const orderId = (o: any) => Number(o?.id ?? o?.orderId ?? o?.order_id);
+      const ids = Array.from(new Set(supplyOrders.map(orderId).filter((id: number) => Number.isFinite(id) && id > 0)));
+      if (!ids.length) throw new Error('В поставке нет заданий');
+
+      const { canceled, checked } = await fetchCanceledFbsOrders(ids);
+      const live = supplyOrders.filter((o: any) => !canceled.has(orderId(o)));
+
+      const [savedMap, dbScans] = await Promise.all([
+        loadFbsSupplyScanMap(supplyId, selectedSupplierId).catch(() => ({} as Record<string, FbsSupplyScanSavedItem>)),
+        fetchFbsSupplyScans(selectedSupplierId, supplyId).catch(() => []),
+      ]);
+      const withChz = new Set<number>();
+      Object.values(savedMap).forEach((item: any) => {
+        const id = Number(String(item?.orderId || '').trim());
+        if (id > 0 && String(item?.honestSignCode || '').trim()) withChz.add(id);
+      });
+      (dbScans || []).forEach((row: any) => {
+        const id = Number(String(row?.orderId || '').trim());
+        if (id > 0 && String(row?.chzCode || '').trim()) withChz.add(id);
+      });
+
+      const need = live.filter((o: any) => !withChz.has(orderId(o)));
+      const meta = await loadProductMetaByNmId(selectedSupplierId, need.map((o: any) => Number(o?.nmId || 0)));
+      const pool = await takeFreeChzCodes(selectedSupplierId, Math.max(need.length, 1));
+
+      const freeBy = new Map<string, number>();
+      pool.forEach((c: any) => {
+        const key = `${normalizeHsCategoryName(c.category)}|${String(c.gender || '').toLowerCase()}`;
+        freeBy.set(key, (freeBy.get(key) || 0) + 1);
+      });
+
+      const used = new Set<string>();
+      const groups = new Map<string, { key: string; category: string; gender: 'male' | 'female'; orders: number; matched: number; freeTotal: number }>();
+      const noGender = new Map<string, { nmId: string; article: string; subject: string; count: number }>();
+      const noCard = new Map<string, { nmId: string; article: string; count: number }>();
+
+      for (const o of need) {
+        const nmId = String(o?.nmId || '');
+        const article = String(o?.article || o?.vendorCode || '—');
+        const card = meta.get(Number(o?.nmId || 0));
+        if (!card) {
+          const row = noCard.get(nmId) || { nmId, article, count: 0 };
+          row.count += 1;
+          noCard.set(nmId, row);
+          continue;
+        }
+        if (!card.gender) {
+          const row = noGender.get(nmId) || { nmId, article, subject: card.subject || '', count: 0 };
+          row.count += 1;
+          noGender.set(nmId, row);
+          continue;
+        }
+        const category = normalizeHsCategoryName(card.subject || '');
+        const key = `${category}|${card.gender}`;
+        const group = groups.get(key) || {
+          key,
+          category: card.subject || 'без категории',
+          gender: card.gender as 'male' | 'female',
+          orders: 0,
+          matched: 0,
+          freeTotal: freeBy.get(key) || 0,
+        };
+        group.orders += 1;
+        const match = matchChzCodeForProduct(pool, used, {
+          gender: card.gender,
+          subject: card.subject,
+          size: String(o?.size || ''),
+        });
+        if (match) {
+          used.add(match.code);
+          group.matched += 1;
+        }
+        groups.set(key, group);
+      }
+
+      setChzPlan({
+        supplyId,
+        supplyName,
+        busy: false,
+        total: live.length,
+        alreadyWithChz: live.length - need.length,
+        canceled: canceled.size,
+        statusChecked: checked,
+        groups: Array.from(groups.values()).sort((a, b) => b.orders - a.orders),
+        noGender: Array.from(noGender.values()).sort((a, b) => b.count - a.count),
+        noCard: Array.from(noCard.values()).sort((a, b) => b.count - a.count),
+      });
+    } catch (e: any) {
+      setChzPlan((prev) => (prev ? { ...prev, busy: false, error: e?.message || String(e) } : prev));
     }
   };
 
@@ -9136,6 +9492,20 @@ export const WBSupplyManager = ({
                                     </span>
                                 </span>
                             </button>
+
+                            {/* Сборка: по поставке на каждый склад отгрузки, задания внутрь */}
+                            <button
+                                onClick={() => void openAssemblePlan()}
+                                disabled={Boolean(assemblePlan?.busy || assemblePlan?.running)}
+                                title="Создать поставку на каждый склад отгрузки и разложить по ним все новые задания"
+                                className="mt-2 flex w-full items-center justify-center gap-3 rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-4 py-2.5 text-white shadow-md shadow-violet-500/30 transition hover:from-violet-700 hover:to-fuchsia-700 disabled:cursor-not-allowed disabled:from-slate-300 disabled:to-slate-300"
+                            >
+                                <Truck className="h-5 w-5" />
+                                <span className="text-left">
+                                    <span className="block font-bold">Собрать поставки</span>
+                                    <span className="block text-xs opacity-80">по поставке на каждый склад отгрузки</span>
+                                </span>
+                            </button>
                         </div>
                     );
                 })()}
@@ -9160,6 +9530,14 @@ export const WBSupplyManager = ({
                         </div>
                     </div>
                     <div className="flex items-center gap-1">
+                        <button
+                            onClick={() => setSelectedSupplyIds((prev) => (prev.size === supplies.length && supplies.length > 0 ? new Set() : new Set(supplies.map((x) => x.id))))}
+                            disabled={supplies.length === 0}
+                            className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                            title="Отметить все поставки для выгрузки"
+                        >
+                            {selectedSupplyIds.size === supplies.length && supplies.length > 0 ? 'Снять все' : 'Выбрать все'}
+                        </button>
                         <button
                             onClick={() => setShowCreateSupplyModal(true)}
                             className="inline-flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-violet-700"
@@ -9220,9 +9598,20 @@ export const WBSupplyManager = ({
                                 `}
                             >
                                 <div className="flex items-start justify-between gap-2">
-                                    <div className="min-w-0">
-                                        <div className="truncate font-semibold text-slate-900">{supply.name}</div>
-                                        <div className="font-mono text-xs text-slate-400">{supply.id}</div>
+                                    <div className="flex min-w-0 items-start gap-2">
+                                        {/* Галочка — выбор поставки для выгрузки листов и кодов подряд. */}
+                                        <input
+                                            type="checkbox"
+                                            checked={selectedSupplyIds.has(supply.id)}
+                                            onChange={() => toggleSupplySelection(supply.id)}
+                                            onClick={(e) => e.stopPropagation()}
+                                            title="Отметить для выгрузки листа и кодов"
+                                            className="mt-1 h-4 w-4 shrink-0 rounded border-slate-300"
+                                        />
+                                        <div className="min-w-0">
+                                            <div className="truncate font-semibold text-slate-900">{supply.name}</div>
+                                            <div className="font-mono text-xs text-slate-400">{supply.id}</div>
+                                        </div>
                                     </div>
                                     <div className="flex shrink-0 flex-col items-end gap-1">
                                         <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${supply.closedAt ? 'bg-slate-100 text-slate-500' : 'bg-emerald-100 text-emerald-700'}`}>
@@ -9251,7 +9640,13 @@ export const WBSupplyManager = ({
 
                                         <div className="grid grid-cols-2 gap-2">
                                             <button
-                                                onClick={(e) => { e.stopPropagation(); downloadFBSStickers(); }}
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    // С марками из базы сначала показываем план, без них печатаем сразу.
+                                                    if (fbsStickersWithChz) void buildChzPlan(supply.id);
+                                                    else void downloadFBSStickers({ supplyId: supply.id });
+                                                }}
+                                                title={fbsStickersWithChz ? 'Покажем, какому товару какая марка достанется и сколько их в базе, и только потом печать' : 'Печать стикеров WB'}
                                                 className="flex items-center justify-center gap-1.5 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-500 px-3 py-2 text-sm font-bold text-white shadow-sm shadow-indigo-500/25 transition hover:from-indigo-600 hover:to-violet-600"
                                             >
                                                 <Printer className="w-4 h-4" /> {fbsStickersWithChz ? 'Стикеры + ЧЗ' : 'Стикеры'}
@@ -9346,6 +9741,43 @@ export const WBSupplyManager = ({
                         ))
                     )}
                 </div>
+
+                {/* Пакетная выгрузка по отмеченным поставкам */}
+                {selectedSupplyIds.size > 0 && (
+                    <div className="space-y-2 border-t border-slate-100 bg-slate-50/80 p-3">
+                        <button
+                            onClick={() => void runBulkSupplyExport()}
+                            disabled={Boolean(bulkExport && !bulkExport.done)}
+                            className="flex w-full items-center justify-center gap-3 rounded-xl bg-gradient-to-r from-sky-600 to-blue-600 px-4 py-3 text-white shadow-md shadow-sky-500/30 transition hover:from-sky-700 hover:to-blue-700 disabled:cursor-not-allowed disabled:from-slate-300 disabled:to-slate-300"
+                        >
+                            <Download className="h-5 w-5" />
+                            <span className="text-left">
+                                <span className="block font-bold">Скачать листы и коды ({selectedSupplyIds.size})</span>
+                                <span className="block text-xs opacity-80">по каждой поставке: лист подбора, следом файл кодов</span>
+                            </span>
+                        </button>
+
+                        {bulkExport && (
+                            <div className="rounded-xl bg-white px-3 py-2 text-xs text-slate-600 shadow-sm">
+                                {bulkExport.done
+                                    ? `Готово: ${bulkExport.total} поставок`
+                                    : `Поставка ${bulkExport.index} из ${bulkExport.total}: ${bulkExport.name} — ${bulkExport.stage}`}
+                                {bulkExport.errors.length > 0 && (
+                                    <ul className="mt-1 list-disc pl-4 text-rose-600">
+                                        {bulkExport.errors.map((msg, i) => <li key={i}>{msg}</li>)}
+                                    </ul>
+                                )}
+                            </div>
+                        )}
+
+                        <button
+                            onClick={() => { setSelectedSupplyIds(new Set()); setBulkExport(null); }}
+                            className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-600 hover:bg-white"
+                        >
+                            Снять выбор
+                        </button>
+                    </div>
+                )}
             </div>
         </div>
         </>
@@ -9433,6 +9865,215 @@ export const WBSupplyManager = ({
                   </button>
                 )}
                 <button onClick={() => setChzPrintReport(null)} className="px-4 py-2 rounded-xl border border-slate-300 text-sm text-slate-700 hover:bg-slate-50">Понятно</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {assemblePlan && (() => {
+        const plan = assemblePlan;
+        const totalOrders = plan.groups.reduce((sum, g) => sum + g.orderIds.length, 0);
+        return (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm" onClick={() => { if (!plan.running) setAssemblePlan(null); }}>
+            <div className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-3xl bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-start justify-between gap-4 bg-gradient-to-r from-violet-600 to-fuchsia-600 px-5 py-4 text-white">
+                <div>
+                  <div className="flex items-center gap-2 text-lg font-bold"><Truck className="h-5 w-5" /> Сборка поставок</div>
+                  <div className="text-sm opacity-90">{selectedSupplier?.name || 'кабинет не выбран'}</div>
+                </div>
+                <button onClick={() => { if (!plan.running) setAssemblePlan(null); }} className="rounded-lg p-1.5 hover:bg-white/20"><X className="h-5 w-5" /></button>
+              </div>
+
+              <div className="space-y-3 overflow-auto p-5">
+                {plan.busy && <div className="rounded-xl bg-slate-50 px-3 py-6 text-center text-sm text-slate-500">Смотрю новые задания и склады…</div>}
+                {plan.error && <div className="rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700">{plan.error}</div>}
+
+                {!plan.busy && !plan.error && plan.groups.length > 0 && (
+                  <>
+                    <div className="text-sm text-slate-600">
+                      {plan.done
+                        ? 'Готово. Что получилось:'
+                        : `Создам ${plan.groups.length} ${plan.groups.length === 1 ? 'поставку' : 'поставки'} и разложу ${totalOrders} заданий по складам отгрузки.`}
+                    </div>
+                    <div className="divide-y divide-slate-100 rounded-xl border border-slate-200">
+                      {plan.groups.map((g) => (
+                        <div key={g.warehouseId} className="px-3 py-2 text-sm">
+                          <div className="flex items-baseline justify-between gap-3">
+                            <span className="font-semibold text-slate-800">{g.warehouseName}</span>
+                            <span className="tabular-nums text-slate-500">{g.orderIds.length} заданий</span>
+                          </div>
+                          <div className="text-xs text-slate-500">{g.supplyName}</div>
+                          {g.status && (
+                            <div className={`mt-0.5 text-xs ${g.status.startsWith('ошибка') ? 'text-rose-600' : 'text-emerald-700'}`}>{g.status}</div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+
+              <div className="flex flex-wrap justify-end gap-2 border-t border-slate-100 px-5 py-3">
+                {!plan.done && (
+                  <button
+                    onClick={() => void runAssemblePlan()}
+                    disabled={plan.busy || plan.running || !plan.groups.length}
+                    className="rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700 disabled:opacity-40"
+                  >
+                    {plan.running ? 'Создаю…' : 'Создать поставки'}
+                  </button>
+                )}
+                <button
+                  onClick={() => setAssemblePlan(null)}
+                  disabled={plan.running}
+                  className="rounded-xl border border-slate-300 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                >
+                  {plan.done ? 'Закрыть' : 'Отмена'}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {chzPlan && (() => {
+        const plan = chzPlan;
+        const willGet = plan.groups.reduce((sum, g) => sum + g.matched, 0);
+        const short = plan.groups.reduce((sum, g) => sum + (g.orders - g.matched), 0);
+        const noMeta = plan.noGender.reduce((s, r) => s + r.count, 0) + plan.noCard.reduce((s, r) => s + r.count, 0);
+        const genderText = (g: string) => (g === 'male' ? 'мужской' : g === 'female' ? 'женский' : '—');
+        return (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm" onClick={() => setChzPlan(null)}>
+            <div className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-start justify-between gap-4 bg-gradient-to-r from-amber-500 to-orange-500 px-5 py-4 text-white">
+                <div>
+                  <div className="flex items-center gap-2 text-lg font-bold"><CheckSquare className="h-5 w-5" /> Какие марки уйдут в печать</div>
+                  <div className="text-sm opacity-90">{plan.supplyName}</div>
+                </div>
+                <button onClick={() => setChzPlan(null)} className="rounded-lg p-1.5 hover:bg-white/20"><X className="h-5 w-5" /></button>
+              </div>
+
+              <div className="space-y-4 overflow-auto p-5">
+                {plan.busy && <div className="rounded-xl bg-slate-50 px-3 py-6 text-center text-sm text-slate-500">Считаю план по поставке…</div>}
+                {plan.error && <div className="rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700">{plan.error}</div>}
+
+                {!plan.busy && !plan.error && (
+                  <>
+                    <div className="grid grid-cols-4 gap-2 text-center">
+                      <div className="rounded-xl bg-slate-50 p-3"><div className="text-2xl font-extrabold tabular-nums">{plan.total}</div><div className="text-xs text-slate-500">заданий</div></div>
+                      <div className="rounded-xl bg-slate-50 p-3"><div className="text-2xl font-extrabold tabular-nums">{plan.alreadyWithChz}</div><div className="text-xs text-slate-500">уже с ЧЗ</div></div>
+                      <div className="rounded-xl bg-emerald-50 p-3"><div className="text-2xl font-extrabold tabular-nums text-emerald-700">{willGet}</div><div className="text-xs text-emerald-700">получат марку</div></div>
+                      <div className={`rounded-xl p-3 ${short + noMeta ? 'bg-amber-50' : 'bg-slate-50'}`}><div className={`text-2xl font-extrabold tabular-nums ${short + noMeta ? 'text-amber-700' : ''}`}>{short + noMeta}</div><div className="text-xs text-slate-500">на скан</div></div>
+                    </div>
+
+                    {plan.canceled > 0 && (
+                      <div className="rounded-xl bg-slate-100 px-3 py-2 text-sm text-slate-600">Отменённых заданий: {plan.canceled} — в печать не пойдут.</div>
+                    )}
+                    {!plan.statusChecked && (
+                      <div className="rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700">Статусы заданий у WB не получены — отменённые могут попасть в печать.</div>
+                    )}
+
+                    {plan.groups.length > 0 && (
+                      <div className="overflow-hidden rounded-xl border border-slate-200">
+                        <table className="w-full text-sm">
+                          <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+                            <tr>
+                              <th className="px-3 py-2 text-left font-semibold">Категория</th>
+                              <th className="px-3 py-2 text-left font-semibold">Пол</th>
+                              <th className="px-3 py-2 text-right font-semibold">Заданий</th>
+                              <th className="px-3 py-2 text-right font-semibold">Получат</th>
+                              <th className="px-3 py-2 text-right font-semibold">Есть в базе</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {plan.groups.map((g) => (
+                              <tr key={g.key} className="border-t border-slate-100">
+                                <td className="px-3 py-2 text-slate-800">{g.category}</td>
+                                <td className="px-3 py-2 text-slate-600">{genderText(g.gender)}</td>
+                                <td className="px-3 py-2 text-right tabular-nums">{g.orders}</td>
+                                <td className={`px-3 py-2 text-right font-semibold tabular-nums ${g.matched < g.orders ? 'text-amber-700' : 'text-emerald-700'}`}>{g.matched}</td>
+                                <td className="px-3 py-2 text-right tabular-nums text-slate-600">{g.freeTotal}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {plan.noGender.length > 0 && (
+                      <div>
+                        <div className="mb-1.5 text-sm font-bold text-slate-800">В карточке WB не указан пол: {plan.noGender.reduce((s, r) => s + r.count, 0)}</div>
+                        <div className="divide-y divide-slate-100 rounded-xl border border-slate-200">
+                          {plan.noGender.map((row) => (
+                            <div key={row.nmId} className="px-3 py-2 text-sm">
+                              <div className="flex flex-wrap items-baseline gap-x-3">
+                                <span className="font-medium text-slate-800">{row.article}</span>
+                                <span className="font-mono text-xs text-slate-500">{row.nmId}</span>
+                                <span className="text-xs text-slate-500">{row.subject || 'без категории'} · {row.count} шт.</span>
+                              </div>
+                              <div className="mt-1 flex flex-wrap items-center gap-2">
+                                <span className="text-xs text-slate-500">Пол товара:</span>
+                                {(['male', 'female'] as const).map((g) => (
+                                  <button
+                                    key={g}
+                                    disabled={chzGenderPick[row.nmId] === 'busy'}
+                                    onClick={() => void pickChzGender(row.nmId, g)}
+                                    className={`rounded-lg border px-2 py-0.5 text-xs font-semibold transition ${chzGenderPick[row.nmId] === g ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-300 text-slate-700 hover:bg-slate-50'}`}
+                                  >
+                                    {g === 'male' ? 'Мужской' : 'Женский'}
+                                  </button>
+                                ))}
+                                {chzGenderPick[row.nmId] && chzGenderPick[row.nmId] !== 'busy' && (
+                                  <span className="text-xs text-emerald-700">сохранено — нажмите «Пересчитать»</span>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {plan.noCard.length > 0 && (
+                      <div>
+                        <div className="mb-1.5 text-sm font-bold text-slate-800">Нет карточки товара: {plan.noCard.reduce((s, r) => s + r.count, 0)}</div>
+                        <div className="divide-y divide-slate-100 rounded-xl border border-slate-200">
+                          {plan.noCard.map((row) => (
+                            <div key={row.nmId} className="px-3 py-2 text-sm">
+                              <span className="font-medium text-slate-800">{row.article}</span>
+                              <span className="ml-3 font-mono text-xs text-slate-500">{row.nmId}</span>
+                              <span className="ml-3 text-xs text-slate-500">{row.count} шт.</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {short > 0 && (
+                      <div className="rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                        Кодов не хватит на {short} заданий — они напечатаются обычным стикером WB, марку на них сканируют вручную.
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+
+              <div className="flex flex-wrap justify-end gap-2 border-t border-slate-100 px-5 py-3">
+                <button
+                  onClick={() => void buildChzPlan(plan.supplyId)}
+                  disabled={plan.busy}
+                  className="rounded-xl border border-slate-300 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                >
+                  Пересчитать
+                </button>
+                <button
+                  onClick={() => { const id = plan.supplyId; setChzPlan(null); void downloadFBSStickers({ supplyId: id }); }}
+                  disabled={plan.busy || Boolean(plan.error)}
+                  className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-40"
+                >
+                  Печатать стикеры
+                </button>
+                <button onClick={() => setChzPlan(null)} className="rounded-xl border border-slate-300 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">Отмена</button>
               </div>
             </div>
           </div>
