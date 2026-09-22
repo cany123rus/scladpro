@@ -836,6 +836,8 @@ export const WBSupplyManager = ({
       options: Array<{ supplyId: string; name: string; count: number; unknownWarehouse?: boolean }>;
       /** Выбранная поставка; пусто — создать новую. */
       targetSupplyId: string;
+      /** Поставка, в которую задания легли на самом деле (после раскладки). */
+      resultSupplyId?: string;
       status?: string;
     }>;
   }>(null);
@@ -8658,6 +8660,7 @@ export const WBSupplyManager = ({
           if (!supplyId) throw new Error('WB не вернул номер поставки');
         }
         await addOrdersToSupplyApi(supplyId, group.orderIds);
+        group.resultSupplyId = supplyId;
         // Сверяемся с WB: сколько заданий в поставке стало на самом деле.
         let total = 0;
         try {
@@ -8672,7 +8675,46 @@ export const WBSupplyManager = ({
       setAssemblePlan((prev) => (prev ? { ...prev, groups: [...groups] } : prev));
     }
 
-    setAssemblePlan((prev) => (prev ? { ...prev, running: false, done: true, groups: [...groups] } : prev));
+    /*
+     * Пересобираем список активных поставок прямо в окне.
+     *
+     * После раскладки числа в нём уже не те, а окно остаётся открытым: сразу
+     * видно, сколько заданий стало в каждой поставке, включая только что
+     * созданные.
+     */
+    const known = new Map<string, { name: string; warehouseId: number; warehouseName: string }>();
+    plan.activeSupplies.forEach((item) => {
+      known.set(item.supplyId, { name: item.name, warehouseId: item.warehouseId, warehouseName: item.warehouseName });
+    });
+    groups.forEach((g) => {
+      if (!g.resultSupplyId) return;
+      const option = g.options.find((x) => x.supplyId === g.resultSupplyId);
+      known.set(g.resultSupplyId, {
+        name: option?.name || g.supplyName,
+        warehouseId: g.warehouseId,
+        warehouseName: g.warehouseName,
+      });
+    });
+
+    const refreshedActive: NonNullable<typeof assemblePlan>['activeSupplies'] = [];
+    for (const [supplyId, info] of known.entries()) {
+      let count = plan.activeSupplies.find((x) => x.supplyId === supplyId)?.count || 0;
+      try {
+        count = (await fetchSupplyOrderIds(supplyId)).length;
+      } catch (e) {
+        console.warn('ID заданий поставки не получены', supplyId, e);
+      }
+      refreshedActive.push({ supplyId, name: info.name, count, warehouseId: info.warehouseId, warehouseName: info.warehouseName });
+    }
+
+    setAssemblePlan((prev) => (prev ? {
+      ...prev,
+      running: false,
+      done: true,
+      groups: [...groups],
+      activeSupplies: refreshedActive,
+    } : prev));
+
     // Задания уехали в поставки: обновляем и список поставок, и новые задания.
     await refreshFbsData();
   };
@@ -10194,7 +10236,9 @@ export const WBSupplyManager = ({
                   <>
                     {plan.activeSupplies.length > 0 && (
                       <div>
-                        <div className="mb-1.5 text-sm font-bold text-slate-800">Активные поставки</div>
+                        <div className="mb-1.5 text-sm font-bold text-slate-800">
+                          Активные поставки{plan.done ? ' — после раскладки' : ''}
+                        </div>
                         <div className="divide-y divide-slate-100 rounded-xl border border-slate-200">
                           {plan.activeSupplies.map((item) => (
                             <div key={item.supplyId} className="flex items-baseline justify-between gap-3 px-3 py-1.5 text-sm">
