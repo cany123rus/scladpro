@@ -825,15 +825,17 @@ export const WBSupplyManager = ({
     running: boolean;
     done: boolean;
     error?: string;
+    /** Активные поставки кабинета — их видно в окне сразу. */
+    activeSupplies: Array<{ supplyId: string; name: string; count: number; warehouseId: number; warehouseName: string }>;
     groups: Array<{
       warehouseId: number;
       warehouseName: string;
       orderIds: string[];
       supplyName: string;
-      /** Открытая поставка этого склада, если она уже есть. */
-      existing?: { supplyId: string; name: string; count: number };
-      /** Куда кладём задания: в открытую поставку склада или в новую. */
-      target: 'existing' | 'new';
+      /** Активные поставки, куда можно положить задания этого склада. */
+      options: Array<{ supplyId: string; name: string; count: number; unknownWarehouse?: boolean }>;
+      /** Выбранная поставка; пусто — создать новую. */
+      targetSupplyId: string;
       status?: string;
     }>;
   }>(null);
@@ -5753,74 +5755,11 @@ export const WBSupplyManager = ({
     setLoading(true);
     setError(null);
     try {
-      const supplyId = encodeURIComponent(String(activeSupplyId));
       const orders = Array.from(selectedOrderIds).map((v) => String(v));
 
-      let done = false;
-      let lastErr: any = null;
-      let customSuccess: string | null = null;
+      await addOrdersToSupplyApi(activeSupplyId, orders);
 
-      // v1: batch PATCH { orders: [...] }
-      try {
-        await wbFetch(`https://marketplace-api.wildberries.ru/api/v3/supplies/${supplyId}/orders`, {
-          method: 'PATCH',
-          body: JSON.stringify({ orders }),
-        });
-        done = true;
-      } catch (e1: any) {
-        lastErr = e1;
-
-        // v2: batch POST { orders: [...] }
-        try {
-          await wbFetch(`https://marketplace-api.wildberries.ru/api/v3/supplies/${supplyId}/orders`, {
-            method: 'POST',
-            body: JSON.stringify({ orders }),
-          });
-          done = true;
-        } catch (e2: any) {
-          lastErr = e2;
-
-          // v3: per-order endpoints fallback matrix
-          let okCount = 0;
-          for (const orderId of orders) {
-            const oid = encodeURIComponent(orderId);
-            const variants: Array<{ method: 'PATCH' | 'POST'; url: string; body?: any }> = [
-              { method: 'PATCH', url: `https://marketplace-api.wildberries.ru/api/v3/supplies/${supplyId}/orders/${oid}` },
-              { method: 'POST',  url: `https://marketplace-api.wildberries.ru/api/v3/supplies/${supplyId}/orders/${oid}` },
-              { method: 'POST',  url: `https://marketplace-api.wildberries.ru/api/v3/supplies/${supplyId}/orders/${oid}/add` },
-              { method: 'PATCH', url: `https://marketplace-api.wildberries.ru/api/v3/supplies/${supplyId}/orders/add`, body: { orderId: orderId } },
-            ];
-
-            let added = false;
-            for (const v of variants) {
-              try {
-                await wbFetch(v.url, {
-                  method: v.method,
-                  ...(v.body ? { body: JSON.stringify(v.body) } : {}),
-                });
-                added = true;
-                okCount += 1;
-                break;
-              } catch (eTry) {
-                lastErr = eTry;
-              }
-            }
-
-            if (!added) {
-              // continue to next order; aggregated result will show partial success/failure
-            }
-          }
-
-          if (okCount > 0) {
-            done = true;
-            customSuccess = `Добавлено ${okCount} из ${orders.length} заказов в поставку ${activeSupplyId}`;
-          }
-        }
-      }
-
-      if (!done) throw lastErr || new Error('Не удалось добавить заказы в поставку');
-
-      setSuccessMsg(customSuccess || `Добавлено ${selectedOrderIds.size} заказов в поставку ${activeSupplyId}`);
+      setSuccessMsg(`Добавлено ${selectedOrderIds.size} заказов в поставку ${activeSupplyId}`);
       setSelectedOrderIds(new Set());
       fetchNewOrders();
     } catch (err: any) {
@@ -8541,66 +8480,105 @@ export const WBSupplyManager = ({
     return mapped as Array<{ id: number; name: string }>;
   };
 
-  /** Добавление заданий в поставку WB: пакетом, с запасными вариантами. */
-  const pushOrdersToSupply = async (supplyId: string, orderIds: string[]) => {
+  /*
+   * Добавление заданий в поставку WB.
+   *
+   * Путь у метода сменился: старый /api/v3/supplies/{id}/orders отвечает
+   * «path not found» (проверено 22.09.2026 на живом токене — поставка
+   * создавалась пустой). Рабочий адрес — /api/marketplace/v3/..., пачками не
+   * больше ста заданий, номера числами.
+   */
+  const addOrdersToSupplyApi = async (supplyId: string, orderIds: Array<string | number>) => {
     const encoded = encodeURIComponent(String(supplyId));
-    for (let i = 0; i < orderIds.length; i += 500) {
-      const chunk = orderIds.slice(i, i + 500);
+    const ids = orderIds
+      .map((v) => Number(String(v).trim()))
+      .filter((v) => Number.isFinite(v) && v > 0);
+
+    /*
+     * Отказ по части заданий — это 409 со списком в поле data.
+     *
+     * Задание могли отменить или уже положить в другую поставку. Остальные
+     * при этом закрепляются, поэтому пачку целиком неудачной не считаем:
+     * пересчитываем, сколько не прошло, и говорим об этом в конце.
+     */
+    const rejected = new Set<number>();
+    for (let i = 0; i < ids.length; i += 100) {
+      const chunk = ids.slice(i, i + 100);
       try {
-        await wbFetch(`https://marketplace-api.wildberries.ru/api/v3/supplies/${encoded}/orders`, {
+        await wbFetch(`https://marketplace-api.wildberries.ru/api/marketplace/v3/supplies/${encoded}/orders`, {
           method: 'PATCH',
           body: JSON.stringify({ orders: chunk }),
         });
-        continue;
-      } catch (batchError) {
-        // По одному: WB иногда не принимает пакет целиком из-за одного задания.
-        let ok = 0;
-        let lastError: any = batchError;
-        for (const orderId of chunk) {
-          try {
-            await wbFetch(`https://marketplace-api.wildberries.ru/api/v3/supplies/${encoded}/orders/${encodeURIComponent(orderId)}`, { method: 'PATCH' });
-            ok += 1;
-          } catch (e) {
-            lastError = e;
-          }
-        }
-        if (ok === 0) throw lastError;
-        if (ok < chunk.length) throw new Error(`добавлено ${ok} из ${chunk.length} заданий`);
+      } catch (e: any) {
+        if (Number(e?.status) !== 409) throw e;
+        const failed = String(e?.message || '').match(/"data":\s*\[([^\]]*)\]/g) || [];
+        const parsed = failed
+          .flatMap((part) => part.replace(/[^\d,]/g, '').split(','))
+          .map((v) => Number(v))
+          .filter((v) => Number.isFinite(v) && v > 0);
+        if (!parsed.length) throw e;
+        parsed.forEach((v) => rejected.add(v));
       }
+    }
+
+    if (rejected.size) {
+      throw new Error(`WB не принял ${rejected.size} из ${ids.length} заданий — проверьте, не отменены ли они`);
     }
   };
 
-  /** План сборки: какие поставки создадим и что в них положим. */
+  /** ID заданий, закреплённых за поставкой, — у WB для этого свой метод. */
+  const fetchSupplyOrderIds = async (supplyId: string): Promise<number[]> => {
+    const data = await wbFetch(`https://marketplace-api.wildberries.ru/api/marketplace/v3/supplies/${encodeURIComponent(supplyId)}/order-ids`);
+    const ids = Array.isArray(data?.orderIds) ? data.orderIds : [];
+    return ids.map((v: any) => Number(v)).filter((v: number) => Number.isFinite(v) && v > 0);
+  };
+
+  const pushOrdersToSupply = addOrdersToSupplyApi;
+
+  /**
+   * Окно сборки: активные поставки, новые задания по складам и куда их класть.
+   *
+   * WB не даёт положить в одну поставку задания с разных складов, поэтому
+   * задания сначала делятся по складу отгрузки, а для каждого склада
+   * предлагается его активная поставка (если она есть) или новая.
+   */
   const openAssemblePlan = async () => {
-    setAssemblePlan({ busy: true, running: false, done: false, groups: [] });
+    setAssemblePlan({ busy: true, running: false, done: false, groups: [], activeSupplies: [] });
     try {
       const warehouses = wbWarehouses.length ? wbWarehouses : await loadWbWarehouses();
       const nameById = new Map(warehouses.map((w) => [w.id, w.name]));
 
-      /*
-       * Открытые поставки складов — чтобы докладывать задания в них.
-       *
-       * Кнопку жмут столько раз, сколько нужно: каждое нажатие берёт всё, что
-       * накопилось, и кладёт в уже открытую поставку склада, а не плодит
-       * вторую. Склад поставки WB не отдаёт, он известен только по её
-       * заданиям: берём его из того же прохода, что считает количество.
-       */
-      const { counts, warehouses: supplyWarehouses } = await loadSupplyOrderCounts(supplies) || { counts: {}, warehouses: {} };
-      const openByWarehouse = new Map<number, { supplyId: string; name: string; count: number }>();
-      supplies
+      // Склад поставки WB не отдаёт — он известен только по её заданиям.
+      const { warehouses: supplyWarehouses } = (await loadSupplyOrderCounts(supplies, true))
+        || { warehouses: {} as Record<string, number> };
+
+      const openSupplies = supplies
         .filter((x) => !x.closedAt)
-        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-        .forEach((x) => {
-          const wh = Number(supplyWarehouses[x.id] || 0);
-          if (!wh || openByWarehouse.has(wh)) return;
-          openByWarehouse.set(wh, { supplyId: x.id, name: x.name || x.id, count: Number(counts[x.id] || 0) });
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+      // Точное количество заданий поставки — отдельным методом WB.
+      const activeSupplies: Array<{ supplyId: string; name: string; count: number; warehouseId: number; warehouseName: string }> = [];
+      for (const item of openSupplies.slice(0, 20)) {
+        let count = Number(supplyOrderCounts[item.id] || 0);
+        try {
+          count = (await fetchSupplyOrderIds(item.id)).length;
+        } catch (e) {
+          console.warn('ID заданий поставки не получены', item.id, e);
+        }
+        const warehouseId = Number(supplyWarehouses[item.id] || 0);
+        activeSupplies.push({
+          supplyId: item.id,
+          name: item.name || item.id,
+          count,
+          warehouseId,
+          warehouseName: warehouseId ? (nameById.get(warehouseId) || `Склад ${warehouseId}`) : '',
         });
+      }
 
       const fresh = await wbFetch('https://marketplace-api.wildberries.ru/api/v3/orders/new');
       const list: any[] = fresh?.orders || [];
       setOrders(list);
       const free = list.filter((o: any) => !o?.supplyId);
-      if (!free.length) throw new Error('Все новые задания уже разложены по поставкам');
 
       const now = new Date();
       const stamp = `${String(now.getDate()).padStart(2, '0')}.${String(now.getMonth() + 1).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
@@ -8616,38 +8594,51 @@ export const WBSupplyManager = ({
       const groups = Array.from(byWarehouse.entries())
         .map(([warehouseId, arr]) => {
           const warehouseName = nameById.get(warehouseId) || `Склад ${warehouseId}`;
-          const existing = openByWarehouse.get(warehouseId);
+          // Поставки того же склада, а неопознанные — следом: их склад просто не попал в окно.
+          const options = activeSupplies
+            .filter((x) => x.warehouseId === warehouseId || !x.warehouseId)
+            .map((x) => ({ supplyId: x.supplyId, name: x.name, count: x.count, unknownWarehouse: !x.warehouseId }))
+            .sort((a, b) => Number(a.unknownWarehouse) - Number(b.unknownWarehouse));
           return {
             warehouseId,
             warehouseName,
             orderIds: arr.map((o: any) => String(o.id)),
             supplyName: `${warehouseName} ${stamp}`,
-            existing,
-            // По умолчанию докладываем в открытую поставку склада, если она есть.
-            target: (existing ? 'existing' : 'new') as 'existing' | 'new',
+            options,
+            targetSupplyId: options.find((x) => !x.unknownWarehouse)?.supplyId || '',
           };
         })
         .sort((a, b) => b.orderIds.length - a.orderIds.length);
 
-      setAssemblePlan({ busy: false, running: false, done: false, groups });
+      if (!groups.length) throw new Error('Все новые задания уже разложены по поставкам');
+
+      setAssemblePlan({ busy: false, running: false, done: false, groups, activeSupplies });
     } catch (e: any) {
-      setAssemblePlan({ busy: false, running: false, done: false, groups: [], error: e?.message || String(e) });
+      setAssemblePlan({ busy: false, running: false, done: false, groups: [], activeSupplies: [], error: e?.message || String(e) });
     }
   };
 
-  /** Создание поставок по плану: на каждый склад своя, задания внутрь. */
-  const runAssemblePlan = async () => {
+  /** Раскладка по плану: в выбранную поставку или в новую. */
+  const runAssemblePlan = async (mode?: 'existing' | 'new') => {
     const plan = assemblePlan;
     if (!plan || !plan.groups.length || plan.running) return;
-    const groups = plan.groups.map((g) => ({ ...g, status: 'создаю…' }));
+
+    const groups = plan.groups.map((g) => ({
+      ...g,
+      targetSupplyId: mode === 'new'
+        ? ''
+        : mode === 'existing'
+          ? (g.options.find((x) => !x.unknownWarehouse)?.supplyId || g.targetSupplyId || '')
+          : g.targetSupplyId,
+      status: 'раскладываю…',
+    }));
     setAssemblePlan({ ...plan, running: true, groups: [...groups] });
 
     for (const group of groups) {
       try {
-        let supplyId = '';
-        if (group.target === 'existing' && group.existing?.supplyId) {
-          supplyId = group.existing.supplyId;
-        } else {
+        let supplyId = group.targetSupplyId;
+        const intoExisting = Boolean(supplyId);
+        if (!supplyId) {
           const created = await wbFetch('https://marketplace-api.wildberries.ru/api/v3/supplies', {
             method: 'POST',
             body: JSON.stringify({ name: group.supplyName }),
@@ -8655,20 +8646,24 @@ export const WBSupplyManager = ({
           supplyId = String(created?.id || '').trim();
           if (!supplyId) throw new Error('WB не вернул номер поставки');
         }
-        await pushOrdersToSupply(supplyId, group.orderIds);
-        group.status = group.target === 'existing'
-          ? `добавлено в ${supplyId}: +${group.orderIds.length}`
-          : `${supplyId} · заданий ${group.orderIds.length}`;
+        await addOrdersToSupplyApi(supplyId, group.orderIds);
+        // Сверяемся с WB: сколько заданий в поставке стало на самом деле.
+        let total = 0;
+        try {
+          total = (await fetchSupplyOrderIds(supplyId)).length;
+        } catch { /* не критично: главное, что задания ушли */ }
+        group.status = intoExisting
+          ? `добавлено в ${supplyId}: +${group.orderIds.length}${total ? ` · всего ${total}` : ''}`
+          : `создана ${supplyId} · заданий ${total || group.orderIds.length}`;
       } catch (e: any) {
         group.status = `ошибка: ${e?.message || e}`;
       }
       setAssemblePlan((prev) => (prev ? { ...prev, groups: [...groups] } : prev));
     }
 
-    // Числа в списке поставок после сборки уже другие.
-    supplyCountsAtRef.current = 0;
-
     setAssemblePlan((prev) => (prev ? { ...prev, running: false, done: true, groups: [...groups] } : prev));
+    // Числа в списке поставок после раскладки уже другие.
+    supplyCountsAtRef.current = 0;
     await fetchSupplies();
     await fetchNewOrders();
   };
@@ -10188,11 +10183,31 @@ export const WBSupplyManager = ({
 
                 {!plan.busy && !plan.error && plan.groups.length > 0 && (
                   <>
+                    {plan.activeSupplies.length > 0 && (
+                      <div>
+                        <div className="mb-1.5 text-sm font-bold text-slate-800">Активные поставки</div>
+                        <div className="divide-y divide-slate-100 rounded-xl border border-slate-200">
+                          {plan.activeSupplies.map((item) => (
+                            <div key={item.supplyId} className="flex items-baseline justify-between gap-3 px-3 py-1.5 text-sm">
+                              <span className="min-w-0">
+                                <span className="text-slate-800">{item.name}</span>
+                                <span className="ml-2 font-mono text-xs text-slate-400">{item.supplyId}</span>
+                              </span>
+                              <span className="shrink-0 text-xs text-slate-500">
+                                {item.warehouseName || 'склад не определён'} · <span className="tabular-nums">{item.count}</span> {ordersWord(item.count)}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
                     <div className="text-sm text-slate-600">
                       {plan.done
                         ? 'Готово. Что получилось:'
-                        : `Разложу ${totalOrders} ${ordersWord(totalOrders)} по складам отгрузки. Где склад уже собирается — доложу в его поставку.`}
+                        : `Новых заданий: ${totalOrders}. В одну поставку WB берёт задания только одного склада, поэтому раскладываем по складам.`}
                     </div>
+
                     <div className="divide-y divide-slate-100 rounded-xl border border-slate-200">
                       {plan.groups.map((g) => (
                         <div key={g.warehouseId} className="px-3 py-2 text-sm">
@@ -10201,27 +10216,32 @@ export const WBSupplyManager = ({
                             <span className="tabular-nums text-slate-500">{g.orderIds.length} {ordersWord(g.orderIds.length)}</span>
                           </div>
 
-                          {g.existing && !plan.done ? (
-                            <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                              {([
-                                { key: 'existing' as const, title: `В «${g.existing.name}» (${g.existing.count} ${ordersWord(g.existing.count)})` },
-                                { key: 'new' as const, title: `Новая: ${g.supplyName}` },
-                              ]).map((opt) => (
-                                <button
-                                  key={opt.key}
-                                  disabled={plan.running}
-                                  onClick={() => setAssemblePlan((prev) => (prev ? {
-                                    ...prev,
-                                    groups: prev.groups.map((row) => (row.warehouseId === g.warehouseId ? { ...row, target: opt.key } : row)),
-                                  } : prev))}
-                                  className={`rounded-lg border px-2 py-0.5 text-xs font-medium transition ${g.target === opt.key ? 'border-violet-500 bg-violet-50 text-violet-700' : 'border-slate-300 text-slate-600 hover:bg-slate-50'}`}
-                                >
-                                  {opt.title}
-                                </button>
-                              ))}
+                          {plan.done ? (
+                            <div className="text-xs text-slate-500">
+                              {g.targetSupplyId
+                                ? `в «${g.options.find((x) => x.supplyId === g.targetSupplyId)?.name || g.targetSupplyId}»`
+                                : g.supplyName}
                             </div>
                           ) : (
-                            <div className="text-xs text-slate-500">{g.target === 'existing' && g.existing ? `в «${g.existing.name}»` : g.supplyName}</div>
+                            <select
+                              value={g.targetSupplyId}
+                              disabled={plan.running}
+                              onChange={(e) => {
+                                const value = e.target.value;
+                                setAssemblePlan((prev) => (prev ? {
+                                  ...prev,
+                                  groups: prev.groups.map((row) => (row.warehouseId === g.warehouseId ? { ...row, targetSupplyId: value } : row)),
+                                } : prev));
+                              }}
+                              className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700"
+                            >
+                              {g.options.map((opt) => (
+                                <option key={opt.supplyId} value={opt.supplyId}>
+                                  В «{opt.name}» · {opt.count} {ordersWord(opt.count)}{opt.unknownWarehouse ? ' · склад не определён' : ''}
+                                </option>
+                              ))}
+                              <option value="">Новая поставка: {g.supplyName}</option>
+                            </select>
                           )}
 
                           {g.status && (
@@ -10236,17 +10256,32 @@ export const WBSupplyManager = ({
 
               <div className="flex flex-wrap justify-end gap-2 border-t border-slate-100 px-5 py-3">
                 {!plan.done && (
-                  <button
-                    onClick={() => void runAssemblePlan()}
-                    disabled={plan.busy || plan.running || !plan.groups.length}
-                    className="rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700 disabled:opacity-40"
-                  >
-                    {plan.running
-                      ? 'Раскладываю…'
-                      : plan.groups.every((g) => g.target === 'existing')
-                        ? 'Доложить в поставки'
-                        : 'Собрать поставки'}
-                  </button>
+                  <>
+                    <button
+                      onClick={() => void runAssemblePlan('existing')}
+                      disabled={plan.busy || plan.running || !plan.groups.some((g) => g.options.some((x) => !x.unknownWarehouse))}
+                      title="Задания уйдут в активные поставки своих складов"
+                      className="rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700 disabled:opacity-40"
+                    >
+                      {plan.running ? 'Раскладываю…' : 'Собрать в активные'}
+                    </button>
+                    <button
+                      onClick={() => void runAssemblePlan('new')}
+                      disabled={plan.busy || plan.running || !plan.groups.length}
+                      title="На каждый склад будет создана новая поставка"
+                      className="rounded-xl border border-violet-300 bg-violet-50 px-4 py-2 text-sm font-semibold text-violet-700 hover:bg-violet-100 disabled:opacity-40"
+                    >
+                      Создать новые поставки
+                    </button>
+                    <button
+                      onClick={() => void runAssemblePlan()}
+                      disabled={plan.busy || plan.running || !plan.groups.length}
+                      title="Разложить так, как выбрано у каждого склада"
+                      className="rounded-xl border border-slate-300 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                    >
+                      По выбору
+                    </button>
+                  </>
                 )}
                 <button
                   onClick={() => setAssemblePlan(null)}
