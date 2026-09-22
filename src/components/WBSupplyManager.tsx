@@ -930,7 +930,7 @@ export const WBSupplyManager = ({
     groups: Array<{ key: string; category: string; gender: 'male' | 'female'; orders: number; matched: number; freeTotal: number }>;
     noGender: Array<{ nmId: string; article: string; subject: string; count: number }>;
     noCard: Array<{ nmId: string; article: string; count: number }>;
-    perSupply: Array<{ supplyId: string; name: string; total: number; alreadyWithChz: number; willGet: number; toScan: number }>;
+    perSupply: Array<{ supplyId: string; name: string; total: number; alreadyWithChz: number; willGet: number; toScan: number; status?: string; busy?: boolean }>;
   }>(null);
   const [fbsStickersWithChz, setFbsStickersWithChzState] = useState<boolean>(() => {
     try { return localStorage.getItem('fbs_stickers_with_chz_v1') === '1'; } catch { return false; }
@@ -7893,7 +7893,7 @@ export const WBSupplyManager = ({
    * onlyMissing — «Допечатать без ЧЗ»: только задания, у которых марки ещё нет,
    * чтобы не перепечатывать всю поставку ради пары заданий.
    */
-  const downloadFBSStickers = async (opts: { onlyMissing?: boolean; supplyId?: string; asFile?: boolean; quiet?: boolean; waitForPrint?: boolean } = {}) => {
+  const downloadFBSStickers = async (opts: { onlyMissing?: boolean; supplyId?: string; asFile?: boolean; quiet?: boolean } = {}) => {
     const onlyMissing = Boolean(opts.onlyMissing);
     /*
      * supplyId и asFile — для пакетной выгрузки нескольких поставок подряд.
@@ -7911,7 +7911,8 @@ export const WBSupplyManager = ({
     if (!printSupplyId) return null;
     setLoading(true);
     try {
-      const bulkRun = asFile || Boolean(opts.waitForPrint);
+      // Пачкой — значит состав поставки уже считали планом: берём из кэша.
+      const bulkRun = asFile || quiet;
       const supplyOrdersRaw = await withTimeout(
         fetchOrdersForSupply(printSupplyId, {
           enrich: true,
@@ -8454,9 +8455,9 @@ export const WBSupplyManager = ({
                  if (asFile) {
                    pdf.save(`Коды ${String(printSupplyName).replace(/[\\/:*?"<>|]+/g, '_')} ${orderedStickers.length}.pdf`);
                    await bindCodes();
-                 } else if (opts.waitForPrint) {
+                 } else {
                    /*
-                    * В очереди поставок связку сохраняем до окна печати.
+                    * Связку пишем до окна печати.
                     *
                     * Коды уже закреплены в базе и нарисованы на этикетках, а
                     * окно печати может провисеть минуту — столько держать
@@ -8464,10 +8465,7 @@ export const WBSupplyManager = ({
                     * окажутся потрачены, но ни к чему не привязаны.
                     */
                    await bindCodes();
-                   await printPdfDirect(pdf, { widthMm: 58, heightMm: 40 }, { waitForClose: true });
-                 } else {
                    await printPdfDirect(pdf, { widthMm: 58, heightMm: 40 });
-                   await bindCodes();
                  }
                  if (!quiet && (fbsStickersWithChz || reportRows.length)) {
                    setChzPrintReport({
@@ -8628,65 +8626,63 @@ export const WBSupplyManager = ({
     });
   };
 
-  /** Пакетная работа начинается с плана марок — как и печать одной поставки. */
+  /**
+   * Пакетная работа начинается с окна плана.
+   *
+   * Печать оттуда идёт по кнопке у каждой поставки: печатать подряд не
+   * получается — браузер не сообщает, когда окно печати закрыли, и очередь
+   * либо ждёт впустую, либо теряет задания.
+   */
   const startBulkSupplyExport = () => {
     const ids = supplies.filter((x) => selectedSupplyIds.has(x.id)).map((x) => x.id);
     if (!ids.length) return;
-    if (fbsStickersWithChz) void buildChzPlan(ids, 'bulk');
+    if (bulkMode === 'print' || fbsStickersWithChz) void buildChzPlan(ids, 'bulk');
     else void runBulkSupplyExport();
   };
 
   /**
-   * Отмеченные поставки — по очереди, одна за другой.
+   * Отмеченные поставки — файлами, одна за другой.
    *
-   * «Скачать листы и коды»: на каждую поставку два файла — лист подбора и коды
-   * к нему. «Печать кодов»: коды каждой поставки уходят в печать отдельным
-   * документом, и следующая ждёт, пока закроют окно печати предыдущей, —
-   * иначе браузер проглотит второе задание.
+   * На каждую поставку два файла: лист подбора и коды к нему. Печать здесь не
+   * идёт — она делается кнопками в окне плана, по поставке за раз.
    */
   const runBulkSupplyExport = async () => {
     const ids = supplies.filter((x) => selectedSupplyIds.has(x.id)).map((x) => x.id);
     if (!ids.length) return;
 
-    const mode = bulkMode;
     const errors: string[] = [];
     const results: string[] = [];
     bulkCancelRef.current = false;
     const progress = (index: number, name: string, stage: string, done = false) => {
       setBulkExport({ total: ids.length, index, name, stage, results: [...results], errors: [...errors], done });
     };
-    progress(0, '', mode === 'print' ? 'печать' : 'выгрузка');
+    progress(0, '', 'выгрузка');
 
     for (let i = 0; i < ids.length; i++) {
       if (bulkCancelRef.current) break;
       const id = ids[i];
       const name = supplies.find((x) => x.id === id)?.name || id;
 
-      if (mode === 'files') {
-        progress(i + 1, name, 'лист подбора');
-        try {
-          await generatePickingList(id);
-        } catch (e: any) {
-          errors.push(`${name}: лист — ${e?.message || e}`);
-        }
-        // Браузеру нужно время между сохранениями, иначе часть файлов теряется.
-        await new Promise((r) => setTimeout(r, 900));
-      }
-
-      progress(i + 1, name, mode === 'print' ? 'печать кодов — закройте окно печати' : 'коды');
+      progress(i + 1, name, 'лист подбора');
       try {
-        const summary = await downloadFBSStickers(
-          mode === 'print'
-            ? { supplyId: id, quiet: true, waitForPrint: true }
-            : { supplyId: id, asFile: true },
-        );
+        await generatePickingList(id);
+      } catch (e: any) {
+        errors.push(`${name}: лист — ${e?.message || e}`);
+      }
+      // Браузеру нужно время между сохранениями, иначе часть файлов теряется.
+      await new Promise((r) => setTimeout(r, 900));
+
+      progress(i + 1, name, 'коды');
+      try {
+        const summary = await downloadFBSStickers({ supplyId: id, asFile: true });
         if (summary) {
-          results.push(`${name}: ${summary.printed} шт., с ЧЗ ${summary.withChz}${summary.rows.filter((r) => r.kind !== 'canceled').length ? `, на скан ${summary.rows.filter((r) => r.kind !== 'canceled').length}` : ''}`);
+          const toScan = summary.rows.filter((r) => r.kind !== 'canceled').length;
+          results.push(`${name}: ${summary.printed} шт., с ЧЗ ${summary.withChz}${toScan ? `, на скан ${toScan}` : ''}`);
         }
       } catch (e: any) {
         errors.push(`${name}: коды — ${e?.message || e}`);
       }
-      await new Promise((r) => setTimeout(r, mode === 'print' ? 1500 : 900));
+      await new Promise((r) => setTimeout(r, 900));
     }
 
     const stopped = bulkCancelRef.current;
@@ -8701,9 +8697,7 @@ export const WBSupplyManager = ({
     });
     bulkCancelRef.current = false;
     if (!errors.length && !stopped) {
-      setSuccessMsg(mode === 'print'
-        ? `Отправлено в печать поставок: ${ids.length}.`
-        : `Выгружено поставок: ${ids.length} — лист подбора и коды по каждой.`);
+      setSuccessMsg(`Выгружено поставок: ${ids.length} — лист подбора и коды по каждой.`);
       setTimeout(() => setSuccessMsg(null), 4000);
     }
   };
@@ -8741,7 +8735,7 @@ export const WBSupplyManager = ({
       const groups = new Map<string, { key: string; category: string; gender: 'male' | 'female'; orders: number; matched: number; freeTotal: number }>();
       const noGender = new Map<string, { nmId: string; article: string; subject: string; count: number }>();
       const noCard = new Map<string, { nmId: string; article: string; count: number }>();
-      const perSupply: Array<{ supplyId: string; name: string; total: number; alreadyWithChz: number; willGet: number; toScan: number }> = [];
+      const perSupply: Array<{ supplyId: string; name: string; total: number; alreadyWithChz: number; willGet: number; toScan: number; status?: string; busy?: boolean }> = [];
 
       let total = 0;
       let alreadyWithChz = 0;
@@ -8862,6 +8856,36 @@ export const WBSupplyManager = ({
       });
     } catch (e: any) {
       setChzPlan((prev) => (prev ? { ...prev, busy: false, supplyName: planTitle, error: e?.message || String(e) } : prev));
+    }
+  };
+
+  /**
+   * Печать кодов одной поставки из окна плана.
+   *
+   * Окно остаётся открытым: рядом ещё поставки, и закрывать его после каждой
+   * печати незачем. Итог печати пишем в строку поставки.
+   */
+  const printPlanSupply = async (supplyId: string) => {
+    const patch = (row: { status?: string; busy?: boolean }) => {
+      setChzPlan((prev) => (prev ? {
+        ...prev,
+        perSupply: prev.perSupply.map((r) => (r.supplyId === supplyId ? { ...r, ...row } : r)),
+      } : prev));
+    };
+    patch({ busy: true, status: 'печатаю…' });
+    try {
+      const summary = await downloadFBSStickers({ supplyId });
+      if (!summary) {
+        patch({ busy: false, status: 'печатать нечего' });
+        return;
+      }
+      const toScan = summary.rows.filter((r) => r.kind !== 'canceled').length;
+      patch({
+        busy: false,
+        status: `напечатано ${summary.printed}, с ЧЗ ${summary.withChz}${toScan ? `, на скан ${toScan}` : ''}`,
+      });
+    } catch (e: any) {
+      patch({ busy: false, status: `ошибка: ${e?.message || e}` });
     }
   };
 
@@ -9787,7 +9811,7 @@ export const WBSupplyManager = ({
                                 onClick={() => startBulkSupplyExport()}
                                 disabled={Boolean(bulkExport && !bulkExport.done)}
                                 title={bulkMode === 'print'
-                                    ? 'Коды каждой поставки уходят в печать по очереди: следующая ждёт, пока закроете окно печати'
+                                    ? 'Откроется окно с планом марок: печать запускается кнопкой у каждой поставки'
                                     : 'По каждой поставке: лист подбора, следом файл кодов'}
                                 className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-sky-600 to-blue-600 px-3 py-2 text-sm font-bold text-white shadow-sm shadow-sky-500/25 transition hover:from-sky-700 hover:to-blue-700 disabled:cursor-not-allowed disabled:from-slate-300 disabled:to-slate-300"
                             >
@@ -9816,15 +9840,7 @@ export const WBSupplyManager = ({
                                 {bulkExport.done
                                     ? `${bulkExport.stage === 'остановлено' ? 'Остановлено' : 'Готово'}: ${bulkExport.total} поставок`
                                     : `Поставка ${bulkExport.index} из ${bulkExport.total}: ${bulkExport.name} — ${bulkExport.stage}`}
-                                {!bulkExport.done && bulkExport.stage.startsWith('печать') && (
-                                    /* Браузер не всегда сообщает, что окно печати закрыли, — тогда очередь двигают руками. */
-                                    <button
-                                        onClick={() => window.dispatchEvent(new Event('afterprint'))}
-                                        className="ml-2 rounded-lg border border-slate-300 px-2 py-0.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                                    >
-                                        Дальше
-                                    </button>
-                                )}
+
                                 {bulkExport.results.length > 0 && (
                                     <ul className="mt-1 list-disc pl-4">
                                         {bulkExport.results.map((msg, i) => <li key={i}>{msg}</li>)}
@@ -10019,7 +10035,7 @@ export const WBSupplyManager = ({
         ];
         const needsChz = r.rows.filter((row) => row.kind !== 'canceled').length;
         return (
-          <div className="fixed inset-0 z-[70] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setChzPrintReport(null)}>
+          <div className="fixed inset-0 z-[80] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setChzPrintReport(null)}>
             <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
               <div className={`px-5 py-4 text-white flex items-start justify-between gap-4 ${needsChz ? 'bg-gradient-to-r from-amber-500 to-orange-500' : 'bg-gradient-to-r from-emerald-500 to-teal-500'}`}>
                 <div>
@@ -10169,8 +10185,9 @@ export const WBSupplyManager = ({
         const noMeta = plan.noGender.reduce((s, r) => s + r.count, 0) + plan.noCard.reduce((s, r) => s + r.count, 0);
         const genderText = (g: string) => (g === 'male' ? 'мужской' : g === 'female' ? 'женский' : '—');
         return (
-          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm" onClick={() => setChzPlan(null)}>
-            <div className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
+          /* Щелчок мимо окна его не закрывает: печатают по очереди, промах по фону стоил бы всего плана. */
+          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm">
+            <div className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
               <div className="flex items-start justify-between gap-4 bg-gradient-to-r from-amber-500 to-orange-500 px-5 py-4 text-white">
                 <div>
                   <div className="flex items-center gap-2 text-lg font-bold">
@@ -10194,7 +10211,7 @@ export const WBSupplyManager = ({
                       <div className={`rounded-xl p-3 ${short + noMeta ? 'bg-amber-50' : 'bg-slate-50'}`}><div className={`text-2xl font-extrabold tabular-nums ${short + noMeta ? 'text-amber-700' : ''}`}>{short + noMeta}</div><div className="text-xs text-slate-500">на скан</div></div>
                     </div>
 
-                    {plan.mode === 'bulk' && plan.perSupply.length > 0 && (
+                    {plan.perSupply.length > 0 && (
                       <div className="overflow-hidden rounded-xl border border-slate-200">
                         <table className="w-full text-sm">
                           <thead className="bg-slate-50 text-xs uppercase text-slate-500">
@@ -10204,16 +10221,32 @@ export const WBSupplyManager = ({
                               <th className="px-3 py-2 text-right font-semibold">Уже с ЧЗ</th>
                               <th className="px-3 py-2 text-right font-semibold">Получат</th>
                               <th className="px-3 py-2 text-right font-semibold">На скан</th>
+                              <th className="px-3 py-2 text-right font-semibold">Печать</th>
                             </tr>
                           </thead>
                           <tbody>
                             {plan.perSupply.map((row) => (
-                              <tr key={row.supplyId} className="border-t border-slate-100">
-                                <td className="px-3 py-2 text-slate-800">{row.name}</td>
+                              <tr key={row.supplyId} className="border-t border-slate-100 align-top">
+                                <td className="px-3 py-2 text-slate-800">
+                                  {row.name}
+                                  {row.status && (
+                                    <div className={`text-xs ${row.status.startsWith('ошибка') ? 'text-rose-600' : 'text-emerald-700'}`}>{row.status}</div>
+                                  )}
+                                </td>
                                 <td className="px-3 py-2 text-right tabular-nums">{row.total}</td>
                                 <td className="px-3 py-2 text-right tabular-nums text-slate-500">{row.alreadyWithChz}</td>
                                 <td className="px-3 py-2 text-right font-semibold tabular-nums text-emerald-700">{row.willGet}</td>
                                 <td className={`px-3 py-2 text-right tabular-nums ${row.toScan ? 'text-amber-700' : 'text-slate-400'}`}>{row.toScan}</td>
+                                <td className="px-3 py-2 text-right">
+                                  <button
+                                    onClick={() => void printPlanSupply(row.supplyId)}
+                                    disabled={Boolean(row.busy) || row.total === 0}
+                                    title="Напечатать коды этой поставки — окно останется открытым"
+                                    className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1 text-xs font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                                  >
+                                    <Printer className="h-3.5 w-3.5" /> {row.busy ? '…' : 'Печать'}
+                                  </button>
+                                </td>
                               </tr>
                             ))}
                           </tbody>
@@ -10320,22 +10353,22 @@ export const WBSupplyManager = ({
                 >
                   Пересчитать
                 </button>
+                {plan.mode === 'bulk' && bulkMode === 'files' && (
+                  <button
+                    onClick={() => { setChzPlan(null); void runBulkSupplyExport(); }}
+                    disabled={plan.busy || Boolean(plan.error)}
+                    className="rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-40"
+                  >
+                    Скачать {plan.supplyIds.length}
+                  </button>
+                )}
                 <button
-                  onClick={() => {
-                    const ids = plan.supplyIds;
-                    const isBulk = plan.mode === 'bulk';
-                    setChzPlan(null);
-                    if (isBulk) void runBulkSupplyExport();
-                    else void downloadFBSStickers({ supplyId: ids[0] });
-                  }}
-                  disabled={plan.busy || Boolean(plan.error)}
-                  className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-40"
+                  onClick={() => setChzPlan(null)}
+                  disabled={plan.perSupply.some((row) => row.busy)}
+                  className="rounded-xl border border-slate-300 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-40"
                 >
-                  {plan.mode === 'bulk'
-                    ? (bulkMode === 'print' ? `Печатать ${plan.supplyIds.length}` : `Скачать ${plan.supplyIds.length}`)
-                    : 'Печатать стикеры'}
+                  Закрыть
                 </button>
-                <button onClick={() => setChzPlan(null)} className="rounded-xl border border-slate-300 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">Отмена</button>
               </div>
             </div>
           </div>

@@ -45,27 +45,13 @@ const removeLater = (iframe: HTMLIFrameElement, url?: string) => {
  * Если браузер не дал напечатать из фрейма (старый браузер, запрет), PDF
  * открывается во вкладке, как раньше: печать не должна просто пропасть.
  */
-export function printPdfDirect(
-  pdf: any,
-  page: { widthMm?: number; heightMm?: number } = {},
-  opts: { waitForClose?: boolean } = {},
-): Promise<void> {
+export function printPdfDirect(pdf: any, page: { widthMm?: number; heightMm?: number } = {}): Promise<void> {
   return new Promise((resolve) => {
     const url = String(pdf.output('bloburl'));
     const iframe = makeFrame(page.widthMm ?? 210, page.heightMm ?? 297);
 
     const fallback = () => {
       try { window.open(url, '_blank'); } catch { /* блокировщик */ }
-    };
-
-    let settled = false;
-    const finish = () => {
-      if (settled) return;
-      settled = true;
-      window.removeEventListener('afterprint', finish);
-      window.removeEventListener('focus', finish);
-      removeLater(iframe, url);
-      resolve();
     };
 
     iframe.onload = () => {
@@ -75,39 +61,22 @@ export function printPdfDirect(
           const win = iframe.contentWindow;
           if (!win) throw new Error('нет окна фрейма');
           win.focus();
-
-          /*
-           * Печать пачкой поставок: ждём, пока закроют окно печати.
-           *
-           * Иначе следующий документ уходит в печать поверх открытого окна, и
-           * браузер его просто проглатывает. Сигнал — afterprint; если браузер
-           * его не шлёт, отпускаем очередь по таймеру, чтобы она не зависла.
-           */
-          if (opts.waitForClose) {
-            try { win.addEventListener('afterprint', finish, { once: true }); } catch { /* нет доступа к фрейму */ }
-            window.addEventListener('afterprint', finish, { once: true });
-            /*
-             * Chrome не всегда шлёт afterprint из фрейма с PDF — особенно когда
-             * окно печати закрыли кнопкой «Отмена». Тогда ловим возврат фокуса
-             * на страницу: он приходит и после печати, и после отмены. Слушаем
-             * чуть позже, чтобы не поймать собственный win.focus().
-             */
-            setTimeout(() => {
-              if (settled) return;
-              window.addEventListener('focus', finish, { once: true });
-            }, 1200);
-            // Последняя страховка: очередь поставок не должна зависать совсем.
-            setTimeout(finish, 30_000);
-            win.print();
-            return;
-          }
-
           win.print();
         } catch (e) {
           console.warn('печать из фрейма не удалась, открываю PDF во вкладке', e);
           fallback();
+        } finally {
+          /*
+           * Закрытия окна печати не ждём.
+           *
+           * Ждали — и очередь поставок замирала: Chrome не сообщает, что PDF
+           * в фрейме допечатали или отменили, и каждая поставка стоила лишних
+           * тридцати секунд ожидания. Поставки печатаются по кнопке в окне
+           * плана, одна за другой, и ждать нечего.
+           */
+          removeLater(iframe, url);
+          resolve();
         }
-        finish();
       }, 400);
     };
 
