@@ -45,13 +45,26 @@ const removeLater = (iframe: HTMLIFrameElement, url?: string) => {
  * Если браузер не дал напечатать из фрейма (старый браузер, запрет), PDF
  * открывается во вкладке, как раньше: печать не должна просто пропасть.
  */
-export function printPdfDirect(pdf: any, page: { widthMm?: number; heightMm?: number } = {}): Promise<void> {
+export function printPdfDirect(
+  pdf: any,
+  page: { widthMm?: number; heightMm?: number } = {},
+  opts: { waitForClose?: boolean } = {},
+): Promise<void> {
   return new Promise((resolve) => {
     const url = String(pdf.output('bloburl'));
     const iframe = makeFrame(page.widthMm ?? 210, page.heightMm ?? 297);
 
     const fallback = () => {
       try { window.open(url, '_blank'); } catch { /* блокировщик */ }
+    };
+
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      window.removeEventListener('afterprint', finish);
+      removeLater(iframe, url);
+      resolve();
     };
 
     iframe.onload = () => {
@@ -61,14 +74,28 @@ export function printPdfDirect(pdf: any, page: { widthMm?: number; heightMm?: nu
           const win = iframe.contentWindow;
           if (!win) throw new Error('нет окна фрейма');
           win.focus();
+
+          /*
+           * Печать пачкой поставок: ждём, пока закроют окно печати.
+           *
+           * Иначе следующий документ уходит в печать поверх открытого окна, и
+           * браузер его просто проглатывает. Сигнал — afterprint; если браузер
+           * его не шлёт, отпускаем очередь по таймеру, чтобы она не зависла.
+           */
+          if (opts.waitForClose) {
+            try { win.addEventListener('afterprint', finish, { once: true }); } catch { /* нет доступа к фрейму */ }
+            window.addEventListener('afterprint', finish, { once: true });
+            setTimeout(finish, 120_000);
+            win.print();
+            return;
+          }
+
           win.print();
         } catch (e) {
           console.warn('печать из фрейма не удалась, открываю PDF во вкладке', e);
           fallback();
-        } finally {
-          removeLater(iframe, url);
-          resolve();
         }
+        finish();
       }, 400);
     };
 

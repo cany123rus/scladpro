@@ -830,15 +830,22 @@ export const WBSupplyManager = ({
 
   /** Поставки, отмеченные галочкой, — для выгрузки листов и кодов подряд. */
   const [selectedSupplyIds, setSelectedSupplyIds] = useState<Set<string>>(new Set());
-  /** Ход пакетной выгрузки: по какой поставке сейчас идём и что уже не вышло. */
+  /** Что делаем с отмеченными поставками: файлы или печать кодов по очереди. */
+  const [bulkMode, setBulkMode] = useState<'files' | 'print'>(() => {
+    try { return localStorage.getItem('fbs_bulk_mode_v1') === 'print' ? 'print' : 'files'; } catch { return 'files'; }
+  });
+  /** Ход пакетной работы: где идём, что получилось и что не вышло. */
   const [bulkExport, setBulkExport] = useState<null | {
     total: number;
     index: number;
     name: string;
     stage: string;
+    results: string[];
     errors: string[];
     done: boolean;
   }>(null);
+  /** Нажали «Остановить» — очередь дойдёт до конца текущей поставки и встанет. */
+  const bulkCancelRef = useRef(false);
   /*
    * План марок до печати.
    *
@@ -7809,7 +7816,7 @@ export const WBSupplyManager = ({
    * onlyMissing — «Допечатать без ЧЗ»: только задания, у которых марки ещё нет,
    * чтобы не перепечатывать всю поставку ради пары заданий.
    */
-  const downloadFBSStickers = async (opts: { onlyMissing?: boolean; supplyId?: string; asFile?: boolean } = {}) => {
+  const downloadFBSStickers = async (opts: { onlyMissing?: boolean; supplyId?: string; asFile?: boolean; quiet?: boolean; waitForPrint?: boolean } = {}) => {
     const onlyMissing = Boolean(opts.onlyMissing);
     /*
      * supplyId и asFile — для пакетной выгрузки нескольких поставок подряд.
@@ -7819,6 +7826,8 @@ export const WBSupplyManager = ({
      */
     const printSupplyId = String(opts.supplyId || activeSupplyId || '');
     const asFile = Boolean(opts.asFile);
+    // Тихий режим — без окна отчёта: в очереди поставок оно перебивало бы печать.
+    const quiet = asFile || Boolean(opts.quiet);
     // Библиотеки печати/Excel грузятся по требованию — не при открытии раздела.
     await Promise.all([ensurePdfLibs(), ensureBwip()]);
     const { jsPDF, autoTable, bwipjs } = lazyLibs;
@@ -8028,7 +8037,7 @@ export const WBSupplyManager = ({
           // Задания с маркой уже напечатаны — их не трогаем вовсе.
           orderedStickers = orderedStickers.filter((st: any) => !existingChzByOrderId.has(Number(st?.orderId ?? st?.id ?? st?.order_id)));
           if (orderedStickers.length === 0) {
-            if (reportRows.length && !asFile) {
+            if (reportRows.length && !quiet) {
               setChzPrintReport({
                 supplyId: printSupplyId,
                 supplyName: supplies.find((x) => x.id === printSupplyId)?.name || printSupplyId,
@@ -8039,7 +8048,7 @@ export const WBSupplyManager = ({
                 statusChecked,
                 rows: reportRows,
               });
-            } else if (!asFile) {
+            } else if (!quiet) {
               setSuccessMsg('У всех заданий поставки уже есть ЧЗ — допечатывать нечего.');
             }
             return { supplyId: printSupplyId, printed: 0, withChz: 0, newChz: 0, statusChecked, rows: reportRows };
@@ -8354,12 +8363,12 @@ export const WBSupplyManager = ({
                  if (asFile) {
                    pdf.save(`Коды ${String(printSupplyName).replace(/[\\/:*?"<>|]+/g, '_')} ${orderedStickers.length}.pdf`);
                  } else {
-                   await printPdfDirect(pdf, { widthMm: 58, heightMm: 40 });
+                   await printPdfDirect(pdf, { widthMm: 58, heightMm: 40 }, { waitForClose: Boolean(opts.waitForPrint) });
                  }
                  if (fbsStickersWithChz && newChzByOrderId.size > 0) {
                    await bindPrintedChzToOrders(newChzByOrderId, orderById, printSupplyId);
                  }
-                 if (!asFile && (fbsStickersWithChz || reportRows.length)) {
+                 if (!quiet && (fbsStickersWithChz || reportRows.length)) {
                    setChzPrintReport({
                      supplyId: printSupplyId,
                      supplyName: printSupplyName,
@@ -8370,7 +8379,7 @@ export const WBSupplyManager = ({
                      statusChecked,
                      rows: reportRows,
                    });
-                 } else if (!asFile && chzShortage) {
+                 } else if (!quiet && chzShortage) {
                    setError(chzShortage);
                  }
                  return {
@@ -8392,7 +8401,7 @@ export const WBSupplyManager = ({
       throw new Error('Стикеры не найдены');
 
     } catch (err: any) {
-      if (asFile) throw err; // пакетная выгрузка сама решает, что делать с ошибкой
+      if (quiet) throw err; // пакетная выгрузка сама решает, что делать с ошибкой
       setError(err.message);
     } finally {
       setLoading(false);
@@ -8519,44 +8528,73 @@ export const WBSupplyManager = ({
   };
 
   /**
-   * Листы подбора и коды по отмеченным поставкам — подряд, файлами.
+   * Отмеченные поставки — по очереди, одна за другой.
    *
-   * Печать открыть подряд нельзя: второе системное окно браузер блокирует.
-   * Поэтому на каждую поставку скачиваются два файла — сначала лист подбора,
-   * следом коды к нему, — и так по очереди, в порядке списка.
+   * «Скачать листы и коды»: на каждую поставку два файла — лист подбора и коды
+   * к нему. «Печать кодов»: коды каждой поставки уходят в печать отдельным
+   * документом, и следующая ждёт, пока закроют окно печати предыдущей, —
+   * иначе браузер проглотит второе задание.
    */
   const runBulkSupplyExport = async () => {
     const ids = supplies.filter((x) => selectedSupplyIds.has(x.id)).map((x) => x.id);
     if (!ids.length) return;
 
+    const mode = bulkMode;
     const errors: string[] = [];
-    setBulkExport({ total: ids.length, index: 0, name: '', stage: '', errors: [], done: false });
+    const results: string[] = [];
+    bulkCancelRef.current = false;
+    const progress = (index: number, name: string, stage: string, done = false) => {
+      setBulkExport({ total: ids.length, index, name, stage, results: [...results], errors: [...errors], done });
+    };
+    progress(0, '', mode === 'print' ? 'печать' : 'выгрузка');
 
     for (let i = 0; i < ids.length; i++) {
+      if (bulkCancelRef.current) break;
       const id = ids[i];
       const name = supplies.find((x) => x.id === id)?.name || id;
 
-      setBulkExport({ total: ids.length, index: i + 1, name, stage: 'лист подбора', errors: [...errors], done: false });
-      try {
-        await generatePickingList(id);
-      } catch (e: any) {
-        errors.push(`${name}: лист — ${e?.message || e}`);
+      if (mode === 'files') {
+        progress(i + 1, name, 'лист подбора');
+        try {
+          await generatePickingList(id);
+        } catch (e: any) {
+          errors.push(`${name}: лист — ${e?.message || e}`);
+        }
+        // Браузеру нужно время между сохранениями, иначе часть файлов теряется.
+        await new Promise((r) => setTimeout(r, 900));
       }
-      // Браузеру нужно время между сохранениями, иначе часть файлов теряется.
-      await new Promise((r) => setTimeout(r, 900));
 
-      setBulkExport({ total: ids.length, index: i + 1, name, stage: 'коды', errors: [...errors], done: false });
+      progress(i + 1, name, mode === 'print' ? 'печать кодов — закройте окно печати' : 'коды');
       try {
-        await downloadFBSStickers({ supplyId: id, asFile: true });
+        const summary = await downloadFBSStickers(
+          mode === 'print'
+            ? { supplyId: id, quiet: true, waitForPrint: true }
+            : { supplyId: id, asFile: true },
+        );
+        if (summary) {
+          results.push(`${name}: ${summary.printed} шт., с ЧЗ ${summary.withChz}${summary.rows.filter((r) => r.kind !== 'canceled').length ? `, на скан ${summary.rows.filter((r) => r.kind !== 'canceled').length}` : ''}`);
+        }
       } catch (e: any) {
         errors.push(`${name}: коды — ${e?.message || e}`);
       }
-      await new Promise((r) => setTimeout(r, 900));
+      await new Promise((r) => setTimeout(r, mode === 'print' ? 1500 : 900));
     }
 
-    setBulkExport({ total: ids.length, index: ids.length, name: '', stage: 'готово', errors, done: true });
-    if (!errors.length) {
-      setSuccessMsg(`Выгружено поставок: ${ids.length} — лист подбора и коды по каждой.`);
+    const stopped = bulkCancelRef.current;
+    setBulkExport({
+      total: ids.length,
+      index: ids.length,
+      name: '',
+      stage: stopped ? 'остановлено' : 'готово',
+      results,
+      errors,
+      done: true,
+    });
+    bulkCancelRef.current = false;
+    if (!errors.length && !stopped) {
+      setSuccessMsg(mode === 'print'
+        ? `Отправлено в печать поставок: ${ids.length}.`
+        : `Выгружено поставок: ${ids.length} — лист подбора и коды по каждой.`);
       setTimeout(() => setSuccessMsg(null), 4000);
     }
   };
@@ -9390,6 +9428,15 @@ export const WBSupplyManager = ({
                         </div>
                     </div>
                     <div className="flex items-center gap-1">
+                        {/* Сборка: по поставке на каждый склад отгрузки, задания внутрь */}
+                        <button
+                            onClick={() => void openAssemblePlan()}
+                            disabled={Boolean(assemblePlan?.busy || assemblePlan?.running)}
+                            title="Создать поставку на каждый склад отгрузки и разложить по ним все новые задания"
+                            className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-violet-600 to-fuchsia-600 px-3 py-1.5 text-sm font-semibold text-white shadow-sm shadow-violet-500/25 transition hover:from-violet-700 hover:to-fuchsia-700 disabled:cursor-not-allowed disabled:from-slate-300 disabled:to-slate-300"
+                        >
+                            <Truck className="h-4 w-4" /> Собрать поставки
+                        </button>
                         <button
                             onClick={toggleAllOrders}
                             disabled={orders.length === 0}
@@ -9493,19 +9540,6 @@ export const WBSupplyManager = ({
                                 </span>
                             </button>
 
-                            {/* Сборка: по поставке на каждый склад отгрузки, задания внутрь */}
-                            <button
-                                onClick={() => void openAssemblePlan()}
-                                disabled={Boolean(assemblePlan?.busy || assemblePlan?.running)}
-                                title="Создать поставку на каждый склад отгрузки и разложить по ним все новые задания"
-                                className="mt-2 flex w-full items-center justify-center gap-3 rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-4 py-2.5 text-white shadow-md shadow-violet-500/30 transition hover:from-violet-700 hover:to-fuchsia-700 disabled:cursor-not-allowed disabled:from-slate-300 disabled:to-slate-300"
-                            >
-                                <Truck className="h-5 w-5" />
-                                <span className="text-left">
-                                    <span className="block font-bold">Собрать поставки</span>
-                                    <span className="block text-xs opacity-80">по поставке на каждый склад отгрузки</span>
-                                </span>
-                            </button>
                         </div>
                     );
                 })()}
@@ -9583,6 +9617,70 @@ export const WBSupplyManager = ({
                         </button>
                     </div>
                 </div>
+
+                {/* Пакетная работа по отмеченным поставкам — сразу под шапкой */}
+                {selectedSupplyIds.size > 0 && (
+                    <div className="space-y-2 border-b border-slate-100 bg-slate-50/80 px-4 py-2.5">
+                        <div className="flex flex-wrap items-center gap-2">
+                            <select
+                                value={bulkMode}
+                                onChange={(e) => {
+                                    const next = e.target.value === 'print' ? 'print' : 'files';
+                                    setBulkMode(next);
+                                    try { localStorage.setItem('fbs_bulk_mode_v1', next); } catch { /* приватный режим */ }
+                                }}
+                                className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs font-medium text-slate-700"
+                            >
+                                <option value="files">Скачать листы и коды</option>
+                                <option value="print">Печать кодов</option>
+                            </select>
+                            <button
+                                onClick={() => void runBulkSupplyExport()}
+                                disabled={Boolean(bulkExport && !bulkExport.done)}
+                                title={bulkMode === 'print'
+                                    ? 'Коды каждой поставки уходят в печать по очереди: следующая ждёт, пока закроете окно печати'
+                                    : 'По каждой поставке: лист подбора, следом файл кодов'}
+                                className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-sky-600 to-blue-600 px-3 py-2 text-sm font-bold text-white shadow-sm shadow-sky-500/25 transition hover:from-sky-700 hover:to-blue-700 disabled:cursor-not-allowed disabled:from-slate-300 disabled:to-slate-300"
+                            >
+                                {bulkMode === 'print' ? <Printer className="h-4 w-4" /> : <Download className="h-4 w-4" />}
+                                {bulkMode === 'print' ? 'Печатать коды' : 'Скачать'} ({selectedSupplyIds.size})
+                            </button>
+                            {bulkExport && !bulkExport.done ? (
+                                <button
+                                    onClick={() => { bulkCancelRef.current = true; }}
+                                    className="rounded-lg border border-rose-300 px-2.5 py-1.5 text-xs font-semibold text-rose-600 hover:bg-rose-50"
+                                >
+                                    Остановить
+                                </button>
+                            ) : (
+                                <button
+                                    onClick={() => { setSelectedSupplyIds(new Set()); setBulkExport(null); }}
+                                    className="rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs text-slate-600 hover:bg-white"
+                                >
+                                    Снять выбор
+                                </button>
+                            )}
+                        </div>
+
+                        {bulkExport && (
+                            <div className="rounded-xl bg-white px-3 py-2 text-xs text-slate-600 shadow-sm">
+                                {bulkExport.done
+                                    ? `${bulkExport.stage === 'остановлено' ? 'Остановлено' : 'Готово'}: ${bulkExport.total} поставок`
+                                    : `Поставка ${bulkExport.index} из ${bulkExport.total}: ${bulkExport.name} — ${bulkExport.stage}`}
+                                {bulkExport.results.length > 0 && (
+                                    <ul className="mt-1 list-disc pl-4">
+                                        {bulkExport.results.map((msg, i) => <li key={i}>{msg}</li>)}
+                                    </ul>
+                                )}
+                                {bulkExport.errors.length > 0 && (
+                                    <ul className="mt-1 list-disc pl-4 text-rose-600">
+                                        {bulkExport.errors.map((msg, i) => <li key={i}>{msg}</li>)}
+                                    </ul>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                )}
 
                 <div className="2xl:flex-1 2xl:overflow-auto">
                     {supplies.length === 0 ? (
@@ -9742,42 +9840,6 @@ export const WBSupplyManager = ({
                     )}
                 </div>
 
-                {/* Пакетная выгрузка по отмеченным поставкам */}
-                {selectedSupplyIds.size > 0 && (
-                    <div className="space-y-2 border-t border-slate-100 bg-slate-50/80 p-3">
-                        <button
-                            onClick={() => void runBulkSupplyExport()}
-                            disabled={Boolean(bulkExport && !bulkExport.done)}
-                            className="flex w-full items-center justify-center gap-3 rounded-xl bg-gradient-to-r from-sky-600 to-blue-600 px-4 py-3 text-white shadow-md shadow-sky-500/30 transition hover:from-sky-700 hover:to-blue-700 disabled:cursor-not-allowed disabled:from-slate-300 disabled:to-slate-300"
-                        >
-                            <Download className="h-5 w-5" />
-                            <span className="text-left">
-                                <span className="block font-bold">Скачать листы и коды ({selectedSupplyIds.size})</span>
-                                <span className="block text-xs opacity-80">по каждой поставке: лист подбора, следом файл кодов</span>
-                            </span>
-                        </button>
-
-                        {bulkExport && (
-                            <div className="rounded-xl bg-white px-3 py-2 text-xs text-slate-600 shadow-sm">
-                                {bulkExport.done
-                                    ? `Готово: ${bulkExport.total} поставок`
-                                    : `Поставка ${bulkExport.index} из ${bulkExport.total}: ${bulkExport.name} — ${bulkExport.stage}`}
-                                {bulkExport.errors.length > 0 && (
-                                    <ul className="mt-1 list-disc pl-4 text-rose-600">
-                                        {bulkExport.errors.map((msg, i) => <li key={i}>{msg}</li>)}
-                                    </ul>
-                                )}
-                            </div>
-                        )}
-
-                        <button
-                            onClick={() => { setSelectedSupplyIds(new Set()); setBulkExport(null); }}
-                            className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-600 hover:bg-white"
-                        >
-                            Снять выбор
-                        </button>
-                    </div>
-                )}
             </div>
         </div>
         </>
