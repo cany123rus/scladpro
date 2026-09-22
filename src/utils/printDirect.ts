@@ -63,6 +63,7 @@ export function printPdfDirect(
       if (settled) return;
       settled = true;
       window.removeEventListener('afterprint', finish);
+      window.removeEventListener('focus', finish);
       removeLater(iframe, url);
       resolve();
     };
@@ -85,7 +86,18 @@ export function printPdfDirect(
           if (opts.waitForClose) {
             try { win.addEventListener('afterprint', finish, { once: true }); } catch { /* нет доступа к фрейму */ }
             window.addEventListener('afterprint', finish, { once: true });
-            setTimeout(finish, 120_000);
+            /*
+             * Chrome не всегда шлёт afterprint из фрейма с PDF — особенно когда
+             * окно печати закрыли кнопкой «Отмена». Тогда ловим возврат фокуса
+             * на страницу: он приходит и после печати, и после отмены. Слушаем
+             * чуть позже, чтобы не поймать собственный win.focus().
+             */
+            setTimeout(() => {
+              if (settled) return;
+              window.addEventListener('focus', finish, { once: true });
+            }, 1200);
+            // Последняя страховка: очередь поставок не должна зависать совсем.
+            setTimeout(finish, 30_000);
             win.print();
             return;
           }

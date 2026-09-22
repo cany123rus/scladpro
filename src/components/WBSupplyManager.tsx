@@ -828,6 +828,69 @@ export const WBSupplyManager = ({
     groups: Array<{ warehouseId: number; warehouseName: string; orderIds: string[]; supplyName: string; status?: string }>;
   }>(null);
 
+  /*
+   * Сколько заданий в каждой поставке.
+   *
+   * Персонального эндпоинта у WB нет (404), поэтому считаем одним проходом по
+   * общему списку заказов и раскладываем по supplyId — один запрос на весь
+   * список поставок, а не по запросу на каждую.
+   */
+  const [supplyOrderCounts, setSupplyOrderCounts] = useState<Record<string, number>>({});
+  const [supplyCountsLoading, setSupplyCountsLoading] = useState(false);
+  /** Когда считали в последний раз: список поставок обновляется чаще, чем меняются числа. */
+  const supplyCountsAtRef = useRef(0);
+
+  /** «5 заданий», «21 задание», «3 задания» — иначе в списке режет глаз. */
+  const ordersWord = (n: number) => {
+    const tail100 = n % 100;
+    const tail10 = n % 10;
+    if (tail100 >= 11 && tail100 <= 14) return 'заданий';
+    if (tail10 === 1) return 'задание';
+    if (tail10 >= 2 && tail10 <= 4) return 'задания';
+    return 'заданий';
+  };
+
+  const loadSupplyOrderCounts = async (list: WBSupply[], force = false) => {
+    if (!list.length) return;
+    if (!force && Date.now() - supplyCountsAtRef.current < 180_000) return;
+    supplyCountsAtRef.current = Date.now();
+    setSupplyCountsLoading(true);
+    try {
+      /*
+       * Окно — месяц.
+       *
+       * WB отдаёт заказы страницами по курсору next, причём страница почти
+       * всегда меньше лимита: за 30 дней это пять запросов и около четырёх
+       * тысяч заданий. Тянуть весь год ради чисел у давно закрытых поставок
+       * незачем — у них количество просто не показываем.
+       */
+      const oldestMs = list.reduce((min, item) => {
+        const at = new Date(item.createdAt).getTime();
+        return Number.isFinite(at) ? Math.min(min, at) : min;
+      }, Date.now());
+      const dateFrom = Math.floor(Math.max(oldestMs - 2 * 86_400_000, Date.now() - 30 * 86_400_000) / 1000);
+
+      const counts: Record<string, number> = {};
+      let next = 0;
+      for (let page = 0; page < 12; page++) {
+        const data = await wbFetch(`https://marketplace-api.wildberries.ru/api/v3/orders?limit=1000&next=${next}&dateFrom=${dateFrom}`);
+        const batch: any[] = data?.orders || [];
+        batch.forEach((o: any) => {
+          const sid = String(o?.supplyId || '').trim();
+          if (sid) counts[sid] = (counts[sid] || 0) + 1;
+        });
+        // Страница бывает и на 255 заказов при лимите 1000 — идём по курсору, а не по размеру.
+        if (!batch.length || typeof data?.next !== 'number' || data.next === next) break;
+        next = data.next;
+      }
+      setSupplyOrderCounts(counts);
+    } catch (e) {
+      console.warn('количество заданий в поставках не получено', e);
+    } finally {
+      setSupplyCountsLoading(false);
+    }
+  };
+
   /** Поставки, отмеченные галочкой, — для выгрузки листов и кодов подряд. */
   const [selectedSupplyIds, setSelectedSupplyIds] = useState<Set<string>>(new Set());
   /** Что делаем с отмеченными поставками: файлы или печать кодов по очереди. */
@@ -855,8 +918,9 @@ export const WBSupplyManager = ({
    * печатаем. Коды при этом не трогаются: план — чтение, не выдача.
    */
   const [chzPlan, setChzPlan] = useState<null | {
-    supplyId: string;
+    supplyIds: string[];
     supplyName: string;
+    mode: 'single' | 'bulk';
     busy: boolean;
     error?: string;
     total: number;
@@ -866,6 +930,7 @@ export const WBSupplyManager = ({
     groups: Array<{ key: string; category: string; gender: 'male' | 'female'; orders: number; matched: number; freeTotal: number }>;
     noGender: Array<{ nmId: string; article: string; subject: string; count: number }>;
     noCard: Array<{ nmId: string; article: string; count: number }>;
+    perSupply: Array<{ supplyId: string; name: string; total: number; alreadyWithChz: number; willGet: number; toScan: number }>;
   }>(null);
   const [fbsStickersWithChz, setFbsStickersWithChzState] = useState<boolean>(() => {
     try { return localStorage.getItem('fbs_stickers_with_chz_v1') === '1'; } catch { return false; }
@@ -2472,6 +2537,8 @@ export const WBSupplyManager = ({
   const supplyOrdersCacheRef = useRef<Map<string, { at: number; rows: any[] }>>(new Map());
   /** Полторы минуты — столько живёт одна «сессия печати» у стола. */
   const SUPPLY_ORDERS_CACHE_MS = 90_000;
+  /** Пачка поставок: между планом и печатью проходят минуты — состав не перечитываем. */
+  const SUPPLY_ORDERS_BULK_CACHE_MS = 15 * 60_000;
 
   const fetchOrdersForSupply = async (
     supplyId: string,
@@ -2492,10 +2559,19 @@ export const WBSupplyManager = ({
   };
 
   const fetchOrdersForSupplyFromWb = async (supplyId: string, options?: { enrich?: boolean; fresh?: boolean }) => {
+    /*
+     * Окно поиска заказов — месяц до создания поставки, а не год.
+     *
+     * Список заказов WB отдаёт страницами по курсору, и год истории — это
+     * пять-шесть запросов на каждую поставку: при печати пачкой поставок
+     * запрос успевал упереться в таймаут. Задание живёт считаные дни, поэтому
+     * месяца хватает с запасом; если по окну не нашлось ничего, ниже идёт
+     * повторный проход уже без ограничения по дате.
+     */
     const supply = supplies.find(s => s.id === supplyId);
     const dateFrom = supply
-      ? Math.floor(new Date(supply.createdAt).getTime() / 1000) - (365 * 24 * 60 * 60)
-      : Math.floor(Date.now() / 1000) - (365 * 24 * 60 * 60);
+      ? Math.floor(new Date(supply.createdAt).getTime() / 1000) - (30 * 24 * 60 * 60)
+      : Math.floor(Date.now() / 1000) - (30 * 24 * 60 * 60);
 
     const withFresh = (url: string) => {
       if (!options?.fresh) return url;
@@ -5596,6 +5672,7 @@ export const WBSupplyManager = ({
       } else {
         setSupplies(suppliesList.filter((s: WBSupply) => !s.closedAt));
       }
+      void loadSupplyOrderCounts(suppliesList);
       
       // Не выбираем поставку сами, если открыт или открывается скан: список
       // приходит через секунду-две, и подмена поставки выбила бы скан закладки.
@@ -7834,7 +7911,16 @@ export const WBSupplyManager = ({
     if (!printSupplyId) return null;
     setLoading(true);
     try {
-      const supplyOrdersRaw = await withTimeout(fetchOrdersForSupply(printSupplyId, { enrich: true, fresh: true, cacheTtlMs: SUPPLY_ORDERS_CACHE_MS }), 30000, 'Таймаут загрузки заказов для стикеров');
+      const bulkRun = asFile || Boolean(opts.waitForPrint);
+      const supplyOrdersRaw = await withTimeout(
+        fetchOrdersForSupply(printSupplyId, {
+          enrich: true,
+          fresh: true,
+          cacheTtlMs: bulkRun ? SUPPLY_ORDERS_BULK_CACHE_MS : SUPPLY_ORDERS_CACHE_MS,
+        }),
+        bulkRun ? 120000 : 30000,
+        'Таймаут загрузки заказов для стикеров',
+      );
       const targetSupplyId = printSupplyId.trim().toLowerCase();
       const supplyOrders = (supplyOrdersRaw || [])
         .filter((o: any) => {
@@ -8360,13 +8446,28 @@ export const WBSupplyManager = ({
              for (const profile of renderProfiles) {
                try {
                  const pdf = await buildPdfForSlice(orderedStickers, profile);
+                 const bindCodes = async () => {
+                   if (fbsStickersWithChz && newChzByOrderId.size > 0) {
+                     await bindPrintedChzToOrders(newChzByOrderId, orderById, printSupplyId);
+                   }
+                 };
                  if (asFile) {
                    pdf.save(`Коды ${String(printSupplyName).replace(/[\\/:*?"<>|]+/g, '_')} ${orderedStickers.length}.pdf`);
+                   await bindCodes();
+                 } else if (opts.waitForPrint) {
+                   /*
+                    * В очереди поставок связку сохраняем до окна печати.
+                    *
+                    * Коды уже закреплены в базе и нарисованы на этикетках, а
+                    * окно печати может провисеть минуту — столько держать
+                    * связку в воздухе нельзя: закроют вкладку, и марки
+                    * окажутся потрачены, но ни к чему не привязаны.
+                    */
+                   await bindCodes();
+                   await printPdfDirect(pdf, { widthMm: 58, heightMm: 40 }, { waitForClose: true });
                  } else {
-                   await printPdfDirect(pdf, { widthMm: 58, heightMm: 40 }, { waitForClose: Boolean(opts.waitForPrint) });
-                 }
-                 if (fbsStickersWithChz && newChzByOrderId.size > 0) {
-                   await bindPrintedChzToOrders(newChzByOrderId, orderById, printSupplyId);
+                   await printPdfDirect(pdf, { widthMm: 58, heightMm: 40 });
+                   await bindCodes();
                  }
                  if (!quiet && (fbsStickersWithChz || reportRows.length)) {
                    setChzPrintReport({
@@ -8527,6 +8628,14 @@ export const WBSupplyManager = ({
     });
   };
 
+  /** Пакетная работа начинается с плана марок — как и печать одной поставки. */
+  const startBulkSupplyExport = () => {
+    const ids = supplies.filter((x) => selectedSupplyIds.has(x.id)).map((x) => x.id);
+    if (!ids.length) return;
+    if (fbsStickersWithChz) void buildChzPlan(ids, 'bulk');
+    else void runBulkSupplyExport();
+  };
+
   /**
    * Отмеченные поставки — по очереди, одна за другой.
    *
@@ -8600,55 +8709,28 @@ export const WBSupplyManager = ({
   };
 
   /**
-   * План марок поставки: кому какая марка достанется и сколько их в базе.
+   * План марок: кому какая марка достанется и сколько их в базе.
    *
-   * Повторяет подбор из печати один в один, но ничего не закрепляет — коды
-   * остаются свободными до нажатия «Печатать».
+   * Считает одну поставку или сразу несколько отмеченных — подбор идёт общим
+   * пулом, как в печати, поэтому видно и то, что второй поставке кодов уже не
+   * останется. Ничего не закрепляет: коды свободны до нажатия «Печатать».
    */
-  const buildChzPlan = async (supplyId: string) => {
-    const supplyName = supplies.find((x) => x.id === supplyId)?.name || supplyId;
+  const buildChzPlan = async (supplyIdOrIds: string | string[], mode: 'single' | 'bulk' = 'single') => {
+    const supplyIds = (Array.isArray(supplyIdOrIds) ? supplyIdOrIds : [supplyIdOrIds]).filter(Boolean);
+    if (!supplyIds.length) return;
+    const nameOf = (id: string) => supplies.find((x) => x.id === id)?.name || id;
+    const planTitle = supplyIds.length === 1
+      ? nameOf(supplyIds[0])
+      : `Поставок: ${supplyIds.length}`;
+
     setChzPlan({
-      supplyId, supplyName, busy: true, total: 0, alreadyWithChz: 0, canceled: 0,
-      statusChecked: false, groups: [], noGender: [], noCard: [],
+      supplyIds, supplyName: planTitle, mode, busy: true, total: 0, alreadyWithChz: 0, canceled: 0,
+      statusChecked: false, groups: [], noGender: [], noCard: [], perSupply: [],
     });
+
     try {
-      const rawOrders = await withTimeout(
-        fetchOrdersForSupply(supplyId, { enrich: true, fresh: true, cacheTtlMs: SUPPLY_ORDERS_CACHE_MS }),
-        30000,
-        'Таймаут загрузки заказов поставки',
-      );
-      const target = supplyId.trim().toLowerCase();
-      const supplyOrders = (rawOrders || []).filter((o: any) => {
-        const candidates = [o?.supplyId, o?.supplyID, o?.supply_id, o?.supply?.id]
-          .map((v) => String(v || '').trim().toLowerCase())
-          .filter(Boolean);
-        return candidates.length === 0 ? true : candidates.some((c) => c === target);
-      });
-      const orderId = (o: any) => Number(o?.id ?? o?.orderId ?? o?.order_id);
-      const ids = Array.from(new Set(supplyOrders.map(orderId).filter((id: number) => Number.isFinite(id) && id > 0)));
-      if (!ids.length) throw new Error('В поставке нет заданий');
-
-      const { canceled, checked } = await fetchCanceledFbsOrders(ids);
-      const live = supplyOrders.filter((o: any) => !canceled.has(orderId(o)));
-
-      const [savedMap, dbScans] = await Promise.all([
-        loadFbsSupplyScanMap(supplyId, selectedSupplierId).catch(() => ({} as Record<string, FbsSupplyScanSavedItem>)),
-        fetchFbsSupplyScans(selectedSupplierId, supplyId).catch(() => []),
-      ]);
-      const withChz = new Set<number>();
-      Object.values(savedMap).forEach((item: any) => {
-        const id = Number(String(item?.orderId || '').trim());
-        if (id > 0 && String(item?.honestSignCode || '').trim()) withChz.add(id);
-      });
-      (dbScans || []).forEach((row: any) => {
-        const id = Number(String(row?.orderId || '').trim());
-        if (id > 0 && String(row?.chzCode || '').trim()) withChz.add(id);
-      });
-
-      const need = live.filter((o: any) => !withChz.has(orderId(o)));
-      const meta = await loadProductMetaByNmId(selectedSupplierId, need.map((o: any) => Number(o?.nmId || 0)));
-      const pool = await takeFreeChzCodes(selectedSupplierId, Math.max(need.length, 1));
-
+      // Пул марок общий на все поставки: одна марка не может уйти дважды.
+      const pool = await takeFreeChzCodes(selectedSupplierId, 1);
       const freeBy = new Map<string, number>();
       pool.forEach((c: any) => {
         const key = `${normalizeHsCategoryName(c.category)}|${String(c.gender || '').toLowerCase()}`;
@@ -8659,60 +8741,127 @@ export const WBSupplyManager = ({
       const groups = new Map<string, { key: string; category: string; gender: 'male' | 'female'; orders: number; matched: number; freeTotal: number }>();
       const noGender = new Map<string, { nmId: string; article: string; subject: string; count: number }>();
       const noCard = new Map<string, { nmId: string; article: string; count: number }>();
+      const perSupply: Array<{ supplyId: string; name: string; total: number; alreadyWithChz: number; willGet: number; toScan: number }> = [];
 
-      for (const o of need) {
-        const nmId = String(o?.nmId || '');
-        const article = String(o?.article || o?.vendorCode || '—');
-        const card = meta.get(Number(o?.nmId || 0));
-        if (!card) {
-          const row = noCard.get(nmId) || { nmId, article, count: 0 };
-          row.count += 1;
-          noCard.set(nmId, row);
-          continue;
-        }
-        if (!card.gender) {
-          const row = noGender.get(nmId) || { nmId, article, subject: card.subject || '', count: 0 };
-          row.count += 1;
-          noGender.set(nmId, row);
-          continue;
-        }
-        const category = normalizeHsCategoryName(card.subject || '');
-        const key = `${category}|${card.gender}`;
-        const group = groups.get(key) || {
-          key,
-          category: card.subject || 'без категории',
-          gender: card.gender as 'male' | 'female',
-          orders: 0,
-          matched: 0,
-          freeTotal: freeBy.get(key) || 0,
-        };
-        group.orders += 1;
-        const match = matchChzCodeForProduct(pool, used, {
-          gender: card.gender,
-          subject: card.subject,
-          size: String(o?.size || ''),
+      let total = 0;
+      let alreadyWithChz = 0;
+      let canceledTotal = 0;
+      let statusChecked = true;
+
+      for (const supplyId of supplyIds) {
+        setChzPlan((prev) => (prev ? { ...prev, supplyName: supplyIds.length > 1 ? `${planTitle} · считаю ${nameOf(supplyId)}` : planTitle } : prev));
+
+        const rawOrders = await withTimeout(
+          // Состав поставки ляжет в кэш и достанется печати, которая идёт следом.
+          fetchOrdersForSupply(supplyId, { enrich: true, fresh: true, cacheTtlMs: SUPPLY_ORDERS_BULK_CACHE_MS }),
+          120000,
+          `Таймаут загрузки заказов поставки ${nameOf(supplyId)}`,
+        );
+        const target = supplyId.trim().toLowerCase();
+        const supplyOrders = (rawOrders || []).filter((o: any) => {
+          const candidates = [o?.supplyId, o?.supplyID, o?.supply_id, o?.supply?.id]
+            .map((v) => String(v || '').trim().toLowerCase())
+            .filter(Boolean);
+          return candidates.length === 0 ? true : candidates.some((c) => c === target);
         });
-        if (match) {
-          used.add(match.code);
-          group.matched += 1;
+        const orderId = (o: any) => Number(o?.id ?? o?.orderId ?? o?.order_id);
+        const ids = Array.from(new Set(supplyOrders.map(orderId).filter((id: number) => Number.isFinite(id) && id > 0)));
+        if (!ids.length) {
+          perSupply.push({ supplyId, name: nameOf(supplyId), total: 0, alreadyWithChz: 0, willGet: 0, toScan: 0 });
+          continue;
         }
-        groups.set(key, group);
+
+        const { canceled, checked } = await fetchCanceledFbsOrders(ids);
+        if (!checked) statusChecked = false;
+        canceledTotal += canceled.size;
+        const live = supplyOrders.filter((o: any) => !canceled.has(orderId(o)));
+
+        const [savedMap, dbScans] = await Promise.all([
+          loadFbsSupplyScanMap(supplyId, selectedSupplierId).catch(() => ({} as Record<string, FbsSupplyScanSavedItem>)),
+          fetchFbsSupplyScans(selectedSupplierId, supplyId).catch(() => []),
+        ]);
+        const withChz = new Set<number>();
+        Object.values(savedMap).forEach((item: any) => {
+          const id = Number(String(item?.orderId || '').trim());
+          if (id > 0 && String(item?.honestSignCode || '').trim()) withChz.add(id);
+        });
+        (dbScans || []).forEach((row: any) => {
+          const id = Number(String(row?.orderId || '').trim());
+          if (id > 0 && String(row?.chzCode || '').trim()) withChz.add(id);
+        });
+
+        const need = live.filter((o: any) => !withChz.has(orderId(o)));
+        const meta = await loadProductMetaByNmId(selectedSupplierId, need.map((o: any) => Number(o?.nmId || 0)));
+
+        let willGet = 0;
+        for (const o of need) {
+          const nmId = String(o?.nmId || '');
+          const article = String(o?.article || o?.vendorCode || '—');
+          const card = meta.get(Number(o?.nmId || 0));
+          if (!card) {
+            const row = noCard.get(nmId) || { nmId, article, count: 0 };
+            row.count += 1;
+            noCard.set(nmId, row);
+            continue;
+          }
+          if (!card.gender) {
+            const row = noGender.get(nmId) || { nmId, article, subject: card.subject || '', count: 0 };
+            row.count += 1;
+            noGender.set(nmId, row);
+            continue;
+          }
+          const category = normalizeHsCategoryName(card.subject || '');
+          const key = `${category}|${card.gender}`;
+          const group = groups.get(key) || {
+            key,
+            category: card.subject || 'без категории',
+            gender: card.gender as 'male' | 'female',
+            orders: 0,
+            matched: 0,
+            freeTotal: freeBy.get(key) || 0,
+          };
+          group.orders += 1;
+          const match = matchChzCodeForProduct(pool, used, {
+            gender: card.gender,
+            subject: card.subject,
+            size: String(o?.size || ''),
+          });
+          if (match) {
+            used.add(match.code);
+            group.matched += 1;
+            willGet += 1;
+          }
+          groups.set(key, group);
+        }
+
+        total += live.length;
+        alreadyWithChz += live.length - need.length;
+        perSupply.push({
+          supplyId,
+          name: nameOf(supplyId),
+          total: live.length,
+          alreadyWithChz: live.length - need.length,
+          willGet,
+          toScan: need.length - willGet,
+        });
       }
 
       setChzPlan({
-        supplyId,
-        supplyName,
+        supplyIds,
+        supplyName: planTitle,
+        mode,
         busy: false,
-        total: live.length,
-        alreadyWithChz: live.length - need.length,
-        canceled: canceled.size,
-        statusChecked: checked,
+        total,
+        alreadyWithChz,
+        canceled: canceledTotal,
+        statusChecked,
         groups: Array.from(groups.values()).sort((a, b) => b.orders - a.orders),
         noGender: Array.from(noGender.values()).sort((a, b) => b.count - a.count),
         noCard: Array.from(noCard.values()).sort((a, b) => b.count - a.count),
+        perSupply,
       });
     } catch (e: any) {
-      setChzPlan((prev) => (prev ? { ...prev, busy: false, error: e?.message || String(e) } : prev));
+      setChzPlan((prev) => (prev ? { ...prev, busy: false, supplyName: planTitle, error: e?.message || String(e) } : prev));
     }
   };
 
@@ -9608,10 +9757,10 @@ export const WBSupplyManager = ({
                             <Package className={`h-5 w-5 ${loading ? 'animate-spin' : ''}`} />
                         </button>
                         <button
-                            onClick={fetchSupplies}
+                            onClick={() => { supplyCountsAtRef.current = 0; void fetchSupplies(); }}
                             disabled={loading}
                             className="rounded-lg p-2 text-slate-600 transition-colors hover:bg-slate-100"
-                            title="Обновить поставки"
+                            title="Обновить поставки и количество заданий"
                         >
                             <RefreshCw className={`h-5 w-5 ${loading ? 'animate-spin' : ''}`} />
                         </button>
@@ -9635,7 +9784,7 @@ export const WBSupplyManager = ({
                                 <option value="print">Печать кодов</option>
                             </select>
                             <button
-                                onClick={() => void runBulkSupplyExport()}
+                                onClick={() => startBulkSupplyExport()}
                                 disabled={Boolean(bulkExport && !bulkExport.done)}
                                 title={bulkMode === 'print'
                                     ? 'Коды каждой поставки уходят в печать по очереди: следующая ждёт, пока закроете окно печати'
@@ -9667,6 +9816,15 @@ export const WBSupplyManager = ({
                                 {bulkExport.done
                                     ? `${bulkExport.stage === 'остановлено' ? 'Остановлено' : 'Готово'}: ${bulkExport.total} поставок`
                                     : `Поставка ${bulkExport.index} из ${bulkExport.total}: ${bulkExport.name} — ${bulkExport.stage}`}
+                                {!bulkExport.done && bulkExport.stage.startsWith('печать') && (
+                                    /* Браузер не всегда сообщает, что окно печати закрыли, — тогда очередь двигают руками. */
+                                    <button
+                                        onClick={() => window.dispatchEvent(new Event('afterprint'))}
+                                        className="ml-2 rounded-lg border border-slate-300 px-2 py-0.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                                    >
+                                        Дальше
+                                    </button>
+                                )}
                                 {bulkExport.results.length > 0 && (
                                     <ul className="mt-1 list-disc pl-4">
                                         {bulkExport.results.map((msg, i) => <li key={i}>{msg}</li>)}
@@ -9716,6 +9874,11 @@ export const WBSupplyManager = ({
                                             {supply.closedAt ? 'Закрыта' : 'Активна'}
                                         </span>
                                         <span className="text-xs text-slate-400">{formatDate(supply.createdAt)}</span>
+                                        <span className="text-xs font-semibold tabular-nums text-slate-600">
+                                            {supplyOrderCounts[supply.id] !== undefined
+                                                ? `${supplyOrderCounts[supply.id]} ${ordersWord(supplyOrderCounts[supply.id])}`
+                                                : supplyCountsLoading ? '…' : ''}
+                                        </span>
                                     </div>
                                 </div>
                                 
@@ -10010,7 +10173,9 @@ export const WBSupplyManager = ({
             <div className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-start justify-between gap-4 bg-gradient-to-r from-amber-500 to-orange-500 px-5 py-4 text-white">
                 <div>
-                  <div className="flex items-center gap-2 text-lg font-bold"><CheckSquare className="h-5 w-5" /> Какие марки уйдут в печать</div>
+                  <div className="flex items-center gap-2 text-lg font-bold">
+                    <CheckSquare className="h-5 w-5" /> {plan.mode === 'bulk' ? (bulkMode === 'print' ? 'Марки на печать пачкой' : 'Марки на выгрузку пачкой') : 'Какие марки уйдут в печать'}
+                  </div>
                   <div className="text-sm opacity-90">{plan.supplyName}</div>
                 </div>
                 <button onClick={() => setChzPlan(null)} className="rounded-lg p-1.5 hover:bg-white/20"><X className="h-5 w-5" /></button>
@@ -10028,6 +10193,33 @@ export const WBSupplyManager = ({
                       <div className="rounded-xl bg-emerald-50 p-3"><div className="text-2xl font-extrabold tabular-nums text-emerald-700">{willGet}</div><div className="text-xs text-emerald-700">получат марку</div></div>
                       <div className={`rounded-xl p-3 ${short + noMeta ? 'bg-amber-50' : 'bg-slate-50'}`}><div className={`text-2xl font-extrabold tabular-nums ${short + noMeta ? 'text-amber-700' : ''}`}>{short + noMeta}</div><div className="text-xs text-slate-500">на скан</div></div>
                     </div>
+
+                    {plan.mode === 'bulk' && plan.perSupply.length > 0 && (
+                      <div className="overflow-hidden rounded-xl border border-slate-200">
+                        <table className="w-full text-sm">
+                          <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+                            <tr>
+                              <th className="px-3 py-2 text-left font-semibold">Поставка</th>
+                              <th className="px-3 py-2 text-right font-semibold">Заданий</th>
+                              <th className="px-3 py-2 text-right font-semibold">Уже с ЧЗ</th>
+                              <th className="px-3 py-2 text-right font-semibold">Получат</th>
+                              <th className="px-3 py-2 text-right font-semibold">На скан</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {plan.perSupply.map((row) => (
+                              <tr key={row.supplyId} className="border-t border-slate-100">
+                                <td className="px-3 py-2 text-slate-800">{row.name}</td>
+                                <td className="px-3 py-2 text-right tabular-nums">{row.total}</td>
+                                <td className="px-3 py-2 text-right tabular-nums text-slate-500">{row.alreadyWithChz}</td>
+                                <td className="px-3 py-2 text-right font-semibold tabular-nums text-emerald-700">{row.willGet}</td>
+                                <td className={`px-3 py-2 text-right tabular-nums ${row.toScan ? 'text-amber-700' : 'text-slate-400'}`}>{row.toScan}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
 
                     {plan.canceled > 0 && (
                       <div className="rounded-xl bg-slate-100 px-3 py-2 text-sm text-slate-600">Отменённых заданий: {plan.canceled} — в печать не пойдут.</div>
@@ -10122,18 +10314,26 @@ export const WBSupplyManager = ({
 
               <div className="flex flex-wrap justify-end gap-2 border-t border-slate-100 px-5 py-3">
                 <button
-                  onClick={() => void buildChzPlan(plan.supplyId)}
+                  onClick={() => void buildChzPlan(plan.supplyIds, plan.mode)}
                   disabled={plan.busy}
                   className="rounded-xl border border-slate-300 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-40"
                 >
                   Пересчитать
                 </button>
                 <button
-                  onClick={() => { const id = plan.supplyId; setChzPlan(null); void downloadFBSStickers({ supplyId: id }); }}
+                  onClick={() => {
+                    const ids = plan.supplyIds;
+                    const isBulk = plan.mode === 'bulk';
+                    setChzPlan(null);
+                    if (isBulk) void runBulkSupplyExport();
+                    else void downloadFBSStickers({ supplyId: ids[0] });
+                  }}
                   disabled={plan.busy || Boolean(plan.error)}
                   className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-40"
                 >
-                  Печатать стикеры
+                  {plan.mode === 'bulk'
+                    ? (bulkMode === 'print' ? `Печатать ${plan.supplyIds.length}` : `Скачать ${plan.supplyIds.length}`)
+                    : 'Печатать стикеры'}
                 </button>
                 <button onClick={() => setChzPlan(null)} className="rounded-xl border border-slate-300 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">Отмена</button>
               </div>
