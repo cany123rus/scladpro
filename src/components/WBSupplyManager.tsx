@@ -5716,6 +5716,17 @@ export const WBSupplyManager = ({
       if (selectedSupplierId && (activeTab === 'fbs' || activeTab === 'fbs_calc')) fetchSupplies();
   }, [showAllSupplies, activeTab]);
 
+  /**
+   * Обновление раздела целиком: и поставки, и новые задания.
+   *
+   * Одно без другого путает: задание уехало в поставку, а в списке новых оно
+   * ещё висит — и наоборот. Количество заданий в поставках тоже пересчитываем.
+   */
+  const refreshFbsData = async () => {
+    supplyCountsAtRef.current = 0;
+    await Promise.all([fetchSupplies(), fetchNewOrders()]);
+  };
+
   const createSupply = async () => {
     if (!newSupplyName) return;
     setLoading(true);
@@ -5730,7 +5741,7 @@ export const WBSupplyManager = ({
       setSuccessMsg(`Поставка создана: ${newId}`);
       setActiveSupplyId(newId);
       setShowCreateSupplyModal(false);
-      fetchSupplies();
+      void refreshFbsData();
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -5761,7 +5772,7 @@ export const WBSupplyManager = ({
 
       setSuccessMsg(`Добавлено ${selectedOrderIds.size} заказов в поставку ${activeSupplyId}`);
       setSelectedOrderIds(new Set());
-      fetchNewOrders();
+      void refreshFbsData();
     } catch (err: any) {
       const raw = err?.message || 'Ошибка добавления заказов в поставку';
       setError(`Не удалось добавить заказы в поставку WB. ${raw}`);
@@ -8662,10 +8673,8 @@ export const WBSupplyManager = ({
     }
 
     setAssemblePlan((prev) => (prev ? { ...prev, running: false, done: true, groups: [...groups] } : prev));
-    // Числа в списке поставок после раскладки уже другие.
-    supplyCountsAtRef.current = 0;
-    await fetchSupplies();
-    await fetchNewOrders();
+    // Задания уехали в поставки: обновляем и список поставок, и новые задания.
+    await refreshFbsData();
   };
 
   const toggleSupplySelection = (supplyId: string) => {
@@ -9669,10 +9678,10 @@ export const WBSupplyManager = ({
                             {selectedOrderIds.size === orders.length && orders.length > 0 ? 'Снять все' : 'Выбрать все'}
                         </button>
                         <button
-                            onClick={fetchNewOrders}
+                            onClick={() => void refreshFbsData()}
                             disabled={loading}
                             className="rounded-lg p-2 text-blue-600 transition-colors hover:bg-blue-50"
-                            title="Обновить заказы"
+                            title="Обновить задания и поставки"
                         >
                             <RefreshCw className={`h-5 w-5 ${loading ? 'animate-spin' : ''}`} />
                         </button>
@@ -9832,10 +9841,10 @@ export const WBSupplyManager = ({
                             <Package className={`h-5 w-5 ${loading ? 'animate-spin' : ''}`} />
                         </button>
                         <button
-                            onClick={() => { supplyCountsAtRef.current = 0; void fetchSupplies(); }}
+                            onClick={() => void refreshFbsData()}
                             disabled={loading}
                             className="rounded-lg p-2 text-slate-600 transition-colors hover:bg-slate-100"
-                            title="Обновить поставки и количество заданий"
+                            title="Обновить поставки, количество заданий и новые задания"
                         >
                             <RefreshCw className={`h-5 w-5 ${loading ? 'animate-spin' : ''}`} />
                         </button>
