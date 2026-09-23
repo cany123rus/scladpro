@@ -855,6 +855,8 @@ export const WBSupplyManager = ({
   const supplyCountsAtRef = useRef(0);
   /** Идущий пересчёт: второй вызов ждёт его, а не запускает свой. */
   const supplyCountsPromiseRef = useRef<Promise<{ counts: Record<string, number>; warehouses: Record<string, number> }> | null>(null);
+  /** Кабинет, к которому относятся посчитанные числа. */
+  const supplyCountsSupplierRef = useRef<string>('');
   /** Те же числа и склады поставок вне рендера — их читает сборка поставок. */
   const supplyCountsRef = useRef<Record<string, number>>({});
   const supplyWarehouseRef = useRef<Record<string, number>>({});
@@ -871,7 +873,20 @@ export const WBSupplyManager = ({
 
   const loadSupplyOrderCounts = async (list: WBSupply[], force = false) => {
     if (!list.length) return { counts: supplyCountsRef.current, warehouses: supplyWarehouseRef.current };
-    if (!force && Date.now() - supplyCountsAtRef.current < 180_000) {
+    /*
+     * Сменили кабинет — считаем заново, не глядя на трёхминутную паузу.
+     *
+     * Иначе у нового кабинета числа не появлялись вовсе: в памяти лежали
+     * номера поставок предыдущего, а к ним свежие поставки не подходят.
+     */
+    const countsSupplierId = selectedSupplierId;
+    const otherSupplier = supplyCountsSupplierRef.current !== countsSupplierId;
+    if (otherSupplier) {
+      supplyCountsRef.current = {};
+      supplyWarehouseRef.current = {};
+      setSupplyOrderCounts({});
+    }
+    if (!force && !otherSupplier && Date.now() - supplyCountsAtRef.current < 180_000) {
       return { counts: supplyCountsRef.current, warehouses: supplyWarehouseRef.current };
     }
     /*
@@ -884,6 +899,25 @@ export const WBSupplyManager = ({
     const run = (async () => {
     setSupplyCountsLoading(true);
     try {
+      /*
+       * Сначала активные поставки — точным методом WB и сразу на экран.
+       *
+       * Это единицы быстрых запросов, а именно эти числа и нужны в работе.
+       * Тяжёлый проход по всем заказам (ради закрытых поставок) идёт следом.
+       */
+      const activeCounts: Record<string, number> = {};
+      for (const item of list.filter((x) => !x.closedAt).slice(0, 10)) {
+        try {
+          activeCounts[item.id] = (await fetchSupplyOrderIds(item.id)).length;
+        } catch (e) {
+          console.warn('точное число заданий поставки не получено', item.id, e);
+        }
+      }
+      if (Object.keys(activeCounts).length) {
+        supplyCountsRef.current = { ...supplyCountsRef.current, ...activeCounts };
+        setSupplyOrderCounts((prev) => ({ ...prev, ...activeCounts }));
+      }
+
       /*
        * Окно — месяц.
        *
@@ -916,9 +950,18 @@ export const WBSupplyManager = ({
         if (!batch.length || typeof data?.next !== 'number' || data.next === next) break;
         next = data.next;
       }
+      /*
+       * Числа активных поставок оставляем точные.
+       *
+       * Общий список проставляет supplyId с задержкой: только что доложенные
+       * задания в нём ещё не видны, и пересчёт по нему занизил бы количество.
+       */
+      Object.assign(counts, activeCounts);
+
       supplyCountsRef.current = counts;
       supplyWarehouseRef.current = warehouses;
       supplyCountsAtRef.current = Date.now();
+      supplyCountsSupplierRef.current = countsSupplierId;
       setSupplyOrderCounts(counts);
     } catch (e) {
       console.warn('количество заданий в поставках не получено', e);
@@ -2599,6 +2642,15 @@ export const WBSupplyManager = ({
     });
   };
 
+  /**
+   * Сколько заданий WB числит в поставке и сколько из них удалось прочитать.
+   *
+   * Список заказов обновляется у WB с задержкой: сразу после добавления он
+   * ещё не отдаёт часть заданий. Тогда лист подбора и коды вышли бы неполными
+   * молча — поэтому расхождение запоминаем и показываем.
+   */
+  const supplyOrdersShortfallRef = useRef<Map<string, { expected: number; got: number }>>(new Map());
+
   const fetchOrdersForSupply = async (
     supplyId: string,
     options?: { enrich?: boolean; fresh?: boolean; cacheTtlMs?: number },
@@ -2631,6 +2683,22 @@ export const WBSupplyManager = ({
     const dateFrom = supply
       ? Math.floor(new Date(supply.createdAt).getTime() / 1000) - (30 * 24 * 60 * 60)
       : Math.floor(Date.now() / 1000) - (30 * 24 * 60 * 60);
+
+    /*
+     * Состав поставки берём у WB по ID заданий, а не по полю supplyId.
+     *
+     * 23.09.2026: в поставке 16 заданий, а в листе подбора оказалось три —
+     * общий список заказов ещё не проставил им supplyId (задания добавили
+     * пару минут назад). Метод order-ids отвечает сразу и точно, поэтому
+     * сначала спрашиваем у него список ID, а строки добираем из общего
+     * списка по этим ID.
+     */
+    const wantedIds = new Set<number>();
+    try {
+      (await fetchSupplyOrderIds(supplyId)).forEach((id) => wantedIds.add(id));
+    } catch (e) {
+      console.warn('ID заданий поставки не получены, идём по supplyId', supplyId, e);
+    }
 
     const withFresh = (url: string) => {
       if (!options?.fresh) return url;
@@ -2703,7 +2771,7 @@ export const WBSupplyManager = ({
       }));
 
       let matched = candidateRows
-        .filter(({ candidates }) => candidates.some((c) => c === target))
+        .filter(({ o, candidates }) => candidates.some((c) => c === target) || wantedIds.has(Number(o?.id)))
         .map(({ o }) => normalizeSupplyOrder(o));
 
       // Fallback: some WB responses return supply ids in slightly different format.
@@ -2719,6 +2787,24 @@ export const WBSupplyManager = ({
       }
 
       return matched;
+    };
+
+    /** Повтор прохода: часть заданий WB отдаёт списком с задержкой в секунды. */
+    const fetchOrdersWithRetry = async () => {
+      let rows = await fetchOrdersListFallback();
+      for (let attempt = 0; attempt < 2 && wantedIds.size > rows.length; attempt++) {
+        await new Promise((r) => setTimeout(r, 2500 * (attempt + 1)));
+        const again = await fetchOrdersListFallback();
+        if (again.length > rows.length) rows = again;
+      }
+      if (wantedIds.size) {
+        if (rows.length < wantedIds.size) {
+          supplyOrdersShortfallRef.current.set(supplyId, { expected: wantedIds.size, got: rows.length });
+        } else {
+          supplyOrdersShortfallRef.current.delete(supplyId);
+        }
+      }
+      return rows;
     };
 
     /*
@@ -2752,7 +2838,7 @@ export const WBSupplyManager = ({
 
     const shouldForceFallbackMerge = Boolean(options?.fresh);
     if (supplyOrders.length === 0 || directLooksSparse || shouldForceFallbackMerge) {
-      const fallbackOrders = await fetchOrdersListFallback();
+      const fallbackOrders = await fetchOrdersWithRetry();
       if (supplyOrders.length === 0) {
         supplyOrders = fallbackOrders;
       } else if (fallbackOrders.length > 0) {
@@ -7397,6 +7483,10 @@ export const WBSupplyManager = ({
       }
       
       doc.save(`Лист подбора ${String(supplyName || '').replace(/[\\/:*?"<>|]+/g, '_')} ${sortedSupplyOrders.length}.pdf`);
+      const pickingShort = supplyOrdersShortfallRef.current.get(pickingSupplyId);
+      if (pickingShort) {
+        setError(`WB отдал ${pickingShort.got} заданий из ${pickingShort.expected} — список заказов обновляется с задержкой. Подождите минуту и скачайте лист заново.`);
+      }
       setSuccessMsg(
         `Лист подбора на ${sortedSupplyOrders.length} заказов скачан`
         + (pickingCancel.canceled.size ? `. Отменённые не вошли: ${pickingCancel.canceled.size}` : '')
@@ -7972,6 +8062,20 @@ export const WBSupplyManager = ({
         const id = extractSafeOrderId(o);
         if (id) orderByIdAll.set(id, o);
       });
+
+      /*
+       * Неполный состав — повод остановиться, а не печатать половину.
+       *
+       * Марки выдаются по напечатанным этикеткам: напечатав часть поставки,
+       * вторую половину пришлось бы догонять вручную.
+       */
+      const shortfall = supplyOrdersShortfallRef.current.get(printSupplyId);
+      if (shortfall) {
+        throw new Error(
+          `WB отдал ${shortfall.got} заданий из ${shortfall.expected}: список заказов обновляется с задержкой. `
+          + 'Подождите минуту и повторите — иначе половина поставки останется без стикеров.',
+        );
+      }
 
       /** Строки отчёта — задания, оставшиеся без ЧЗ. */
       const reportRows: NonNullable<typeof chzPrintReport>['rows'] = [];
