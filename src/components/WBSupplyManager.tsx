@@ -926,11 +926,8 @@ export const WBSupplyManager = ({
        * тысяч заданий. Тянуть весь год ради чисел у давно закрытых поставок
        * незачем — у них количество просто не показываем.
        */
-      const oldestMs = list.reduce((min, item) => {
-        const at = new Date(item.createdAt).getTime();
-        return Number.isFinite(at) ? Math.min(min, at) : min;
-      }, Date.now());
-      const dateFrom = Math.floor(Math.max(oldestMs - 2 * 86_400_000, Date.now() - 30 * 86_400_000) / 1000);
+      // 28 дней, а не 30: на периоде больше месяца WB отдаёт выборку без свежих заданий.
+      const dateFrom = Math.floor((Date.now() - 28 * 86_400_000) / 1000);
 
       const counts: Record<string, number> = {};
       // Заодно запоминаем склад поставки: у WB его в самой поставке нет, только в заданиях.
@@ -2678,11 +2675,24 @@ export const WBSupplyManager = ({
      * запрос успевал упереться в таймаут. Задание живёт считаные дни, поэтому
      * месяца хватает с запасом; если по окну не нашлось ничего, ниже идёт
      * повторный проход уже без ограничения по дате.
+     *
+     * Период запроса — не больше 30 дней, иначе WB отвечает не тем.
+     *
+     * 23.09.2026: в поставке 16 заданий, а список заказов не отдавал ни
+     * одного. Причина — окно «создана минус 30 дней … сейчас»: для поставки
+     * вчерашнего дня это 31 день, и WB на такой период молча возвращает
+     * выборку без свежих заданий (ошибки при этом нет). Берём 28 дней: для
+     * живой поставки — последние 28 дней, для старой — 28 дней от её
+     * создания, с явным dateTo.
      */
-    const supply = supplies.find(s => s.id === supplyId);
-    const dateFrom = supply
-      ? Math.floor(new Date(supply.createdAt).getTime() / 1000) - (30 * 24 * 60 * 60)
-      : Math.floor(Date.now() / 1000) - (30 * 24 * 60 * 60);
+    const supply = supplies.find((s) => s.id === supplyId);
+    const WINDOW_MS = 28 * 24 * 60 * 60 * 1000;
+    const nowMs = Date.now();
+    const createdMs = supply ? new Date(supply.createdAt).getTime() : nowMs;
+    const recent = !Number.isFinite(createdMs) || nowMs - createdMs < WINDOW_MS - 2 * 24 * 60 * 60 * 1000;
+    const fromMs = recent ? nowMs - WINDOW_MS : createdMs - 2 * 24 * 60 * 60 * 1000;
+    const dateFrom = Math.floor(fromMs / 1000);
+    const dateTo = recent ? 0 : Math.floor((fromMs + WINDOW_MS) / 1000);
 
     /*
      * Состав поставки берём у WB по ID заданий, а не по полю supplyId.
@@ -2751,7 +2761,9 @@ export const WBSupplyManager = ({
 
       for (let page = 0; page < 300; page++) {
         const baseUrl = `https://marketplace-api.wildberries.ru/api/v3/orders?limit=1000&next=${next}`;
-        const url = useDateFrom ? `${baseUrl}&dateFrom=${dateFrom}` : baseUrl;
+        const url = useDateFrom
+          ? `${baseUrl}&dateFrom=${dateFrom}${dateTo ? `&dateTo=${dateTo}` : ''}`
+          : baseUrl;
         const data = await wbFetch(withFresh(url));
         const batch: any[] = data?.orders || [];
         if (batch.length === 0) break;
