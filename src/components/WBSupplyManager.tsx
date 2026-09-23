@@ -853,6 +853,8 @@ export const WBSupplyManager = ({
   const [supplyCountsLoading, setSupplyCountsLoading] = useState(false);
   /** Когда считали в последний раз: список поставок обновляется чаще, чем меняются числа. */
   const supplyCountsAtRef = useRef(0);
+  /** Идущий пересчёт: второй вызов ждёт его, а не запускает свой. */
+  const supplyCountsPromiseRef = useRef<Promise<{ counts: Record<string, number>; warehouses: Record<string, number> }> | null>(null);
   /** Те же числа и склады поставок вне рендера — их читает сборка поставок. */
   const supplyCountsRef = useRef<Record<string, number>>({});
   const supplyWarehouseRef = useRef<Record<string, number>>({});
@@ -872,7 +874,14 @@ export const WBSupplyManager = ({
     if (!force && Date.now() - supplyCountsAtRef.current < 180_000) {
       return { counts: supplyCountsRef.current, warehouses: supplyWarehouseRef.current };
     }
-    supplyCountsAtRef.current = Date.now();
+    /*
+     * Пересчёт уже идёт — ждём его, а не запускаем второй.
+     *
+     * Иначе окно сборки успевало прочитать пустые склады поставок, пока первый
+     * проход ещё шёл, и предлагало создать новые поставки вместо уже открытых.
+     */
+    if (supplyCountsPromiseRef.current) return supplyCountsPromiseRef.current;
+    const run = (async () => {
     setSupplyCountsLoading(true);
     try {
       /*
@@ -909,6 +918,7 @@ export const WBSupplyManager = ({
       }
       supplyCountsRef.current = counts;
       supplyWarehouseRef.current = warehouses;
+      supplyCountsAtRef.current = Date.now();
       setSupplyOrderCounts(counts);
     } catch (e) {
       console.warn('количество заданий в поставках не получено', e);
@@ -916,6 +926,13 @@ export const WBSupplyManager = ({
       setSupplyCountsLoading(false);
     }
     return { counts: supplyCountsRef.current, warehouses: supplyWarehouseRef.current };
+    })();
+    supplyCountsPromiseRef.current = run;
+    try {
+      return await run;
+    } finally {
+      supplyCountsPromiseRef.current = null;
+    }
   };
 
   /** Поставки, отмеченные галочкой, — для выгрузки листов и кодов подряд. */
@@ -2566,6 +2583,21 @@ export const WBSupplyManager = ({
   const SUPPLY_ORDERS_CACHE_MS = 90_000;
   /** Пачка поставок: между планом и печатью проходят минуты — состав не перечитываем. */
   const SUPPLY_ORDERS_BULK_CACHE_MS = 15 * 60_000;
+
+  /**
+   * Сброс кэша состава: без него лист подбора и коды печатались по старому
+   * составу поставки — задания, доложенные пару минут назад, в файл не попадали.
+   */
+  const invalidateSupplyOrdersCache = (supplyId?: string) => {
+    if (!supplyId) {
+      supplyOrdersCacheRef.current.clear();
+      return;
+    }
+    const prefix = `${supplyId}|`;
+    Array.from(supplyOrdersCacheRef.current.keys()).forEach((key) => {
+      if (key.startsWith(prefix)) supplyOrdersCacheRef.current.delete(key);
+    });
+  };
 
   const fetchOrdersForSupply = async (
     supplyId: string,
@@ -5726,6 +5758,7 @@ export const WBSupplyManager = ({
    */
   const refreshFbsData = async () => {
     supplyCountsAtRef.current = 0;
+    invalidateSupplyOrdersCache();
     await Promise.all([fetchSupplies(), fetchNewOrders()]);
   };
 
@@ -8533,6 +8566,10 @@ export const WBSupplyManager = ({
         parsed.forEach((v) => rejected.add(v));
       }
     }
+
+    // Состав поставки изменился — кэш и число заданий пересчитываем заново.
+    invalidateSupplyOrdersCache(String(supplyId));
+    supplyCountsAtRef.current = 0;
 
     if (rejected.size) {
       throw new Error(`WB не принял ${rejected.size} из ${ids.length} заданий — проверьте, не отменены ли они`);
