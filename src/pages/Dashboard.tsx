@@ -15219,7 +15219,40 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         supabase.from('products').select('id', { count: 'exact', head: true }).eq('supplier_id', supplierId).is('deleted_at', null).in('article', reportCodes),
       ]);
       if (r1.error && r2.error) throw (r1.error || r2.error);
-      return Number(r1.count || 0) > 0 || Number(r2.count || 0) > 0;
+      if (Number(r1.count || 0) > 0 || Number(r2.count || 0) > 0) return true;
+
+      /*
+       * Карточки WB — второй источник принадлежности.
+       *
+       * У ИП Власенко А С раздел «Товары» пуст (0 строк), а карточки кабинета
+       * лежат в кэше WB — 234 штуки. Еженедельный отчёт кабинета отклонялся
+       * как чужой, хотя все его коды номенклатуры есть в этом кэше.
+       */
+      const nmIds = reportCodes
+        .map((code) => Number(code))
+        .filter((nm) => Number.isFinite(nm) && nm > 0);
+      if (nmIds.length) {
+        const { count: cacheCount } = await supabase
+          .from('wb_products_cache')
+          .select('nm_id', { count: 'exact', head: true })
+          .eq('supplier_id', supplierId)
+          .in('nm_id', nmIds);
+        if (Number(cacheCount || 0) > 0) return true;
+      }
+
+      /*
+       * О товарах кабинета не знаем ничего — сверять не с чем.
+       *
+       * Блокировать загрузку в этом случае неправильно: отчёт, скорее всего,
+       * свой, а база товаров просто ещё не заполнена.
+       */
+      const [allProducts, allCards] = await Promise.all([
+        supabase.from('products').select('id', { count: 'exact', head: true }).eq('supplier_id', supplierId).is('deleted_at', null),
+        supabase.from('wb_products_cache').select('nm_id', { count: 'exact', head: true }).eq('supplier_id', supplierId),
+      ]);
+      if (!Number(allProducts.count || 0) && !Number(allCards.count || 0)) return true;
+
+      return false;
     } catch (e) {
       console.error('validateUploadedReportSupplier error', e);
       return true; // при ошибке проверки не блокируем загрузку
