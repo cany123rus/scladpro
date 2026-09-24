@@ -978,8 +978,13 @@ export const WBSupplyManager = ({
   /** Поставки, отмеченные галочкой, — для выгрузки листов и кодов подряд. */
   const [selectedSupplyIds, setSelectedSupplyIds] = useState<Set<string>>(new Set());
   /** Что делаем с отмеченными поставками: файлы или печать кодов по очереди. */
-  const [bulkMode, setBulkMode] = useState<'files' | 'print'>(() => {
-    try { return localStorage.getItem('fbs_bulk_mode_v1') === 'print' ? 'print' : 'files'; } catch { return 'files'; }
+  const [bulkMode, setBulkMode] = useState<'files' | 'print' | 'grouped'>(() => {
+    try {
+      const saved = localStorage.getItem('fbs_bulk_mode_v1');
+      return saved === 'print' || saved === 'grouped' ? saved : 'files';
+    } catch {
+      return 'files';
+    }
   });
   /** Ход пакетной работы: где идём, что получилось и что не вышло. */
   const [bulkExport, setBulkExport] = useState<null | {
@@ -7513,20 +7518,41 @@ export const WBSupplyManager = ({
     }
   };
 
-  const generateGroupedSupplierPickingList = async () => {
+  /**
+   * Лист подбора с группировкой по товару.
+   *
+   * Без аргумента — текущая поставка. Со списком поставок — один общий файл:
+   * со стеллажей набирают сразу на несколько поставок, и бегать по ним с
+   * отдельными листами незачем.
+   */
+  const generateGroupedSupplierPickingList = async (supplyIdsArg?: string[]) => {
     // Библиотеки печати/Excel грузятся по требованию — не при открытии раздела.
     await ensurePdfLibs();
     const { jsPDF, autoTable } = lazyLibs;
-    if (!activeSupplyId) return;
+    const groupedSupplyIds = (supplyIdsArg && supplyIdsArg.length ? supplyIdsArg : [activeSupplyId])
+      .map((id) => String(id || ''))
+      .filter(Boolean);
+    if (!groupedSupplyIds.length) return;
     setLoading(true);
     try {
       // For grouped picking we need the full supply content, not a possibly partial direct payload.
-      let supplyOrdersRaw = await withTimeout(fetchOrdersForSupply(activeSupplyId, { enrich: true, fresh: true, cacheTtlMs: SUPPLY_ORDERS_CACHE_MS }), 30000, 'Таймаут загрузки заказов (групп.) 1');
-      if (!supplyOrdersRaw || supplyOrdersRaw.length === 0) {
-        supplyOrdersRaw = await withTimeout(fetchOrdersForSupply(activeSupplyId, { enrich: false, fresh: true, cacheTtlMs: SUPPLY_ORDERS_CACHE_MS }), 30000, 'Таймаут загрузки заказов (групп.) 2');
+      const collected: any[] = [];
+      const seenOrderIds = new Set<number>();
+      for (const id of groupedSupplyIds) {
+        let rowsOfSupply = await withTimeout(fetchOrdersForSupply(id, { enrich: true, fresh: true, cacheTtlMs: SUPPLY_ORDERS_BULK_CACHE_MS }), 120000, 'Таймаут загрузки заказов (групп.) 1');
+        if (!rowsOfSupply || rowsOfSupply.length === 0) {
+          rowsOfSupply = await withTimeout(fetchOrdersForSupply(id, { enrich: false, fresh: true, cacheTtlMs: SUPPLY_ORDERS_BULK_CACHE_MS }), 120000, 'Таймаут загрузки заказов (групп.) 2');
+        }
+        (rowsOfSupply || []).forEach((o: any) => {
+          const orderId = Number(o?.id ?? o?.orderId ?? o?.order_id);
+          if (Number.isFinite(orderId) && seenOrderIds.has(orderId)) return;
+          if (Number.isFinite(orderId)) seenOrderIds.add(orderId);
+          collected.push(o);
+        });
       }
-      if (!supplyOrdersRaw || supplyOrdersRaw.length === 0) {
-        throw new Error('По выбранной поставке не найдены заказы');
+      const supplyOrdersRaw = collected;
+      if (!supplyOrdersRaw.length) {
+        throw new Error('По выбранным поставкам не найдены заказы');
       }
 
       const groupedCancel = await fetchCanceledFbsOrders(
@@ -7646,15 +7672,24 @@ export const WBSupplyManager = ({
         console.error('Error loading font', e);
       }
 
-      const supplyName = supplies.find(s => s.id === activeSupplyId)?.name || activeSupplyId;
+      const nameOfSupply = (id: string) => supplies.find((x) => x.id === id)?.name || id;
+      const supplyName = groupedSupplyIds.length === 1
+        ? nameOfSupply(groupedSupplyIds[0])
+        : `${groupedSupplyIds.length} ${groupedSupplyIds.length < 5 ? 'поставки' : 'поставок'}`;
       doc.setFontSize(16);
       doc.text(`Лист подбора (группировка по товару) ${supplyName}`, 14, 20);
       doc.setFontSize(11);
       doc.text(`Дата: ${new Date().toLocaleDateString('ru-RU')}`, 14, 28);
-      doc.text(`Групп: ${rows.length}`, 14, 34);
+      doc.text(`Групп: ${rows.length} · заданий: ${supplyOrders.length}`, 14, 34);
+      if (groupedSupplyIds.length > 1) {
+        // Перечисляем поставки: по листу должно быть видно, что в него вошло.
+        doc.setFontSize(9);
+        const names = groupedSupplyIds.map(nameOfSupply).join(', ');
+        doc.text(doc.splitTextToSize(`Поставки: ${names}`, 180), 14, 40);
+      }
 
       (autoTable as any)(doc, {
-        startY: 40,
+        startY: groupedSupplyIds.length > 1 ? 48 : 40,
         head: [['Фото', 'Артикул', 'Наименование', 'Цвет', 'Размеры (кол-во)', 'Итого']],
         body: rows,
         styles: { fontSize: 8, cellPadding: 2, valign: 'middle', font: 'Roboto' },
@@ -7692,6 +7727,10 @@ export const WBSupplyManager = ({
       });
 
       doc.save(`Лист подбора (групп.) ${String(supplyName || '').replace(/[\\/:*?"<>|]+/g, '_')} ${rows.length}.pdf`);
+      if (groupedSupplyIds.length > 1) {
+        setSuccessMsg(`Общий лист подбора: ${rows.length} позиций, ${supplyOrders.length} заданий из ${groupedSupplyIds.length} поставок.`);
+        setTimeout(() => setSuccessMsg(null), 6000);
+      }
       if (groupedCancel.canceled.size || !groupedCancel.checked) {
         setSuccessMsg(
           `Лист подбора (групп.) скачан`
@@ -8891,6 +8930,11 @@ export const WBSupplyManager = ({
   const startBulkSupplyExport = () => {
     const ids = supplies.filter((x) => selectedSupplyIds.has(x.id)).map((x) => x.id);
     if (!ids.length) return;
+    // Групповой лист марок не касается — план не нужен, сразу файл.
+    if (bulkMode === 'grouped') {
+      void generateGroupedSupplierPickingList(ids);
+      return;
+    }
     if (bulkMode === 'print' || fbsStickersWithChz) void buildChzPlan(ids, 'bulk');
     else void runBulkSupplyExport();
   };
@@ -10053,7 +10097,7 @@ export const WBSupplyManager = ({
                             <select
                                 value={bulkMode}
                                 onChange={(e) => {
-                                    const next = e.target.value === 'print' ? 'print' : 'files';
+                                    const next = e.target.value === 'print' ? 'print' : e.target.value === 'grouped' ? 'grouped' : 'files';
                                     setBulkMode(next);
                                     try { localStorage.setItem('fbs_bulk_mode_v1', next); } catch { /* приватный режим */ }
                                 }}
@@ -10061,17 +10105,20 @@ export const WBSupplyManager = ({
                             >
                                 <option value="files">Скачать листы и коды</option>
                                 <option value="print">Печать кодов</option>
+                                <option value="grouped">Лист групп. одним файлом</option>
                             </select>
                             <button
                                 onClick={() => startBulkSupplyExport()}
                                 disabled={Boolean(bulkExport && !bulkExport.done)}
                                 title={bulkMode === 'print'
                                     ? 'Откроется окно с планом марок: печать запускается кнопкой у каждой поставки'
-                                    : 'По каждой поставке: лист подбора, следом файл кодов'}
+                                    : bulkMode === 'grouped'
+                                        ? 'Один лист подбора с группировкой по товару — сразу по всем отмеченным поставкам'
+                                        : 'По каждой поставке: лист подбора, следом файл кодов'}
                                 className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-sky-600 to-blue-600 px-3 py-2 text-sm font-bold text-white shadow-sm shadow-sky-500/25 transition hover:from-sky-700 hover:to-blue-700 disabled:cursor-not-allowed disabled:from-slate-300 disabled:to-slate-300"
                             >
-                                {bulkMode === 'print' ? <Printer className="h-4 w-4" /> : <Download className="h-4 w-4" />}
-                                {bulkMode === 'print' ? 'Печатать коды' : 'Скачать'} ({selectedSupplyIds.size})
+                                {bulkMode === 'print' ? <Printer className="h-4 w-4" /> : bulkMode === 'grouped' ? <List className="h-4 w-4" /> : <Download className="h-4 w-4" />}
+                                {bulkMode === 'print' ? 'Печатать коды' : bulkMode === 'grouped' ? 'Общий лист' : 'Скачать'} ({selectedSupplyIds.size})
                             </button>
                             {bulkExport && !bulkExport.done ? (
                                 <button
