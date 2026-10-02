@@ -66,14 +66,29 @@ const emitConnectionEvent = (type: 'issue' | 'ok', detail?: any) => {
  * неудачных попыток подряд те же запросы идут через запасной адрес, а через
  * десять минут клиент снова пробует основной.
  */
+/*
+ * Данные и реалтайм ходят разными дорогами — так дешевле.
+ *
+ * Вебсокет Realtime висит часами, а Cloud Run считает открытое соединение
+ * активным запросом: из 490 часов работы прокси за месяц почти все —
+ * вебсокеты (медиана длительности запроса 20 секунд, 95-я перцентиль 197).
+ * У Cloudflare такие соединения бесплатны, поэтому реалтайм оставляем ему
+ * (адрес клиента), а запросы данных шлём на Cloud Run (VITE_SUPABASE_REST_URL)
+ * — он доступен там, где у Cloudflare не ходит QUIC. Счёт выходит рублёвый:
+ * данные — это короткие запросы по сотне-другой миллисекунд.
+ */
+const restUrl =
+  (import.meta as any).env?.VITE_SUPABASE_REST_URL || supabaseUrl;
+
 const PRIMARY_BASE = (() => {
-  try { return new URL(supabaseUrl).origin; } catch { return supabaseUrl; }
+  try { return new URL(restUrl).origin; } catch { return restUrl; }
 })();
 
 const FALLBACK_BASES = [
+  (() => { try { return new URL(supabaseUrl).origin; } catch { return supabaseUrl; } })(),
   'https://supabase-proxy-427900628011.europe-north1.run.app',
   'https://blygwkxjogmioebutiwn.supabase.co',
-].filter((base) => base !== PRIMARY_BASE);
+].filter((base, index, all) => base !== PRIMARY_BASE && all.indexOf(base) === index);
 
 const BASE_STICKY_MS = 10 * 60_000;
 let activeFallbackIndex = -1;
@@ -151,9 +166,18 @@ const requestUrlOf = (input: RequestInfo | URL) => {
   return (input as Request).url;
 };
 
-/** Тот же запрос, но на другом хосте. Путь, параметры и тело не меняются. */
+/**
+ * Тот же запрос, но на выбранном хосте. Путь, параметры и тело не меняются.
+ *
+ * Адрес переписываем всегда, а не только для запасных: клиент собирает ссылки
+ * от своего адреса (там живёт реалтайм), а данные ходят на свой.
+ */
 const rebaseInput = (input: RequestInfo | URL, base: string): RequestInfo | URL => {
-  if (base === PRIMARY_BASE) return input;
+  try {
+    if (new URL(requestUrlOf(input)).origin === base) return input;
+  } catch {
+    return input;
+  }
   try {
     const target = new URL(requestUrlOf(input));
     const next = new URL(base);
