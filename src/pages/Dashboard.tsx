@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef, useTransition, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
+import { chunkReloadAllowed } from '../utils/chunkReload';
 import { useAuth } from '../context/AuthContext';
 import {
   LayoutDashboard, Map as MapIcon, Package, Truck, ClipboardCheck, Users,
@@ -11,19 +12,14 @@ import {
 // Устойчивый ленивый импорт: если чанк не загрузился или экспорт отсутствует
 // (устаревший кэш после деплоя), один раз жёстко перезагружаем страницу за свежими чанками.
 function lazyNamed<T>(factory: () => Promise<any>, name: string, key: string) {
-  const flag = `chunk-reload-${key}`;
   return React.lazy(() =>
     factory()
       .then((m: any) => {
-        if (m && m[name]) {
-          try { sessionStorage.removeItem(flag); } catch {}
-          return { default: m[name] as React.ComponentType<T> };
-        }
+        if (m && m[name]) return { default: m[name] as React.ComponentType<T> };
         throw new Error('Missing export: ' + name);
       })
       .catch((err: any) => {
-        if (typeof sessionStorage !== 'undefined' && !sessionStorage.getItem(flag)) {
-          try { sessionStorage.setItem(flag, '1'); } catch {}
+        if (chunkReloadAllowed(key)) {
           window.location.reload();
           return new Promise<{ default: React.ComponentType<T> }>(() => {});
         }

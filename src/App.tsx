@@ -1,22 +1,17 @@
 import React, { Suspense, lazy } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { chunkReloadAllowed } from './utils/chunkReload';
 import Login from './pages/Login';
 // Heavy pages are lazy-loaded so the initial bundle stays small (jspdf, exceljs,
 // zxing, html2canvas etc. live inside these and load only when the page opens).
 // lazyRetry: при ошибке загрузки чанка (устаревший кэш после деплоя) делаем
 // одноразовую жёсткую перезагрузку — браузер подтянет свежий index + чанки.
 function lazyRetry<T extends { default: React.ComponentType<any> }>(factory: () => Promise<T>, key: string) {
-  const flag = `chunk-reload-${key}`;
   return lazy(() =>
     factory()
-      .then((mod) => {
-        try { sessionStorage.removeItem(flag); } catch {}
-        return mod;
-      })
       .catch((err) => {
-        if (typeof sessionStorage !== 'undefined' && !sessionStorage.getItem(flag)) {
-          try { sessionStorage.setItem(flag, '1'); } catch {}
+        if (chunkReloadAllowed(key)) {
           window.location.reload();
           // возвращаем «висящий» промис, пока идёт перезагрузка
           return new Promise<T>(() => {});
