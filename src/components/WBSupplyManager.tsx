@@ -853,6 +853,53 @@ export const WBSupplyManager = ({
   const [supplyCountsLoading, setSupplyCountsLoading] = useState(false);
   /** Когда считали в последний раз: список поставок обновляется чаще, чем меняются числа. */
   const supplyCountsAtRef = useRef(0);
+  /*
+   * Общий список заказов кабинета за 28 дней.
+   *
+   * Его просят сразу двое: панель «Честный знак» (расход за 14 дней) и счётчик
+   * заданий в поставках. Раньше каждый тянул свой проход — это десяток лишних
+   * запросов к WB подряд, и панель ЧЗ начинала открываться заметно дольше.
+   * Теперь проход один на три минуты, панель просто отфильтровывает свои дни.
+   *
+   * Период строго меньше 30 дней: на большем WB отдаёт выборку без свежих
+   * заданий (проверено 23.09.2026).
+   */
+  const RECENT_ORDERS_DAYS = 28;
+  const recentOrdersCacheRef = useRef<{ supplierId: string; at: number; orders: any[] } | null>(null);
+  const recentOrdersPromiseRef = useRef<Promise<any[]> | null>(null);
+
+  const fetchRecentOrders = async (force = false): Promise<any[]> => {
+    const supplierId = selectedSupplierId;
+    const cache = recentOrdersCacheRef.current;
+    if (!force && cache && cache.supplierId === supplierId && Date.now() - cache.at < 180_000) {
+      return cache.orders;
+    }
+    if (!force && recentOrdersPromiseRef.current) return recentOrdersPromiseRef.current;
+
+    const run = (async () => {
+      const dateFrom = Math.floor((Date.now() - RECENT_ORDERS_DAYS * 86_400_000) / 1000);
+      const orders: any[] = [];
+      let next = 0;
+      for (let page = 0; page < 12; page++) {
+        const data = await wbFetch(`https://marketplace-api.wildberries.ru/api/v3/orders?limit=1000&next=${next}&dateFrom=${dateFrom}`);
+        const batch: any[] = data?.orders || [];
+        orders.push(...batch);
+        // Страница бывает меньше лимита, но с курсором — идём по next, а не по размеру.
+        if (!batch.length || typeof data?.next !== 'number' || data.next === next) break;
+        next = data.next;
+      }
+      recentOrdersCacheRef.current = { supplierId, at: Date.now(), orders };
+      return orders;
+    })();
+
+    recentOrdersPromiseRef.current = run;
+    try {
+      return await run;
+    } finally {
+      recentOrdersPromiseRef.current = null;
+    }
+  };
+
   /** Идущий пересчёт: второй вызов ждёт его, а не запускает свой. */
   const supplyCountsPromiseRef = useRef<Promise<{ counts: Record<string, number>; warehouses: Record<string, number> }> | null>(null);
   /** Кабинет, к которому относятся посчитанные числа. */
@@ -906,7 +953,7 @@ export const WBSupplyManager = ({
        * Тяжёлый проход по всем заказам (ради закрытых поставок) идёт следом.
        */
       const activeCounts: Record<string, number> = {};
-      for (const item of list.filter((x) => !x.closedAt).slice(0, 10)) {
+      for (const item of list.filter((x) => !x.closedAt).slice(0, 6)) {
         try {
           activeCounts[item.id] = (await fetchSupplyOrderIds(item.id)).length;
         } catch (e) {
@@ -926,27 +973,16 @@ export const WBSupplyManager = ({
        * тысяч заданий. Тянуть весь год ради чисел у давно закрытых поставок
        * незачем — у них количество просто не показываем.
        */
-      // 28 дней, а не 30: на периоде больше месяца WB отдаёт выборку без свежих заданий.
-      const dateFrom = Math.floor((Date.now() - 28 * 86_400_000) / 1000);
-
       const counts: Record<string, number> = {};
       // Заодно запоминаем склад поставки: у WB его в самой поставке нет, только в заданиях.
       const warehouses: Record<string, number> = {};
-      let next = 0;
-      for (let page = 0; page < 12; page++) {
-        const data = await wbFetch(`https://marketplace-api.wildberries.ru/api/v3/orders?limit=1000&next=${next}&dateFrom=${dateFrom}`);
-        const batch: any[] = data?.orders || [];
-        batch.forEach((o: any) => {
-          const sid = String(o?.supplyId || '').trim();
-          if (!sid) return;
-          counts[sid] = (counts[sid] || 0) + 1;
-          const wh = Number(o?.warehouseId || 0);
-          if (wh > 0 && !warehouses[sid]) warehouses[sid] = wh;
-        });
-        // Страница бывает и на 255 заказов при лимите 1000 — идём по курсору, а не по размеру.
-        if (!batch.length || typeof data?.next !== 'number' || data.next === next) break;
-        next = data.next;
-      }
+      (await fetchRecentOrders(force)).forEach((o: any) => {
+        const sid = String(o?.supplyId || '').trim();
+        if (!sid) return;
+        counts[sid] = (counts[sid] || 0) + 1;
+        const wh = Number(o?.warehouseId || 0);
+        if (wh > 0 && !warehouses[sid]) warehouses[sid] = wh;
+      });
       /*
        * Числа активных поставок оставляем точные.
        *
@@ -2070,20 +2106,15 @@ export const WBSupplyManager = ({
    * Один элемент — один заказ: в ФБС в задании всегда одна вещь.
    */
   const loadFbsOrderNmIds = async (days: number): Promise<number[]> => {
-    const dateFrom = Math.floor(Date.now() / 1000) - days * 86_400;
-    const ids: number[] = [];
-    let next = 0;
-    for (let page = 0; page < 30; page++) {
-      const data = await wbFetch(`https://marketplace-api.wildberries.ru/api/v3/orders?limit=1000&next=${next}&dateFrom=${dateFrom}`);
-      const batch: any[] = data?.orders || [];
-      for (const o of batch) {
-        const nm = Number(o?.nmId);
-        if (nm > 0) ids.push(nm);
-      }
-      if (batch.length < 1000 || typeof data?.next !== 'number' || data.next === next) break;
-      next = data.next;
-    }
-    return ids;
+    const since = Date.now() - days * 86_400_000;
+    const orders = await fetchRecentOrders();
+    return orders
+      .filter((o: any) => {
+        const at = new Date(o?.createdAt || 0).getTime();
+        return !Number.isFinite(at) || at >= since;
+      })
+      .map((o: any) => Number(o?.nmId))
+      .filter((nm: number) => nm > 0);
   };
 
   const toggleAllOrders = () => {
@@ -5861,6 +5892,7 @@ export const WBSupplyManager = ({
    */
   const refreshFbsData = async () => {
     supplyCountsAtRef.current = 0;
+    recentOrdersCacheRef.current = null;
     invalidateSupplyOrdersCache();
     await Promise.all([fetchSupplies(), fetchNewOrders()]);
   };
