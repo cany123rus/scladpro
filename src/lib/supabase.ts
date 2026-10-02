@@ -96,6 +96,55 @@ const switchToNextBase = () => {
   emitConnectionEvent('issue', { base: FALLBACK_BASES[activeFallbackIndex], switched: true });
 };
 
+/*
+ * Выбор пути при старте.
+ *
+ * Ждать провалов, чтобы понять, что основной адрес недоступен, дорого: на
+ * айфоне из-за границы запрос к Cloudflare висел двадцать секунд, а запасной
+ * отвечал за полсекунды. Поэтому при первом же обращении пингуем все адреса
+ * разом и берём тот, который ответил. Основной предпочитаем: если он живой,
+ * остаёмся на нём.
+ */
+let basePickPromise: Promise<void> | null = null;
+
+const probeBase = (base: string, timeoutMs: number) => new Promise<string | null>((resolve) => {
+  if (typeof fetch !== 'function') return resolve(null);
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => { ctrl.abort(); resolve(null); }, timeoutMs);
+  fetch(`${base}/rest/v1/`, { headers: { apikey: supabaseKey }, signal: ctrl.signal })
+    .then((res) => { clearTimeout(timer); resolve(res.status < 500 ? base : null); })
+    .catch(() => { clearTimeout(timer); resolve(null); });
+});
+
+const pickBaseOnce = () => {
+  if (basePickPromise) return basePickPromise;
+  if (!FALLBACK_BASES.length) {
+    basePickPromise = Promise.resolve();
+    return basePickPromise;
+  }
+
+  basePickPromise = (async () => {
+    const primary = probeBase(PRIMARY_BASE, 4000);
+    const others = FALLBACK_BASES.map((base, index) => probeBase(base, 4000).then((ok) => (ok ? index : null)));
+
+    // Основной адрес успел ответить — ничего не меняем.
+    const primaryOk = await Promise.race([primary, sleep(1500).then(() => null)]);
+    if (primaryOk) return;
+
+    const winner = await Promise.race([
+      ...others.map(async (p) => { const i = await p; return i === null ? new Promise<number>(() => {}) : i; }),
+      sleep(4000).then(() => null),
+    ]);
+    if (typeof winner === 'number') {
+      activeFallbackIndex = winner;
+      fallbackSwitchedAtMs = Date.now();
+      emitConnectionEvent('issue', { base: FALLBACK_BASES[winner], picked: true });
+    }
+  })();
+
+  return basePickPromise;
+};
+
 const requestUrlOf = (input: RequestInfo | URL) => {
   if (typeof input === 'string') return input;
   if (input instanceof URL) return input.toString();
@@ -117,6 +166,17 @@ const rebaseInput = (input: RequestInfo | URL, base: string): RequestInfo | URL 
   }
 };
 
+/*
+ * Сколько ждать ответа на каждой попытке.
+ *
+ * 02.10 на айфоне запрос к Cloudflare висел ровно 20 секунд и отваливался по
+ * таймауту, хотя запасной адрес отвечал за полсекунды (у оператора не ходит
+ * QUIC до Cloudflare). С одним общим таймаутом в 35 секунд переключение на
+ * запасной путь занимало больше минуты — для человека это «сайт не грузит».
+ * Поэтому первая попытка короткая: лучше быстро попробовать другой путь.
+ */
+const attemptTimeoutMs = (attempt: number) => (attempt === 1 ? 9000 : attempt === 2 ? 18000 : 35000);
+
 const resilientFetch: typeof fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   const maxAttempts = 4;
   let lastError: any;
@@ -126,11 +186,13 @@ const resilientFetch: typeof fetch = async (input: RequestInfo | URL, init?: Req
     if (waitMs > 0) await sleep(waitMs);
   }
 
+  // Первый запрос ждёт выбора пути, но не дольше полутора секунд.
+  await Promise.race([pickBaseOnce(), sleep(1500)]);
+
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       const controller = new AbortController();
-      const timeoutMs = 35000;
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      const timer = setTimeout(() => controller.abort(), attemptTimeoutMs(attempt));
 
       try {
         await acquireSupabaseFetchSlot();
@@ -185,8 +247,15 @@ const resilientFetch: typeof fetch = async (input: RequestInfo | URL, init?: Req
         supabaseDegradedUntilMs = Date.now() + 45_000;
       }
       emitConnectionEvent('issue', { error: String((err as any)?.message || err), attempt });
-      // Сеть оборвалась дважды — дальше пробуем через запасной адрес.
-      if (attempt >= 2) switchToNextBase();
+      /*
+       * Сеть или таймаут — меняем адрес сразу, с первой же неудачи.
+       *
+       * Ошибка пути не лечится повтором в тот же хост: если до Cloudflare у
+       * этого оператора не достучаться, второй такой же запрос только съест
+       * ещё девять секунд. Серверные 5xx — другое дело, они лечатся повтором,
+       * и там переключение по-прежнему со второй попытки.
+       */
+      switchToNextBase();
       if (!isRetryableFetchError(err) || attempt >= maxAttempts) {
         throw err;
       }
