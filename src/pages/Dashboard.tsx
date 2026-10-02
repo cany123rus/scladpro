@@ -10601,6 +10601,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   };
 
   // Suppliers Functions
+  /** Сколько раз уже перезапрашивали поставщиков после ошибки: без этого будет вечный цикл. */
+  const suppliersRetryRef = useRef(0);
+
   const fetchSuppliers = async () => {
     const { data, error } = await supabase
       .from('suppliers')
@@ -10608,8 +10611,29 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       .is('deleted_at', null)
       .order('created_at', { ascending: false });
 
-    if (error) console.error('Error fetching suppliers:', error);
-    else setSuppliers(data || []);
+    /*
+     * Молчаливый пустой список — худший исход.
+     *
+     * 02.10 на телефоне раздел ФБС открылся без поставщиков, заказов и
+     * поставок, а в шапке значилось «база подключена»: запрос упал, ошибка
+     * ушла только в консоль. Теперь о провале говорим вслух и пробуем ещё раз.
+     */
+    if (error) {
+      console.error('Error fetching suppliers:', error);
+      showToast(`Не удалось загрузить поставщиков: ${error.message || 'нет связи с базой'}`, 'error');
+      setLoadingSuppliers(false);
+      if (suppliersRetryRef.current < 2) {
+        suppliersRetryRef.current += 1;
+        setTimeout(() => { void fetchSuppliers(); }, 4000);
+      }
+      return;
+    }
+
+    suppliersRetryRef.current = 0;
+    setSuppliers(data || []);
+    if (!(data || []).length) {
+      showToast('База ответила, но список поставщиков пуст — проверьте доступ', 'warning');
+    }
     setLoadingSuppliers(false);
   };
 

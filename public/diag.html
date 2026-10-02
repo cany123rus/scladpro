@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>СкладПро — проверка связи</title>
+<style>
+  :root { color-scheme: light; }
+  body { margin: 0; padding: 16px; background: #f6f7f9; color: #151a23;
+         font: 16px/1.5 -apple-system, "Segoe UI", system-ui, sans-serif; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  p.sub { margin: 0 0 16px; color: #6b7382; font-size: 14px; }
+  button { font: inherit; font-weight: 600; border: 0; border-radius: 12px; padding: 12px 18px;
+           background: #4a3fc4; color: #fff; }
+  button:disabled { background: #b9bdd0; }
+  ul { list-style: none; margin: 16px 0 0; padding: 0; }
+  li { background: #fff; border: 1px solid #dfe3ea; border-radius: 12px; padding: 10px 12px; margin-bottom: 8px; }
+  .name { font-weight: 600; }
+  .res { font-size: 14px; margin-top: 2px; }
+  .ok { color: #0a6a4a; }
+  .bad { color: #9d2540; }
+  .wait { color: #6b7382; }
+  textarea { width: 100%; height: 140px; margin-top: 12px; font: 12px/1.4 ui-monospace, monospace;
+             border: 1px solid #dfe3ea; border-radius: 12px; padding: 8px; }
+</style>
+</head>
+<body>
+<h1>Проверка связи</h1>
+<p class="sub">Открой эту страницу на том устройстве, где сайт не грузит данные, и нажми «Проверить». Потом скопируй отчёт и пришли его.</p>
+<button id="run">Проверить</button>
+<ul id="list"></ul>
+<textarea id="report" readonly placeholder="Отчёт появится здесь"></textarea>
+
+<script>
+const KEY = 'sb_publishable_kSk_B3Y6eN5P9sCVk67-cg_uSGedHJX';
+const TARGETS = [
+  ['Воркер Cloudflare (основной путь)', 'https://sb.scladpro.ru'],
+  ['Прокси Cloud Run (запасной)', 'https://supabase-proxy-427900628011.europe-north1.run.app'],
+  ['Supabase напрямую', 'https://blygwkxjogmioebutiwn.supabase.co'],
+];
+
+const list = document.getElementById('list');
+const report = document.getElementById('report');
+const lines = [];
+
+function row(name) {
+  const li = document.createElement('li');
+  li.innerHTML = '<div class="name"></div><div class="res wait">проверяю…</div>';
+  li.querySelector('.name').textContent = name;
+  list.appendChild(li);
+  return li.querySelector('.res');
+}
+
+async function checkRest(name, base) {
+  const el = row(name + ' — данные');
+  const t0 = Date.now();
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 20000);
+    const res = await fetch(base + '/rest/v1/suppliers?select=id,name&limit=5', {
+      headers: { apikey: KEY, Authorization: 'Bearer ' + KEY },
+      signal: ctrl.signal,
+    });
+    clearTimeout(timer);
+    const body = await res.json().catch(() => null);
+    const ms = Date.now() - t0;
+    const count = Array.isArray(body) ? body.length : 0;
+    const ok = res.ok && count > 0;
+    el.className = 'res ' + (ok ? 'ok' : 'bad');
+    el.textContent = (ok ? '✅ ' : '❌ ') + 'код ' + res.status + ', поставщиков ' + count + ', ' + ms + ' мс';
+    lines.push(name + ' REST: ' + res.status + ', строк ' + count + ', ' + ms + ' мс');
+  } catch (e) {
+    const ms = Date.now() - t0;
+    el.className = 'res bad';
+    el.textContent = '❌ ' + (e && e.name === 'AbortError' ? 'таймаут 20 с' : String(e && e.message || e));
+    lines.push(name + ' REST: ошибка ' + String(e && e.message || e) + ' за ' + ms + ' мс');
+  }
+}
+
+async function checkWs(name, base) {
+  const el = row(name + ' — реалтайм');
+  const t0 = Date.now();
+  await new Promise((resolve) => {
+    let settled = false;
+    const done = (text, ok) => {
+      if (settled) return;
+      settled = true;
+      el.className = 'res ' + (ok ? 'ok' : 'bad');
+      el.textContent = (ok ? '✅ ' : '❌ ') + text;
+      lines.push(name + ' websocket: ' + text);
+      resolve();
+    };
+    let sock;
+    try {
+      sock = new WebSocket(base.replace('https://', 'wss://') + '/realtime/v1/websocket?apikey=' + KEY + '&vsn=1.0.0');
+    } catch (e) { return done('не создался: ' + (e && e.message), false); }
+    const timer = setTimeout(() => { try { sock.close(); } catch (e) {} done('таймаут 15 с', false); }, 15000);
+    sock.onopen = () => { clearTimeout(timer); try { sock.close(); } catch (e) {} done('открылся за ' + (Date.now() - t0) + ' мс', true); };
+    sock.onerror = () => { clearTimeout(timer); done('ошибка соединения', false); };
+  });
+}
+
+async function checkWb() {
+  const el = row('API Wildberries');
+  const t0 = Date.now();
+  try {
+    const res = await fetch('https://marketplace-api.wildberries.ru/ping', { mode: 'no-cors' });
+    el.className = 'res ok';
+    el.textContent = '✅ отвечает за ' + (Date.now() - t0) + ' мс';
+    lines.push('WB: ответил за ' + (Date.now() - t0) + ' мс (тип ' + res.type + ')');
+  } catch (e) {
+    el.className = 'res bad';
+    el.textContent = '❌ ' + String(e && e.message || e);
+    lines.push('WB: ошибка ' + String(e && e.message || e));
+  }
+}
+
+document.getElementById('run').addEventListener('click', async (ev) => {
+  ev.target.disabled = true;
+  list.innerHTML = '';
+  lines.length = 0;
+  lines.push('Проверка связи, ' + new Date().toLocaleString('ru-RU'));
+  lines.push('Браузер: ' + navigator.userAgent);
+  for (const [name, base] of TARGETS) {
+    await checkRest(name, base);
+    await checkWs(name, base);
+  }
+  await checkWb();
+  report.value = lines.join('\n');
+  ev.target.disabled = false;
+  ev.target.textContent = 'Проверить ещё раз';
+});
+</script>
+</body>
+</html>
