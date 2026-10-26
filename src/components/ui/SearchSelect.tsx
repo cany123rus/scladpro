@@ -52,6 +52,8 @@ export function SearchSelect({
   const popRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; width: number; top?: number; bottom?: number } | null>(null);
+  const placeRef = useRef<(() => void) | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const showSearch = searchable ?? options.length + (emptyLabel ? 1 : 0) > SEARCH_FROM;
 
@@ -63,8 +65,14 @@ export function SearchSelect({
       setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); setOpen(false); } };
-    // Страница прокрутилась или окно изменилось — список остался бы висеть на старом месте.
-    const onMove = (e: Event) => { if (e.target instanceof Node && popRef.current?.contains(e.target)) return; setOpen(false); };
+    // Страница прокрутилась или окно изменилось (на телефоне — вышла клавиатура): список не закрываем,
+    // а переставляем к кнопке. Если сама кнопка ушла за экран — тогда закрываем.
+    const onMove = (e: Event) => {
+      if (e.target instanceof Node && popRef.current?.contains(e.target)) return;
+      const r = rootRef.current?.getBoundingClientRect();
+      if (!r || r.bottom < 0 || r.top > window.innerHeight) { setOpen(false); return; }
+      placeRef.current?.();
+    };
     document.addEventListener('mousedown', onDown);
     document.addEventListener('keydown', onKey, true);
     window.addEventListener('scroll', onMove, true);
@@ -78,17 +86,27 @@ export function SearchSelect({
   }, [open]);
 
   useLayoutEffect(() => {
-    if (!open || !rootRef.current) return;
-    const r = rootRef.current.getBoundingClientRect();
-    const need = 340;
-    const width = Math.max(r.width, 224);
-    const left = Math.max(8, Math.min(r.left, window.innerWidth - width - 8));
-    if (window.innerHeight - r.bottom < need && r.top > window.innerHeight - r.bottom) {
-      setPos({ left, width, bottom: window.innerHeight - r.top + 4 });
-    } else {
-      setPos({ left, width, top: r.bottom + 4 });
-    }
+    if (!open || !rootRef.current) { placeRef.current = null; return; }
+    const place = () => {
+      if (!rootRef.current) return;
+      const r = rootRef.current.getBoundingClientRect();
+      const need = 340;
+      const width = Math.max(r.width, 224);
+      const left = Math.max(8, Math.min(r.left, window.innerWidth - width - 8));
+      if (window.innerHeight - r.bottom < need && r.top > window.innerHeight - r.bottom) {
+        setPos({ left, width, bottom: window.innerHeight - r.top + 4 });
+      } else {
+        setPos({ left, width, top: r.bottom + 4 });
+      }
+    };
+    placeRef.current = place;
+    place();
   }, [open]);
+
+  // Фокус в поиск — без прокрутки: прокрутка контейнера окна сдвигала бы весь список.
+  useEffect(() => {
+    if (open && pos && showSearch) inputRef.current?.focus({ preventScroll: true });
+  }, [open, pos === null, showSearch]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Пункты списка: «пустое» значение первым, дальше найденные по запросу.
   const items = useMemo(() => {
@@ -180,8 +198,11 @@ export function SearchSelect({
         <div
           ref={popRef}
           role="listbox"
-          className="oc-popover fixed !z-[70] p-2"
+          className="oc-popover fixed !z-[10000] p-2"
           style={{ left: pos.left, width: pos.width, top: pos.top, bottom: pos.bottom }}
+          // Список в React-дереве лежит внутри окна, и без этого клик по пункту «всплывал» бы до подложки окна и закрывал его.
+          onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
           onKeyDown={onListKey}
           tabIndex={-1}
         >
@@ -189,7 +210,7 @@ export function SearchSelect({
             <div className="relative mb-2">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <input
-                autoFocus
+                ref={inputRef}
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
                 placeholder="Найти…"
