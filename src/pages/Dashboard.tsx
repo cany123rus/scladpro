@@ -559,6 +559,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [honestSignPrintedHistory, setHonestSignPrintedHistory] = useState<any[]>([]);
   const [supplierCategories, setSupplierCategories] = useState<string[]>([]);
   const [honestSignCategoryStats, setHonestSignCategoryStats] = useState<Array<{ category: string; total: number; inBase: number; printed: number; scanned: number }>>([]);
+  const [honestSignRawCategories, setHonestSignRawCategories] = useState<string[]>([]);
   const [loadingCategories, setLoadingCategories] = useState(false);
   const [codesToPrint, setCodesToPrint] = useState<string[]>([]);
   const [isPrintingCodes, setIsPrintingCodes] = useState(false);
@@ -575,6 +576,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     // Свитеры, жилеты и кардиганы — одна категория ЧЗ: марки у них общие.
     if (['свитеры', 'свитер', 'жилеты', 'жилет', 'жилетки', 'жилетка', 'кардиганы', 'кардиган', 'свитеры / жилеты', 'свитеры / жилеты / кардиганы'].includes(lowered)) {
       return 'Свитеры / Жилеты / Кардиганы';
+    }
+    // Куртки, бомберы и дублёнки — одна категория ЧЗ: пока им ставят одну марку (бомберы).
+    const flat = lowered.replace(/ё/g, 'е');
+    if (flat === 'куртки' || flat === 'куртка' || flat.includes('бомбер') || flat.includes('дублен')) {
+      return 'Куртки / Бомберы / Дублёнки';
     }
 
     return raw;
@@ -836,15 +842,23 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       return;
     }
 
-    const stats = (data || []).map((row: any) => ({
-      category: String(row?.category || 'Без категории'),
-      total: Number(row?.total || 0),
-      inBase: Number(row?.in_base || 0),
-      printed: Number(row?.printed || 0),
-      scanned: Number(row?.scanned || 0),
-    }));
+    const rawNames: string[] = [];
+    const merged = new Map<string, { category: string; total: number; inBase: number; printed: number; scanned: number }>();
+    (data || []).forEach((row: any) => {
+      const rawName = String(row?.category || 'Без категории');
+      rawNames.push(rawName);
+      // Объединённые категории (куртки / бомберы / дублёнки) показываем одной строкой.
+      const category = normalizeHSCategory(rawName);
+      const acc = merged.get(category) || { category, total: 0, inBase: 0, printed: 0, scanned: 0 };
+      acc.total += Number(row?.total || 0);
+      acc.inBase += Number(row?.in_base || 0);
+      acc.printed += Number(row?.printed || 0);
+      acc.scanned += Number(row?.scanned || 0);
+      merged.set(category, acc);
+    });
 
-    setHonestSignCategoryStats(stats);
+    setHonestSignRawCategories(rawNames);
+    setHonestSignCategoryStats(Array.from(merged.values()));
   };
 
   /*
@@ -860,20 +874,31 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     }
 
     let cancelled = false;
-    supabase
-      .rpc('hs_supplier_sizes', { p_supplier: honestSignSupplierId, p_category: honestSignBaseCategory || null })
-      .then(({ data, error }) => {
-        if (cancelled) return;
-        if (error) {
-          console.warn('Размеры не загрузились', error);
-          setHonestSignSizes([]);
-          return;
-        }
-        setHonestSignSizes((data || []).map((r: any) => ({ size: String(r?.size || ''), cards: Number(r?.cards || 0) })));
-      });
+    // Объединённая категория в базе может лежать под несколькими названиями — спрашиваем по каждому.
+    const selectedNorm = honestSignBaseCategory ? normalizeHSCategory(honestSignBaseCategory) : '';
+    const names = selectedNorm
+      ? Array.from(new Set([honestSignBaseCategory, ...honestSignRawCategories.filter((c) => normalizeHSCategory(c) === selectedNorm)]))
+      : [null];
+    Promise.all(
+      names.map((name) => supabase.rpc('hs_supplier_sizes', { p_supplier: honestSignSupplierId, p_category: name })),
+    ).then((results) => {
+      if (cancelled) return;
+      const failed = results.find((r) => r.error);
+      if (failed) {
+        console.warn('Размеры не загрузились', failed.error);
+        setHonestSignSizes([]);
+        return;
+      }
+      const bySize = new Map<string, number>();
+      results.forEach((r) => (r.data || []).forEach((row: any) => {
+        const size = String(row?.size || '');
+        bySize.set(size, (bySize.get(size) || 0) + Number(row?.cards || 0));
+      }));
+      setHonestSignSizes(Array.from(bySize, ([size, cards]) => ({ size, cards })));
+    });
 
     return () => { cancelled = true; };
-  }, [honestSignSupplierId, honestSignBaseCategory]);
+  }, [honestSignSupplierId, honestSignBaseCategory, honestSignRawCategories]);
 
   // Сменили категорию — прежний размер к ней может не относиться.
   useEffect(() => {

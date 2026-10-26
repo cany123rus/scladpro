@@ -902,6 +902,11 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
     if (['свитеры', 'свитер', 'жилеты', 'жилет', 'жилетки', 'жилетка', 'кардиганы', 'кардиган', 'свитеры / жилеты', 'свитеры / жилеты / кардиганы'].includes(value)) {
       return 'свитеры / жилеты / кардиганы';
     }
+    // Куртки, бомберы и дублёнки — одна категория ЧЗ.
+    const flat = value.replace(/ё/g, 'е');
+    if (flat === 'куртки' || flat === 'куртка' || flat.includes('бомбер') || flat.includes('дублен')) {
+      return 'куртки / бомберы / дублёнки';
+    }
     return value;
   };
 
