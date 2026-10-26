@@ -37,12 +37,22 @@
 }
 
 @layer components {
+  /*
+   * Без backdrop-blur: размытие фона делает каждую карточку отдельным слоем, и
+   * следующая карточка рисовалась поверх выпадающих списков из предыдущей —
+   * список уходил под таблицу. Фон под карточками почти белый, на глаз разницы нет.
+   */
   .oc-card {
-    @apply bg-white/90 backdrop-blur rounded-2xl border border-slate-200 shadow-lg shadow-slate-200/40;
+    @apply bg-white/90 rounded-2xl border border-slate-200 shadow-lg shadow-slate-200/40;
   }
 
   .oc-card-soft {
-    @apply bg-white/70 backdrop-blur rounded-2xl border border-slate-200/70 shadow-sm;
+    @apply bg-white/70 rounded-2xl border border-slate-200/70 shadow-sm;
+  }
+
+  /* Всплывающий список (фильтры, выбор из списка): один вид и один слой на весь сайт. */
+  .oc-popover {
+    @apply z-40 rounded-2xl border border-slate-200 bg-white shadow-xl;
   }
 
   .oc-title {
@@ -75,6 +85,14 @@
 
   .oc-select {
     @apply w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none;
+    /* Свой значок раскрытия вместо системного: одинаковый вид во всех браузерах. */
+    appearance: none;
+    -webkit-appearance: none;
+    padding-right: 2.25rem;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.75rem center;
+    background-size: 1rem;
   }
 
   .oc-filterbar {
@@ -131,6 +149,29 @@ button:disabled {
   opacity: 0.55;
   cursor: not-allowed;
   transform: none;
+}
+
+/*
+ * Числовые поля: без крошечных стрелок браузера, в которые не попасть пальцем.
+ * Стрелки ↑/↓ на клавиатуре работают по-прежнему; для количества есть
+ * компонент с крупными кнопками (components/ui/QtyStepper).
+ */
+input[type='number'] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+input[type='number']::-webkit-inner-spin-button,
+input[type='number']::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* Наведение на поля: единая подсветка рамки, как у кнопок. */
+input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):hover:not(:disabled):not(:focus),
+select:hover:not(:disabled):not(:focus),
+textarea:hover:not(:disabled):not(:focus) {
+  border-color: rgb(165 180 252 / 0.9);
 }
 
 /* Unified modern date/month inputs across the app */

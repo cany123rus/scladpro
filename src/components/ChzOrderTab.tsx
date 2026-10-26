@@ -1,8 +1,11 @@
 import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Check, ChevronDown, ChevronLeft, ChevronRight, FileSpreadsheet, FileText, ListChecks, Minus, Package, Plus, RefreshCw, Search, Trash2, X,
+  ChevronLeft, ChevronRight, FileSpreadsheet, FileText, ListChecks, Package, RefreshCw, Trash2, X,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { FacetSelect, fold } from './ui/FacetSelect';
+import { QtyStepper, QTY_MAX } from './ui/QtyStepper';
+import { SearchField } from './ui/SearchField';
 import { compareSizes } from '../utils/sizeOrder';
 import { downloadAoaWorkbook } from '../utils/excelExport';
 import { ensurePdfLibs, lazyLibs } from '../pages/dashboardLazyLibs';
@@ -139,238 +142,6 @@ const selectionCount = (sel: Selection) => {
 const NO_CATEGORY = 'Без категории';
 const NO_BRAND = 'Без бренда';
 
-/** Для сравнения «Дублёнки» и «дубленки» одинаково: регистр и ё не должны мешать поиску. */
-const fold = (v: string) => v.toLowerCase().replace(/ё/g, 'е').trim();
-
-type FacetOption = { name: string; count: number };
-
-/**
- * Выпадающий список с поиском для категорий и брендов.
- *
- * Обычный <select> на сотню брендов не годится: не найти, не отметить несколько.
- * Здесь есть поиск по подстроке, галочки, счётчики «сколько товаров останется»
- * с учётом остальных фильтров и поиска, быстрые «выбрать найденные» и «сбросить».
- * Закрывается кликом снаружи и Esc; Enter в поиске отмечает первый найденный пункт.
- */
-function FacetSelect({
-  label, options, selected, onChange,
-}: {
-  label: string;
-  options: FacetOption[];
-  selected: string[];
-  onChange: (next: string[]) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [q, setQ] = useState('');
-  const [byName, setByName] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => { if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false); };
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
-    document.addEventListener('mousedown', onDown);
-    document.addEventListener('keydown', onKey);
-    inputRef.current?.focus();
-    return () => {
-      document.removeEventListener('mousedown', onDown);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [open]);
-
-  useEffect(() => { if (!open) setQ(''); }, [open]);
-
-  const chosen = useMemo(() => new Set(selected), [selected]);
-  const shown = useMemo(() => {
-    const needle = fold(q);
-    const list = needle ? options.filter((o) => fold(o.name).includes(needle)) : options.slice();
-    return list.sort((a, b) => {
-      const sa = chosen.has(a.name) ? 0 : 1;
-      const sb = chosen.has(b.name) ? 0 : 1;
-      if (sa !== sb) return sa - sb;
-      // Пункты, где после остальных фильтров ничего не осталось, уходят вниз.
-      const za = a.count === 0 ? 1 : 0;
-      const zb = b.count === 0 ? 1 : 0;
-      if (za !== zb) return za - zb;
-      return byName ? a.name.localeCompare(b.name, 'ru') : b.count - a.count || a.name.localeCompare(b.name, 'ru');
-    });
-  }, [options, q, chosen, byName]);
-
-  const toggle = (name: string) => onChange(chosen.has(name) ? selected.filter((x) => x !== name) : [...selected, name]);
-  const addShown = () => onChange(Array.from(new Set([...selected, ...shown.filter((o) => o.count > 0).map((o) => o.name)])));
-
-  return (
-    <div className="relative" ref={rootRef}>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-sm transition-colors ${selected.length ? 'border-indigo-300 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}
-        aria-expanded={open}
-      >
-        {label}
-        {selected.length > 0 && <span className="rounded-full bg-indigo-600 px-1.5 text-[11px] font-semibold text-white">{selected.length}</span>}
-        <ChevronDown className={`w-4 h-4 transition-transform ${open ? 'rotate-180' : ''}`} />
-      </button>
-      {open && (
-        <div className="absolute left-0 z-40 mt-1 w-[22rem] max-w-[92vw] rounded-2xl border border-slate-200 bg-white p-2 shadow-xl">
-          <div className="relative mb-2">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <input
-              ref={inputRef}
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter' && shown[0]) { e.preventDefault(); toggle(shown[0].name); } }}
-              placeholder={`Найти: ${label.toLowerCase()}`}
-              className="oc-input w-full !pl-8"
-            />
-          </div>
-          <div className="mb-1 flex items-center justify-between px-1 text-[11px] text-slate-500">
-            <span>{shown.length} из {options.length}</span>
-            <button type="button" className="hover:text-slate-800" onClick={() => setByName((v) => !v)}>
-              {byName ? 'по алфавиту' : 'по числу товаров'}
-            </button>
-          </div>
-          <div className="max-h-72 overflow-auto">
-            {shown.map((o) => {
-              const on = chosen.has(o.name);
-              return (
-                <button
-                  type="button"
-                  key={o.name}
-                  onClick={() => toggle(o.name)}
-                  className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-slate-50 ${o.count === 0 && !on ? 'opacity-45' : ''}`}
-                >
-                  <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${on ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-300'}`}>
-                    {on && <Check className="w-3 h-3" />}
-                  </span>
-                  <span className="flex-1 truncate" title={o.name}>{o.name}</span>
-                  <span className="text-xs tabular-nums text-slate-400">{o.count}</span>
-                </button>
-              );
-            })}
-            {shown.length === 0 && <div className="px-2 py-4 text-center text-sm text-slate-400">Ничего не найдено</div>}
-          </div>
-          <div className="mt-2 flex items-center justify-between border-t border-slate-100 pt-2">
-            <button type="button" className="text-xs text-slate-500 hover:text-slate-800 disabled:opacity-40" onClick={() => onChange([])} disabled={!selected.length}>Сбросить</button>
-            <button type="button" className="text-xs font-medium text-indigo-600 hover:text-indigo-800 disabled:opacity-40" onClick={addShown} disabled={!shown.some((o) => o.count > 0)}>
-              Выбрать найденные
-            </button>
-            <button type="button" className="text-xs font-semibold text-indigo-600" onClick={() => setOpen(false)}>Готово</button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-const QTY_MAX = 1_000_000;
-
-/**
- * Количество: крупные «−» и «+», поле с цифрами, удержание кнопки.
- *
- * Стандартное числовое поле браузера — крошечные стрелки, в которые на складе
- * не попасть пальцем. Здесь кнопки по 36 px; при удержании число бежит само, а
- * через пару секунд — десятками. В поле: стрелки ↑/↓ меняют на 1 (с Shift — на
- * 10), Enter заканчивает ввод, фокус выделяет число целиком. Пока набираете,
- * поле можно очистить — пустое значение не превращается в 1 на лету.
- */
-const QtyStepper = memo(function QtyStepper({
-  value, active, label, onSet, onStep,
-}: {
-  value: number;
-  active: boolean;
-  label: string;
-  onSet: (qty: number) => void;
-  onStep: (delta: number) => void;
-}) {
-  const [draft, setDraft] = useState<string | null>(null);
-  const delayRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const stepRef = useRef(onStep);
-  stepRef.current = onStep;
-
-  const stop = useCallback(() => {
-    if (delayRef.current) clearTimeout(delayRef.current);
-    if (tickRef.current) clearInterval(tickRef.current);
-    delayRef.current = null;
-    tickRef.current = null;
-  }, []);
-  useEffect(() => stop, [stop]);
-
-  const hold = (dir: 1 | -1) => {
-    stop();
-    setDraft(null);
-    stepRef.current(dir);
-    delayRef.current = setTimeout(() => {
-      let ticks = 0;
-      tickRef.current = setInterval(() => {
-        ticks += 1;
-        stepRef.current(dir * (ticks > 20 ? 10 : 1));
-      }, 90);
-    }, 420);
-  };
-
-  const btn = 'flex h-9 w-9 shrink-0 select-none touch-none items-center justify-center rounded-lg border text-slate-700 transition-colors '
-    + 'border-slate-300 bg-white hover:bg-slate-100 active:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-white';
-
-  return (
-    <div className="flex items-center gap-1">
-      <button
-        type="button"
-        className={btn}
-        disabled={!active || value <= 1}
-        aria-label={`Меньше: ${label}`}
-        onPointerDown={(e) => { e.preventDefault(); hold(-1); }}
-        onPointerUp={stop}
-        onPointerLeave={stop}
-        onPointerCancel={stop}
-        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); stepRef.current(-1); } }}
-      >
-        <Minus className="w-4 h-4" />
-      </button>
-      <input
-        type="text"
-        inputMode="numeric"
-        pattern="[0-9]*"
-        value={draft ?? (active ? String(value) : '')}
-        placeholder="0"
-        onFocus={(e) => e.target.select()}
-        onChange={(e) => {
-          const v = e.target.value.replace(/\D/g, '').slice(0, 7);
-          setDraft(v);
-          const n = Number(v);
-          if (v !== '' && n > 0) onSet(Math.min(QTY_MAX, n));
-        }}
-        onBlur={() => setDraft(null)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') { e.currentTarget.blur(); return; }
-          if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-            e.preventDefault();
-            setDraft(null);
-            stepRef.current((e.key === 'ArrowUp' ? 1 : -1) * (e.shiftKey ? 10 : 1));
-          }
-        }}
-        className={`h-9 w-14 rounded-lg border text-center text-sm font-semibold tabular-nums outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 ${active ? 'border-indigo-300 bg-white text-slate-900' : 'border-slate-200 bg-slate-50 text-slate-400'}`}
-        aria-label={`Количество: ${label}`}
-      />
-      <button
-        type="button"
-        className={btn}
-        disabled={value >= QTY_MAX}
-        aria-label={`Больше: ${label}`}
-        onPointerDown={(e) => { e.preventDefault(); hold(1); }}
-        onPointerUp={stop}
-        onPointerLeave={stop}
-        onPointerCancel={stop}
-        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); stepRef.current(1); } }}
-      >
-        <Plus className="w-4 h-4" />
-      </button>
-    </div>
-  );
-});
-
 /** Один товар со своими размерами. Перерисовывается, только если изменился он сам или его выбор. */
 const ProductCard = memo(function ProductCard({
   product, supplierName, sel, onToggleSize, onQty, onStep, onToggleAll,
@@ -386,26 +157,28 @@ const ProductCard = memo(function ProductCard({
   const chosen = sel ? Object.keys(sel).length : 0;
   const allOn = product.sizes.length > 0 && chosen === product.sizes.length;
   return (
-    <div className="oc-card p-3 md:p-4 flex flex-col md:flex-row gap-3 md:gap-4">
-      <div className="flex gap-3 md:w-[44%] min-w-0">
+    <div className="oc-card p-2.5 flex flex-col md:flex-row gap-2.5 md:gap-3">
+      <div className="flex gap-2.5 md:w-[40%] min-w-0">
         <input
           type="checkbox"
-          className="mt-1 h-5 w-5 shrink-0 accent-indigo-600"
+          className="mt-1 h-4 w-4 shrink-0 accent-indigo-600"
           checked={allOn}
           ref={(el) => { if (el) el.indeterminate = chosen > 0 && !allOn; }}
           onChange={(e) => onToggleAll(product, e.target.checked)}
           aria-label={`Выбрать все размеры ${product.vendorCode}`}
         />
         {product.photo ? (
-          <img src={product.photo} alt="" loading="lazy" decoding="async" className="h-16 w-12 shrink-0 rounded-lg object-cover bg-slate-100" />
+          <img src={product.photo} alt="" loading="lazy" decoding="async" className="h-28 w-[5.25rem] shrink-0 rounded-xl object-cover bg-slate-100" />
         ) : (
-          <div className="h-16 w-12 shrink-0 rounded-lg bg-slate-100 flex items-center justify-center text-slate-300"><Package className="w-5 h-5" /></div>
+          <div className="h-28 w-[5.25rem] shrink-0 rounded-xl bg-slate-100 flex items-center justify-center text-slate-300"><Package className="w-7 h-7" /></div>
         )}
         <div className="min-w-0">
-          <div className="font-semibold text-slate-900 truncate" title={product.vendorCode}>{product.vendorCode || '—'}</div>
-          <div className="text-xs text-slate-500 truncate" title={product.title}>{product.title || 'Без названия'}</div>
+          <div className="text-lg font-bold leading-tight text-slate-900 truncate" title={product.vendorCode}>{product.vendorCode || '—'}</div>
+          {product.subject && (
+            <div className="mt-0.5 inline-block max-w-full truncate rounded-full bg-indigo-50 px-2.5 py-0.5 text-sm font-semibold text-indigo-700" title={product.subject}>{product.subject}</div>
+          )}
+          <div className="mt-1 text-xs text-slate-500 line-clamp-2" title={product.title}>{product.title || 'Без названия'}</div>
           <div className="mt-1 flex flex-wrap gap-1 text-[11px]">
-            {product.subject && <span className="rounded-full bg-indigo-50 text-indigo-700 px-2 py-0.5">{product.subject}</span>}
             {product.brand && <span className="rounded-full bg-slate-100 text-slate-600 px-2 py-0.5">{product.brand}</span>}
             <span className="rounded-full bg-slate-100 text-slate-500 px-2 py-0.5">WB {product.nmId}</span>
             {supplierName && <span className="rounded-full bg-violet-50 text-violet-700 px-2 py-0.5">{supplierName}</span>}
@@ -416,26 +189,27 @@ const ProductCard = memo(function ProductCard({
         {product.sizes.length === 0 ? (
           <div className="text-sm text-slate-400">В карточке нет размеров</div>
         ) : (
-          <div className="grid gap-1.5 sm:grid-cols-2 xl:grid-cols-3">
+          <div className="grid gap-1 sm:grid-cols-2 xl:grid-cols-3">
             {product.sizes.map((s) => {
               const item = sel?.[s.size];
               return (
                 <div
                   key={s.size}
-                  className={`flex flex-wrap items-center gap-x-2 gap-y-1.5 rounded-xl border px-2.5 py-2 ${item ? 'border-indigo-300 bg-indigo-50/60' : 'border-slate-200 bg-white'}`}
+                  className={`flex flex-wrap items-center gap-x-1.5 gap-y-1 rounded-lg border px-2 py-1 ${item ? 'border-indigo-300 bg-indigo-50/60' : 'border-slate-200 bg-white'}`}
                 >
                   <input
                     type="checkbox"
-                    className="h-5 w-5 shrink-0 accent-indigo-600"
+                    className="h-4 w-4 shrink-0 accent-indigo-600"
                     checked={Boolean(item)}
                     onChange={(e) => onToggleSize(product, s, e.target.checked)}
                     aria-label={`Размер ${sizeLabel(s.size)}`}
                   />
-                  <div className="min-w-[4.5rem] flex-1">
+                  <div className="min-w-[3.25rem] flex-1">
                     <div className="text-sm font-semibold text-slate-800 leading-tight">{sizeLabel(s.size)}</div>
-                    <div className="text-[10px] text-slate-400 truncate" title={s.barcode}>{s.barcode || 'нет баркода'}</div>
+                    <div className="text-[9px] leading-tight text-slate-400 truncate" title={s.barcode}>{s.barcode || 'нет баркода'}</div>
                   </div>
                   <QtyStepper
+                    size="sm"
                     value={item ? item.qty : 0}
                     active={Boolean(item)}
                     label={`${product.vendorCode} ${sizeLabel(s.size)}`}
@@ -812,21 +586,11 @@ export function ChzOrderTab({
 
       {/* relative z-40: у oc-card размытие фона, каждая карточка товара — свой слой и перекрыла бы выпадающие списки */}
       <div className="oc-card relative z-40 p-3 md:p-4 mb-3 space-y-3">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Артикул, баркод, код WB, название, бренд — или вставьте список через запятую / с новой строки"
-            className="oc-input w-full !pl-9 !pr-9"
-            aria-label="Поиск"
-          />
-          {query && (
-            <button type="button" onClick={() => setQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-700" aria-label="Очистить поиск">
-              <X className="w-4 h-4" />
-            </button>
-          )}
-        </div>
+        <SearchField
+          value={query}
+          onChange={setQuery}
+          placeholder="Артикул, баркод, код WB, название, бренд — или вставьте список через запятую / с новой строки"
+        />
 
         <div className="flex flex-wrap items-center gap-2">
           <select value={supplierId} onChange={(e) => setSupplierId(e.target.value)} className="oc-select" aria-label="Поставщик">

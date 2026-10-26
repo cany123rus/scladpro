@@ -33,6 +33,7 @@ import {
  */
 import { ensureBwip, ensureExcel, ensurePdfLibs, lazyLibs } from '../pages/dashboardLazyLibs';
 import { supabase } from '../lib/supabase';
+import { SearchSelect } from './ui/SearchSelect';
 import {
   GS_SEPARATOR,
   encodeGsForExcel,
@@ -12874,23 +12875,9 @@ export const WBSupplyManager = ({
 
                       {showFilters && (
                           <>
-                              <select
-                                  className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 outline-none focus:ring-2 focus:ring-indigo-500"
-                                  value={selectedBrand}
-                                  onChange={(e) => setSelectedBrand(e.target.value)}
-                              >
-                                  <option value="">Все бренды</option>
-                                  {brands.map(b => <option key={b} value={b}>{b}</option>)}
-                              </select>
+                              <SearchSelect className="min-w-[12rem]" value={selectedBrand} onChange={setSelectedBrand} emptyLabel="Все бренды" options={brands.map((b) => ({ value: b, label: b }))} ariaLabel="Бренд" />
 
-                              <select
-                                  className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 outline-none focus:ring-2 focus:ring-indigo-500"
-                                  value={selectedCategory}
-                                  onChange={(e) => setSelectedCategory(e.target.value)}
-                              >
-                                  <option value="">Все категории</option>
-                                  {categories.map(c => <option key={c} value={c}>{c}</option>)}
-                              </select>
+                              <SearchSelect className="min-w-[12rem]" value={selectedCategory} onChange={setSelectedCategory} emptyLabel="Все категории" options={categories.map((c) => ({ value: c, label: c }))} ariaLabel="Категория" />
                               <label className="flex items-center gap-2 text-sm text-slate-700">
                                   <input
                                       type="checkbox"

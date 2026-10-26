@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import "./index.css";
 import App from "./App.tsx";
 import ErrorBoundary from "./components/ErrorBoundary";
+import { installInputEnhancements } from "./utils/inputEnhancements";
 
 const isChunkError = (message: string) => {
   const m = message.toLowerCase();
@@ -58,6 +59,8 @@ window.addEventListener("vite:preloadError", (event: any) => {
   try { event.preventDefault(); } catch {}
   handleChunkLoadError("failed to fetch dynamically imported module");
 });
+
+installInputEnhancements();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

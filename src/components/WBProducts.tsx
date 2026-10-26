@@ -3,6 +3,7 @@ import React, { useEffect, useState, useRef, useMemo, useCallback, useDeferredVa
 import { Loader2, AlertCircle, Image as ImageIcon, ExternalLink, RefreshCw, Printer, Minus, Plus, Search, Filter, X, Package, Pencil, Database, CheckCircle2, Trash2 } from 'lucide-react';
 import JsBarcode from 'jsbarcode';
 import html2canvas from 'html2canvas';
+import { SearchSelect } from './ui/SearchSelect';
 // jsPDF и bwip-js — по требованию: раздел открывается без 1,2 МБ библиотек печати.
 import { ensureBwip, ensurePdfLibs, lazyLibs } from '../pages/dashboardLazyLibs';
 import { printPdfDirect } from '../utils/printDirect';
@@ -1890,25 +1891,11 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
                 </div>
                 <div>
                     <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Бренд</label>
-                    <select
-                        value={selectedBrand}
-                        onChange={(e) => setSelectedBrand(e.target.value)}
-                        className="w-full min-h-[44px] rounded-xl border border-slate-200 bg-white px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-500"
-                    >
-                        <option value="">Все бренды</option>
-                        {brands.map(b => <option key={b} value={b}>{b}</option>)}
-                    </select>
+                    <SearchSelect value={selectedBrand} onChange={setSelectedBrand} emptyLabel="Все бренды" options={brands.map((b) => ({ value: b, label: b }))} ariaLabel="Бренд" />
                 </div>
                 <div>
                     <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Категория</label>
-                    <select
-                        value={selectedCategory}
-                        onChange={(e) => setSelectedCategory(e.target.value)}
-                        className="w-full min-h-[44px] rounded-xl border border-slate-200 bg-white px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-500"
-                    >
-                        <option value="">Все категории</option>
-                        {categories.map(c => <option key={c} value={c}>{c}</option>)}
-                    </select>
+                    <SearchSelect value={selectedCategory} onChange={setSelectedCategory} emptyLabel="Все категории" options={categories.map((c) => ({ value: c, label: c }))} ariaLabel="Категория" />
                 </div>
             </div>
         )}

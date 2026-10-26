@@ -13,6 +13,7 @@ import {
 } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { SearchSelect } from './ui/SearchSelect';
 import { supabase } from '../lib/supabase';
 import { Plus, Trash2, Calendar, X, Pencil, CheckSquare } from 'lucide-react';
 import { createTask, fetchActiveTasks, softDeleteTask, updateTask } from '../services/tasks.service';
@@ -886,12 +887,13 @@ export const Tasks = () => {
           </div>
           <div>
             <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-1.5">Исполнитель</div>
-            <select value={newTaskAssigneeId} onChange={e => setNewTaskAssigneeId(e.target.value)} className="oc-select w-full">
-              <option value="">Без исполнителя</option>
-              {employees.map((e) => (
-                <option key={e.id} value={String(e.id)}>{getEmployeeDisplayName(e as any)}</option>
-              ))}
-            </select>
+            <SearchSelect
+              value={newTaskAssigneeId}
+              onChange={setNewTaskAssigneeId}
+              emptyLabel="Без исполнителя"
+              options={employees.map((e) => ({ value: String(e.id), label: getEmployeeDisplayName(e as any) }))}
+              ariaLabel="Исполнитель"
+            />
           </div>
           <div>
             <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-1.5">Количество</div>

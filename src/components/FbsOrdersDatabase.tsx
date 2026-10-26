@@ -10,6 +10,7 @@ import {
   X,
 } from 'lucide-react';
 import { getWBImageUrls } from '../utils/wbImages';
+import { SearchSelect } from './ui/SearchSelect';
 import { downloadWorkbook } from '../utils/excelExport';
 import {
   fetchFbsCodeDuplicates,
@@ -445,14 +446,7 @@ export const FbsOrdersDatabase = ({
 
         <label className="flex flex-col gap-1">
           <span className="text-xs text-slate-500">Поставка</span>
-          <select value={supplyId} onChange={(e) => setSupplyId(e.target.value)} className="oc-select min-w-[180px]">
-            <option value="">все поставки</option>
-            {supplies.map((id) => (
-              <option key={id} value={id}>
-                {id}
-              </option>
-            ))}
-          </select>
+          <SearchSelect className="min-w-[180px]" value={supplyId} onChange={setSupplyId} emptyLabel="все поставки" options={supplies.map((id) => ({ value: id, label: id }))} ariaLabel="Поставка" />
         </label>
 
         <label className="flex flex-col gap-1">

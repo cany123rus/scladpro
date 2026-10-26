@@ -44,6 +44,7 @@ import PushToggle from '../components/PushToggle';
 import { findCoord as ruFindCoord } from '../utils/ruGeo';
 import { confirmDialog } from '../components/ConfirmDialog';
 import { storeCurrentEmployee } from '../utils/employeeStorage';
+import { SearchSelect } from '../components/ui/SearchSelect';
 import { createWorkbookBlob, downloadAoaWorkbook, downloadWorkbook } from '../utils/excelExport';
 import { QRCodeSVG } from 'qrcode.react';
 import { telegramService } from '../services/telegram.service';
@@ -22180,14 +22181,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                           <input value={fboPalletProductSearch} onChange={(e) => setFboPalletProductSearch(e.target.value)} placeholder="Поиск по названию, артикулу, ШК или WB..." className="oc-input pl-9" />
                         </div>
-                        <select value={fboPalletBrandFilter} onChange={(e) => setFboPalletBrandFilter(e.target.value)} className="oc-select">
-                          <option value="">Все бренды</option>
-                          {fboPalletBrands.map((brand) => <option key={'fbo-pallet-brand-' + brand} value={brand}>{brand}</option>)}
-                        </select>
-                        <select value={fboPalletCategoryFilter} onChange={(e) => setFboPalletCategoryFilter(e.target.value)} className="oc-select">
-                          <option value="">Все категории</option>
-                          {fboPalletCategories.map((category) => <option key={'fbo-pallet-cat-' + category} value={category}>{category}</option>)}
-                        </select>
+                        <SearchSelect value={fboPalletBrandFilter} onChange={setFboPalletBrandFilter} emptyLabel="Все бренды" options={fboPalletBrands.map((brand) => ({ value: brand, label: brand }))} ariaLabel="Бренд" />
+                        <SearchSelect value={fboPalletCategoryFilter} onChange={setFboPalletCategoryFilter} emptyLabel="Все категории" options={fboPalletCategories.map((category) => ({ value: category, label: category }))} ariaLabel="Категория" />
                       </div>
                     </div>
                     <div className="p-4">
@@ -25010,26 +25005,22 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         </div>
                         <div>
                             <label className="block text-sm font-medium text-slate-700 mb-2">Категории товаров по поставщику</label>
-                            <select
+                            <SearchSelect
                               value={honestSignBaseCategory}
-                              onChange={(e) => setHonestSignBaseCategory(e.target.value)}
-                              className="w-full p-3 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                              onChange={setHonestSignBaseCategory}
                               disabled={loadingCategories}
-                            >
-                              <option value="">-- Выберите категорию --</option>
-                              {loadingCategories ? (
-                                <option disabled>Загрузка...</option>
-                              ) : supplierCategories.length > 0 ? (
-                                supplierCategories.map(c => <option key={c} value={c}>{c}</option>)
-                              ) : (
-                                <>
-                                  <option value="clothing">Одежда</option>
-                                  <option value="shoes">Обувь</option>
-                                  <option value="linen">Белье</option>
-                                  <option value="other">Другое</option>
-                                </>
-                              )}
-                            </select>
+                              emptyLabel="-- Выберите категорию --"
+                              placeholder={loadingCategories ? 'Загрузка...' : '-- Выберите категорию --'}
+                              options={supplierCategories.length > 0
+                                ? supplierCategories.map((c) => ({ value: c, label: c }))
+                                : [
+                                  { value: 'clothing', label: 'Одежда' },
+                                  { value: 'shoes', label: 'Обувь' },
+                                  { value: 'linen', label: 'Белье' },
+                                  { value: 'other', label: 'Другое' },
+                                ]}
+                              ariaLabel="Категория"
+                            />
                         </div>
                         <div>
                             <label className="block text-sm font-medium text-slate-700 mb-2">Пол</label>
@@ -32387,17 +32378,18 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       )}
                       <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                         <label className="block text-sm font-semibold text-slate-800 mb-2">Сотрудник</label>
-                        <select
+                        <SearchSelect
                           value={cwReportForm.employee_id}
-                          onChange={e => setCwReportForm({...cwReportForm, employee_id: e.target.value})}
-                          className="w-full p-2 border rounded-lg text-sm"
-                        >
-                          <option value="">Выберите сотрудника...</option>
-                          <option value="__ALL__">Все сотрудники</option>
-                          {employees
-                            .filter(e => String(e.role || '').toLowerCase() !== 'admin' && String(e.login || '').toLowerCase() !== 'admin')
-                            .map(e => <option key={e.id} value={e.id}>{e.full_name}</option>)}
-                        </select>
+                          onChange={(id) => setCwReportForm({ ...cwReportForm, employee_id: id })}
+                          emptyLabel="Выберите сотрудника..."
+                          options={[
+                            { value: '__ALL__', label: 'Все сотрудники' },
+                            ...employees
+                              .filter(e => String(e.role || '').toLowerCase() !== 'admin' && String(e.login || '').toLowerCase() !== 'admin')
+                              .map(e => ({ value: String(e.id), label: String(e.full_name || '') })),
+                          ]}
+                          ariaLabel="Сотрудник"
+                        />
                       </div>
                       <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                         <label className="block text-sm font-semibold text-slate-800 mb-2">Поставщик</label>
@@ -33186,23 +33178,19 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   {String(currentEmployee?.role || '').toLowerCase() === 'admin' && hasAssemblyButtonAccess('cw_calendar_schedule_employee_pick') && (
                     <div className="mb-3 pt-1">
                       <label className="block text-xs text-slate-500 mb-1">Сотрудник</label>
-                      <select
+                      <SearchSelect
                         value={cwScheduleEmployeeId}
-                        onChange={async (e) => {
-                          const id = e.target.value;
+                        onChange={async (id) => {
                           setCwScheduleEmployeeId(id);
                           if (id) await loadEmployeeSchedule(id);
                         }}
-                        className="oc-select"
-                      >
-                        <option value="">Выберите сотрудника...</option>
-                        {employees
+                        emptyLabel="Выберите сотрудника..."
+                        options={employees
                           .filter((e) => String(e.role || '').toLowerCase() !== 'admin' && String(e.login || '').toLowerCase() !== 'admin')
                           .filter((e) => isScheduleEmployeeVisible(e))
-                          .map((e) => (
-                            <option key={`sched-emp-${e.id}`} value={e.id}>{e.full_name}</option>
-                          ))}
-                      </select>
+                          .map((e) => ({ value: String(e.id), label: String(e.full_name || '') }))}
+                        ariaLabel="Сотрудник"
+                      />
                     </div>
                   )}
 
@@ -33844,19 +33832,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50/80 p-3 grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-3 items-end">
                     <label className="block">
                       <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Фильтр по рабочему</span>
-                      <select
+                      <SearchSelect
                         value={tempWorkerQuickPayWorkerFilter}
-                        onChange={(e) => {
-                          setTempWorkerQuickPayWorkerFilter(e.target.value);
+                        onChange={(v) => {
+                          setTempWorkerQuickPayWorkerFilter(v);
                           setTempWorkerQuickPaySelectedIds([]);
                         }}
-                        className="oc-input h-11 rounded-xl bg-white text-sm"
-                      >
-                        <option value="all">Все сотрудники с неоплаченными сменами</option>
-                        {tempWorkerQuickPayWorkerOptions.map((name) => (
-                          <option key={`quick-pay-worker-${name}`} value={name}>{name}</option>
-                        ))}
-                      </select>
+                        options={[{ value: 'all', label: 'Все сотрудники с неоплаченными сменами' }, ...tempWorkerQuickPayWorkerOptions.map((name) => ({ value: name, label: name }))]}
+                        ariaLabel="Сотрудник"
+                      />
                     </label>
                     <label className="block">
                       <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Кто оплатит</span>
@@ -33980,19 +33964,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   </div>
 
                   <div className="mt-4 grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-3">
-                    <select
+                    <SearchSelect
                       value={deliveryQuickPayCourierFilter}
-                      onChange={(e) => {
-                        setDeliveryQuickPayCourierFilter(e.target.value);
+                      onChange={(v) => {
+                        setDeliveryQuickPayCourierFilter(v);
                         setDeliveryQuickPaySelectedIds([]);
                       }}
-                      className="oc-input h-11 rounded-xl bg-white text-sm"
-                    >
-                      <option value="all">Все доставщики</option>
-                      {deliveryCourierOptions.map((name) => (
-                        <option key={`quick-pay-delivery-courier-${name}`} value={name}>{name}</option>
-                      ))}
-                    </select>
+                      options={[{ value: 'all', label: 'Все доставщики' }, ...deliveryCourierOptions.map((name) => ({ value: name, label: name }))]}
+                      ariaLabel="Доставщик"
+                    />
                     <select
                       value={deliveryQuickPayPayerSupplierId}
                       onChange={(e) => setDeliveryQuickPayPayerSupplierId(e.target.value)}

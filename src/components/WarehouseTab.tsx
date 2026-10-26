@@ -1,4 +1,5 @@
 import React from 'react';
+import { SearchSelect } from './ui/SearchSelect';
 
 type Props = {
   warehouseFill: any;
@@ -401,10 +402,13 @@ export const WarehouseTab = (props: Props) => {
           <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-3 items-end">
           <div>
             <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Стеллаж</label>
-            <select value={warehouseFill.rack} onChange={(e) => { setWarehouseEditTarget(null); setWarehouseFill((p: any) => ({ ...p, rack: e.target.value, shelf: '' })); }} className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100">
-              <option value="">Выберите стеллаж</option>
-              {allWarehouseRacks.map((rack) => <option key={rack} value={rack}>{rack}</option>)}
-            </select>
+            <SearchSelect
+              value={warehouseFill.rack}
+              onChange={(rack) => { setWarehouseEditTarget(null); setWarehouseFill((p: any) => ({ ...p, rack, shelf: '' })); }}
+              emptyLabel="Выберите стеллаж"
+              options={allWarehouseRacks.map((rack) => ({ value: rack, label: rack }))}
+              ariaLabel="Стеллаж"
+            />
           </div>
 
           <div>
@@ -461,10 +465,14 @@ export const WarehouseTab = (props: Props) => {
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Поиск: Артикул</label>
             <div className="flex gap-2">
-              <select value={pendingArticle} onChange={(e) => { setPendingArticle(e.target.value); setPendingSize(''); setPendingColor(''); }} className="px-3 py-2 border border-slate-300 rounded-lg w-full">
-                <option value="">Выберите артикул</option>
-                {warehouseSearchOptions.articles.map((v) => <option key={v} value={v}>{v}</option>)}
-              </select>
+              <SearchSelect
+                className="w-full"
+                value={pendingArticle}
+                onChange={(v) => { setPendingArticle(v); setPendingSize(''); setPendingColor(''); }}
+                emptyLabel="Выберите артикул"
+                options={warehouseSearchOptions.articles.map((v) => ({ value: v, label: v }))}
+                ariaLabel="Артикул"
+              />
             </div>
           </div>
 
