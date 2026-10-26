@@ -4,6 +4,7 @@ import { getEmpAvatarColor, getEmpInitials, normalizeRoleKey, getWarehouseMoneyO
 import { supabase } from '../lib/supabase';
 import { telegramService } from '../services/telegram.service';
 import { sendPush } from '../utils/push';
+import { Select } from '../components/ui/Select';
 
 type BotSlot = { key: string; label: string; hint?: string };
 const BOT_SLOTS: BotSlot[] = [
@@ -940,12 +941,12 @@ export function AdminPanel(props: AdminPanelProps) {
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-slate-500 mb-1">Кому</label>
-                  <select value={pushForm.target} onChange={(e) => setPushForm((p) => ({ ...p, target: e.target.value }))} className="oc-select w-full">
+                  <Select value={pushForm.target} onChange={(e) => setPushForm((p) => ({ ...p, target: e.target.value }))} className="oc-select w-full">
                     <option value="all">Всем устройствам</option>
                     {employees.map((e: any) => (
                       <option key={e.id} value={String(e.id)}>{e.full_name || e.login}</option>
                     ))}
-                  </select>
+                  </Select>
                 </div>
               </div>
               <div>

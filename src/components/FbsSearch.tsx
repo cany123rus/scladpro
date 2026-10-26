@@ -14,6 +14,7 @@ import {
   restoreDataMatrixGs,
   stickerKey,
 } from '../utils/honestSign';
+import { Select } from './ui/Select';
 
 /**
  * Поиск ФБС — где лежит товар из загруженной сюда поставки.
@@ -1408,7 +1409,7 @@ export function FbsSearch({
           */}
           <div className="flex items-center gap-2">
             <span className="text-sm text-slate-500">Кабинет</span>
-            <select
+            <Select
               className="oc-select min-w-[200px]"
               value={supplierId}
               onChange={(e) => setSupplierId(e.target.value)}
@@ -1420,7 +1421,7 @@ export function FbsSearch({
                   {s.name}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
 
           <input

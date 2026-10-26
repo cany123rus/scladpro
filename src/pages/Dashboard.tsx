@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef, useTransition, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
+import { fetchAllPages } from '../lib/fetchAll';
 import { chunkReloadAllowed } from '../utils/chunkReload';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -57,6 +58,8 @@ import { printPdfDirect } from '../utils/printDirect';
 import { ExcelUploader, SuppliesFBOSection, WBProductsSection, ReportsSection, EmployeesSection, TelegramSettingsSection, DatamatrixCode, WbLayoutHandle } from './dashboardComponents';
 import { DashboardDatabaseTab } from './DashboardDatabaseTab';
 import { drawReportHeader, drawMetaLines, drawKpiChips, reportFooter, reportTableStyles } from './pdfReportKit';
+import { Select } from '../components/ui/Select';
+import { QtyField } from '../components/ui/QtyField';
 
 import { DASHBOARD_TAB_IDS, isDashboardTabId } from '../constants/dashboardTabs';
 import { normalizeDataMatrixText, parseChzCodesText, restoreDataMatrixGs } from '../utils/honestSign';
@@ -5557,14 +5560,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     {isEditing && cwWarehouseMoneyEdit ? (
                       <div className="space-y-2">
                         <div className="grid grid-cols-1 gap-2 md:grid-cols-2 2xl:grid-cols-[130px_130px_1fr_auto_auto]">
-                          <select
+                          <Select
                             value={cwWarehouseMoneyEdit.mode}
                             onChange={(e) => setCwWarehouseMoneyEdit(prev => prev ? { ...prev, mode: e.target.value as 'add' | 'writeoff' } : prev)}
                             className="oc-select"
                           >
                             <option value="add">Добавить</option>
                             <option value="writeoff">Списать</option>
-                          </select>
+                          </Select>
                           <input
                             type="number"
                             step="0.01"
@@ -6846,7 +6849,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
   const buildWarehouseOfflineSnapshot = async () => {
     const [productsRes, modelRes, layoutRes, suppliesRes, boxesRes, hsRes] = await Promise.all([
-      supabase.from('wb_products_cache').select('supplier_id, nm_id, product_json').limit(20000),
+      fetchAllPages((__a, __b) => supabase.from('wb_products_cache').select('supplier_id, nm_id, product_json').order('nm_id').range(__a, __b)),
       supabase.from('app_settings').select('value').eq('key', 'wb_model_numbers_v1').maybeSingle(),
       supabase.from('app_settings').select('value').eq('key', 'wb_label_layout_v1').maybeSingle(),
       supabase.from('supplies').select('*, boxes(supply_items(count))').is('deleted_at', null).order('created_at', { ascending: false }),
@@ -8603,11 +8606,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         }
       }
 
-      const { data: wbCacheRows, error: wbCacheError } = await supabase
+      const { data: wbCacheRows, error: wbCacheError } = await fetchAllPages((__a, __b) => supabase
         .from('wb_products_cache')
         .select('nm_id, product_json')
         .eq('supplier_id', currentSupply.supplier_id)
-        .limit(10000);
+        .order('nm_id').range(__a, __b));
       if (wbCacheError) throw wbCacheError;
 
       const wbByBarcode = new Map<string, any>();
@@ -8679,11 +8682,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     try {
       if (!currentSupply?.supplier_id || !supplyProductsRows.length) return;
       setSupplyProductsPhotoLoading(true);
-      const { data, error } = await supabase
+      const { data, error } = await fetchAllPages((__a, __b) => supabase
         .from('wb_products_cache')
         .select('supplier_id, nm_id, product_json')
         .eq('supplier_id', currentSupply.supplier_id)
-        .limit(10000);
+        .order('nm_id').range(__a, __b));
       if (error) throw error;
 
       const photoByNm: Record<string, string> = {};
@@ -14012,11 +14015,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       }
       try {
         setBarterCatalogLoading(true);
-        const { data, error } = await supabase
+        const { data, error } = await fetchAllPages((__a, __b) => supabase
           .from('wb_products_cache')
           .select('supplier_id, nm_id, product_json')
           .eq('supplier_id', barterSupplierId)
-          .limit(10000);
+          .order('nm_id').range(__a, __b));
         if (error) throw error;
         const rows = (data || []).map((r: any, idx: number) => {
           const p = r?.product_json || {};
@@ -14058,11 +14061,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       const next: Record<string, string> = {};
       const norm = (v: any) => String(v ?? '').replace(/\D+/g, '').replace(/^0+/, '');
 
-      const { data: cacheRows, error } = await supabase
+      const { data: cacheRows, error } = await fetchAllPages((__a, __b) => supabase
         .from('wb_products_cache')
         .select('product_json')
         .eq('supplier_id', supplierId)
-        .limit(10000);
+        .order('nm_id').range(__a, __b));
       if (error) throw error;
 
       const byNm: Record<string, string> = {};
@@ -14105,11 +14108,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     if (!supplierIds.length) return showToast('Нет карточек для обновления фото', 'info');
     try {
       setBarterPhotoLoading(true);
-      const { data, error } = await supabase
+      const { data, error } = await fetchAllPages((__a, __b) => supabase
         .from('wb_products_cache')
         .select('supplier_id, nm_id, product_json')
         .in('supplier_id', supplierIds)
-        .limit(10000);
+        .order('supplier_id').order('nm_id').range(__a, __b));
       if (error) throw error;
 
       const photoByKey: Record<string, string> = {};
@@ -17808,11 +17811,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
       // 1) try supplier cache first
       if (uploadedSelectedSupplierId) {
-        const { data: cacheRows, error: cacheErr } = await supabase
+        const { data: cacheRows, error: cacheErr } = await fetchAllPages((__a, __b) => supabase
           .from('wb_products_cache')
           .select('product_json')
           .eq('supplier_id', uploadedSelectedSupplierId)
-          .limit(10000);
+          .order('nm_id').range(__a, __b));
         if (!cacheErr) {
           (cacheRows || []).forEach((row: any) => {
             const p = row?.product_json || {};
@@ -20694,7 +20697,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       </div>
                       <div className="mt-2">
                         <label className="block text-[11px] font-medium text-slate-500 mb-1 uppercase tracking-wide">Деньги на складе</label>
-                        <select
+                        <Select
                           value={(supplier as any).warehouse_money_owner || ''}
                           onChange={(e) => handleBindSupplierOwner(supplier.id, e.target.value || null)}
                           className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
@@ -20707,7 +20710,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           }).map((o) => (
                             <option key={`bind-${supplier.id}-${o.id}`} value={o.id}>{o.title}</option>
                           ))}
-                        </select>
+                        </Select>
                         {(supplier as any).warehouse_money_owner && (
                           <div className="mt-1 text-[11px] text-emerald-600">Уведомления о списаниях идут этому поставщику (TG: {supplier.telegram_chat_id})</div>
                         )}
@@ -21001,14 +21004,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     </div>
                     <div className="p-5 md:p-6">
                     <label className="mb-1 block text-xs font-medium text-slate-500">Поставщик для ШК поставки</label>
-                    <select
+                    <Select
                       value={selectedSupplierId}
                       onChange={(e) => setSelectedSupplierId(e.target.value)}
                       className="oc-select mb-4 min-h-[48px]"
                     >
                       <option value="">Выберите поставщика для ШК поставки...</option>
                       {(warehouseOfflineEnabled ? getWarehouseOfflineSuppliers() : suppliers).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                    </select>
+                    </Select>
 
 	                    <form onSubmit={handleSupplyScan} className="flex gap-2">
 	                      <input
@@ -21041,14 +21044,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       Загрузите Excel с колонкой «ШК короба» (или первой колонкой с кодом), затем сгенерируйте этикетки 58×40 с нумерацией. Макет берётся из «Конструктор этикеток → Короба FBO».
                     </div>
                     <label className="mb-1 block text-xs font-medium text-slate-500">Поставщик</label>
-                    <select
+                    <Select
                       value={fboBoxesSupplierId}
                       onChange={(e) => setFboBoxesSupplierId(e.target.value)}
                       className="oc-select mb-3 min-h-[48px]"
                     >
                       <option value="">Выберите поставщика для коробок FBO...</option>
                       {(warehouseOfflineEnabled ? getWarehouseOfflineSuppliers() : suppliers).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                    </select>
+                    </Select>
                     <label className="group flex cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center transition-colors hover:border-sky-300 hover:bg-sky-50">
                       <FileSpreadsheet className="h-7 w-7 text-slate-400 group-hover:text-sky-500" />
                       <div className="text-sm font-medium text-slate-700">
@@ -21844,14 +21847,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         </div>
                       </div>
 	                      <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
-                        <select
+                        <Select
                           value={fboPalletSupplierId}
                           onChange={(e) => handleChangeFboPalletSupplier(e.target.value)}
                           className="oc-select"
                         >
                           <option value="">Выберите поставщика...</option>
                           {suppliers.map((supplier) => <option key={'fbo-pallet-supplier-' + supplier.id} value={supplier.id}>{supplier.name}</option>)}
-                        </select>
+                        </Select>
                         <button type="button" onClick={() => fetchFboPalletData(fboPalletSupplierId)} disabled={!fboPalletSupplierId || fboPalletLoading} className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">
                           {fboPalletLoading ? 'Загрузка...' : 'Обновить'}
 	                        </button>
@@ -22459,8 +22462,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       </div>
                       <div>
                         <label className="mb-1 block text-sm font-medium text-slate-700">Количество</label>
-                        <input
-                          type="number"
+                        <QtyField
+                         
                           min={1}
                           max={500}
                           value={nameSequencePrintForm.quantity}
@@ -22589,14 +22592,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   <div className="oc-card p-6 mb-6">
                     <h2 className="text-lg font-bold mb-4">Новая приемка</h2>
                     <div className="flex gap-2">
-                      <select
+                      <Select
                         value={receptionSupplierId}
                         onChange={(e) => setReceptionSupplierId(e.target.value)}
                         className="flex-1 p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none"
                       >
                         <option value="">-- Выберите поставщика --</option>
                         {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                      </select>
+                      </Select>
                       <button
                         onClick={handleCreateReception}
                         className="p-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
@@ -22714,8 +22717,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           <img src={photo.url} alt="Preview" className="w-24 h-24 object-cover rounded-lg bg-slate-100" />
                           <div className="flex-1">
                             <label className="block text-sm font-medium text-slate-700 mb-1">Кол-во товара</label>
-                            <input
-                              type="number"
+                            <QtyField
+                             
                               value={photo.quantity}
                               onChange={(e) => {
                                 const newPhotos = [...receptionPhotos];
@@ -23422,13 +23425,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 </div>
                 <div className="mt-3 space-y-3">
                   <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_220px] gap-2">
-                    <select value={barterTopSupplierId} onChange={(e) => {
+                    <Select value={barterTopSupplierId} onChange={(e) => {
                       setBarterTopSupplierId(e.target.value);
                       setBarterMonthPickerOpen(false);
                     }} className="oc-select w-full min-w-0">
                       <option value="">Сначала выберите поставщика</option>
                       {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                    </select>
+                    </Select>
                     <div className="relative">
                       <button
                         type="button"
@@ -23652,13 +23655,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       placeholder="Поиск по нику, ссылке, подписчикам, статусу или комментарию"
                       className="oc-input"
                     />
-                    <select value={externalAdsBaseSupplierFilter} onChange={(e) => setExternalAdsBaseSupplierFilter(e.target.value)} className="oc-select">
+                    <Select value={externalAdsBaseSupplierFilter} onChange={(e) => setExternalAdsBaseSupplierFilter(e.target.value)} className="oc-select">
                       <option value="all">Все поставщики</option>
                       {externalAdsBaseSupplierOptions.map((supplier) => (
                         <option key={`external-ads-supplier-filter-${supplier.id}`} value={supplier.id}>{supplier.name}</option>
                       ))}
-                    </select>
-                    <select value={externalAdsBasePlatformFilter} onChange={(e) => setExternalAdsBasePlatformFilter(e.target.value)} className="oc-select">
+                    </Select>
+                    <Select value={externalAdsBasePlatformFilter} onChange={(e) => setExternalAdsBasePlatformFilter(e.target.value)} className="oc-select">
                       <option value="all">Все сети</option>
                       <option value="Instagram">Instagram</option>
                       <option value="TikTok">TikTok</option>
@@ -23667,13 +23670,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       <option value="VK">VK</option>
                       <option value="OK">OK</option>
                       <option value="other">Другие сети</option>
-                    </select>
-                    <select value={externalAdsBaseSort} onChange={(e) => setExternalAdsBaseSort(e.target.value as any)} className="oc-select">
+                    </Select>
+                    <Select value={externalAdsBaseSort} onChange={(e) => setExternalAdsBaseSort(e.target.value as any)} className="oc-select">
                       <option value="date_desc">Сначала новые</option>
                       <option value="date_asc">Сначала старые</option>
                       <option value="nickname_asc">По нику</option>
                       <option value="followers_desc">По подписчикам</option>
-                    </select>
+                    </Select>
                   </div>
                   {filteredExternalAdsBase.length === 0 ? (
                     <div className="text-sm text-slate-500">{externalAdsBase.length === 0 ? 'Пока пусто. Нажми «Создать запись», чтобы добавить первую запись.' : externalAdsBaseHasActiveFilters ? 'Фильтр ничего не нашёл.' : 'Поиск ничего не нашёл.'}</div>
@@ -23858,7 +23861,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
                                 <div className="text-sm font-semibold text-slate-900">История бартеров / рекламы</div>
                                 <div className="grid grid-cols-1 sm:grid-cols-[160px_220px] gap-2">
-                                  <select
+                                  <Select
                                     value={historyFilters.kind}
                                     onChange={(e) => setExternalAdsHistoryFilters((prev) => ({
                                       ...prev,
@@ -23872,8 +23875,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                     <option value="all">Все активности</option>
                                     <option value="barter">Только бартеры</option>
                                     <option value="ad">Только реклама</option>
-                                  </select>
-                                  <select
+                                  </Select>
+                                  <Select
                                     value={historyFilters.supplierId}
                                     onChange={(e) => setExternalAdsHistoryFilters((prev) => ({
                                       ...prev,
@@ -23888,7 +23891,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                     {historySupplierOptions.map((supplier) => (
                                       <option key={`history-supplier-${item.id}-${supplier.id}`} value={supplier.id}>{supplier.name}</option>
                                     ))}
-                                  </select>
+                                  </Select>
                                 </div>
                               </div>
                               <div className="mt-2 space-y-2 max-h-72 overflow-y-auto pr-1">
@@ -24212,7 +24215,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                           <label className="block text-sm font-medium text-slate-700 mb-1">Статус</label>
-                          <select
+                          <Select
                             value={externalAdsBaseForm.status}
                             onChange={(e) => setExternalAdsBaseForm((prev) => ({ ...prev, status: e.target.value }))}
                             className="oc-select"
@@ -24225,11 +24228,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             <option value="waiting_stats">Ждём статистику</option>
                             <option value="completed">Завершено</option>
                             <option value="rejected">Отказ</option>
-                          </select>
+                          </Select>
                         </div>
                         <div>
                           <label className="block text-sm font-medium text-slate-700 mb-1">Общий рейтинг блогера</label>
-                          <select
+                          <Select
                             value={externalAdsBaseForm.overallRating}
                             onChange={(e) => setExternalAdsBaseForm((prev) => ({ ...prev, overallRating: e.target.value }))}
                             className={getBarterRatingClassName(externalAdsBaseForm.overallRating)}
@@ -24238,7 +24241,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             {BARTER_RATING_OPTIONS.filter((option) => option).map((option) => (
                               <option key={`overall-rating-${option}`} value={option}>{option}</option>
                             ))}
-                          </select>
+                          </Select>
                         </div>
                       </div>
 
@@ -24467,7 +24470,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                       placeholder="Просмотры"
                                       className="oc-input"
                                     />
-                                    <select
+                                    <Select
                                       value={row.barter_ratings?.[i] || ''}
                                       onChange={(e) => {
                                         const nextRows = (barterRows || []).map((x) => x.id === row.id ? { ...x, barter_ratings: (x.barter_ratings || []).map((v, vi) => vi === i ? e.target.value : v) } : x);
@@ -24479,7 +24482,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                       {BARTER_RATING_OPTIONS.filter(Boolean).map((option) => (
                                         <option key={`barter-rating-${row.id}-${i}-${option}`} value={option}>{option}</option>
                                       ))}
-                                    </select>
+                                    </Select>
                                     <label className={`inline-flex items-center justify-center gap-2 rounded-lg border px-2.5 py-2 text-xs font-medium ${row.barter_published?.[i] ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-white text-slate-600'}`}>
                                       <input
                                         type="checkbox"
@@ -24565,7 +24568,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                       placeholder="Просмотры"
                                       className="oc-input"
                                     />
-                                    <select
+                                    <Select
                                       value={row.ad_ratings?.[i] || ''}
                                       onChange={(e) => {
                                         const nextRows = (barterRows || []).map((x) => x.id === row.id ? { ...x, ad_ratings: (x.ad_ratings || []).map((v, vi) => vi === i ? e.target.value : v) } : x);
@@ -24577,7 +24580,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                       {BARTER_RATING_OPTIONS.filter(Boolean).map((option) => (
                                         <option key={`ad-rating-${row.id}-${i}-${option}`} value={option}>{option}</option>
                                       ))}
-                                    </select>
+                                    </Select>
                                     <label className={`inline-flex items-center justify-center gap-2 rounded-lg border px-2.5 py-2 text-xs font-medium ${row.ad_published?.[i] ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-white text-slate-600'}`}>
                                       <input
                                         type="checkbox"
@@ -24716,10 +24719,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       <button className="text-slate-500 hover:text-slate-700" onClick={() => closeBarterAddModal()}><X className="h-4 w-4" /></button>
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3 shrink-0">
-                      <select value={barterSupplierId} onChange={(e) => setBarterSupplierId(e.target.value)} className="oc-select">
+                      <Select value={barterSupplierId} onChange={(e) => setBarterSupplierId(e.target.value)} className="oc-select">
                         <option value="">Выберите поставщика</option>
                         {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                      </select>
+                      </Select>
                       <input value={barterProductSearch} onChange={(e) => setBarterProductSearch(e.target.value)} placeholder="Поиск: название / номенклатура / артикул / артикул поставщика" className="oc-input" />
                       <button type="button" onClick={refreshBarterPhotos} disabled={barterPhotoLoading || !barterSupplierId} className="btn-ghost disabled:opacity-60">
                         {barterPhotoLoading ? 'Обновляю фото...' : 'Обновить фото'}
@@ -24728,11 +24731,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     <div className="mb-3 grid grid-cols-2 gap-2 items-end shrink-0">
                       <div className="flex flex-col">
                         <label className="block text-[11px] font-medium text-slate-500 mb-1 uppercase tracking-wide leading-tight min-h-[28px] flex items-end">Бартеров создать</label>
-                        <input type="number" min="0" value={barterCreateBarterCount} onChange={(e) => setBarterCreateBarterCount(e.target.value)} className="oc-input w-full" placeholder="0" />
+                        <QtyField min="0" value={barterCreateBarterCount} onChange={(e) => setBarterCreateBarterCount(e.target.value)} className="oc-input w-full" placeholder="0" />
                       </div>
                       <div className="flex flex-col">
                         <label className="block text-[11px] font-medium text-slate-500 mb-1 uppercase tracking-wide leading-tight min-h-[28px] flex items-end">Реклам создать</label>
-                        <input type="number" min="0" value={barterCreateAdCount} onChange={(e) => setBarterCreateAdCount(e.target.value)} className="oc-input w-full" placeholder="0" />
+                        <QtyField min="0" value={barterCreateAdCount} onChange={(e) => setBarterCreateAdCount(e.target.value)} className="oc-input w-full" placeholder="0" />
                       </div>
                     </div>
                     <label className="mb-3 flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700 shrink-0">
@@ -24853,14 +24856,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 <>
                   <div className="oc-card p-6 mb-6">
                     <label className="block text-sm font-medium text-slate-700 mb-2">Выберите поставщика</label>
-                    <select
+                    <Select
                       value={honestSignSupplierId}
                       onChange={(e) => setHonestSignSupplierId(e.target.value)}
                       className="w-full p-3 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
                     >
                       <option value="">-- Выберите поставщика --</option>
                       {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                    </select>
+                    </Select>
                   </div>
 
                   {!honestSignSupplierId ? (
@@ -24931,14 +24934,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                         <div>
                             <label className="block text-sm font-medium text-slate-700 mb-2">Выберите поставщика</label>
-                            <select
+                            <Select
                               value={honestSignSupplierId}
                               onChange={(e) => setHonestSignSupplierId(e.target.value)}
                               className="w-full p-3 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
                             >
                               <option value="">-- Выберите поставщика --</option>
                               {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                            </select>
+                            </Select>
                         </div>
                     </div>
 
@@ -24994,14 +24997,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                         <div>
                             <label className="block text-sm font-medium text-slate-700 mb-2">Выберите поставщика</label>
-                            <select
+                            <Select
                               value={honestSignSupplierId}
                               onChange={(e) => setHonestSignSupplierId(e.target.value)}
                               className="w-full p-3 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
                             >
                               <option value="">-- Выберите поставщика --</option>
                               {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                            </select>
+                            </Select>
                         </div>
                         <div>
                             <label className="block text-sm font-medium text-slate-700 mb-2">Категории товаров по поставщику</label>
@@ -25024,7 +25027,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         </div>
                         <div>
                             <label className="block text-sm font-medium text-slate-700 mb-2">Пол</label>
-                            <select
+                            <Select
                               value={honestSignBaseGender}
                               onChange={(e) => setHonestSignBaseGender(normalizeHSGender(e.target.value) as 'male' | 'female' | '')}
                               className="w-full p-3 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
@@ -25032,13 +25035,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               <option value="">-- Выберите пол --</option>
                               <option value="male">Мужской</option>
                               <option value="female">Женский</option>
-                            </select>
+                            </Select>
                         </div>
                         <div>
                             {/* Размеры — только те, что есть у карточек выбранной категории:
                                 весь размерный ряд магазина здесь только мешает. */}
                             <label className="block text-sm font-medium text-slate-700 mb-2">Размер</label>
-                            <select
+                            <Select
                               value={honestSignBaseSize}
                               onChange={(e) => setHonestSignBaseSize(e.target.value)}
                               className="w-full p-3 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none disabled:bg-slate-100 disabled:text-slate-400"
@@ -25050,7 +25053,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                   {s.size} ({s.cards})
                                 </option>
                               ))}
-                            </select>
+                            </Select>
 
                             <label className="mt-2 flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
                               <input
@@ -25285,14 +25288,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       <h2 className="text-lg font-bold text-slate-900">Файлы для печати</h2>
                     </div>
                     <div className="flex gap-2 items-center">
-                      <select
+                      <Select
                         value={printSupplierId}
                         onChange={(e) => setPrintSupplierId(e.target.value)}
                         className="flex-1 p-2 bg-white border border-slate-200 rounded-lg outline-none"
                       >
                         <option value="">-- Выберите поставщика --</option>
                         {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                      </select>
+                      </Select>
                       <button
                         onClick={() => printFileInputRef.current?.click()}
                         className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center"
@@ -25791,10 +25794,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     <div className="mt-4 flex flex-wrap items-end gap-3">
                       <div className="min-w-[240px]">
                         <label className="block text-xs text-slate-500 mb-1">Поставщик (с WB API токеном)</label>
-                        <select value={adsApiSupplierId} onChange={(e) => setAdsApiSupplierId(e.target.value)} className="w-full md:w-[360px] px-3 py-2 text-sm border border-slate-300 rounded-lg bg-white">
+                        <Select value={adsApiSupplierId} onChange={(e) => setAdsApiSupplierId(e.target.value)} className="w-full md:w-[360px] px-3 py-2 text-sm border border-slate-300 rounded-lg bg-white">
                           <option value="">- Выберите поставщика -</option>
                           {(suppliers || []).filter((s: any) => s.wb_adv_api_token || s.wb_api_token).map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                        </select>
+                        </Select>
                       </div>
                       <div>
                         <label className="block text-xs text-slate-500 mb-1">Период с</label>
@@ -26356,10 +26359,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               <CalcField label="Целевая маржа" value={calcTargetMargin} onChange={setCalcTargetMargin} suffix="%" step="1" />
                               <div>
                                 <label className="block text-xs font-medium text-slate-600 mb-1">Ставка УСН</label>
-                                <select value={usnRate} onChange={(e) => setCalcUsnRate(Number(e.target.value))} className="w-full px-2 py-2 border border-slate-300 rounded-lg text-sm">
+                                <Select value={usnRate} onChange={(e) => setCalcUsnRate(Number(e.target.value))} className="w-full px-2 py-2 border border-slate-300 rounded-lg text-sm">
                                   <option value={0.06}>6% «Доходы»</option>
                                   <option value={0.15}>15% «Д − Р»</option>
-                                </select>
+                                </Select>
                               </div>
                             </div>
                             <label className="mt-3 flex items-start gap-2 cursor-pointer select-none">
@@ -26565,9 +26568,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                       <label className="block text-xs font-medium text-slate-600 mb-1">Закупка за ед. <span className="text-slate-400">(валюта)</span></label>
                                       <div className="flex items-center gap-1">
                                         <CalcInput value={it.purchase} onChange={(v: number) => upd(it.id, { purchase: v })} className="w-full px-2 py-2 border border-slate-300 rounded-lg text-sm" />
-                                        <select value={it.currency} onChange={(e) => upd(it.id, { currency: e.target.value })} className="px-1 py-2 border border-slate-300 rounded-lg text-xs">
+                                        <Select value={it.currency} onChange={(e) => upd(it.id, { currency: e.target.value })} className="px-1 py-2 border border-slate-300 rounded-lg text-xs">
                                           {['CNY', 'USD', 'EUR', 'RUB', 'TRY', 'KGS'].map((c) => <option key={c} value={c}>{c}</option>)}
-                                        </select>
+                                        </Select>
                                       </div>
                                     </div>
                                     <CalcField label="Курс (0 = ЦБ)" value={it.rateManual} onChange={(v: number) => upd(it.id, { rateManual: v })} />
@@ -26581,35 +26584,35 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                   <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-3">
                                     <div>
                                       <label className="block text-xs font-medium text-slate-600 mb-1">Страна</label>
-                                      <select value={it.country} onChange={(e) => upd(it.id, { country: e.target.value })} className="w-full px-2 py-2 border border-slate-300 rounded-lg text-xs">
+                                      <Select value={it.country} onChange={(e) => upd(it.id, { country: e.target.value })} className="w-full px-2 py-2 border border-slate-300 rounded-lg text-xs">
                                         {IMPORT_COUNTRIES.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
-                                      </select>
+                                      </Select>
                                     </div>
                                     <div className="md:col-span-2">
                                       <label className="block text-xs font-medium text-slate-600 mb-1">Категория</label>
-                                      <select value={it.category} onChange={(e) => applyCategory(it.id, e.target.value)} className="w-full px-2 py-2 border border-slate-300 rounded-lg text-xs">
+                                      <Select value={it.category} onChange={(e) => applyCategory(it.id, e.target.value)} className="w-full px-2 py-2 border border-slate-300 rounded-lg text-xs">
                                         {IMPORT_CATEGORIES.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
-                                      </select>
+                                      </Select>
                                     </div>
                                     <CalcField label="Доставка до РФ" value={it.deliveryToBorder} onChange={(v: number) => upd(it.id, { deliveryToBorder: v })} suffix="₽" />
                                   </div>
                                   <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mt-3">
                                     <div>
                                       <label className="block text-xs font-medium text-slate-600 mb-1">Тип пошлины</label>
-                                      <select value={it.dutyType} onChange={(e) => upd(it.id, { dutyType: e.target.value })} className="w-full px-2 py-2 border border-slate-300 rounded-lg text-xs">
+                                      <Select value={it.dutyType} onChange={(e) => upd(it.id, { dutyType: e.target.value })} className="w-full px-2 py-2 border border-slate-300 rounded-lg text-xs">
                                         <option value="adv">Адвалорная (%)</option>
                                         <option value="spec">Специфическая (€)</option>
                                         <option value="comb">Комбинированная</option>
-                                      </select>
+                                      </Select>
                                     </div>
                                     <CalcField label="Ставка" value={it.dutyPct} onChange={(v: number) => upd(it.id, { dutyPct: v })} suffix="%" />
                                     <CalcField label="Ставка" value={it.dutySpec} onChange={(v: number) => upd(it.id, { dutySpec: v })} suffix="€" />
                                     <div>
                                       <label className="block text-xs font-medium text-slate-600 mb-1">За единицу</label>
-                                      <select value={it.dutyUnit} onChange={(e) => upd(it.id, { dutyUnit: e.target.value })} className="w-full px-2 py-2 border border-slate-300 rounded-lg text-xs">
+                                      <Select value={it.dutyUnit} onChange={(e) => upd(it.id, { dutyUnit: e.target.value })} className="w-full px-2 py-2 border border-slate-300 rounded-lg text-xs">
                                         <option value="kg">€ / кг</option>
                                         <option value="pair">€ / шт</option>
-                                      </select>
+                                      </Select>
                                     </div>
                                     <CalcField label="НДС ввозной" value={it.vatPct} onChange={(v: number) => upd(it.id, { vatPct: v })} suffix="%" />
                                   </div>
@@ -26632,16 +26635,16 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                           <label className="block text-xs font-medium text-slate-600 mb-1">Закупка за ед.</label>
                                           <div className="flex items-center gap-1">
                                             <CalcInput value={v.purchase} onChange={(x: number) => updImportVariant(it, i, { purchase: x })} className="w-24 px-2 py-2 border border-slate-300 rounded-lg text-sm" />
-                                            <select value={v.currency} onChange={(e) => updImportVariant(it, i, { currency: e.target.value })} className="px-1 py-2 border border-slate-300 rounded-lg text-xs">
+                                            <Select value={v.currency} onChange={(e) => updImportVariant(it, i, { currency: e.target.value })} className="px-1 py-2 border border-slate-300 rounded-lg text-xs">
                                               {['CNY', 'USD', 'EUR', 'RUB', 'TRY', 'KGS'].map((c) => <option key={c} value={c}>{c}</option>)}
-                                            </select>
+                                            </Select>
                                           </div>
                                         </div>
                                         <div>
                                           <label className="block text-xs font-medium text-slate-600 mb-1">Страна</label>
-                                          <select value={v.country} onChange={(e) => updImportVariant(it, i, { country: e.target.value })} className="px-2 py-2 border border-slate-300 rounded-lg text-xs">
+                                          <Select value={v.country} onChange={(e) => updImportVariant(it, i, { country: e.target.value })} className="px-2 py-2 border border-slate-300 rounded-lg text-xs">
                                             {IMPORT_COUNTRIES.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
-                                          </select>
+                                          </Select>
                                         </div>
                                         <CalcField label="Доставка до РФ" value={v.deliveryToBorder} onChange={(x: number) => updImportVariant(it, i, { deliveryToBorder: x })} suffix="₽" />
                                         <CalcField label="Оборот" value={v.turnoverDays ?? 30} onChange={(x: number) => updImportVariant(it, i, { turnoverDays: x })} suffix="дн" step="1" />
@@ -26694,11 +26697,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                     <CalcField label="Себестоимость ОСНО (с НДС)" value={it.costRu} onChange={(v: number) => upd(it.id, { costRu: v })} suffix="₽" />
                                     <div>
                                       <label className="block text-xs font-medium text-slate-600 mb-1">НДС в закупке</label>
-                                      <select value={it.vatPct} onChange={(e) => upd(it.id, { vatPct: Number(e.target.value) })} className="w-full px-2 py-2 border border-slate-300 rounded-lg text-sm">
+                                      <Select value={it.vatPct} onChange={(e) => upd(it.id, { vatPct: Number(e.target.value) })} className="w-full px-2 py-2 border border-slate-300 rounded-lg text-sm">
                                         <option value={22}>22% — обычный поставщик</option>
                                         <option value={10}>10% — льготный товар</option>
                                         <option value={0}>0% — поставщик без НДС</option>
-                                      </select>
+                                      </Select>
                                     </div>
                                     <CalcField label="Оборот закупки РФ" value={it.ruTurnoverDays ?? 30} onChange={(v: number) => upd(it.id, { ruTurnoverDays: v })} suffix="дн" step="1" />
                                   </div>
@@ -27024,7 +27027,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   <div className="flex flex-wrap items-end justify-start gap-3 mb-3">
                     <div className="min-w-[260px]">
                       <label className="block text-sm font-medium text-slate-700 mb-2">Поставщик для загружаемого отчёта</label>
-                      <select
+                      <Select
                         value={uploadedSelectedSupplierId}
                         onChange={(e) => {
                           const v = e.target.value;
@@ -27038,7 +27041,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <option value="">- Выберите поставщика -</option>
                         <option value={ANY_SUPPLIER_ID}>Любой поставщик (без фото)</option>
                         {visibleUploadedAnalyticsSuppliers.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                      </select>
+                      </Select>
                       {(uploadedAnalyticsSuppliers || []).length === 0 && (
                         <div className="mt-2 text-xs text-amber-600">Поставщики не загрузились. Нажмите «Отчёты» или обновите страницу.</div>
                       )}
@@ -28394,7 +28397,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               <>
                                 <div className="flex items-center gap-1.5">
                                   <span className="text-slate-400 text-xs">Продажи:</span>
-                                  <select
+                                  <Select
                                     value={uploadedVatSalesIncluded ? 'in' : 'on'}
                                     onChange={(e) => {
                                       const v = e.target.value === 'in';
@@ -28406,11 +28409,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                   >
                                     <option value="on" className="text-slate-800">×22% сверху</option>
                                     <option value="in" className="text-slate-800">×22/122 (НДС в сумме)</option>
-                                  </select>
+                                  </Select>
                                 </div>
                                 <div className="flex items-center gap-1.5">
                                   <span className="text-slate-400 text-xs">Себестоимость:</span>
-                                  <select
+                                  <Select
                                     value={uploadedVatCostIncluded ? 'in' : 'on'}
                                     onChange={(e) => {
                                       const v = e.target.value === 'in';
@@ -28422,7 +28425,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                   >
                                     <option value="in" className="text-slate-800">×22/122 (НДС в сумме)</option>
                                     <option value="on" className="text-slate-800">×22% сверху</option>
-                                  </select>
+                                  </Select>
                                 </div>
                                 <label className="flex items-center gap-2 cursor-pointer select-none" title="С 01.01.2026 эквайринг облагается НДС 22%. Берём его входной НДС к вычету (сам эквайринг уже в комиссии — повторно не вычитаем).">
                                   <input
@@ -28437,14 +28440,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             )}
                             <div className="flex items-center gap-2">
                               <span className="text-slate-400">Сравнить с:</span>
-                              <select value={compareReportId} onChange={(e) => loadCompareSummary(e.target.value)} className="px-2 py-1 text-xs rounded-lg bg-white/10 border border-white/15 text-white max-w-[230px]">
+                              <Select value={compareReportId} onChange={(e) => loadCompareSummary(e.target.value)} className="px-2 py-1 text-xs rounded-lg bg-white/10 border border-white/15 text-white max-w-[230px]">
                                 <option value="" className="text-slate-800">— не сравнивать —</option>
                                 {[...(uploadedHistory || [])].reverse().map((h: any) => {
                                   const ps = h?.summary_json?.period_start ? new Date(h.summary_json.period_start).toLocaleDateString('ru-RU') : '';
                                   const pe = h?.summary_json?.period_end ? new Date(h.summary_json.period_end).toLocaleDateString('ru-RU') : '';
                                   return <option key={h.id} value={h.id} className="text-slate-800">{ps}–{pe}{h?.summary_json?.report_number ? ` · №${h.summary_json.report_number}` : ''}</option>;
                                 })}
-                              </select>
+                              </Select>
                               {compareSummary && <span className="text-[11px] text-indigo-300">▲/▼ к выбранному периоду</span>}
                             </div>
                             <div className="flex items-center gap-1.5 sm:ml-auto">
@@ -29141,7 +29144,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       placeholder="Поиск по коду/названию"
                       className="w-64 px-3 py-2 text-sm border border-slate-300 rounded-lg"
                     />
-                    <select
+                    <Select
                       value={uploadedCostEditorFilter}
                       onChange={(e) => {
                         const nextFilter = e.target.value as any;
@@ -29160,7 +29163,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       <option value="all">Все товары</option>
                       <option value="with_price">С ценой</option>
                       <option value="without_price">Без цены</option>
-                    </select>
+                    </Select>
                     <button type="button" onClick={saveUploadedCostsFromEditor} disabled={uploadedSavingCosts} className="px-3 py-2 text-sm rounded-lg border border-emerald-300 text-emerald-700 hover:bg-emerald-50 disabled:opacity-60">
                       {uploadedSavingCosts ? 'Сохраняю...' : 'Сохранить'}
                     </button>
@@ -29791,7 +29794,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-2">Отправить через бота</label>
-                    <select
+                    <Select
                       value={selectedBotForManual}
                       onChange={(e) => setSelectedBotForManual(e.target.value)}
                       className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
@@ -29799,12 +29802,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       <option value="main">Основной бот (Поставки)</option>
                       <option value="reception">Бот Приемки</option>
                       <option value="file">Бот Файлов</option>
-                    </select>
+                    </Select>
                   </div>
 
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-2">Поставщик (Chat ID)</label>
-                    <select
+                    <Select
                       value={telegramSupplierId}
                       onChange={(e) => setTelegramSupplierId(e.target.value)}
                       className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
@@ -29816,7 +29819,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           {s.name} {s.telegram_chat_id ? `(${s.telegram_chat_id})` : '(Нет ID)'}
                         </option>
                       ))}
-                    </select>
+                    </Select>
                   </div>
 
                   <div>
@@ -30362,7 +30365,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">Роль</label>
-                    <select
+                    <Select
                       value={newEmployee.role}
                       onChange={e => setNewEmployee({...newEmployee, role: e.target.value})}
                       className="oc-select"
@@ -30370,7 +30373,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       <option value="Сборщик">Сборщик</option>
                       <option value="Менеджер">Менеджер</option>
                       <option value="Управляющий">Управляющий</option>
-                    </select>
+                    </Select>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
@@ -30472,7 +30475,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     </div>
                     <div>
                         <label className="block text-sm font-medium text-slate-700 mb-1">Роль</label>
-                        <select
+                        <Select
                         value={editingEmployee.role || 'Сборщик'}
                         onChange={e => setEditingEmployee({...editingEmployee, role: e.target.value})}
                         className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-indigo-500"
@@ -30480,7 +30483,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <option value="Сборщик">Сборщик</option>
                         <option value="Менеджер">Менеджер</option>
                         <option value="Управляющий">Управляющий</option>
-                        </select>
+                        </Select>
                     </div>
                     <div>
                         <label className="block text-sm font-medium text-slate-700 mb-1">Логин</label>
@@ -31614,12 +31617,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             return (
                             <div key={r.id} className="rounded-2xl border border-slate-200 bg-slate-50/60 p-2">
                               <div className="grid grid-cols-1 md:grid-cols-[1.4fr_1fr_1.3fr_1fr_auto] gap-2">
-                              <select value={r.size} onChange={(e) => { const name = e.target.value; const t = packagingTypeTemplates.find((x) => x.name === name); setCwPurchaseRows(prev => prev.map(x => x.id === r.id ? { ...x, size: name, price: (t && !x.newPrice) ? String(t.price || '') : x.price } : x)); }} className="oc-input">
+                              <Select value={r.size} onChange={(e) => { const name = e.target.value; const t = packagingTypeTemplates.find((x) => x.name === name); setCwPurchaseRows(prev => prev.map(x => x.id === r.id ? { ...x, size: name, price: (t && !x.newPrice) ? String(t.price || '') : x.price } : x)); }} className="oc-input">
                                 <option value="">Тип упаковки…</option>
                                 {packagingTypeTemplates.map((t) => <option key={`pt-${r.id}-${t.name}`} value={t.name}>{t.name}{t.price ? ` — ${t.price} ₽` : ''}</option>)}
                                 {r.size && !packagingTypeTemplates.some((t) => t.name === r.size) && <option value={r.size}>{r.size}</option>}
-                              </select>
-                              <input type="number" placeholder="Кол-во" value={r.quantity} onChange={(e) => setCwPurchaseRows(prev => prev.map(x => x.id === r.id ? { ...x, quantity: e.target.value } : x))} className="oc-input" />
+                              </Select>
+                              <QtyField placeholder="Кол-во" value={r.quantity} onChange={(e) => setCwPurchaseRows(prev => prev.map(x => x.id === r.id ? { ...x, quantity: e.target.value } : x))} className="oc-input" />
                               <div>
                                 <input type="number" step="0.01" placeholder="Цена за шт." value={r.price} disabled={Boolean(tpl) && !r.newPrice} onChange={(e) => setCwPurchaseRows(prev => prev.map(x => x.id === r.id ? { ...x, price: e.target.value } : x))} className={`oc-input ${tpl && !r.newPrice ? 'bg-slate-100 text-slate-500' : ''}`} />
                                 {tpl && (
@@ -31685,10 +31688,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   <div className="rounded-3xl border border-slate-200 bg-white shadow-sm overflow-hidden">
                     <div className="flex flex-col gap-3 px-5 py-4 border-b border-slate-100 md:flex-row md:items-center md:justify-between">
                       <h4 className="font-bold text-slate-900">История закупок</h4>
-                      <select value={cwPurchaseHistorySupplierFilter} onChange={(e) => setCwPurchaseHistorySupplierFilter(e.target.value)} className="oc-input md:max-w-xs">
+                      <Select value={cwPurchaseHistorySupplierFilter} onChange={(e) => setCwPurchaseHistorySupplierFilter(e.target.value)} className="oc-input md:max-w-xs">
                         <option value="all">Все поставщики</option>
                         {suppliers.map((s) => <option key={`pp-flt-${s.id}`} value={String(s.id)}>{s.name}</option>)}
-                      </select>
+                      </Select>
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-4">
                       <div className="rounded-2xl border border-indigo-100 bg-indigo-50 p-3"><div className="text-[11px] font-semibold uppercase text-indigo-500">Упаковка</div><div className="text-xl font-extrabold text-indigo-800">{totalPack.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽</div></div>
@@ -31973,15 +31976,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                       return (
                                         <div key={`cw-item-${idx}`} className="border rounded-xl p-3 bg-slate-50 space-y-2">
                                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                            <select
+                                            <Select
                                               value={item.supplier_id}
                                               onChange={(e) => setCwFormItems(prev => prev.map((x, i) => i === idx ? { ...x, supplier_id: e.target.value } : x))}
                                               className="oc-select"
                                             >
                                               <option value="">Поставщик...</option>
                                               {suppliers.map(s => <option key={`cw-item-s-${s.id}`} value={s.id}>{s.name}</option>)}
-                                            </select>
-                                            <select
+                                            </Select>
+                                            <Select
                                               value={item.work_rate_id}
                                               onChange={(e) => setCwFormItems(prev => prev.map((x, i) => i === idx ? { ...x, work_rate_id: e.target.value, quantity: isTimeBasedWorkRate(e.target.value) ? '' : x.quantity } : x))}
                                               className="oc-select"
@@ -31990,11 +31993,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                               <option value={CW_TIME_RATE_KEY}>Время {(!currentEmployee || normalizeRoleKey(currentEmployee.role || currentEmployee.login) === 'admin') ? `(${getCwTimeRatePrice().toFixed(2)} ₽ / мин)` : ''}</option>
                                               {cwWorkRates
                                                 .map(r => <option key={r.id} value={r.id}>{r.name} {(!currentEmployee || currentEmployee.role === 'admin') ? `(${r.price} ₽)` : ''}</option>)}
-                                            </select>
+                                            </Select>
                                           </div>
 
                                           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                                            <select
+                                            <Select
                                               value={item.packaging_used}
                                               onChange={(e) => setCwFormItems(prev => prev.map((x, i) => i === idx ? { ...x, packaging_used: e.target.value as '' | 'yes' | 'no', packaging: e.target.value === 'yes' ? x.packaging : '' } : x))}
                                               className="oc-select"
@@ -32002,22 +32005,22 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                               <option value="">Упаковка: выбрать...</option>
                                               <option value="no">Упаковка: нет</option>
                                               <option value="yes">Упаковка: да</option>
-                                            </select>
+                                            </Select>
                                             {item.packaging_used === 'yes' ? (
-                                              <select
+                                              <Select
                                                 value={item.packaging}
                                                 onChange={(e) => setCwFormItems(prev => prev.map((x, i) => i === idx ? { ...x, packaging: e.target.value } : x))}
                                                 className="oc-select"
                                               >
                                                 <option value="">Выберите упаковку...</option>
                                                 {cwPackagingRates.map(r => <option key={`cw-pack-${idx}-${r.id}`} value={r.name}>{r.name}</option>)}
-                                              </select>
+                                              </Select>
                                             ) : (
                                               <div className="w-full p-2 border rounded-lg text-xs text-slate-500 flex items-center">Упаковка не нужна</div>
                                             )}
                                             {!isTime ? (
-                                              <input
-                                                type="number"
+                                              <QtyField
+                                               
                                                 min="1"
                                                 placeholder="Кол-во"
                                                 value={item.quantity}
@@ -32393,7 +32396,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       </div>
                       <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                         <label className="block text-sm font-semibold text-slate-800 mb-2">Поставщик</label>
-                        <select
+                        <Select
                           value={cwReportForm.supplier_id}
                           onChange={e => setCwReportForm({...cwReportForm, supplier_id: e.target.value})}
                           className="w-full p-2 border rounded-lg text-sm"
@@ -32401,7 +32404,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           <option value="">Выберите поставщика...</option>
                           <option value="__ALL__">По всем поставщикам</option>
                           {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                        </select>
+                        </Select>
                       </div>
                     </div>
 
@@ -32691,8 +32694,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">Количество коробок</label>
-                    <input
-                      type="number"
+                    <QtyField
+                     
                       min="1"
                       value={editBoxLogModal.quantity}
                       onChange={e => setEditBoxLogModal(prev => ({ ...prev, quantity: e.target.value }))}
@@ -32702,8 +32705,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">Количество товара</label>
-                    <input
-                      type="number"
+                    <QtyField
+                     
                       min="0"
                       value={editBoxLogModal.items_quantity}
                       onChange={e => setEditBoxLogModal(prev => ({ ...prev, items_quantity: e.target.value }))}
@@ -32738,14 +32741,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">Поставщик</label>
-                    <select
+                    <Select
                       value={editBoxLogModal.supplier_id}
                       onChange={e => setEditBoxLogModal(prev => ({ ...prev, supplier_id: e.target.value }))}
                       className="oc-select"
                     >
                       <option value="">Не выбран</option>
                       {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                    </select>
+                    </Select>
                   </div>
                 </div>
 
@@ -32774,14 +32777,14 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
               <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-md" onClick={e => e.stopPropagation()}>
                 <h3 className="text-lg font-bold text-slate-900 mb-3">Кто оплатил?</h3>
                 <p className="text-sm text-slate-500 mb-4">Выберите поставщика, который оплатил эту запись.</p>
-                <select
+                <Select
                   value={paidByModal.supplierId}
                   onChange={(e) => setPaidByModal(prev => ({ ...prev, supplierId: e.target.value }))}
                   className="w-full p-2 border rounded-lg mb-4"
                 >
                   <option value="">Выберите поставщика...</option>
                   {suppliers.map(s => <option key={`paid-by-${s.id}`} value={s.id}>{s.name}</option>)}
-                </select>
+                </Select>
                 <div className="flex gap-3">
                   <button
                     onClick={() => setPaidByModal({ isOpen: false, target: 'temp', logId: '', supplierId: '' })}
@@ -32884,16 +32887,16 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     const rowAmount = totalPallets > 0 ? (totalAmount / totalPallets) * rowPallets : 0;
                     return (
                       <div key={`pallet-row-${idx}`} className="grid grid-cols-1 md:grid-cols-[1fr_150px_170px_40px] gap-2 items-center">
-                        <select
+                        <Select
                           value={row.supplier_id}
                           onChange={(e) => setPalletRows(prev => prev.map((r, i) => i === idx ? { ...r, supplier_id: e.target.value } : r))}
                           className="oc-select"
                         >
                           <option value="">Выберите поставщика</option>
                           {suppliers.map(s => <option key={`pallet-s-${s.id}`} value={s.id}>{s.name}</option>)}
-                        </select>
-                        <input
-                          type="number"
+                        </Select>
+                        <QtyField
+                         
                           placeholder="Паллет"
                           value={row.pallets}
                           onChange={(e) => setPalletRows(prev => prev.map((r, i) => i === idx ? { ...r, pallets: e.target.value } : r))}
@@ -33110,7 +33113,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 <div className="space-y-2">
                   {cwScheduleNotifyEmployeeIds.map((id, i) => (
                     <div key={`sched-notify-${i}`} className="flex items-center gap-2">
-                      <select value={id} onChange={(e) => setCwScheduleNotifyEmployeeIds((prev) => prev.map((x, idx) => idx === i ? e.target.value : x))} className="oc-select">
+                      <Select value={id} onChange={(e) => setCwScheduleNotifyEmployeeIds((prev) => prev.map((x, idx) => idx === i ? e.target.value : x))} className="oc-select">
                         <option value="">Выберите сотрудника...</option>
                         {employees
                           .filter((e) => String(e.role || '').toLowerCase() !== 'admin' && String(e.login || '').toLowerCase() !== 'admin')
@@ -33118,7 +33121,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           .map((e) => (
                             <option key={`sched-notify-emp-${e.id}`} value={e.id}>{e.full_name}</option>
                           ))}
-                      </select>
+                      </Select>
                       <button type="button" onClick={() => setCwScheduleNotifyEmployeeIds((prev) => prev.filter((_, idx) => idx !== i))} className="px-2 py-1 text-xs rounded border border-rose-300 text-rose-700">Удалить</button>
                     </div>
                   ))}
@@ -33606,21 +33609,21 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-500">{filteredTempWorkerLogs.length}</span>
                     </div>
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 xl:w-auto xl:max-w-2xl xl:flex-1">
-                      <select value={tempWorkerSupplierFilter} onChange={(e) => setTempWorkerSupplierFilter(e.target.value)} className="oc-input">
+                      <Select value={tempWorkerSupplierFilter} onChange={(e) => setTempWorkerSupplierFilter(e.target.value)} className="oc-input">
                         <option value="all">Все поставщики</option>
                         {suppliers.map((s) => (
                           <option key={`temp-filter-s-${s.id}`} value={String(s.id)}>{s.name}</option>
                         ))}
-                      </select>
-                      <select value={tempWorkerPaidFilter} onChange={(e) => setTempWorkerPaidFilter(e.target.value as 'all' | 'paid' | 'unpaid')} className="oc-input">
+                      </Select>
+                      <Select value={tempWorkerPaidFilter} onChange={(e) => setTempWorkerPaidFilter(e.target.value as 'all' | 'paid' | 'unpaid')} className="oc-input">
                         <option value="all">Все статусы оплаты</option>
                         <option value="paid">Оплачено</option>
                         <option value="unpaid">Не оплачено</option>
-                      </select>
-                      <select value={tempWorkerDateSort} onChange={(e) => setTempWorkerDateSort(e.target.value as 'desc' | 'asc')} className="oc-input">
+                      </Select>
+                      <Select value={tempWorkerDateSort} onChange={(e) => setTempWorkerDateSort(e.target.value as 'desc' | 'asc')} className="oc-input">
                         <option value="desc">Сначала новые</option>
                         <option value="asc">Сначала старые</option>
-                      </select>
+                      </Select>
                     </div>
                   </div>
                     <div className="md:hidden space-y-2">
@@ -33844,7 +33847,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     </label>
                     <label className="block">
                       <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Кто оплатит</span>
-                      <select
+                      <Select
                         value={tempWorkerQuickPayPayerSupplierId}
                         onChange={(e) => setTempWorkerQuickPayPayerSupplierId(e.target.value)}
                         className="oc-input h-11 rounded-xl bg-white text-sm"
@@ -33853,7 +33856,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         {deliveryPayerSuppliers.map((s) => (
                           <option key={`quick-pay-payer-${s.id}`} value={String(s.id)}>{s.name}</option>
                         ))}
-                      </select>
+                      </Select>
                     </label>
                     <button
                       type="button"
@@ -33973,7 +33976,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       options={[{ value: 'all', label: 'Все доставщики' }, ...deliveryCourierOptions.map((name) => ({ value: name, label: name }))]}
                       ariaLabel="Доставщик"
                     />
-                    <select
+                    <Select
                       value={deliveryQuickPayPayerSupplierId}
                       onChange={(e) => setDeliveryQuickPayPayerSupplierId(e.target.value)}
                       className="oc-input h-11 rounded-xl bg-white text-sm"
@@ -33982,7 +33985,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       {deliveryPayerSuppliers.map((s: any) => (
                         <option key={`quick-pay-delivery-payer-${s.id}`} value={String(s.id)}>{s.name}</option>
                       ))}
-                    </select>
+                    </Select>
                     <button
                       type="button"
                       onClick={() => {
@@ -34162,7 +34165,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
                       <label className="block">
                         <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Доставщик</span>
-                        <select
+                        <Select
                           value={deliveryForm.courier}
                           onChange={(e) => setDeliveryForm(prev => ({ ...prev, courier: e.target.value }))}
                           className="oc-input h-11 rounded-xl bg-white text-sm"
@@ -34171,12 +34174,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           {deliveryPersons.map((name) => (
                             <option key={'delivery-person-' + name} value={name}>{name}</option>
                           ))}
-                        </select>
+                        </Select>
                       </label>
                       <label className="block">
                         <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Тип поставки</span>
                         <div className="flex gap-2">
-                          <select
+                          <Select
                             value={deliveryForm.supply_type}
                             onChange={(e) => setDeliveryForm(prev => ({ ...prev, supply_type: e.target.value }))}
                             className="oc-input h-11 rounded-xl bg-white text-sm flex-1 min-w-0"
@@ -34185,7 +34188,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             {deliverySupplyTypes.map((t) => (
                               <option key={'delivery-supply-type-' + t} value={t}>{t}</option>
                             ))}
-                          </select>
+                          </Select>
                           <button
                             type="button"
                             onClick={() => setShowDeliverySupplyTypeModal(true)}
@@ -34226,7 +34229,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     <div className="mt-4 space-y-2">
                       {deliveryForm.rows.map((row, index) => (
                         <div key={'delivery-form-row-' + index} className="grid grid-cols-2 md:grid-cols-[1fr_120px_120px_44px] gap-2">
-                          <select
+                          <Select
                             value={row.supplier_id}
                             onChange={(e) => setDeliveryForm(prev => ({
                               ...prev,
@@ -34238,9 +34241,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             {suppliers.map((supplier) => (
                               <option key={'delivery-row-supplier-' + index + '-' + supplier.id} value={String(supplier.id)}>{supplier.name}</option>
                             ))}
-                          </select>
-                          <input
-                            type="number"
+                          </Select>
+                          <QtyField
+                           
                             min="0"
                             step="1"
                             value={row.boxes}
@@ -34251,8 +34254,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             placeholder="Коробки"
                             className="oc-input h-11 rounded-xl bg-white text-sm"
                           />
-                          <input
-                            type="number"
+                          <QtyField
+                           
                             min="0"
                             step="1"
                             value={row.pallets}
@@ -34306,12 +34309,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           <button type="button" onClick={() => { setDeliveryDateStart(''); setDeliveryDateEnd(''); }} className="h-11 px-3 rounded-xl border border-slate-200 text-sm text-slate-600 hover:bg-slate-50">Сброс</button>
                         )}
                         <div><label className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1">Поставщик</label>
-                          <select value={deliverySupplierFilter} onChange={(e) => setDeliverySupplierFilter(e.target.value)} className="oc-input h-11 rounded-xl bg-white text-sm sm:max-w-xs">
+                          <Select value={deliverySupplierFilter} onChange={(e) => setDeliverySupplierFilter(e.target.value)} className="oc-input h-11 rounded-xl bg-white text-sm sm:max-w-xs">
                             <option value="all">Все поставщики</option>
                             {deliveryInfographicsFiltered.supplierRows.map((row) => (
                               <option key={'delivery-filter-' + row.supplierId} value={row.supplierId}>{row.supplierName}</option>
                             ))}
-                          </select>
+                          </Select>
                         </div>
                       </div>
                     </div>
@@ -34461,23 +34464,23 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <label className="block">
                       <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Период</span>
-                      <select
+                      <Select
                         value={salaryPayPeriodKey}
                         onChange={async (e) => { setSalaryPayPeriodKey(e.target.value); setSalaryPaySelectedIds([]); setSalaryPayExpanded([]); setSalaryPayExpandedDates([]); await loadSalaryPayRows(e.target.value); }}
                         className="oc-input h-11 rounded-xl bg-white text-sm"
                       >
                         {cwSalaryPeriods.map((p) => (<option key={'salary-period-' + p.key} value={p.key}>{p.label}</option>))}
-                      </select>
+                      </Select>
                     </label>
                     <label className="block">
                       <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Оплата</span>
-                      <select
+                      <Select
                         value={salaryPayOwner}
                         onChange={(e) => setSalaryPayOwner(e.target.value as WarehouseMoneyOwner)}
                         className="oc-input h-11 rounded-xl bg-white text-sm"
                       >
                         {WAREHOUSE_MONEY_OWNERS.map((o) => (<option key={'salary-owner-' + o.id} value={o.id}>{getSupplierNameForOwner(o.id)}</option>))}
-                      </select>
+                      </Select>
                     </label>
                   </div>
                 </div>
@@ -34677,7 +34680,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   </label>
                   <label className="block">
                     <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Доставщик</span>
-                    <select
+                    <Select
                       value={deliveryEditModal.courier}
                       onChange={(e) => setDeliveryEditModal(prev => ({ ...prev, courier: e.target.value }))}
                       className="oc-input h-11 rounded-xl bg-white text-sm"
@@ -34686,12 +34689,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       {deliveryCourierOptions.map((name) => (
                         <option key={'delivery-edit-person-' + name} value={name}>{name}</option>
                       ))}
-                    </select>
+                    </Select>
                   </label>
                   <label className="block">
                     <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Тип поставки</span>
                     <div className="flex gap-2">
-                      <select
+                      <Select
                         value={deliveryEditModal.supply_type}
                         onChange={(e) => setDeliveryEditModal(prev => ({ ...prev, supply_type: e.target.value }))}
                         className="oc-input h-11 rounded-xl bg-white text-sm flex-1"
@@ -34700,7 +34703,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         {deliverySupplyTypes.map((t) => (
                           <option key={'delivery-edit-supply-type-' + t} value={t}>{t}</option>
                         ))}
-                      </select>
+                      </Select>
                       <button
                         type="button"
                         onClick={() => setShowDeliverySupplyTypeModal(true)}
@@ -34727,7 +34730,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 <div className="mt-4 space-y-2">
                   {deliveryEditModal.rows.map((row, index) => (
                     <div key={'delivery-edit-row-' + index} className="grid grid-cols-2 md:grid-cols-[1fr_120px_120px_44px] gap-2">
-                      <select
+                      <Select
                         value={row.supplier_id}
                         onChange={(e) => setDeliveryEditModal(prev => ({
                           ...prev,
@@ -34739,9 +34742,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         {suppliers.map((supplier) => (
                           <option key={'delivery-edit-supplier-' + index + '-' + supplier.id} value={String(supplier.id)}>{supplier.name}</option>
                         ))}
-                      </select>
-                      <input
-                        type="number"
+                      </Select>
+                      <QtyField
+                       
                         min="0"
                         step="1"
                         value={row.boxes}
@@ -34752,8 +34755,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         placeholder="Коробки"
                         className="oc-input h-11 rounded-xl bg-white text-sm"
                       />
-                      <input
-                        type="number"
+                      <QtyField
+                       
                         min="0"
                         step="1"
                         value={row.pallets}
@@ -34826,7 +34829,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
                       <label className="block">
                         <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Поставщик</span>
-                        <select
+                        <Select
                           value={deliveryReportForm.supplier_id}
                           onChange={(e) => setDeliveryReportForm(prev => ({ ...prev, supplier_id: e.target.value }))}
                           className="oc-input h-11 rounded-xl bg-white text-sm"
@@ -34835,11 +34838,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           {deliveryInfographics.supplierRows.map((row) => (
                             <option key={'delivery-report-supplier-' + row.supplierId} value={row.supplierId}>{row.supplierName}</option>
                           ))}
-                        </select>
+                        </Select>
                       </label>
                       <label className="block">
                         <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Доставщик</span>
-                        <select
+                        <Select
                           value={deliveryReportForm.courier}
                           onChange={(e) => setDeliveryReportForm(prev => ({ ...prev, courier: e.target.value }))}
                           className="oc-input h-11 rounded-xl bg-white text-sm"
@@ -34848,11 +34851,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           {deliveryCourierOptions.map((name) => (
                             <option key={'delivery-report-courier-' + name} value={name}>{name}</option>
                           ))}
-                        </select>
+                        </Select>
                       </label>
                       <label className="block">
                         <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Кто оплатил</span>
-                        <select
+                        <Select
                           value={deliveryReportForm.paid_by_supplier_id}
                           onChange={(e) => setDeliveryReportForm(prev => ({ ...prev, paid_by_supplier_id: e.target.value }))}
                           className="oc-input h-11 rounded-xl bg-white text-sm"
@@ -34861,11 +34864,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           {suppliers.map((supplier) => (
                             <option key={'delivery-report-paid-by-' + supplier.id} value={String(supplier.id)}>{supplier.name}</option>
                           ))}
-                        </select>
+                        </Select>
                       </label>
                       <label className="block">
                         <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Статус оплаты</span>
-                        <select
+                        <Select
                           value={deliveryReportForm.paid_status}
                           onChange={(e) => setDeliveryReportForm(prev => ({ ...prev, paid_status: e.target.value }))}
                           className="oc-input h-11 rounded-xl bg-white text-sm"
@@ -34873,7 +34876,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           <option value="all">Все статусы</option>
                           <option value="paid">Оплачено</option>
                           <option value="unpaid">Не оплачено</option>
-                        </select>
+                        </Select>
                       </label>
                       <label className="block">
                         <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Дата с</span>
@@ -35101,7 +35104,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
                       <label className="mt-4 block">
                         <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Кто оплатил</span>
-                        <select
+                        <Select
                           value={deliveryPayModal.payerSupplierId}
                           onChange={(e) => setDeliveryPayModal(prev => ({ ...prev, payerSupplierId: e.target.value }))}
                           className="oc-input h-11 rounded-xl bg-white text-sm"
@@ -35110,7 +35113,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           {deliveryPayerSuppliers.map((supplier) => (
                             <option key={'delivery-pay-supplier-' + supplier.id} value={String(supplier.id)}>{supplier.name}</option>
                           ))}
-                        </select>
+                        </Select>
                       </label>
 
                       <div className="mt-5 flex justify-end gap-2">
@@ -35160,32 +35163,32 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
                       <label className="block">
                         <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Поставщик</span>
-                        <select value={generalReportForm.supplier_id} onChange={(e) => setGeneralReportForm(prev => ({ ...prev, supplier_id: e.target.value }))} className="oc-input h-11 rounded-xl bg-white text-sm">
+                        <Select value={generalReportForm.supplier_id} onChange={(e) => setGeneralReportForm(prev => ({ ...prev, supplier_id: e.target.value }))} className="oc-input h-11 rounded-xl bg-white text-sm">
                           <option value="all">Все поставщики</option>
                           {suppliers.map((s) => <option key={`general-report-s-${s.id}`} value={String(s.id)}>{s.name}</option>)}
-                        </select>
+                        </Select>
                       </label>
                       <label className="block">
                         <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Исполнитель / доставщик</span>
-                        <select value={generalReportForm.person_name} onChange={(e) => setGeneralReportForm(prev => ({ ...prev, person_name: e.target.value }))} className="oc-input h-11 rounded-xl bg-white text-sm">
+                        <Select value={generalReportForm.person_name} onChange={(e) => setGeneralReportForm(prev => ({ ...prev, person_name: e.target.value }))} className="oc-input h-11 rounded-xl bg-white text-sm">
                           <option value="all">Все исполнители</option>
                           {generalReportPersonOptions.map((name) => <option key={`general-report-person-${name}`} value={name}>{name}</option>)}
-                        </select>
+                        </Select>
                       </label>
                       <label className="block">
                         <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Кто оплатил</span>
-                        <select value={generalReportForm.paid_by_supplier_id} onChange={(e) => setGeneralReportForm(prev => ({ ...prev, paid_by_supplier_id: e.target.value }))} className="oc-input h-11 rounded-xl bg-white text-sm">
+                        <Select value={generalReportForm.paid_by_supplier_id} onChange={(e) => setGeneralReportForm(prev => ({ ...prev, paid_by_supplier_id: e.target.value }))} className="oc-input h-11 rounded-xl bg-white text-sm">
                           <option value="all">Все оплаты</option>
                           {suppliers.map((s) => <option key={`general-report-paid-by-${s.id}`} value={String(s.id)}>{s.name}</option>)}
-                        </select>
+                        </Select>
                       </label>
                       <label className="block">
                         <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Статус оплаты</span>
-                        <select value={generalReportForm.paid_status} onChange={(e) => setGeneralReportForm(prev => ({ ...prev, paid_status: e.target.value }))} className="oc-input h-11 rounded-xl bg-white text-sm">
+                        <Select value={generalReportForm.paid_status} onChange={(e) => setGeneralReportForm(prev => ({ ...prev, paid_status: e.target.value }))} className="oc-input h-11 rounded-xl bg-white text-sm">
                           <option value="all">Все статусы</option>
                           <option value="paid">Оплачено</option>
                           <option value="unpaid">Не оплачено</option>
-                        </select>
+                        </Select>
                       </label>
                       <label className="block">
                         <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Дата с</span>
@@ -35544,7 +35547,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
                       <label className="block">
                         <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Поставщик работ</span>
-                        <select
+                        <Select
                           value={tempWorkerReportForm.supplier_id}
                           onChange={(e) => setTempWorkerReportForm(prev => ({ ...prev, supplier_id: e.target.value }))}
                           className="oc-input h-11 rounded-xl bg-white text-sm"
@@ -35553,11 +35556,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           {suppliers.map((s) => (
                             <option key={`temp-report-s-${s.id}`} value={String(s.id)}>{s.name}</option>
                           ))}
-                        </select>
+                        </Select>
                       </label>
                       <label className="block">
                         <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Временный сотрудник</span>
-                        <select
+                        <Select
                           value={tempWorkerReportForm.worker_name}
                           onChange={(e) => setTempWorkerReportForm(prev => ({ ...prev, worker_name: e.target.value }))}
                           className="oc-input h-11 rounded-xl bg-white text-sm"
@@ -35566,11 +35569,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           {tempWorkerReportWorkerOptions.map((name) => (
                             <option key={`temp-report-worker-${name}`} value={name}>{name}</option>
                           ))}
-                        </select>
+                        </Select>
                       </label>
                       <label className="block">
                         <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Кто оплатил</span>
-                        <select
+                        <Select
                           value={tempWorkerReportForm.paid_by_supplier_id}
                           onChange={(e) => setTempWorkerReportForm(prev => ({ ...prev, paid_by_supplier_id: e.target.value }))}
                           className="oc-input h-11 rounded-xl bg-white text-sm"
@@ -35579,11 +35582,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           {suppliers.map((s) => (
                             <option key={`temp-report-paid-by-${s.id}`} value={String(s.id)}>{s.name}</option>
                           ))}
-                        </select>
+                        </Select>
                       </label>
                       <label className="block">
                         <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Статус оплаты</span>
-                        <select
+                        <Select
                           value={tempWorkerReportForm.paid_status}
                           onChange={(e) => setTempWorkerReportForm(prev => ({ ...prev, paid_status: e.target.value }))}
                           className="oc-input h-11 rounded-xl bg-white text-sm"
@@ -35591,7 +35594,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                           <option value="all">Все статусы</option>
                           <option value="paid">Оплачено</option>
                           <option value="unpaid">Не оплачено</option>
-                        </select>
+                        </Select>
                       </label>
                       <label className="block">
                         <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Дата с</span>
@@ -35783,10 +35786,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     );
                   })()}
                   {!!tempWorkerPaymentModal.error && <div className="rounded-lg border border-rose-200 bg-rose-50 text-rose-700 px-3 py-2 text-sm">{tempWorkerPaymentModal.error}</div>}
-                  <select value={tempWorkerPaymentModal.supplierId} onChange={(e) => setTempWorkerPaymentModal(prev => ({ ...prev, supplierId: e.target.value, error: '' }))} className="oc-input">
+                  <Select value={tempWorkerPaymentModal.supplierId} onChange={(e) => setTempWorkerPaymentModal(prev => ({ ...prev, supplierId: e.target.value, error: '' }))} className="oc-input">
                     <option value="">Выберите поставщика</option>
                     {suppliers.map(s => <option key={s.id} value={String(s.id)}>{s.name}</option>)}
-                  </select>
+                  </Select>
                   <input value={tempWorkerPaymentModal.amount} onChange={(e) => setTempWorkerPaymentModal(prev => ({ ...prev, amount: e.target.value, error: '' }))} type="number" step="0.01" placeholder="Сумма оплаты" className="oc-input" />
                   <button
                     onClick={async () => {
@@ -35939,10 +35942,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                   </div>
                   <div>
                     <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1">Поставщик</label>
-                    <select value={cwPurchaseEdit.supplier_id} onChange={(e) => setCwPurchaseEdit((p: any) => ({ ...p, supplier_id: e.target.value }))} className="oc-input w-full">
+                    <Select value={cwPurchaseEdit.supplier_id} onChange={(e) => setCwPurchaseEdit((p: any) => ({ ...p, supplier_id: e.target.value }))} className="oc-input w-full">
                       <option value="">—</option>
                       {suppliers.map((s) => <option key={`ppe-${s.id}`} value={String(s.id)}>{s.name}</option>)}
-                    </select>
+                    </Select>
                   </div>
                   {cwPurchaseEdit.kind === 'other' ? (
                     <>
@@ -35962,7 +35965,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         <input type="text" value={cwPurchaseEdit.size} onChange={(e) => setCwPurchaseEdit((p: any) => ({ ...p, size: e.target.value }))} className="oc-input w-full" />
                       </div>
                       <div className="grid grid-cols-3 gap-2">
-                        <div><label className="block text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1">Кол-во</label><input type="number" value={cwPurchaseEdit.quantity} onChange={(e) => setCwPurchaseEdit((p: any) => ({ ...p, quantity: e.target.value }))} className="oc-input w-full" /></div>
+                        <div><label className="block text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1">Кол-во</label><QtyField value={cwPurchaseEdit.quantity} onChange={(e) => setCwPurchaseEdit((p: any) => ({ ...p, quantity: e.target.value }))} className="oc-input w-full" /></div>
                         <div><label className="block text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1">Цена/шт</label><input type="number" step="0.01" value={cwPurchaseEdit.price} onChange={(e) => setCwPurchaseEdit((p: any) => ({ ...p, price: e.target.value }))} className="oc-input w-full" /></div>
                         <div><label className="block text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1">Доставка</label><input type="number" step="0.01" value={cwPurchaseEdit.delivery} onChange={(e) => setCwPurchaseEdit((p: any) => ({ ...p, delivery: e.target.value }))} className="oc-input w-full" /></div>
                       </div>
@@ -36051,18 +36054,18 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               </div>
                             </div>
                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                              <select value={line.supplier_id} onChange={e => upd({ supplier_id: e.target.value })} className="p-2.5 bg-white border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-500">
+                              <Select value={line.supplier_id} onChange={e => upd({ supplier_id: e.target.value })} className="p-2.5 bg-white border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-500">
                                 <option value="">Поставщик…</option>
                                 {suppliers.map((s) => <option key={`twl-s-${idx}-${s.id}`} value={s.id}>{s.name}</option>)}
-                              </select>
-                              <select value={line.worker_name} onChange={e => upd({ worker_name: e.target.value })} className="p-2.5 bg-white border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-500">
+                              </Select>
+                              <Select value={line.worker_name} onChange={e => upd({ worker_name: e.target.value })} className="p-2.5 bg-white border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-500">
                                 <option value="">Сотрудник…</option>
                                 {tempWorkersList.map((n) => <option key={`twl-n-${idx}-${n}`} value={n}>{n}</option>)}
-                              </select>
-                              <select value={line.work_comment} onChange={e => upd({ work_comment: e.target.value })} className="p-2.5 bg-white border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-500">
+                              </Select>
+                              <Select value={line.work_comment} onChange={e => upd({ work_comment: e.target.value })} className="p-2.5 bg-white border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-500">
                                 <option value="">Тип работы…</option>
                                 {tempWorkerCommentTemplates.map((t, i) => <option key={`twl-tpl-${idx}-${i}`} value={t}>{t}</option>)}
-                              </select>
+                              </Select>
                             </div>
                             <div className="grid grid-cols-3 gap-2 mt-2 items-end">
                               {line.isTime ? (
@@ -36072,7 +36075,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                                 </>
                               ) : (
                                 <>
-                                  <div><label className="block text-[11px] text-slate-500 mb-1">Количество</label><input type="number" min="0" value={line.quantity} onChange={e => upd({ quantity: e.target.value })} className="w-full p-2.5 bg-white border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-500" placeholder="0" /></div>
+                                  <div><label className="block text-[11px] text-slate-500 mb-1">Количество</label><QtyField min="0" value={line.quantity} onChange={e => upd({ quantity: e.target.value })} className="w-full p-2.5 bg-white border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-500" placeholder="0" /></div>
                                   <div><label className="block text-[11px] text-slate-500 mb-1">Цена сборки ₽</label><input type="number" min="0" value={line.price} onChange={e => upd({ price: e.target.value })} className="w-full p-2.5 bg-white border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-500" placeholder="0" /></div>
                                 </>
                               )}
@@ -36114,7 +36117,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 <form onSubmit={handleUpdateTempWorkerLog} className="space-y-5">
                     <div>
                         <label className="block text-sm font-medium text-slate-700 mb-1.5">Поставщик</label>
-                        <select
+                        <Select
                           value={tempWorkerEditForm.supplier_id}
                           onChange={e => setTempWorkerEditForm({...tempWorkerEditForm, supplier_id: e.target.value})}
                           className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
@@ -36122,7 +36125,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         >
                           <option value="">Выберите поставщика...</option>
                           {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                        </select>
+                        </Select>
                     </div>
                     <div>
                         <label className="block text-sm font-medium text-slate-700 mb-1.5">Дата работы</label>
@@ -36136,7 +36139,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-slate-700 mb-1.5">Сотрудник</label>
-                      <select
+                      <Select
                         value={tempWorkerEditForm.worker_name}
                         onChange={e => setTempWorkerEditForm({...tempWorkerEditForm, worker_name: e.target.value})}
                         className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
@@ -36147,11 +36150,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         {tempWorkerEditForm.worker_name && !tempWorkersList.includes(tempWorkerEditForm.worker_name) && (
                           <option value={tempWorkerEditForm.worker_name}>{tempWorkerEditForm.worker_name}</option>
                         )}
-                      </select>
+                      </Select>
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-slate-700 mb-1.5">Тип работы</label>
-                      <select
+                      <Select
                         value={tempWorkerEditForm.work_comment}
                         onChange={e => setTempWorkerEditForm({...tempWorkerEditForm, work_comment: e.target.value})}
                         className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
@@ -36161,7 +36164,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         {tempWorkerEditForm.work_comment && !tempWorkerCommentTemplates.includes(tempWorkerEditForm.work_comment) && (
                           <option value={tempWorkerEditForm.work_comment}>{tempWorkerEditForm.work_comment}</option>
                         )}
-                      </select>
+                      </Select>
                     </div>
                     <div>
                       <label className="inline-flex items-center gap-2 text-sm font-medium text-slate-600 cursor-pointer">
@@ -36177,7 +36180,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         </>
                       ) : (
                         <>
-                          <div><label className="block text-sm font-medium text-slate-700 mb-1.5">Количество</label><input type="number" min="0" value={tempWorkerEditForm.quantity} onChange={e => setTempWorkerEditForm({...tempWorkerEditForm, quantity: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500" placeholder="0" /></div>
+                          <div><label className="block text-sm font-medium text-slate-700 mb-1.5">Количество</label><QtyField min="0" value={tempWorkerEditForm.quantity} onChange={e => setTempWorkerEditForm({...tempWorkerEditForm, quantity: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500" placeholder="0" /></div>
                           <div><label className="block text-sm font-medium text-slate-700 mb-1.5">Цена сборки ₽</label><input type="number" min="0" value={tempWorkerEditForm.price} onChange={e => setTempWorkerEditForm({...tempWorkerEditForm, price: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500" placeholder="0" /></div>
                         </>
                       )}

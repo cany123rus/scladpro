@@ -12,6 +12,7 @@ import { restoreDataMatrixGs } from '../utils/honestSign';
 import { FixedSizeList as List, ListChildComponentProps } from 'react-window';
 import { isWarehouseOfflineEnabled, warehouseOfflineClient } from '../lib/warehouseOffline';
 import { pgInList } from '../utils/pgFilters';
+import { Select } from './ui/Select';
 
 interface WBCharacteristic {
   name?: string;
@@ -1880,14 +1881,14 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 rounded-2xl border border-indigo-100 bg-indigo-50/40 p-4 shadow-sm">
                 <div>
                     <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Поставщик</label>
-                    <select
+                    <Select
                         value={selectedSupplierId}
                         onChange={(e) => setSelectedSupplierId(e.target.value)}
                         className="w-full min-h-[44px] rounded-xl border border-slate-200 bg-white px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-500"
                     >
                         <option value="">Все поставщики</option>
                         {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                    </select>
+                    </Select>
                 </div>
                 <div>
                     <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Бренд</label>

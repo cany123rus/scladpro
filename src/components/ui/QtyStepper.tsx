@@ -13,7 +13,7 @@ export const QTY_MAX = 1_000_000;
  * поле можно очистить — пустое значение не превращается в 1 на лету.
  */
 export const QtyStepper = memo(function QtyStepper({
-  value, active, label, onSet, onStep, size = 'md',
+  value, active, label, onSet, onStep, size = 'md', min = 1, max = QTY_MAX, fill = false, blank = false, placeholder = '0',
 }: {
   value: number;
   active: boolean;
@@ -22,6 +22,14 @@ export const QtyStepper = memo(function QtyStepper({
   onStep: (delta: number) => void;
   /** sm — компактный для плотных списков; !min-h-0 снимает общий минимум высоты кнопок для касаний. */
   size?: 'md' | 'sm';
+  /** Наименьшее значение: 1 для количества, 0 для «может быть нулём». */
+  min?: number;
+  max?: number;
+  /** Растянуть поле на всю ширину — для форм, где число стоит в колонке. */
+  fill?: boolean;
+  /** Пока значение не задано, поле пустое, а не «0». */
+  blank?: boolean;
+  placeholder?: string;
 }) {
   const [draft, setDraft] = useState<string | null>(null);
   const delayRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -56,11 +64,11 @@ export const QtyStepper = memo(function QtyStepper({
   const icon = sm ? 'w-3.5 h-3.5' : 'w-4 h-4';
 
   return (
-    <div className={`flex items-center ${sm ? 'gap-0.5' : 'gap-1'}`}>
+    <div className={`flex items-center ${sm ? 'gap-0.5' : 'gap-1'} ${fill ? 'w-full' : ''}`}>
       <button
         type="button"
         className={btn}
-        disabled={!active || value <= 1}
+        disabled={!active || value <= min}
         aria-label={`Меньше: ${label}`}
         onPointerDown={(e) => { e.preventDefault(); hold(-1); }}
         onPointerUp={stop}
@@ -74,14 +82,14 @@ export const QtyStepper = memo(function QtyStepper({
         type="text"
         inputMode="numeric"
         pattern="[0-9]*"
-        value={draft ?? (active ? String(value) : '')}
-        placeholder="0"
+        value={draft ?? (active && !blank ? String(value) : '')}
+        placeholder={placeholder}
         onFocus={(e) => e.target.select()}
         onChange={(e) => {
           const v = e.target.value.replace(/\D/g, '').slice(0, 7);
           setDraft(v);
           const n = Number(v);
-          if (v !== '' && n > 0) onSet(Math.min(QTY_MAX, n));
+          if (v !== '' && n >= min) onSet(Math.min(max, n));
         }}
         onBlur={() => setDraft(null)}
         onKeyDown={(e) => {
@@ -92,13 +100,13 @@ export const QtyStepper = memo(function QtyStepper({
             stepRef.current((e.key === 'ArrowUp' ? 1 : -1) * (e.shiftKey ? 10 : 1));
           }
         }}
-        className={`${sm ? 'h-7 w-11 !min-h-0 !px-1 !py-0 text-xs' : 'h-9 w-14 text-sm'} rounded-lg border text-center font-semibold tabular-nums outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 ${active ? 'border-indigo-300 bg-white text-slate-900' : 'border-slate-200 bg-slate-50 text-slate-400'}`}
+        className={`${sm ? 'h-7 !min-h-0 !px-1 !py-0 text-xs' : 'h-9 text-sm'} ${fill ? 'min-w-0 flex-1' : sm ? 'w-11' : 'w-14'} rounded-lg border text-center font-semibold tabular-nums outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 ${active ? 'border-indigo-300 bg-white text-slate-900' : 'border-slate-200 bg-slate-50 text-slate-400'}`}
         aria-label={`Количество: ${label}`}
       />
       <button
         type="button"
         className={btn}
-        disabled={value >= QTY_MAX}
+        disabled={value >= max}
         aria-label={`Больше: ${label}`}
         onPointerDown={(e) => { e.preventDefault(); hold(1); }}
         onPointerUp={stop}

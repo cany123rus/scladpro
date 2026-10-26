@@ -33,6 +33,7 @@ import {
  */
 import { ensureBwip, ensureExcel, ensurePdfLibs, lazyLibs } from '../pages/dashboardLazyLibs';
 import { supabase } from '../lib/supabase';
+import { fetchAllPages } from '../lib/fetchAll';
 import { SearchSelect } from './ui/SearchSelect';
 import {
   GS_SEPARATOR,
@@ -86,6 +87,8 @@ import {
   listSupplyBoxes,
   maxBoxesForOrders,
 } from '../utils/wbSupplyBoxes';
+import { Select } from './ui/Select';
+import { QtyField } from './ui/QtyField';
 
 /*
  * Подразделы грузятся отдельными чанками.
@@ -1693,11 +1696,11 @@ export const WBSupplyManager = ({
 
       // 2) load photo map by nm_id from wb_products_cache (as in WB Products)
       try {
-        const { data: cacheRows } = await supabase
+        const { data: cacheRows } = await fetchAllPages((__a, __b) => supabase
           .from('wb_products_cache')
           .select(PHOTO_MAP_SELECT)
           .eq('supplier_id', selectedSupplierId)
-          .limit(10000);
+          .order('nm_id').range(__a, __b));
 
         const { byNm, byArticle } = buildPhotoMaps(cacheRows || []);
         setCalcPhotoByNmId(byNm);
@@ -6844,11 +6847,11 @@ export const WBSupplyManager = ({
         // Always refresh photos from DB source (wb_products_cache) for current supplier
         if (selectedSupplierId) {
           try {
-            const { data: cacheRows } = await supabase
+            const { data: cacheRows } = await fetchAllPages((__a, __b) => supabase
               .from('wb_products_cache')
               .select(PHOTO_MAP_SELECT)
               .eq('supplier_id', selectedSupplierId)
-              .limit(10000);
+              .order('nm_id').range(__a, __b));
             const { byNm, byArticle } = buildPhotoMaps(cacheRows || []);
             setCalcPhotoByNmId(byNm);
             setCalcPhotoByArticle(byArticle);
@@ -9823,7 +9826,7 @@ export const WBSupplyManager = ({
               {(activeTab === 'fbs' || activeTab === 'orders_db' || activeTab === 'chz_withdrawal') && (
                 <label className="flex items-center gap-2">
                   <span className="text-sm text-slate-500">Поставщик</span>
-                  <select
+                  <Select
                     className="min-w-[240px] rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800 shadow-sm focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-500/20"
                     value={selectedSupplierId}
                     onChange={(e) => {
@@ -9837,7 +9840,7 @@ export const WBSupplyManager = ({
                     {fbsSuppliers.map(s => (
                       <option key={s.id} value={s.id}>{s.name}</option>
                     ))}
-                  </select>
+                  </Select>
                 </label>
               )}
             </div>
@@ -10133,7 +10136,7 @@ export const WBSupplyManager = ({
                 {selectedSupplyIds.size > 0 && (
                     <div className="space-y-2 border-b border-slate-100 bg-slate-50/80 px-4 py-2.5">
                         <div className="flex flex-wrap items-center gap-2">
-                            <select
+                            <Select
                                 value={bulkMode}
                                 onChange={(e) => {
                                     const next = e.target.value === 'print' ? 'print' : e.target.value === 'grouped' ? 'grouped' : 'files';
@@ -10145,7 +10148,7 @@ export const WBSupplyManager = ({
                                 <option value="files">Скачать листы и коды</option>
                                 <option value="print">Печать кодов</option>
                                 <option value="grouped">Лист групп. одним файлом</option>
-                            </select>
+                            </Select>
                             <button
                                 onClick={() => startBulkSupplyExport()}
                                 disabled={Boolean(bulkExport && !bulkExport.done)}
@@ -10337,7 +10340,7 @@ export const WBSupplyManager = ({
                                                 </button>
                                             )}
                                             {fbsStickersWithChz && (
-                                                <select
+                                                <Select
                                                     value={fbsLabelKind}
                                                     onChange={(e) => {
                                                         const next = e.target.value as FbsLabelKind;
@@ -10350,7 +10353,7 @@ export const WBSupplyManager = ({
                                                     {(Object.keys(FBS_LABEL_KIND_TITLES) as FbsLabelKind[]).map((id) => (
                                                         <option key={id} value={id}>{FBS_LABEL_KIND_TITLES[id]}</option>
                                                     ))}
-                                                </select>
+                                                </Select>
                                             )}
                                         </div>
                                     </div>
@@ -10515,7 +10518,7 @@ export const WBSupplyManager = ({
                                 : g.supplyName}
                             </div>
                           ) : (
-                            <select
+                            <Select
                               value={g.targetSupplyId}
                               disabled={plan.running}
                               onChange={(e) => {
@@ -10533,7 +10536,7 @@ export const WBSupplyManager = ({
                                 </option>
                               ))}
                               <option value="">Новая поставка: {g.supplyName}</option>
-                            </select>
+                            </Select>
                           )}
 
                           {g.status && (
@@ -10825,8 +10828,8 @@ export const WBSupplyManager = ({
                   <div className="flex items-end gap-2">
                     <label className="flex-1">
                       <span className="block text-xs font-medium text-slate-500 mb-1">Сколько создать</span>
-                      <input
-                        type="number"
+                      <QtyField
+                       
                         min={1}
                         max={1000}
                         value={boxesAmount}
@@ -11492,7 +11495,7 @@ export const WBSupplyManager = ({
                         className="inline-flex items-center gap-1.5 text-sm text-slate-600"
                       >
                         Макет:
-                        <select
+                        <Select
                           value={fbsLabelKind}
                           onChange={(e) => {
                             const next = e.target.value as FbsLabelKind;
@@ -11507,7 +11510,7 @@ export const WBSupplyManager = ({
                           {(Object.keys(FBS_LABEL_KIND_TITLES) as FbsLabelKind[]).map((id) => (
                             <option key={id} value={id}>{FBS_LABEL_KIND_TITLES[id]}</option>
                           ))}
-                        </select>
+                        </Select>
                       </label>
 
                       <label
@@ -11786,7 +11789,7 @@ export const WBSupplyManager = ({
       {(activeTab === 'fbs_orders' || activeTab === 'fbo_acceptance') && (
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 md:p-6 space-y-4">
           <div className="flex flex-col gap-3">
-            <select
+            <Select
               className="w-full md:w-[320px] border rounded-lg p-2 bg-white"
               value={selectedSupplierId}
               onChange={(e) => {
@@ -11800,7 +11803,7 @@ export const WBSupplyManager = ({
               {fbsSuppliers.map((s) => (
                 <option key={s.id} value={s.id}>{s.name}</option>
               ))}
-            </select>
+            </Select>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:flex xl:flex-wrap gap-2 md:gap-3">
               <label className="w-full xl:w-auto px-4 py-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 cursor-pointer inline-flex items-center justify-center gap-2 text-center">
@@ -12083,13 +12086,13 @@ export const WBSupplyManager = ({
                 <div className="space-y-3">
                   <div>
                     <label className="block text-sm text-slate-700 mb-1">Количество коробок</label>
-                    <input type="number" min="0" value={fbsSaveBoxes} onChange={(e) => setFbsSaveBoxes(e.target.value)} className="oc-input" placeholder="0" />
+                    <QtyField min="0" value={fbsSaveBoxes} onChange={(e) => setFbsSaveBoxes(e.target.value)} className="oc-input" placeholder="0" />
                   </div>
                   {activeTab === 'fbo_acceptance' && (
                     <>
                       <div>
                         <label className="block text-sm text-slate-700 mb-1">Количество паллет</label>
-                        <input type="number" min="0" value={fbsSavePallets} onChange={(e) => setFbsSavePallets(e.target.value)} className="oc-input" placeholder="0" />
+                        <QtyField min="0" value={fbsSavePallets} onChange={(e) => setFbsSavePallets(e.target.value)} className="oc-input" placeholder="0" />
                       </div>
                       <div>
                         <label className="block text-sm text-slate-700 mb-1">Название склада</label>
@@ -12623,7 +12626,7 @@ export const WBSupplyManager = ({
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 md:p-6 space-y-4">
           <div>
             <label className="text-xs text-slate-500">Поставщик</label>
-            <select
+            <Select
               className="w-full md:w-[420px] border rounded-lg p-2 bg-white"
               value={selectedSupplierIdCalc}
               onChange={(e) => setSelectedSupplierIdCalc(e.target.value)}
@@ -12631,12 +12634,12 @@ export const WBSupplyManager = ({
               {fbsSuppliers.map((s) => (
                 <option key={s.id} value={s.id}>{s.name}</option>
               ))}
-            </select>
+            </Select>
           </div>
           <div className="flex flex-col md:flex-row md:items-end gap-3">
             <div className="flex-1">
               <label className="text-xs text-slate-500">Поставка FBS</label>
-              <select
+              <Select
                 className="w-full border rounded-lg p-2 bg-white"
                 value={calcSupplyId}
                 onChange={(e) => setCalcSupplyId(e.target.value)}
@@ -12645,7 +12648,7 @@ export const WBSupplyManager = ({
                 {supplies.map((s) => (
                   <option key={s.id} value={s.id}>{s.name} ({s.id})</option>
                 ))}
-              </select>
+              </Select>
             </div>
             <button
               onClick={() => loadFbsCalcForSupply(calcSupplyId)}
@@ -12838,7 +12841,7 @@ export const WBSupplyManager = ({
                           <div>
                               <h2 className="font-bold text-slate-900 leading-tight">Заказ товара</h2>
                               <label className="text-xs text-slate-500">Поставщик</label>
-                              <select
+                              <Select
                                   className="mt-1 block w-full md:w-[420px] rounded-xl border border-slate-200 bg-white px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-500"
                                   value={selectedSupplierIdSupplyOrder}
                                   onChange={(e) => setSelectedSupplierIdSupplyOrder(e.target.value)}
@@ -12846,7 +12849,7 @@ export const WBSupplyManager = ({
                                   {suppliers.map((s) => (
                                       <option key={s.id} value={s.id}>{s.name}</option>
                                   ))}
-                              </select>
+                              </Select>
                           </div>
                       </div>
                       <button

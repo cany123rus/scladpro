@@ -19,6 +19,7 @@ import {
   type ChzStatus,
 } from '../utils/chzWithdrawal';
 import { currentEmployeeName } from '../utils/fbsOrderCodes';
+import { Select } from './ui/Select';
 
 /**
  * Вывод кодов маркировки из оборота по продажам ФБС.
@@ -350,7 +351,7 @@ export const ChzWithdrawal = ({ supplierId, supplierName }: { supplierId: string
           </button>
 
           {certificates && certificates.length > 0 && (
-            <select
+            <Select
               value={thumbprint}
               onChange={(e) => setThumbprint(e.target.value)}
               className="oc-select min-w-[280px]"
@@ -362,7 +363,7 @@ export const ChzWithdrawal = ({ supplierId, supplierName }: { supplierId: string
                   {c.inn ? ` · ИНН ${c.inn}` : ''} · до {new Date(c.validTo).toLocaleDateString('ru-RU')}
                 </option>
               ))}
-            </select>
+            </Select>
           )}
 
           <button
@@ -451,7 +452,7 @@ export const ChzWithdrawal = ({ supplierId, supplierName }: { supplierId: string
       <div className="oc-card overflow-hidden">
         <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 p-3">
           <h3 className="font-semibold text-slate-900">Коды</h3>
-          <select value={queueFilter} onChange={(e) => setQueueFilter(e.target.value)} className="oc-select ml-auto">
+          <Select value={queueFilter} onChange={(e) => setQueueFilter(e.target.value)} className="oc-select ml-auto">
             <option value="">все</option>
             <option value="pending">готовы к выводу</option>
             <option value="blocked">чужой владелец</option>
@@ -459,7 +460,7 @@ export const ChzWithdrawal = ({ supplierId, supplierName }: { supplierId: string
             <option value="sent">отправлены</option>
             <option value="accepted">выведены нами</option>
             <option value="rejected">отказ</option>
-          </select>
+          </Select>
         </div>
 
         <div className="overflow-x-auto">

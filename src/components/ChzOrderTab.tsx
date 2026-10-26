@@ -10,6 +10,7 @@ import { compareSizes } from '../utils/sizeOrder';
 import { downloadAoaWorkbook } from '../utils/excelExport';
 import { ensurePdfLibs, lazyLibs } from '../pages/dashboardLazyLibs';
 import { drawKpiChips, drawReportHeader, INDIGO, reportFooter, reportTableStyles } from '../pages/pdfReportKit';
+import { Select } from './ui/Select';
 
 /**
  * Заказ Честного знака.
@@ -593,10 +594,10 @@ export function ChzOrderTab({
         />
 
         <div className="flex flex-wrap items-center gap-2">
-          <select value={supplierId} onChange={(e) => setSupplierId(e.target.value)} className="oc-select" aria-label="Поставщик">
+          <Select value={supplierId} onChange={(e) => setSupplierId(e.target.value)} className="oc-select" aria-label="Поставщик">
             {supplierList.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             {supplierList.length > 1 && <option value="all">Все поставщики</option>}
-          </select>
+          </Select>
 
           <FacetSelect label="Категории" options={categoryOptions} selected={categories} onChange={setCategories} />
           <FacetSelect label="Бренды" options={brandOptions} selected={brands} onChange={setBrands} />

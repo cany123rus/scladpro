@@ -1,5 +1,6 @@
 import React from 'react';
 import { SearchSelect } from './ui/SearchSelect';
+import { Select } from './ui/Select';
 
 type Props = {
   warehouseFill: any;
@@ -413,10 +414,10 @@ export const WarehouseTab = (props: Props) => {
 
           <div>
             <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Полка</label>
-            <select value={warehouseFill.shelf} onChange={(e) => { setWarehouseEditTarget(null); setWarehouseFill((p: any) => ({ ...p, shelf: e.target.value })); }} className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100">
+            <Select value={warehouseFill.shelf} onChange={(e) => { setWarehouseEditTarget(null); setWarehouseFill((p: any) => ({ ...p, shelf: e.target.value })); }} className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100">
               <option value="">Выберите полку</option>
               {selectedRackShelves.map((shelf) => <option key={shelf} value={shelf}>{shelf}</option>)}
-            </select>
+            </Select>
           </div>
 
           <div>
@@ -436,10 +437,10 @@ export const WarehouseTab = (props: Props) => {
 
           <div>
             <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Поставщик</label>
-            <select value={warehouseFill.supplier || ''} onChange={(e) => setWarehouseFill((p: any) => ({ ...p, supplier: e.target.value }))} className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100">
+            <Select value={warehouseFill.supplier || ''} onChange={(e) => setWarehouseFill((p: any) => ({ ...p, supplier: e.target.value }))} className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100">
               <option value="">Выберите поставщика</option>
               {suppliers.map((s) => <option key={s.id} value={s.name}>{s.name}</option>)}
-            </select>
+            </Select>
           </div>
 
           <button onClick={handleFillRack} className="h-11 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 px-4 font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md">{warehouseEditTarget ? 'Сохранить изменения' : 'Заполнить полку'}</button>
@@ -479,10 +480,10 @@ export const WarehouseTab = (props: Props) => {
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Поиск: Размер</label>
             <div className="flex gap-2 mb-2">
-              <select value={pendingSize} onChange={(e) => setPendingSize(e.target.value)} className="px-3 py-2 border border-slate-300 rounded-lg w-full" disabled={selectedArticles.length === 0}>
+              <Select value={pendingSize} onChange={(e) => setPendingSize(e.target.value)} className="px-3 py-2 border border-slate-300 rounded-lg w-full" disabled={selectedArticles.length === 0}>
                 <option value="">{selectedArticles.length === 0 ? 'Сначала выберите артикул' : 'Выберите размер'}</option>
                 {dependentSizeOptions.map((v) => <option key={v} value={v}>{v}</option>)}
-              </select>
+              </Select>
             </div>
             {selectedArticles.length > 0 && dependentSizeOptions.length > 0 && (
               <div className="flex flex-wrap gap-2 max-h-28 overflow-y-auto rounded-lg border border-emerald-100 bg-emerald-50 p-2">
@@ -510,10 +511,10 @@ export const WarehouseTab = (props: Props) => {
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Поиск: Цвет</label>
             <div className="flex gap-2 mb-2">
-              <select value={pendingColor} onChange={(e) => setPendingColor(e.target.value)} className="px-3 py-2 border border-slate-300 rounded-lg w-full" disabled={selectedArticles.length === 0}>
+              <Select value={pendingColor} onChange={(e) => setPendingColor(e.target.value)} className="px-3 py-2 border border-slate-300 rounded-lg w-full" disabled={selectedArticles.length === 0}>
                 <option value="">{selectedArticles.length === 0 ? 'Сначала выберите артикул' : 'Выберите цвет'}</option>
                 {dependentColorOptions.map((v) => <option key={v} value={v}>{v}</option>)}
-              </select>
+              </Select>
             </div>
             {selectedArticles.length > 0 && dependentColorOptions.length > 0 && (
               <div className="flex flex-wrap gap-2 max-h-28 overflow-y-auto rounded-lg border border-amber-100 bg-amber-50 p-2">
@@ -587,7 +588,7 @@ export const WarehouseTab = (props: Props) => {
               <button onClick={handleDownloadWarehouseSearchPdf} disabled={warehousePdfGenerating} className="h-10 rounded-xl border border-indigo-200 bg-indigo-50 px-3 text-sm font-semibold text-indigo-700 shadow-sm hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50">
                 {warehousePdfGenerating ? 'Подготовка Excel...' : 'Скачать позиции (Excel)'}
               </button>
-              <select
+              <Select
                 value={warehouseShareEmployeeId}
                 onChange={(e) => setWarehouseShareEmployeeId(e.target.value)}
                 className="px-3 py-2 border border-slate-300 rounded-lg w-full text-sm"
@@ -596,7 +597,7 @@ export const WarehouseTab = (props: Props) => {
                 {warehouseShareEmployees.map((emp) => (
                   <option key={emp.id} value={emp.id}>{String(emp.full_name || '').trim() || `Сотрудник ${emp.id}`}{emp.telegram_chat_id ? '' : ' (без TG)'}</option>
                 ))}
-              </select>
+              </Select>
               <button onClick={handleSendWarehouseSearchToTelegram} disabled={warehousePdfGenerating} className="h-10 rounded-xl bg-emerald-600 px-3 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50">
                 {warehousePdfGenerating ? 'Подготовка файла...' : 'Отправить в Telegram'}
               </button>
@@ -638,10 +639,10 @@ export const WarehouseTab = (props: Props) => {
           </button>
           {rackFillMode && (
             <>
-              <select value={bulkSupplierId} onChange={(e) => setBulkSupplierId(e.target.value)} className="h-11 min-w-[240px] rounded-xl border border-slate-200 bg-white px-3 text-sm shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100">
+              <Select value={bulkSupplierId} onChange={(e) => setBulkSupplierId(e.target.value)} className="h-11 min-w-[240px] rounded-xl border border-slate-200 bg-white px-3 text-sm shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100">
                 <option value="">Выберите поставщика для стеллажей</option>
                 {suppliers.map((s) => <option key={`bulk-${s.id}`} value={s.id}>{s.name}</option>)}
-              </select>
+              </Select>
               <button
                 onClick={() => {
                   if (!bulkSupplierId || selectedRacksBulk.length === 0) return;

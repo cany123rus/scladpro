@@ -20,6 +20,8 @@ import { createTask, fetchActiveTasks, softDeleteTask, updateTask } from '../ser
 import { buildTaskColumnUpdate, ColumnId, getTaskColumn, resolveDropColumn } from '../utils/tasks';
 import { confirmDialog } from './ConfirmDialog';
 import { sendPush } from '../utils/push';
+import { Select } from './ui/Select';
+import { QtyField } from './ui/QtyField';
 
 interface Task {
   id: string;
@@ -897,7 +899,7 @@ export const Tasks = () => {
           </div>
           <div>
             <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-1.5">Количество</div>
-            <input type="number" placeholder="шт." value={newTaskQuantity} onChange={e => setNewTaskQuantity(e.target.value)} className="oc-input w-full" />
+            <QtyField placeholder="шт." value={newTaskQuantity} onChange={e => setNewTaskQuantity(e.target.value)} className="oc-input w-full" />
           </div>
         </div>
 
@@ -906,12 +908,12 @@ export const Tasks = () => {
           <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50/60 p-3.5">
             <div className="text-[11px] font-semibold uppercase tracking-wide text-amber-600 mb-2">Данные сборки</div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <select value={newTaskSupplierId} onChange={e => setNewTaskSupplierId(e.target.value)} className="oc-select w-full" required>
+              <Select value={newTaskSupplierId} onChange={e => setNewTaskSupplierId(e.target.value)} className="oc-select w-full" required>
                 <option value="">Поставщик для сборки…</option>
                 {suppliers.map((s) => (
                   <option key={s.id} value={String(s.id)}>{s.name}</option>
                 ))}
-              </select>
+              </Select>
               <label className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors ${newTaskAssemblyFile ? 'border-emerald-300 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50'}`}>
                 <span className="truncate">{newTaskAssemblyFile ? `📎 ${newTaskAssemblyFile.name}` : '📎 Файл сборки (PDF)'}</span>
                 <input
@@ -921,7 +923,7 @@ export const Tasks = () => {
                   onChange={(e) => setNewTaskAssemblyFile(e.target.files?.[0] || null)}
                 />
               </label>
-              <select
+              <Select
                 value=""
                 onChange={async (e) => {
                   const selectedId = e.target.value;
@@ -943,7 +945,7 @@ export const Tasks = () => {
                 {supplierOrderHistory.map((item) => (
                   <option key={item.id} value={String(item.id)}>{item.fileName}</option>
                 ))}
-              </select>
+              </Select>
             </div>
           </div>
         )}
@@ -965,12 +967,12 @@ export const Tasks = () => {
             <div className="space-y-3">
               <input value={editTaskForm.content} onChange={(e) => setEditTaskForm((p) => ({ ...p, content: e.target.value }))} className="oc-input" placeholder="Текст задачи" />
               <div className="grid grid-cols-2 gap-2">
-                <select value={editTaskForm.priority} onChange={(e) => setEditTaskForm((p) => ({ ...p, priority: parseInt(e.target.value) as 1 | 2 | 3 | 4 | 5 }))} className="oc-select">
+                <Select value={editTaskForm.priority} onChange={(e) => setEditTaskForm((p) => ({ ...p, priority: parseInt(e.target.value) as 1 | 2 | 3 | 4 | 5 }))} className="oc-select">
                   <option value={1}>Срочно</option><option value={2}>Сборка очередь</option><option value={3}>В работе!</option><option value={4}>Поставки</option><option value={5}>Честный знак</option>
-                </select>
+                </Select>
                 <input type="date" value={editTaskForm.due_date} onChange={(e) => setEditTaskForm((p) => ({ ...p, due_date: e.target.value }))} className="oc-select" />
               </div>
-              <input type="number" value={editTaskForm.quantity} onChange={(e) => setEditTaskForm((p) => ({ ...p, quantity: e.target.value }))} className="oc-input" placeholder="Количество" />
+              <QtyField value={editTaskForm.quantity} onChange={(e) => setEditTaskForm((p) => ({ ...p, quantity: e.target.value }))} className="oc-input" placeholder="Количество" />
             </div>
             <div className="flex justify-end gap-2 mt-4">
               <button onClick={() => setEditingTask(null)} className="px-3 py-2 rounded-lg border">Отмена</button>

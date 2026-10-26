@@ -24,6 +24,7 @@ import {
   type FbsOrderCodeSort,
   type FbsScanReject,
 } from '../utils/fbsOrderCodes';
+import { Select } from './ui/Select';
 
 /**
  * База заказов ФБС: какой ЧЗ уехал с каким заказом.
@@ -461,12 +462,12 @@ export const FbsOrdersDatabase = ({
 
         <label className="flex flex-col gap-1">
           <span className="text-xs text-slate-500">Сортировка</span>
-          <select value={sort} onChange={(e) => setSort(e.target.value as FbsOrderCodeSort)} className="oc-select">
+          <Select value={sort} onChange={(e) => setSort(e.target.value as FbsOrderCodeSort)} className="oc-select">
             <option value="scanned_desc">сначала новые сканы</option>
             <option value="scanned_asc">сначала старые сканы</option>
             <option value="order_desc">по номеру заказа</option>
             <option value="article_asc">по артикулу</option>
-          </select>
+          </Select>
         </label>
 
         <label className="flex items-center gap-2 text-sm text-slate-600 pb-2">
