@@ -33,6 +33,7 @@ const Tasks = lazyNamed(() => import('../components/Tasks'), 'Tasks', 'tasks-cmp
 const WarehouseTab = lazyNamed(() => import('../components/WarehouseTab'), 'WarehouseTab', 'warehouse');
 const AdvertisingInsights = lazyNamed(() => import('../components/AdvertisingInsights'), 'AdvertisingInsights', 'adv');
 const CamerasTab = lazyNamed(() => import('../components/CamerasTab'), 'CamerasTab', 'cameras');
+const ChzOrderTab = lazyNamed<React.ComponentProps<typeof import('../components/ChzOrderTab')['ChzOrderTab']>>(() => import('../components/ChzOrderTab'), 'ChzOrderTab', 'chzorder');
 const FbsSearch = lazyNamed(() => import('../components/FbsSearch'), 'FbsSearch', 'fbssearch');
 const AdminPanel = lazyNamed(() => import('./AdminPanel'), 'AdminPanel', 'adminpanel');
 const InstructionTab = lazyNamed(() => import('./InstructionTab'), 'InstructionTab', 'instruction');
@@ -11793,6 +11794,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     if (personal === true) return true;
     const roleRule = sectionRoleAccess[roleKey]?.[tabId];
     if (roleRule === 'deny') return false;
+    // «Заказ честного знака» готовит заказ платных кодов: по умолчанию только админу, остальным — явным разрешением.
+    if (tabId === 'chz_order' && roleRule !== 'allow') return false;
     return true;
   }, [sectionRoleAccess]);
 
@@ -11984,6 +11987,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       title: 'Маркировка и сервис',
       items: [
         { id: 'honest_sign', label: 'ЧЗ / Печать' },
+        { id: 'chz_order', label: 'Заказ честного знака' },
         { id: 'tasks', label: 'Задачи' },
       ]
     },
@@ -19788,6 +19792,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     { id: 'reception', icon: ClipboardCheck, label: 'Приемка товара' },
     { id: 'suppliers', icon: Users, label: 'Поставщики' },
     { id: 'honest_sign', icon: ShieldCheck, label: 'ЧЗ / Печать' },
+    { id: 'chz_order', icon: FileSpreadsheet, label: 'Заказ честного знака' },
     { id: 'completed', icon: CheckSquare, label: 'Сборка' },
     { id: 'reports', icon: FileText, label: 'Отчеты' },
     { id: 'analytics', icon: BarChart2, label: 'Аналитика' },
@@ -23302,6 +23307,13 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           {activeTab === 'fbs_search' && (
             <React.Suspense fallback={<SectionSkeleton />}>
               <FbsSearch currentEmployee={currentEmployee} showToast={showToast} />
+            </React.Suspense>
+          )}
+
+          {/* CHZ ORDER TAB */}
+          {activeTab === 'chz_order' && (
+            <React.Suspense fallback={<SectionSkeleton />}>
+              <ChzOrderTab suppliers={suppliers} showToast={showToast} />
             </React.Suspense>
           )}
 

@@ -11,6 +11,7 @@ export const DASHBOARD_TAB_IDS = [
   'reception',
   'suppliers',
   'honest_sign',
+  'chz_order',
   'completed',
   'reports',
   'analytics',
