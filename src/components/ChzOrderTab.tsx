@@ -1,6 +1,6 @@
 import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Check, ChevronDown, ChevronLeft, ChevronRight, FileSpreadsheet, FileText, ListChecks, Package, RefreshCw, Search, Trash2, X,
+  Check, ChevronDown, ChevronLeft, ChevronRight, FileSpreadsheet, FileText, ListChecks, Minus, Package, Plus, RefreshCw, Search, Trash2, X,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { compareSizes } from '../utils/sizeOrder';
@@ -264,15 +264,123 @@ function FacetSelect({
   );
 }
 
+const QTY_MAX = 1_000_000;
+
+/**
+ * Количество: крупные «−» и «+», поле с цифрами, удержание кнопки.
+ *
+ * Стандартное числовое поле браузера — крошечные стрелки, в которые на складе
+ * не попасть пальцем. Здесь кнопки по 36 px; при удержании число бежит само, а
+ * через пару секунд — десятками. В поле: стрелки ↑/↓ меняют на 1 (с Shift — на
+ * 10), Enter заканчивает ввод, фокус выделяет число целиком. Пока набираете,
+ * поле можно очистить — пустое значение не превращается в 1 на лету.
+ */
+const QtyStepper = memo(function QtyStepper({
+  value, active, label, onSet, onStep,
+}: {
+  value: number;
+  active: boolean;
+  label: string;
+  onSet: (qty: number) => void;
+  onStep: (delta: number) => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const delayRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const stepRef = useRef(onStep);
+  stepRef.current = onStep;
+
+  const stop = useCallback(() => {
+    if (delayRef.current) clearTimeout(delayRef.current);
+    if (tickRef.current) clearInterval(tickRef.current);
+    delayRef.current = null;
+    tickRef.current = null;
+  }, []);
+  useEffect(() => stop, [stop]);
+
+  const hold = (dir: 1 | -1) => {
+    stop();
+    setDraft(null);
+    stepRef.current(dir);
+    delayRef.current = setTimeout(() => {
+      let ticks = 0;
+      tickRef.current = setInterval(() => {
+        ticks += 1;
+        stepRef.current(dir * (ticks > 20 ? 10 : 1));
+      }, 90);
+    }, 420);
+  };
+
+  const btn = 'flex h-9 w-9 shrink-0 select-none touch-none items-center justify-center rounded-lg border text-slate-700 transition-colors '
+    + 'border-slate-300 bg-white hover:bg-slate-100 active:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-white';
+
+  return (
+    <div className="flex items-center gap-1">
+      <button
+        type="button"
+        className={btn}
+        disabled={!active || value <= 1}
+        aria-label={`Меньше: ${label}`}
+        onPointerDown={(e) => { e.preventDefault(); hold(-1); }}
+        onPointerUp={stop}
+        onPointerLeave={stop}
+        onPointerCancel={stop}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); stepRef.current(-1); } }}
+      >
+        <Minus className="w-4 h-4" />
+      </button>
+      <input
+        type="text"
+        inputMode="numeric"
+        pattern="[0-9]*"
+        value={draft ?? (active ? String(value) : '')}
+        placeholder="0"
+        onFocus={(e) => e.target.select()}
+        onChange={(e) => {
+          const v = e.target.value.replace(/\D/g, '').slice(0, 7);
+          setDraft(v);
+          const n = Number(v);
+          if (v !== '' && n > 0) onSet(Math.min(QTY_MAX, n));
+        }}
+        onBlur={() => setDraft(null)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') { e.currentTarget.blur(); return; }
+          if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+            e.preventDefault();
+            setDraft(null);
+            stepRef.current((e.key === 'ArrowUp' ? 1 : -1) * (e.shiftKey ? 10 : 1));
+          }
+        }}
+        className={`h-9 w-14 rounded-lg border text-center text-sm font-semibold tabular-nums outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 ${active ? 'border-indigo-300 bg-white text-slate-900' : 'border-slate-200 bg-slate-50 text-slate-400'}`}
+        aria-label={`Количество: ${label}`}
+      />
+      <button
+        type="button"
+        className={btn}
+        disabled={value >= QTY_MAX}
+        aria-label={`Больше: ${label}`}
+        onPointerDown={(e) => { e.preventDefault(); hold(1); }}
+        onPointerUp={stop}
+        onPointerLeave={stop}
+        onPointerCancel={stop}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); stepRef.current(1); } }}
+      >
+        <Plus className="w-4 h-4" />
+      </button>
+    </div>
+  );
+});
+
 /** Один товар со своими размерами. Перерисовывается, только если изменился он сам или его выбор. */
 const ProductCard = memo(function ProductCard({
-  product, supplierName, sel, onToggleSize, onQty, onToggleAll,
+  product, supplierName, sel, onToggleSize, onQty, onStep, onToggleAll,
 }: {
   product: Product;
   supplierName: string;
   sel: Record<string, SelItem> | undefined;
   onToggleSize: (p: Product, size: SizeRow, on: boolean) => void;
   onQty: (p: Product, size: SizeRow, qty: number) => void;
+  onStep: (p: Product, size: SizeRow, delta: number) => void;
   onToggleAll: (p: Product, on: boolean) => void;
 }) {
   const chosen = sel ? Object.keys(sel).length : 0;
@@ -314,29 +422,25 @@ const ProductCard = memo(function ProductCard({
               return (
                 <div
                   key={s.size}
-                  className={`flex items-center gap-2 rounded-xl border px-2 py-1.5 ${item ? 'border-indigo-300 bg-indigo-50/60' : 'border-slate-200 bg-white'}`}
+                  className={`flex flex-wrap items-center gap-x-2 gap-y-1.5 rounded-xl border px-2.5 py-2 ${item ? 'border-indigo-300 bg-indigo-50/60' : 'border-slate-200 bg-white'}`}
                 >
                   <input
                     type="checkbox"
-                    className="h-4 w-4 shrink-0 accent-indigo-600"
+                    className="h-5 w-5 shrink-0 accent-indigo-600"
                     checked={Boolean(item)}
                     onChange={(e) => onToggleSize(product, s, e.target.checked)}
                     aria-label={`Размер ${sizeLabel(s.size)}`}
                   />
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm font-medium text-slate-800 leading-tight">{sizeLabel(s.size)}</div>
+                  <div className="min-w-[4.5rem] flex-1">
+                    <div className="text-sm font-semibold text-slate-800 leading-tight">{sizeLabel(s.size)}</div>
                     <div className="text-[10px] text-slate-400 truncate" title={s.barcode}>{s.barcode || 'нет баркода'}</div>
                   </div>
-                  <input
-                    type="number"
-                    inputMode="numeric"
-                    min={1}
-                    disabled={!item}
-                    value={item ? item.qty : ''}
-                    placeholder="шт"
-                    onChange={(e) => onQty(product, s, Number(e.target.value))}
-                    className="oc-input !w-16 !py-1 text-center text-sm disabled:opacity-40"
-                    aria-label={`Количество ${sizeLabel(s.size)}`}
+                  <QtyStepper
+                    value={item ? item.qty : 0}
+                    active={Boolean(item)}
+                    label={`${product.vendorCode} ${sizeLabel(s.size)}`}
+                    onSet={(q) => onQty(product, s, q)}
+                    onStep={(d) => onStep(product, s, d)}
                   />
                 </div>
               );
@@ -543,11 +647,28 @@ export function ChzOrderTab({
     });
   }, []);
 
+  const clampQty = (n: number) => (Number.isFinite(n) ? Math.max(1, Math.min(QTY_MAX, Math.floor(n))) : 1);
+
+  /** Количество задают прямо с невыбранной строки: размер при этом отмечается сам. */
   const onQty = useCallback((p: Product, s: SizeRow, qty: number) => {
     setSelection((prev) => {
+      const value = clampQty(qty);
       const cur = prev[p.id]?.[s.size];
-      if (!cur) return prev;
-      const value = Number.isFinite(qty) ? Math.max(1, Math.min(1_000_000, Math.floor(qty))) : 1;
+      if (cur?.qty === value) return prev;
+      return { ...prev, [p.id]: { ...(prev[p.id] || {}), [s.size]: cur ? { ...cur, qty: value } : toItem(p, s, value) } };
+    });
+  }, []);
+
+  const onStep = useCallback((p: Product, s: SizeRow, delta: number) => {
+    setSelection((prev) => {
+      const cur = prev[p.id]?.[s.size];
+      if (!cur) {
+        // «+» на невыбранной строке отмечает её с количеством 1, «−» ничего не делает.
+        if (delta <= 0) return prev;
+        return { ...prev, [p.id]: { ...(prev[p.id] || {}), [s.size]: toItem(p, s, 1) } };
+      }
+      const value = clampQty(cur.qty + delta);
+      if (value === cur.qty) return prev;
       return { ...prev, [p.id]: { ...prev[p.id], [s.size]: { ...cur, qty: value } } };
     });
   }, []);
@@ -792,6 +913,7 @@ export function ChzOrderTab({
               sel={selection[p.id]}
               onToggleSize={onToggleSize}
               onQty={onQty}
+              onStep={onStep}
               onToggleAll={onToggleAll}
             />
           ))}
