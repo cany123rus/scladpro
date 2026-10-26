@@ -384,6 +384,15 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       return 'tasks';
     }
   });
+  /*
+   * Тяжёлые вкладки («Товары WB», «Реклама») монтируем при первом открытии, а не
+   * на входе в приложение. Раньше их просто прятали: «Товары WB» на старте
+   * скачивали каталог всех кабинетов, даже если человек пришёл собирать
+   * поставку. После первого открытия вкладка остаётся в памяти скрытой —
+   * состояние и фильтры при переключении не теряются.
+   */
+  const visitedTabsRef = useRef<Set<string>>(new Set());
+  visitedTabsRef.current.add(activeTab);
   // Открыто окно «Скан ЧЗ» — раздел ФБС держим в памяти и в других разделах.
   const [fbsScanKeepAlive, setFbsScanKeepAlive] = useState(false);
   const [selectedWarehouseRack, setSelectedWarehouseRack] = useState<{ rowTitle: string; rackName: string; shelves: string[] } | null>(null);
@@ -615,17 +624,27 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
      * В WB идём, только если кэш пуст.
      */
     try {
-      const { data: cachedCards } = await supabase
-        .from('wb_products_cache')
-        .select('product_json')
-        .eq('supplier_id', supplierId)
-        .limit(20000);
-
+      /*
+       * Из карточки нужно одно поле — предмет, его и просим (путём в JSON), а не
+       * всю карточку целиком: у кабинета их тысячи, и каждая тянет описание,
+       * характеристики и фото. Страницами по 1000: больше база за раз не отдаёт,
+       * и общий .limit() молча обрезал бы список у кабинета с тысячей карточек.
+       */
       const cachedSet = new Set<string>();
-      (cachedCards || []).forEach((row: any) => {
-        const cat = normalizeHSCategory(String(row?.product_json?.subjectName || '').trim());
-        if (cat) cachedSet.add(cat);
-      });
+      for (let from = 0; from < 50_000; from += 1000) {
+        const { data: page, error: pageError } = await supabase
+          .from('wb_products_cache')
+          .select('subject:product_json->>subjectName')
+          .eq('supplier_id', supplierId)
+          .order('nm_id')
+          .range(from, from + 999);
+        if (pageError) throw pageError;
+        (page || []).forEach((row: any) => {
+          const cat = normalizeHSCategory(String(row?.subject || '').trim());
+          if (cat) cachedSet.add(cat);
+        });
+        if (!page || page.length < 1000) break;
+      }
 
       if (cachedSet.size > 0) {
         setSupplierCategories(Array.from(cachedSet).sort((a, b) => a.localeCompare(b, 'ru')));
@@ -23346,6 +23365,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           )}
 
           {/* WB PRODUCTS TAB */}
+          {visitedTabsRef.current.has('wb_products') && (
           <div className={`w-full mx-auto px-2 md:px-4 ${activeTab === 'wb_products' ? '' : 'hidden'}`}>
             <div className="mb-3 flex flex-wrap items-center gap-3 rounded-2xl border border-indigo-200 bg-gradient-to-r from-indigo-50 to-violet-50 px-4 py-3 shadow-sm">
               <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-600 text-white shrink-0"><Package className="h-5 w-5" /></div>
@@ -23365,13 +23385,16 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
               </React.Suspense>
             </WBProductsSection>
           </div>
+          )}
 
           {/* ADVERTISING TAB */}
+          {visitedTabsRef.current.has('advertising') && (
           <div className={`w-full mx-auto px-2 md:px-4 ${activeTab === 'advertising' ? '' : 'hidden'}`}>
             <React.Suspense fallback={<SectionSkeleton />}>
               <AdvertisingInsights />
             </React.Suspense>
           </div>
+          )}
 
           {/* BARTERS TAB */}
           {activeTab === 'barters' && (
