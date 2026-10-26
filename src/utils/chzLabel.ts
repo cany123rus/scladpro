@@ -67,6 +67,15 @@ export const normalizeHsCategoryName = (raw: string): string => {
   return value;
 };
 
+/**
+ * Дублёнки берут марку любого пола.
+ *
+ * Пока на куртки, бомберы и дублёнки идёт одна и та же марка, пол товара для
+ * них не различаем: ни при подборе, ни при проверке «пол не указан».
+ */
+export const isSheepskinSubject = (raw: string): boolean =>
+  String(raw || '').toLowerCase().replace(/ё/g, 'е').includes('дублен');
+
 export interface ChzPoolItem {
   code: string;
   category: string;
@@ -121,6 +130,7 @@ export function matchChzCodeForProduct(
   const productGender = String(product?.gender || '').trim().toLowerCase();
   const productSubject = normalizeHsCategoryName(product?.subject || '');
   const productSize = normalizeHsSize(product?.size || '');
+  const anyGender = isSheepskinSubject(product?.subject || '');
 
   return pool.find((item) => {
     if (used.has(item.code)) return false;
@@ -129,11 +139,11 @@ export function matchChzCodeForProduct(
     const codeCategory = normalizeHsCategoryName(item.category);
     const codeSize = normalizeHsSize(item.size || '');
 
-    if (codeGender && codeGender !== productGender) return false;
+    if (!anyGender && codeGender && codeGender !== productGender) return false;
     if (codeSize && codeSize !== productSize) return false;
     if (codeCategory && productSubject && codeCategory !== productSubject) return false;
 
-    const genderMatched = Boolean(codeGender && codeGender === productGender);
+    const genderMatched = !anyGender && Boolean(codeGender && codeGender === productGender);
     const sizeMatched = Boolean(codeSize && codeSize === productSize);
     const categoryMatched = Boolean(codeCategory && productSubject && codeCategory === productSubject);
     return genderMatched || sizeMatched || categoryMatched;

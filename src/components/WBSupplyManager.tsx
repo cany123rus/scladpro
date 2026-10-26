@@ -56,6 +56,7 @@ import {
   drawFbsComboLabel,
   matchChzCodeForProduct,
   normalizeHsCategoryName,
+  isSheepskinSubject,
   normalizeHsSize,
   readChzLabelLayout,
   readChzTailLayout,
@@ -9129,21 +9130,26 @@ export const WBSupplyManager = ({
             noCard.set(nmId, row);
             continue;
           }
-          if (!card.gender) {
+          // Дублёнкам пол не нужен: марка берётся любого пола.
+          const anyGender = isSheepskinSubject(card.subject || '');
+          if (!card.gender && !anyGender) {
             const row = noGender.get(nmId) || { nmId, article, subject: card.subject || '', count: 0 };
             row.count += 1;
             noGender.set(nmId, row);
             continue;
           }
           const category = normalizeHsCategoryName(card.subject || '');
-          const key = `${category}|${card.gender}`;
+          const planGender = (anyGender ? '' : card.gender) as 'male' | 'female';
+          const key = `${category}|${planGender}`;
           const group = groups.get(key) || {
             key,
             category: card.subject || 'без категории',
-            gender: card.gender as 'male' | 'female',
+            gender: planGender,
             orders: 0,
             matched: 0,
-            freeTotal: freeBy.get(key) || 0,
+            freeTotal: anyGender
+              ? (freeBy.get(`${category}|male`) || 0) + (freeBy.get(`${category}|female`) || 0) + (freeBy.get(`${category}|`) || 0)
+              : (freeBy.get(key) || 0),
           };
           group.orders += 1;
           const match = matchChzCodeForProduct(pool, used, {
