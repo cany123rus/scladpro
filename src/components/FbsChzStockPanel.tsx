@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, ChevronDown, RefreshCw } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { normalizeHsCategoryName } from '../utils/chzLabel';
 
 /**
  * Честный знак поставщика: сколько осталось и на сколько хватит.
@@ -218,11 +219,21 @@ export default function FbsChzStockPanel({
   const groups = useMemo(() => {
     const map = new Map<string, { category: string; inBase: number; used: number; periodDays: number; rows: ForecastRow[] }>();
     for (const row of rows) {
-      const g = map.get(row.category) || { category: row.category, inBase: 0, used: 0, periodDays: row.periodDays, rows: [] };
+      // Объединённые категории ЧЗ (куртки / бомберы / дублёнки и др.) считаем одной строкой.
+      const key = normalizeHsCategoryName(row.category) || row.category;
+      const label = key === 'куртки / бомберы / дублёнки' ? 'Куртки / Бомберы / Дублёнки' : row.category;
+      const g = map.get(key) || { category: label, inBase: 0, used: 0, periodDays: row.periodDays, rows: [] };
       g.inBase += row.inBase;
       g.used += row.used;
-      g.rows.push(row);
-      map.set(row.category, g);
+      // Один пол из разных исходных категорий — одна строка.
+      const same = g.rows.find((r) => r.gender === row.gender);
+      if (same) {
+        same.inBase += row.inBase;
+        same.used += row.used;
+      } else {
+        g.rows.push({ ...row, category: label });
+      }
+      map.set(key, g);
     }
     const order: Record<Status, number> = { out: 0, critical: 1, low: 2, ok: 3, idle: 4 };
     return Array.from(map.values()).sort((a, b) => {
