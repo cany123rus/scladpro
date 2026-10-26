@@ -1,6 +1,6 @@
 import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ChevronLeft, ChevronRight, FileSpreadsheet, FileText, ListChecks, Package, RefreshCw, Search, Trash2, X,
+  Check, ChevronDown, ChevronLeft, ChevronRight, FileSpreadsheet, FileText, ListChecks, Package, RefreshCw, Search, Trash2, X,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { compareSizes } from '../utils/sizeOrder';
@@ -106,7 +106,7 @@ async function fetchSupplierProducts(supplierId: string): Promise<Product[]> {
         subject,
         photo: str(row?.p1) || str(row?.p2),
         sizes,
-        hay: [vendorCode, nmId, title, brand, subject, ...sizes.flatMap((s) => s.barcodes)].join(' ').toLowerCase(),
+        hay: [vendorCode, nmId, title, brand, subject, ...sizes.flatMap((s) => s.barcodes)].join(' ').toLowerCase().replace(/ё/g, 'е'),
       });
     }
     if (rows.length < PAGE) break;
@@ -135,6 +135,134 @@ const selectionCount = (sel: Selection) => {
   }
   return { positions, qty };
 };
+
+const NO_CATEGORY = 'Без категории';
+const NO_BRAND = 'Без бренда';
+
+/** Для сравнения «Дублёнки» и «дубленки» одинаково: регистр и ё не должны мешать поиску. */
+const fold = (v: string) => v.toLowerCase().replace(/ё/g, 'е').trim();
+
+type FacetOption = { name: string; count: number };
+
+/**
+ * Выпадающий список с поиском для категорий и брендов.
+ *
+ * Обычный <select> на сотню брендов не годится: не найти, не отметить несколько.
+ * Здесь есть поиск по подстроке, галочки, счётчики «сколько товаров останется»
+ * с учётом остальных фильтров и поиска, быстрые «выбрать найденные» и «сбросить».
+ * Закрывается кликом снаружи и Esc; Enter в поиске отмечает первый найденный пункт.
+ */
+function FacetSelect({
+  label, options, selected, onChange,
+}: {
+  label: string;
+  options: FacetOption[];
+  selected: string[];
+  onChange: (next: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const [byName, setByName] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => { if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    inputRef.current?.focus();
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  useEffect(() => { if (!open) setQ(''); }, [open]);
+
+  const chosen = useMemo(() => new Set(selected), [selected]);
+  const shown = useMemo(() => {
+    const needle = fold(q);
+    const list = needle ? options.filter((o) => fold(o.name).includes(needle)) : options.slice();
+    return list.sort((a, b) => {
+      const sa = chosen.has(a.name) ? 0 : 1;
+      const sb = chosen.has(b.name) ? 0 : 1;
+      if (sa !== sb) return sa - sb;
+      // Пункты, где после остальных фильтров ничего не осталось, уходят вниз.
+      const za = a.count === 0 ? 1 : 0;
+      const zb = b.count === 0 ? 1 : 0;
+      if (za !== zb) return za - zb;
+      return byName ? a.name.localeCompare(b.name, 'ru') : b.count - a.count || a.name.localeCompare(b.name, 'ru');
+    });
+  }, [options, q, chosen, byName]);
+
+  const toggle = (name: string) => onChange(chosen.has(name) ? selected.filter((x) => x !== name) : [...selected, name]);
+  const addShown = () => onChange(Array.from(new Set([...selected, ...shown.filter((o) => o.count > 0).map((o) => o.name)])));
+
+  return (
+    <div className="relative" ref={rootRef}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-sm transition-colors ${selected.length ? 'border-indigo-300 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}
+        aria-expanded={open}
+      >
+        {label}
+        {selected.length > 0 && <span className="rounded-full bg-indigo-600 px-1.5 text-[11px] font-semibold text-white">{selected.length}</span>}
+        <ChevronDown className={`w-4 h-4 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div className="absolute left-0 z-40 mt-1 w-[22rem] max-w-[92vw] rounded-2xl border border-slate-200 bg-white p-2 shadow-xl">
+          <div className="relative mb-2">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <input
+              ref={inputRef}
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && shown[0]) { e.preventDefault(); toggle(shown[0].name); } }}
+              placeholder={`Найти: ${label.toLowerCase()}`}
+              className="oc-input w-full !pl-8"
+            />
+          </div>
+          <div className="mb-1 flex items-center justify-between px-1 text-[11px] text-slate-500">
+            <span>{shown.length} из {options.length}</span>
+            <button type="button" className="hover:text-slate-800" onClick={() => setByName((v) => !v)}>
+              {byName ? 'по алфавиту' : 'по числу товаров'}
+            </button>
+          </div>
+          <div className="max-h-72 overflow-auto">
+            {shown.map((o) => {
+              const on = chosen.has(o.name);
+              return (
+                <button
+                  type="button"
+                  key={o.name}
+                  onClick={() => toggle(o.name)}
+                  className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-slate-50 ${o.count === 0 && !on ? 'opacity-45' : ''}`}
+                >
+                  <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${on ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-300'}`}>
+                    {on && <Check className="w-3 h-3" />}
+                  </span>
+                  <span className="flex-1 truncate" title={o.name}>{o.name}</span>
+                  <span className="text-xs tabular-nums text-slate-400">{o.count}</span>
+                </button>
+              );
+            })}
+            {shown.length === 0 && <div className="px-2 py-4 text-center text-sm text-slate-400">Ничего не найдено</div>}
+          </div>
+          <div className="mt-2 flex items-center justify-between border-t border-slate-100 pt-2">
+            <button type="button" className="text-xs text-slate-500 hover:text-slate-800 disabled:opacity-40" onClick={() => onChange([])} disabled={!selected.length}>Сбросить</button>
+            <button type="button" className="text-xs font-medium text-indigo-600 hover:text-indigo-800 disabled:opacity-40" onClick={addShown} disabled={!shown.some((o) => o.count > 0)}>
+              Выбрать найденные
+            </button>
+            <button type="button" className="text-xs font-semibold text-indigo-600" onClick={() => setOpen(false)}>Готово</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 /** Один товар со своими размерами. Перерисовывается, только если изменился он сам или его выбор. */
 const ProductCard = memo(function ProductCard({
@@ -236,9 +364,7 @@ export function ChzOrderTab({
   const [query, setQuery] = useState('');
   const deferredQuery = useDeferredValue(query);
   const [categories, setCategories] = useState<string[]>([]);
-  const [brand, setBrand] = useState('');
-  const [catOpen, setCatOpen] = useState(false);
-  const [catFilter, setCatFilter] = useState('');
+  const [brands, setBrands] = useState<string[]>([]);
   const [onlySelected, setOnlySelected] = useState(false);
   const [page, setPage] = useState(0);
   const [selection, setSelection] = useState<Selection>(() => readSelection());
@@ -308,39 +434,23 @@ export function ChzOrderTab({
 
   const base = useMemo(() => activeIds.flatMap((id) => products[id] || []), [activeIds, products]);
 
-  const categoryCounts = useMemo(() => {
-    const map = new Map<string, number>();
-    base.forEach((p) => { const c = p.subject || 'Без категории'; map.set(c, (map.get(c) || 0) + 1); });
-    return Array.from(map, ([name, count]) => ({ name, count })).sort((a, b) => a.name.localeCompare(b.name, 'ru'));
-  }, [base]);
-
-  const brands = useMemo(
-    () => Array.from(new Set(base.map((p) => p.brand).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'ru')),
-    [base],
-  );
-
-  // Сменили кабинет — выбранные категории и бренд из другого списка не должны молча прятать товары.
-  useEffect(() => { setCategories([]); setBrand(''); setPage(0); }, [supplierId]);
+  // Сменили кабинет — выбранные категории и бренды из другого списка не должны молча прятать товары.
+  useEffect(() => { setCategories([]); setBrands([]); setPage(0); }, [supplierId]);
 
   /*
    * Поиск.
    *
    * Через пробел — «и»: каждое слово должно встретиться в артикуле, баркоде,
-   * коде WB, названии, бренде или категории. Если в строке есть перенос, запятая
-   * или точка с запятой — это список: ищем точное совпадение любого значения с
-   * артикулом, баркодом или кодом WB, а не найденные показываем отдельно. Так
-   * можно вставить столбец артикулов или баркодов из таблицы целиком.
+   * коде WB, названии, бренде или категории (регистр и «ё» не важны). Если в
+   * строке есть перенос, запятая или точка с запятой — это список: ищем точное
+   * совпадение любого значения с артикулом, баркодом или кодом WB, а не
+   * найденные показываем отдельно. Так можно вставить столбец артикулов или
+   * баркодов из таблицы целиком.
    */
-  const { filtered, notFound, bulk } = useMemo(() => {
+  const searched = useMemo(() => {
     const raw = deferredQuery.trim().toLowerCase();
     const isBulk = /[\n,;]/.test(raw);
     let list = base;
-
-    if (categories.length) {
-      const set = new Set(categories);
-      list = list.filter((p) => set.has(p.subject || 'Без категории'));
-    }
-    if (brand) list = list.filter((p) => p.brand === brand);
     if (onlySelected) list = list.filter((p) => selection[p.id] && Object.keys(selection[p.id]).length > 0);
 
     let missing: string[] = [];
@@ -359,18 +469,56 @@ export function ChzOrderTab({
         });
         missing = tokens.filter((t) => !hit.has(t));
       } else {
-        const words = raw.split(/\s+/).filter(Boolean);
+        const words = fold(raw).split(/\s+/).filter(Boolean);
         list = list.filter((p) => words.every((w) => p.hay.includes(w)));
       }
     }
-    return {
-      filtered: [...list].sort((a, b) => a.vendorCode.localeCompare(b.vendorCode, 'ru', { numeric: true })),
-      notFound: missing,
-      bulk: isBulk,
-    };
-  }, [base, categories, brand, deferredQuery, onlySelected, selection]);
+    return { list, notFound: missing, bulk: isBulk };
+  }, [base, deferredQuery, onlySelected, selection]);
 
-  useEffect(() => { setPage(0); }, [deferredQuery, categories, brand, onlySelected, supplierId]);
+  const { notFound, bulk } = searched;
+
+  const filtered = useMemo(() => {
+    const catSet = categories.length ? new Set(categories) : null;
+    const brandSet = brands.length ? new Set(brands) : null;
+    const list = searched.list.filter((p) =>
+      (!catSet || catSet.has(p.subject || NO_CATEGORY)) && (!brandSet || brandSet.has(p.brand || NO_BRAND)));
+    return list.sort((a, b) => a.vendorCode.localeCompare(b.vendorCode, 'ru', { numeric: true }));
+  }, [searched, categories, brands]);
+
+  /*
+   * Счётчики в списках категорий и брендов — «сколько товаров останется».
+   * Категории считаются с учётом поиска и выбранных брендов, бренды — с учётом
+   * поиска и выбранных категорий; свой собственный выбор в счётчик не входит,
+   * иначе отметив одну категорию, остальные показали бы нули и их нельзя было бы
+   * добавить. Полный список имён берём из всей базы кабинета, чтобы пункты не
+   * пропадали, а лишь серели.
+   */
+  const categoryOptions = useMemo(() => {
+    const brandSet = brands.length ? new Set(brands) : null;
+    const counts = new Map<string, number>();
+    base.forEach((p) => { const c = p.subject || NO_CATEGORY; if (!counts.has(c)) counts.set(c, 0); });
+    searched.list.forEach((p) => {
+      if (brandSet && !brandSet.has(p.brand || NO_BRAND)) return;
+      const c = p.subject || NO_CATEGORY;
+      counts.set(c, (counts.get(c) || 0) + 1);
+    });
+    return Array.from(counts, ([name, count]) => ({ name, count }));
+  }, [base, searched, brands]);
+
+  const brandOptions = useMemo(() => {
+    const catSet = categories.length ? new Set(categories) : null;
+    const counts = new Map<string, number>();
+    base.forEach((p) => { const b = p.brand || NO_BRAND; if (!counts.has(b)) counts.set(b, 0); });
+    searched.list.forEach((p) => {
+      if (catSet && !catSet.has(p.subject || NO_CATEGORY)) return;
+      const b = p.brand || NO_BRAND;
+      counts.set(b, (counts.get(b) || 0) + 1);
+    });
+    return Array.from(counts, ([name, count]) => ({ name, count }));
+  }, [base, searched, categories]);
+
+  useEffect(() => { setPage(0); }, [deferredQuery, categories, brands, onlySelected, supplierId]);
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, pageCount - 1);
@@ -528,7 +676,6 @@ export function ChzOrderTab({
 
   const anyLoading = activeIds.some((id) => loading[id]);
   const errorEntries = activeIds.filter((id) => errors[id]);
-  const filteredCats = categoryCounts.filter((c) => c.name.toLowerCase().includes(catFilter.trim().toLowerCase()));
 
   return (
     <div className="mx-auto w-full max-w-[1500px] px-2 md:px-4 pb-4">
@@ -565,40 +712,8 @@ export function ChzOrderTab({
             {supplierList.length > 1 && <option value="all">Все поставщики</option>}
           </select>
 
-          <div className="relative">
-            <button type="button" onClick={() => setCatOpen((v) => !v)} className="btn-ghost">
-              Категории{categories.length ? ` · ${categories.length}` : ''}
-            </button>
-            {catOpen && (
-              <div className="absolute z-30 mt-1 w-72 max-w-[90vw] rounded-2xl border border-slate-200 bg-white p-2 shadow-xl">
-                <input value={catFilter} onChange={(e) => setCatFilter(e.target.value)} placeholder="Найти категорию" className="oc-input w-full mb-2" />
-                <div className="max-h-64 overflow-auto">
-                  {filteredCats.map((c) => (
-                    <label key={c.name} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-slate-50">
-                      <input
-                        type="checkbox"
-                        className="accent-indigo-600"
-                        checked={categories.includes(c.name)}
-                        onChange={(e) => setCategories((prev) => (e.target.checked ? [...prev, c.name] : prev.filter((x) => x !== c.name)))}
-                      />
-                      <span className="flex-1 truncate">{c.name}</span>
-                      <span className="text-xs text-slate-400">{c.count}</span>
-                    </label>
-                  ))}
-                  {filteredCats.length === 0 && <div className="px-2 py-3 text-sm text-slate-400">Ничего нет</div>}
-                </div>
-                <div className="mt-2 flex justify-between">
-                  <button type="button" className="text-xs text-slate-500 hover:text-slate-800" onClick={() => setCategories([])}>Сбросить</button>
-                  <button type="button" className="text-xs font-semibold text-indigo-600" onClick={() => setCatOpen(false)}>Готово</button>
-                </div>
-              </div>
-            )}
-          </div>
-
-          <select value={brand} onChange={(e) => setBrand(e.target.value)} className="oc-select" aria-label="Бренд">
-            <option value="">Все бренды</option>
-            {brands.map((b) => <option key={b} value={b}>{b}</option>)}
-          </select>
+          <FacetSelect label="Категории" options={categoryOptions} selected={categories} onChange={setCategories} />
+          <FacetSelect label="Бренды" options={brandOptions} selected={brands} onChange={setBrands} />
 
           <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm">
             <input type="checkbox" className="accent-indigo-600" checked={onlySelected} onChange={(e) => setOnlySelected(e.target.checked)} />
@@ -616,13 +731,19 @@ export function ChzOrderTab({
           </button>
         </div>
 
-        {categories.length > 0 && (
-          <div className="flex flex-wrap gap-1.5">
+        {(categories.length > 0 || brands.length > 0) && (
+          <div className="flex flex-wrap items-center gap-1.5">
             {categories.map((c) => (
-              <button key={c} type="button" onClick={() => setCategories((prev) => prev.filter((x) => x !== c))} className="flex items-center gap-1 rounded-full bg-indigo-50 px-2.5 py-1 text-xs text-indigo-700">
+              <button key={`c:${c}`} type="button" onClick={() => setCategories((prev) => prev.filter((x) => x !== c))} className="flex items-center gap-1 rounded-full bg-indigo-50 px-2.5 py-1 text-xs text-indigo-700 hover:bg-indigo-100">
                 {c} <X className="w-3 h-3" />
               </button>
             ))}
+            {brands.map((b) => (
+              <button key={`b:${b}`} type="button" onClick={() => setBrands((prev) => prev.filter((x) => x !== b))} className="flex items-center gap-1 rounded-full bg-violet-50 px-2.5 py-1 text-xs text-violet-700 hover:bg-violet-100">
+                {b} <X className="w-3 h-3" />
+              </button>
+            ))}
+            <button type="button" onClick={() => { setCategories([]); setBrands([]); }} className="ml-1 text-xs text-slate-500 hover:text-slate-800">Сбросить фильтры</button>
           </div>
         )}
       </div>
