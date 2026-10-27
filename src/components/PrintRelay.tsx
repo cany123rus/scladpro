@@ -44,7 +44,7 @@ export function PrintRelay() {
       } catch { /* ignore */ }
     };
     /*
-     * Раз в 30 секунд и только на видимой вкладке.
+     * Только на видимой вкладке (теперь раз в 2 минуты + по событию, см. ниже).
      *
      * Раньше опрос шёл каждые 5 секунд всегда, даже в свёрнутом окне: 21,5
      * тысячи запросов в сутки — половина всего трафика сайта (замер 13.09.2026),
@@ -56,11 +56,20 @@ export function PrintRelay() {
       if (document.visibilityState === 'visible') void poll();
     };
     tick();
-    const t = setInterval(tick, 30_000);
+    // Раз в 2 минуты, а не в 30 секунд: каждый опрос — платный запрос через прокси на каждом
+    // открытом компьютере (около 2,9 тысячи в сутки на вкладку). Новое задание приходит сразу
+    // по Realtime (он идёт через Cloudflare и бесплатен); опрос остался подстраховкой на случай,
+    // если таблица не отдаёт события.
+    const t = setInterval(tick, 120_000);
+    const channel = supabase
+      .channel(`print_jobs_pending:${Math.random().toString(36).slice(2, 8)}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'print_jobs' }, () => { tick(); })
+      .subscribe();
     document.addEventListener('visibilitychange', tick);
     return () => {
       alive = false;
       clearInterval(t);
+      supabase.removeChannel(channel);
       document.removeEventListener('visibilitychange', tick);
     };
   }, []);

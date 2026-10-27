@@ -12638,16 +12638,16 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   };
 
   // Presence: «онлайн» считаем по свежести last_seen (heartbeat), а не по липкому флагу is_online.
-  // Окно «онлайн» — с запасом над интервалом отметки (2 мин), иначе человек
+  // Окно «онлайн» — с запасом над интервалом отметки (3 мин), иначе человек
   // с медленной сетью мигал бы офлайном между отметками.
-  const ONLINE_WINDOW_MS = 300000; // 5 минут
+  const ONLINE_WINDOW_MS = 480000; // 8 минут (отметка раз в 3 минуты + запас)
   const [presenceTick, setPresenceTick] = useState(0);
   const isEmployeeOnline = (emp: any) => {
     const ls = emp?.last_seen ? new Date(emp.last_seen).getTime() : 0;
     return ls > 0 && (Date.now() - ls) < ONLINE_WINDOW_MS;
   };
   /*
-   * Отметка «онлайн»: при загрузке, раз в 2 минуты и при возврате во вкладку.
+   * Отметка «онлайн»: при загрузке, раз в 3 минуты и при возврате во вкладку.
    *
    * Было раз в 45 секунд — 2,2 тысячи записей в сутки (13.09.2026), и каждую
    * realtime рассылал всем открытым вкладкам. Точность «кто онлайн» до пары
@@ -12659,7 +12659,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     let alive = true;
     const beat = () => { supabase.from('employees').update({ last_seen: new Date().toISOString(), is_online: true }).eq('id', empId).then(() => {}, () => {}); };
     beat();
-    const iv = setInterval(() => { if (alive && document.visibilityState === 'visible') beat(); }, 120000);
+    const iv = setInterval(() => { if (alive && document.visibilityState === 'visible') beat(); }, 180000);
     const onVis = () => { if (document.visibilityState === 'visible') beat(); };
     document.addEventListener('visibilitychange', onVis);
     return () => { alive = false; clearInterval(iv); document.removeEventListener('visibilitychange', onVis); };

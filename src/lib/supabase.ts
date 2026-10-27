@@ -131,8 +131,41 @@ const probeBase = (base: string, timeoutMs: number) => new Promise<string | null
     .catch(() => { clearTimeout(timer); resolve(null); });
 });
 
+const BASE_PICK_KEY = 'sb_base_pick_v1';
+
+/**
+ * Выбор пути помним десять минут — на все вкладки и перезагрузки страницы.
+ * Каждая новая вкладка раньше слала по пробному запросу на все адреса, включая
+ * Cloud Run, за который платят по числу запросов; выбранный путь живёт столько
+ * же, сколько и ручное переключение на запасной (BASE_STICKY_MS).
+ */
+const readRememberedPick = (): number | null | undefined => {
+  try {
+    const raw = localStorage.getItem(BASE_PICK_KEY);
+    if (!raw) return undefined;
+    const parsed = JSON.parse(raw) as { index?: number; at?: number };
+    if (!parsed || typeof parsed.at !== 'number' || Date.now() - parsed.at > BASE_STICKY_MS) return undefined;
+    return typeof parsed.index === 'number' ? parsed.index : null;
+  } catch {
+    return undefined;
+  }
+};
+
+const rememberPick = (index: number | null) => {
+  try { localStorage.setItem(BASE_PICK_KEY, JSON.stringify({ index, at: Date.now() })); } catch { /* без хранилища проверим при следующем заходе */ }
+};
+
 const pickBaseOnce = () => {
   if (basePickPromise) return basePickPromise;
+  const remembered = readRememberedPick();
+  if (remembered !== undefined) {
+    if (typeof remembered === 'number' && remembered >= 0 && remembered < FALLBACK_BASES.length) {
+      activeFallbackIndex = remembered;
+      fallbackSwitchedAtMs = Date.now();
+    }
+    basePickPromise = Promise.resolve();
+    return basePickPromise;
+  }
   if (!FALLBACK_BASES.length) {
     basePickPromise = Promise.resolve();
     return basePickPromise;
@@ -144,7 +177,7 @@ const pickBaseOnce = () => {
 
     // Основной адрес успел ответить — ничего не меняем.
     const primaryOk = await Promise.race([primary, sleep(1500).then(() => null)]);
-    if (primaryOk) return;
+    if (primaryOk) { rememberPick(null); return; }
 
     const winner = await Promise.race([
       ...others.map(async (p) => { const i = await p; return i === null ? new Promise<number>(() => {}) : i; }),
@@ -153,6 +186,7 @@ const pickBaseOnce = () => {
     if (typeof winner === 'number') {
       activeFallbackIndex = winner;
       fallbackSwitchedAtMs = Date.now();
+      rememberPick(winner);
       emitConnectionEvent('issue', { base: FALLBACK_BASES[winner], picked: true });
     }
   })();
@@ -201,7 +235,7 @@ const rebaseInput = (input: RequestInfo | URL, base: string): RequestInfo | URL 
  */
 const attemptTimeoutMs = (attempt: number) => (attempt === 1 ? 9000 : attempt === 2 ? 18000 : 35000);
 
-const resilientFetch: typeof fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+const resilientFetchCore: typeof fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   const maxAttempts = 4;
   let lastError: any;
 
@@ -289,6 +323,45 @@ const resilientFetch: typeof fetch = async (input: RequestInfo | URL, init?: Req
   }
 
   throw lastError;
+};
+
+/*
+ * Одинаковые запросы чтения, идущие одновременно, — один запрос на всех.
+ *
+ * Раздел при открытии просит одни и те же справочники из нескольких мест
+ * (ставки, поставщики, настройки), и каждый такой запрос — отдельный платный
+ * запрос через прокси. Пока первый ещё в пути, остальные берут его ответ.
+ * Это не кэш: как только ответ пришёл, следующий запрос идёт в базу заново,
+ * поэтому данные не «залёживаются». Запросы с телом и с собственным abort
+ * не трогаем: отмена одного не должна ронять соседей.
+ */
+const inflightReads = new Map<string, Promise<Response>>();
+
+const readKeyOf = (input: RequestInfo | URL, init?: RequestInit): string | null => {
+  if (typeof input !== 'string' && !(input instanceof URL)) return null;
+  const method = String(init?.method || 'GET').toUpperCase();
+  if (method !== 'GET' || init?.body || init?.signal) return null;
+  const headers = Array.from(new Headers(init?.headers || {}).entries())
+    .map(([k, v]) => `${k.toLowerCase()}:${v}`)
+    .sort()
+    .join('|');
+  return `${String(input)}#${headers}`;
+};
+
+const resilientFetch: typeof fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+  const key = readKeyOf(input, init);
+  if (!key) return resilientFetchCore(input, init);
+
+  let shared = inflightReads.get(key);
+  if (!shared) {
+    shared = resilientFetchCore(input, init);
+    const created = shared;
+    const done = () => { if (inflightReads.get(key) === created) inflightReads.delete(key); };
+    created.then(done, done);
+    inflightReads.set(key, created);
+  }
+  // Каждому читателю — своя копия: тело ответа читается один раз.
+  return shared.then((res) => res.clone());
 };
 
 export const supabase = createClient(supabaseUrl, supabaseKey, {
