@@ -6805,9 +6805,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     else setHonestSignCodes([]);
   }, [honestSignSupplierId]);
 
+  // Список поставщиков грузим один раз при входе: после правок он перечитывается сам,
+  // а изменения от других людей приходят через realtime (канал db_changes ниже).
+  // Раньше запрос (select *, с токенами WB) повторялся при каждой смене выбранного поставщика.
   useEffect(() => {
     fetchSuppliers();
-  }, [selectedSupplierId]);
+  }, []);
 
   /*
    * Живое обновление списка поставщиков.
