@@ -12,6 +12,8 @@ import { restoreDataMatrixGs } from '../utils/honestSign';
 import { FixedSizeList as List, ListChildComponentProps } from 'react-window';
 import { isWarehouseOfflineEnabled, warehouseOfflineClient } from '../lib/warehouseOffline';
 import { pgInList } from '../utils/pgFilters';
+import { hsCategoryKey, loadDisabledHsCategories } from '../utils/chzCategoryUse';
+import { hsNmIdsSupported, parseNmIds } from '../utils/chzProductLinks';
 import { Select } from './ui/Select';
 
 interface WBCharacteristic {
@@ -552,7 +554,7 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
 
   type CachedCodesPayload = {
     preparedAt: string;
-    bySupplier: Record<string, Array<{ code: string; category?: string | null }>>;
+    bySupplier: Record<string, Array<{ code: string; category?: string | null; nmIds?: number[] }>>;
   };
 
   const loadPrintCodesCache = (): CachedCodesPayload | null => {
@@ -621,15 +623,21 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
     // Fetch all suppliers' codes concurrently instead of one-by-one.
     await Promise.all(supplierIds.map(async (supplierId) => {
       try {
+        // nm_ids — привязка марок к товарам; колонку просим, только если база её уже получила.
+        const withLinks = await hsNmIdsSupported();
         const { data: codes } = await supabase
           .from('unified_honest_sign_codes')
-          .select('code, category')
+          .select(withLinks ? 'code, category, nm_ids' : 'code, category')
           .eq('supplier_id', supplierId)
           .neq('file_name', 'Напечатанные QR')
           .order('created_at', { ascending: false })
           .limit(5000);
 
-        bySupplier[supplierId] = (codes || []) as Array<{ code: string; category?: string | null }>;
+        // Категории со снятой галочкой «Использовать» в кэш печати не попадают.
+        const disabledCategories = await loadDisabledHsCategories(supplierId);
+        bySupplier[supplierId] = ((codes || []) as unknown as Array<{ code: string; category?: string | null; nm_ids?: unknown }>)
+          .filter((row) => !disabledCategories.has(hsCategoryKey(row.category)))
+          .map((row) => ({ code: row.code, category: row.category, nmIds: parseNmIds(row.nm_ids) }));
       } catch {
         bySupplier[supplierId] = [];
       }
@@ -1044,7 +1052,7 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
       const usedCodes = new Set<string>();
 
       variants.forEach(v => {
-        let code: { code: string; category?: string | null } | undefined;
+        let code: { code: string; category?: string | null; nmIds?: number[] } | undefined;
 
         if (v.barcode) {
           const prefix = '010' + v.barcode;
@@ -1063,12 +1071,16 @@ const WBProductsComponent = ({ suppliers = [] }: { suppliers?: Supplier[] }) => 
             productCatAliases.add('костюмы спортивные');
           }
 
-          code = availableCodes.find(c => {
+          const sameCategory = (c: { code: string; category?: string | null }) => {
             if (!c.category || usedCodes.has(c.code)) return false;
             const dbCatRaw = String(c.category).trim().toLowerCase();
             const dbCatNorm = normalizeHSCategory(dbCatRaw);
             return productCatAliases.has(dbCatRaw) || productCatAliases.has(dbCatNorm);
-          });
+          };
+          // Марки, привязанные к товарам, берём первыми и только для своих карточек.
+          const nmId = Number(v.product.nmID || 0);
+          code = availableCodes.find(c => c.nmIds?.length && nmId > 0 && c.nmIds.includes(nmId) && sameCategory(c))
+            ?? availableCodes.find(c => !c.nmIds?.length && sameCategory(c));
         }
 
         if (code) {

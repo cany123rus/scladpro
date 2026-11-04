@@ -65,6 +65,8 @@ import {
   readFbsComboLayout,
 } from '../utils/chzLabel';
 import type { ChzLabelLayout, ChzTailLayout, FbsComboLayout } from '../utils/chzLabel';
+import { hsCategoryKey, loadDisabledHsCategories } from '../utils/chzCategoryUse';
+import { hsPoolColumns, parseNmIds } from '../utils/chzProductLinks';
 import { pgInList } from '../utils/pgFilters';
 import {
   deleteFbsOrderCode,
@@ -7825,8 +7827,10 @@ export const WBSupplyManager = ({
   const takeFreeChzCodes = async (
     supplierId: string,
     count: number,
-  ): Promise<Array<{ code: string; category: string; gender: string }>> => {
+  ): Promise<Array<{ code: string; category: string; gender: string; size?: string; nmIds?: number[] }>> => {
     if (!supplierId || count <= 0) return [];
+    // nm_ids — привязка марок к товарам; колонку просим, только если база её уже получила.
+    const poolColumns = await hsPoolColumns();
 
     /*
      * Вся свободная база поставщика, а не «count × 4 самых старых».
@@ -7839,7 +7843,7 @@ export const WBSupplyManager = ({
     for (let from = 0; from < 50_000; from += 1000) {
       const { data: page, error } = await supabase
         .from('unified_honest_sign_codes')
-        .select('code, category, gender, size')
+        .select(poolColumns)
         .eq('supplier_id', supplierId)
         .neq('file_name', 'Напечатанные QR')
         .neq('file_name', 'Отсканировано')
@@ -7852,14 +7856,18 @@ export const WBSupplyManager = ({
       if (!page || page.length < 1000) break;
     }
 
+    // Категории со снятой галочкой «Использовать» в «Инфографике по ЧЗ» не подбираем.
+    const disabledCategories = await loadDisabledHsCategories(supplierId);
+
     return (data || [])
       .map((r: any) => ({
         code: String(r?.code || '').trim(),
         category: String(r?.category || '').trim(),
         gender: String(r?.gender || '').trim().toLowerCase(),
         size: String(r?.size || '').trim(),
+        nmIds: parseNmIds(r?.nm_ids),
       }))
-      .filter((r: any) => r.code);
+      .filter((r: any) => r.code && !disabledCategories.has(hsCategoryKey(r.category)));
   };
 
   /*
@@ -8398,6 +8406,7 @@ export const WBSupplyManager = ({
               gender: card?.gender || '',
               subject: card?.subject || '',
               size: String(order?.size || ''),
+              nmId: Number(order?.nmId || 0),
             });
             if (!match) {
               unmatchedOrders += 1;
@@ -9160,6 +9169,7 @@ export const WBSupplyManager = ({
             gender: card.gender,
             subject: card.subject,
             size: String(o?.size || ''),
+            nmId: Number(o?.nmId || 0),
           });
           if (match) {
             used.add(match.code);
