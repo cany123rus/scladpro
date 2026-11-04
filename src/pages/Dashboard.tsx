@@ -4,12 +4,7 @@ import { supabase } from '../lib/supabase';
 import { fetchAllPages } from '../lib/fetchAll';
 import { chunkReloadAllowed } from '../utils/chunkReload';
 import { useAuth } from '../context/AuthContext';
-import {
-  LayoutDashboard, Map as MapIcon, Package, Truck, ClipboardCheck, Users,
-  ShieldCheck, Printer, Box, CheckSquare, Terminal, MessageSquare,
-  Send, UserCog, LogOut, Plus, Search, Bell, Settings, ChevronRight, ChevronLeft, ChevronDown, ChevronUp, Calendar,
-  Pencil, Trash2, History, Save, X, Upload, ArrowLeft, Undo2, AlertCircle, CheckCircle2, QrCode, FileSpreadsheet, Lock, LockOpen, Camera, Download, FileText, File, FileClock, Clock, Menu, Database, Power, Link, RefreshCw, ShoppingCart, BarChart2, ShoppingBag, RotateCcw, Wallet, Megaphone, TrendingUp, BookOpen
-} from 'lucide-react';
+import { Map as MapIcon, Package, Truck, ClipboardCheck, Users, ShieldCheck, Box, CheckSquare, Send, UserCog, LogOut, Plus, Search, Bell, Settings, ChevronRight, Pencil, Trash2, Save, X, Undo2, AlertCircle, CheckCircle2, QrCode, FileSpreadsheet, LockOpen, Camera, FileText, File, FileClock, Menu, Database, Link, RefreshCw, ShoppingCart, BarChart2, ShoppingBag, Wallet, BookOpen } from 'lucide-react';
 // Устойчивый ленивый импорт: если чанк не загрузился или экспорт отсутствует
 // (устаревший кэш после деплоя), один раз жёстко перезагружаем страницу за свежими чанками.
 function lazyNamed<T>(factory: () => Promise<any>, name: string, key: string) {
@@ -57,7 +52,7 @@ import { readFirstSheetAsJsonFast } from '../utils/excelWorkerClient';
 import { mergeWarehouseUpdates, removeWarehouseShelfItem, upsertWarehouseShelfItem } from '../utils/warehouseActions';
 import { ensurePdfLibs, ensureExcel, ensureBwip, lazyLibs } from './dashboardLazyLibs';
 import { printPdfDirect } from '../utils/printDirect';
-import { ExcelUploader, SuppliesFBOSection, WBProductsSection, ReportsSection, EmployeesSection, TelegramSettingsSection, DatamatrixCode, WbLayoutHandle } from './dashboardComponents';
+import { WBProductsSection } from './dashboardComponents';
 import { DashboardDatabaseTab } from './DashboardDatabaseTab';
 import { drawReportHeader, drawMetaLines, drawKpiChips, reportFooter, reportTableStyles } from './pdfReportKit';
 import { Select } from '../components/ui/Select';
@@ -66,7 +61,7 @@ import { notifyChzStockChanged } from '../components/FbsChzStockPanel';
 import { HS_CATEGORY_USE_EVENT, hsCategoryKey, loadDisabledHsCategories, setHsCategoryEnabled } from '../utils/chzCategoryUse';
 import type { FileUploadSummary } from '../components/ChzFileLinker';
 
-import { DASHBOARD_TAB_IDS, isDashboardTabId } from '../constants/dashboardTabs';
+import { isDashboardTabId } from '../constants/dashboardTabs';
 import { normalizeDataMatrixText, parseChzCodesText, restoreDataMatrixGs } from '../utils/honestSign';
 import {
   DEFAULT_CHZ_TAIL_LAYOUT,
@@ -94,28 +89,9 @@ const WB_LAYOUT_SAMPLE_CHZ = '0104640233723909215XH=oFmHzyr,Z91EE1292z8CrXhvLbaN
 const WB_PREVIEW_SCALE = 737 / 58;
 import { getDefaultWarehouseOfflineUrl, getWarehouseOfflineUrl, isWarehouseOfflineEnabled, setWarehouseOfflineEnabled, setWarehouseOfflineUrl, warehouseOfflineClient, WarehouseOfflineSnapshot, WarehouseOfflineStatus } from '../lib/warehouseOffline';
 import { pgInList } from '../utils/pgFilters';
-import type {
-  NotificationType, NotificationItem, ToastStyle, Supplier, Product,
-  FboPalletSession, FboPallet, FboPalletWarehouse, FboPalletSupply, FboPalletItem,
-  FboPalletProductOption, FboPalletHint, FboPalletSnapshot, Supply, SupplyBox, SupplyItem,
-  OfflineFboSession, OfflineFboValidationSummary, ExternalAdsSocialLink, ExternalAdsHistoryItem,
-  ExternalAdsBaseEntry, AccessRule, ButtonAccessConfig,
-} from './dashboardTypes';
-import {
-  getSafeId, EMP_AVATAR_GRADIENTS, getEmpInitials, getEmpAvatarColor, getRelationCount,
-  getOfflineBoxItemsCount, getOfflineSupplyItemsCount, getNotificationToneClass, getNotificationStyle,
-  getNotificationHistoryTextClass, BARTER_RATING_OPTIONS, getBarterRatingClassName, RATING_SCORE_MAP,
-  EXTERNAL_ADS_STATUS_LABELS, EXTERNAL_ADS_STATUS_CLASSES, getExternalAdsStatusLabel,
-  getExternalAdsStatusClassName, normalizeExternalAdsStatus, getRatingLabelByScore, getExternalAdsSummary,
-  normalizeExternalUrl, parseExternalBloggerLink, getWbCharacteristicValue, getWbPhotoUrl,
-  buildFboScanProductCard, WAREHOUSE_MONEY_LEHA_PREFIX, WAREHOUSE_MONEY_OWNERS, getEmptyWarehouseMoneyForms,
-  getDefaultWarehouseMoneyFilters, getWarehouseMoneyOwner, getWarehouseMoneyDisplayComment,
-  buildWarehouseMoneyStoredComment, DELIVERY_PAYER_OWNER_RULES, getDeliveryPayerOwner, isDeliveryPayerSupplier,
-  ASSEMBLY_BUTTONS, FINANCIAL_DEFAULT_DENY_BUTTONS, isAssemblyExcludedStaffRate, isAssemblyTempType, normalizeRoleKey, ruToEn, fixLayout,
-} from './dashboardHelpers';
-import type {
-  WarehouseMoneyOwner, WarehouseMoneyFilter, WarehouseMoneyFormState, WarehouseMoneyFilterState, WarehouseMoneyLog,
-} from './dashboardHelpers';
+import { NotificationType, NotificationItem, Supplier, Product, FboPalletSession, FboPallet, FboPalletWarehouse, FboPalletSupply, FboPalletItem, FboPalletProductOption, FboPalletHint, FboPalletSnapshot, Supply, SupplyBox, SupplyItem, OfflineFboSession, OfflineFboValidationSummary, ExternalAdsSocialLink, ExternalAdsHistoryItem, ExternalAdsBaseEntry, AccessRule, ButtonAccessConfig } from './dashboardTypes';
+import { getSafeId, getOfflineBoxItemsCount, getOfflineSupplyItemsCount, getNotificationStyle, getNotificationHistoryTextClass, normalizeExternalAdsStatus, normalizeExternalUrl, parseExternalBloggerLink, getWbCharacteristicValue, buildFboScanProductCard, WAREHOUSE_MONEY_OWNERS, getEmptyWarehouseMoneyForms, getDefaultWarehouseMoneyFilters, getWarehouseMoneyOwner, getWarehouseMoneyDisplayComment, buildWarehouseMoneyStoredComment, getDeliveryPayerOwner, isDeliveryPayerSupplier, ASSEMBLY_BUTTONS, FINANCIAL_DEFAULT_DENY_BUTTONS, isAssemblyExcludedStaffRate, isAssemblyTempType, normalizeRoleKey, fixLayout } from './dashboardHelpers';
+import { WarehouseMoneyOwner, WarehouseMoneyFormState, WarehouseMoneyFilterState, WarehouseMoneyLog } from './dashboardHelpers';
 
 
 
@@ -251,11 +227,6 @@ function HeaderClock() {
   );
 }
 
-// Компоненты калькулятора объявлены на уровне модуля НАМЕРЕННО: если объявить их внутри
-// рендера, React на каждый ввод создаёт новый тип компонента, размонтирует input и теряет
-// фокус — вводился бы только один символ за клик.
-const calcMoney = (v: number) => Number(v || 0).toLocaleString('ru-RU', { maximumFractionDigits: 2 });
-
 // Инпут держит СВОЙ текст, чтобы поле можно было полностью очистить: если писать 0 прямо
 // в состояние, он тут же возвращается в поле и ноль невозможно стереть. Наверх отдаём число
 // (пустое поле = 0), а внешние изменения (кнопка «Подставить из отчёта») подхватываем эффектом.
@@ -364,13 +335,6 @@ export const CalcRow = ({ label, value, base, strong, tone, hint }: any) => {
     </div>
   );
 };
-
-const CalcLine = ({ label, value, sign, strong, muted }: any) => (
-  <div className={`flex items-center justify-between py-1.5 text-sm ${strong ? 'font-bold text-slate-900' : muted ? 'text-slate-400' : 'text-slate-600'}`}>
-    <span>{sign}{label}</span>
-    <span className={strong ? '' : 'font-medium text-slate-800'}>{calcMoney(value)} ₽</span>
-  </div>
-);
 
 /**
  * Разделы со своим сканером: сборка ФБО («Поставки») и поиск ФБС.
@@ -550,19 +514,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [editingSupplierId, setEditingSupplierId] = useState<string | null>(null);
   const [showSupplierQR, setShowSupplierQR] = useState<Supplier | null>(null);
   const [showProductQR, setShowProductQR] = useState<Product | null>(null);
-
-  // Products State
-  const [products, setProducts] = useState<Product[]>([]);
-  const [loadingProducts, setLoadingProducts] = useState(false);
   const [selectedSupplierId, setSelectedSupplierId] = useState<string>('');
-  const [productSearch, setProductSearch] = useState('');
-  const [showAddProductModal, setShowAddProductModal] = useState(false);
-  const [newProduct, setNewProduct] = useState({ name: '', wb_sku: '', barcode: '', size: '', color: '' });
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // Import & Notification State
-  const [lastImportedIds, setLastImportedIds] = useState<string[]>([]);
-  const [syncingProductsFromWb, setSyncingProductsFromWb] = useState(false);
   const [notification, setNotification] = useState<NotificationItem | null>(null);
   const [notificationHistory, setNotificationHistory] = useState<NotificationItem[]>([]);
   const [isNotificationHistoryVisible, setIsNotificationHistoryVisible] = useState(false);
@@ -599,8 +551,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [honestSignCategoryStats, setHonestSignCategoryStats] = useState<Array<{ category: string; total: number; inBase: number; printed: number; scanned: number }>>([]);
   const [honestSignRawCategories, setHonestSignRawCategories] = useState<string[]>([]);
   const [loadingCategories, setLoadingCategories] = useState(false);
-  const [codesToPrint, setCodesToPrint] = useState<string[]>([]);
-  const [isPrintingCodes, setIsPrintingCodes] = useState(false);
+  const [codesToPrint] = useState<string[]>([]);
+  const [isPrintingCodes] = useState(false);
   const [showReturnCodesModal, setShowReturnCodesModal] = useState(false);
   const [returnCodesInput, setReturnCodesInput] = useState('');
   // Галочка «Использовать» в карточках категорий ЧЗ: снята — коды не подбираются и не печатаются.
@@ -1279,7 +1231,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [summaryExpanded, setSummaryExpanded] = useState<Record<string, boolean>>({});
   // Сортировка детализации размеров в сводке (по каждому товару отдельно).
   const [summarySizeSort, setSummarySizeSort] = useState<Record<string, { key: string; dir: 'asc' | 'desc' }>>({});
-  const [summaryLogProblemOnly, setSummaryLogProblemOnly] = useState(false);
   const [uploadedCostByKey, setUploadedCostByKey] = useState<Record<string, string>>({});
   const [uploadedSelectedSupplierId, setUploadedSelectedSupplierId] = useState<string>('');
   // Сентинел «Любой поставщик»: отчёт грузится без привязки к поставщику
@@ -1312,7 +1263,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [uploadedPhotoLoading, setUploadedPhotoLoading] = useState(false);
   const MAX_UPLOAD_ROWS = 250000;
   const TURBO_MODE_ROWS = 10000;
-  const UPLOAD_RAW_ROWS_DB_LIMIT = 0;
   const ANALYTICS_JSON_DB_LIMIT = 2500;
   const UPLOADED_TABLE_RENDER_LIMIT = 800;
   const RAW_REPORTS_BUCKET = 'analytics-raw-reports';
@@ -1351,7 +1301,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [uploadedPhotoPreview, setUploadedPhotoPreview] = useState<{ src: string; title?: string } | null>(null);
   const [uploadedSizeDetailsOpen, setUploadedSizeDetailsOpen] = useState<Record<string, boolean>>({});
   const [uploadedSizeSortByRow, setUploadedSizeSortByRow] = useState<Record<string, { key: string; dir: 'asc' | 'desc' }>>({});
-  const [uploadedPendingFileName, setUploadedPendingFileName] = useState<string>('');
   const [uploadedPersistedCostByCode, setUploadedPersistedCostByCode] = useState<Record<string, number>>({});
   const [uploadedSavingCosts, setUploadedSavingCosts] = useState(false);
   const [uploadedCostEditorOpen, setUploadedCostEditorOpen] = useState(false);
@@ -1364,8 +1313,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [uploadedSortDir, setUploadedSortDir] = useState<'asc' | 'desc'>('desc');
   const [uploadedDailySeries, setUploadedDailySeries] = useState<Record<string, { code: string; name: string; points: any[] }>>({});
   const [uploadedChartKey, setUploadedChartKey] = useState('');
-  const [uploadedChartMetric, setUploadedChartMetric] = useState<'sales_net' | 'returns_gross' | 'logistics_sum' | 'payout_net' | 'fine_sum' | 'storage_sum' | 'withhold_sum' | 'to_pay_total' | 'sold_qty' | 'return_qty' | 'acquiring_sum'>('sales_net');
-  const [uploadedChartHover, setUploadedChartHover] = useState<{ x: number; y: number; date: string; value: number } | null>(null);
   const [uploadedExtraCosts, setUploadedExtraCosts] = useState<number>(0);
   const [uploadedTaxRateOverride, setUploadedTaxRateOverride] = useState<0.01 | 0.06 | 0.15 | null>(null);
   const [uploadedTurboMode, setUploadedTurboMode] = useState(false);
@@ -1608,8 +1555,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       localStorage.setItem('uploaded_share_hidden_keys_v1', JSON.stringify(uploadedShareHiddenKeys || {}));
     } catch {}
   }, [uploadedShareHiddenKeys]);
-
-  const [openDatePicker, setOpenDatePicker] = useState<string | null>(null);
   const [supabaseConnectionIssue, setSupabaseConnectionIssue] = useState<string | null>(null);
 
   // Employee Report Modal State
@@ -1844,7 +1789,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [cwPackagingRateForm, setCwPackagingRateForm] = useState({ name: '', price: '' });
   const [cwSelectedPeriod, setCwSelectedPeriod] = useState(new Date());
   const [cwReportModalOpen, setCwReportModalOpen] = useState(false);
-  const [cwPackagingRatesModalOpen, setCwPackagingRatesModalOpen] = useState(false);
   const [cwReportForm, setCwReportForm] = useState({
     employee_id: '',
     supplier_id: '',
@@ -2008,7 +1952,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [sectionRoleAccess, setSectionRoleAccess] = useState<Record<string, Record<string, 'allow' | 'deny'>>>({});
   const [sectionRoleAccessLoaded, setSectionRoleAccessLoaded] = useState(false);
   const [adminPanelSection, setAdminPanelSection] = useState<'sections-emp' | 'sections-role' | 'buttons' | 'employees' | 'bots' | 'finance' | 'assembly' | 'push'>('sections-emp');
-  const [selectedAccessEmployeeId, setSelectedAccessEmployeeId] = useState('');
 
   const fetchTempWorkerLogs = async () => {
     try {
@@ -3569,22 +3512,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     return { totalPack, totalOther, total: totalPack + totalOther, bySupplier };
   }, [generalPackagingRows, suppliers, generalReportForm.supplier_id]);
 
-  // Assembled quantity per supplier (for the general report breakdown).
-  const assemblyBySupplier = useMemo(() => {
-    const m = new Map<string, { temp: number; staff: number }>();
-    (assemblyTempRows || []).forEach((r: any) => {
-      if (!isAssemblyTempType(r.work_comment)) return; const q = Number(r.quantity || 0); if (q <= 0) return;
-      const k = String(r.supplier_id || ''); const e = m.get(k) || { temp: 0, staff: 0 }; e.temp += q; m.set(k, e);
-    });
-    (assemblyStaffRows || []).forEach((r: any) => {
-      if (isAssemblyExcludedStaffRate(r.work_rates?.name)) return; const q = Number(r.quantity || 0); if (q <= 0) return;
-      const k = String(r.supplier_id || ''); const e = m.get(k) || { temp: 0, staff: 0 }; e.staff += q; m.set(k, e);
-    });
-    return Array.from(m.entries())
-      .map(([sid, v]) => ({ supplierId: sid, name: suppliers.find((s: any) => String(s.id) === sid)?.name || 'Без поставщика', temp: v.temp, staff: v.staff, total: v.temp + v.staff }))
-      .sort((a, b) => b.total - a.total);
-  }, [assemblyTempRows, assemblyStaffRows, suppliers]);
-
   const generalTempWorkerRows = useMemo(() => {
     const start = String(generalReportForm.start_date || '');
     const end = String(generalReportForm.end_date || '');
@@ -4747,18 +4674,12 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     }
     setPaidByModal({ isOpen: false, target: 'temp', logId: '', supplierId: '' });
   };
-
-
-  // Reports Section Report State
-  const [reportsReportModalOpen, setReportsReportModalOpen] = useState(false);
-  const [reportsReportForm, setReportsReportForm] = useState({
+  const [reportsReportForm] = useState({
     start: mskTodayYmd(),
     end: mskTodayYmd(),
     supplier_id: '',
   });
-  const [reportsReportResult, setReportsReportResult] = useState<any>(null);
   const [suppliersAllTimeStats, setSuppliersAllTimeStats] = useState<any[]>([]);
-  const [warehouseCostForm, setWarehouseCostForm] = useState({ month: new Date().toISOString().slice(0, 7), cost: '' });
   const [warehouseCostHistory, setWarehouseCostHistory] = useState<any[]>([]);
 
   const fetchWarehouseCosts = async () => {
@@ -4777,34 +4698,18 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         fetchWarehouseCosts();
     }
   }, [activeTab, reportsReportForm.supplier_id]);
-
-  // Box Inventory State
-  const [cwBoxForm, setCwBoxForm] = useState({ quantity: '', price: '', delivery: '' });
-  const [cwBoxFBSRows, setCwBoxFBSRows] = useState<Array<{ id: string; supplier_id: string; quantity: string; items_quantity: string }>>([{ id: getSafeId(), supplier_id: '', quantity: '', items_quantity: '' }]);
-  const [cwBoxFBSTotalDelivery, setCwBoxFBSTotalDelivery] = useState('');
-  const [cwEmployeeRequisitesForm, setCwEmployeeRequisitesForm] = useState({ name: '', phone: '', bank: '' });
-  const [cwEmployeeRequisitesCollapsed, setCwEmployeeRequisitesCollapsed] = useState(false);
-  const [cwEmployeeRequisitesEditingId, setCwEmployeeRequisitesEditingId] = useState<string | null>(null);
   const [cwEmployeeRequisites, setCwEmployeeRequisites] = useState<Array<{ id: string; name: string; phone: string; bank: string }>>([]);
   const [cwBoxHistory, setCwBoxHistory] = useState<any[]>([]);
-  const [cwBoxHistorySupplierFilter, setCwBoxHistorySupplierFilter] = useState('all');
-  const [cwBoxHistoryPaymentFilter, setCwBoxHistoryPaymentFilter] = useState<'all' | 'paid' | 'unpaid'>('all');
-  const [cwBoxHistoryCollapsed, setCwBoxHistoryCollapsed] = useState(false);
   const [cwBoxCreators, setCwBoxCreators] = useState<Record<string, { employee_id?: string; employee_name?: string }>>({});
   const [fbsDebtSupplierId, setFbsDebtSupplierId] = useState('');
   const [fbsDebtRequisiteId, setFbsDebtRequisiteId] = useState('');
-  const [fbsDebtComment, setFbsDebtComment] = useState('');
   const [tempDebtSupplierId, setTempDebtSupplierId] = useState('');
   const [tempDebtRequisiteId, setTempDebtRequisiteId] = useState('');
-  const [tempDebtComment, setTempDebtComment] = useState('');
   const [tempDebtLogs, setTempDebtLogs] = useState<any[]>([]);
   const [debtPaymentRows, setDebtPaymentRows] = useState<Array<{ id: string; requisiteId: string; amount: string }>>([]);
   const [cwWarehouseMoneyForms, setCwWarehouseMoneyForms] = useState<WarehouseMoneyFormState>(() => getEmptyWarehouseMoneyForms());
   const [cwWarehouseMoneyEdit, setCwWarehouseMoneyEdit] = useState<null | { id: string; amount: string; comment: string; mode: 'add' | 'writeoff'; owner: WarehouseMoneyOwner }>(null);
   const [cwWarehouseMoneyFilters, setCwWarehouseMoneyFilters] = useState<WarehouseMoneyFilterState>(() => getDefaultWarehouseMoneyFilters());
-  const [cwSupplierDebtCollapsed, setCwSupplierDebtCollapsed] = useState(false);
-  const [cwWarehouseMoneyCollapsed, setCwWarehouseMoneyCollapsed] = useState(false);
-  const [cwBoxesFormsCollapsed, setCwBoxesFormsCollapsed] = useState(false);
   const [cwWarehouseMoneyHistory, setCwWarehouseMoneyHistory] = useState<WarehouseMoneyLog[]>([]);
   const cwWarehouseMoneyRowsByOwner = useMemo(() => {
     const grouped: Record<WarehouseMoneyOwner, WarehouseMoneyLog[]> = { sasha: [], leha: [] };
@@ -4831,8 +4736,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     };
   }, [cwWarehouseMoneyRowsByOwner, cwWarehouseMoneyFilters]);
   const [cwSalaryIssueForm, setCwSalaryIssueForm] = useState({ employee_id: '', period_key: '' });
-  const [cwSalaryIssuePreview, setCwSalaryIssuePreview] = useState<{ amount: number; logsCount: number; periodLabel: string; periodStart: string; periodEnd: string } | null>(null);
-  const [cwSalaryIssueLoading, setCwSalaryIssueLoading] = useState(false);
   const [showSalaryPayModal, setShowSalaryPayModal] = useState(false);
   const [salaryPayPeriodKey, setSalaryPayPeriodKey] = useState('');
   const [salaryPayOwner, setSalaryPayOwner] = useState<WarehouseMoneyOwner>('sasha');
@@ -4993,7 +4896,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   };
 
   // Report Dates State
-  const [reportDates, setReportDates] = useState<{
+  const [reportDates] = useState<{
     [key: string]: { start: string, end: string }
   }>({});
 
@@ -5029,12 +4932,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       const { data } = await supabase.from('app_settings').select('value').eq('key', 'box_log_creators_v1').maybeSingle();
       const parsed = data?.value ? (typeof data.value === 'string' ? JSON.parse(data.value) : data.value) : {};
       if (parsed && typeof parsed === 'object') setCwBoxCreators(parsed as any);
-    } catch {}
-  };
-
-  const saveCwBoxCreators = async (next: Record<string, { employee_id?: string; employee_name?: string }>) => {
-    try {
-      await supabase.from('app_settings').upsert([{ key: 'box_log_creators_v1', value: JSON.stringify(next || {}) }], { onConflict: 'key' });
     } catch {}
   };
 
@@ -5076,13 +4973,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     setTempDebtLogs(data || []);
   };
 
-  const getFbsDeliveryAmount = (log: any) => {
-    const rawDelivery = Number(log?.delivery_price ?? 0);
-    if (Number.isFinite(rawDelivery) && rawDelivery > 0) return rawDelivery;
-    const qty = Number(log?.quantity ?? 0);
-    return Math.max(0, qty) * 150;
-  };
-
   const handleToggleBoxFbsPaid = async (logId: string, nextPaid: boolean, paidBySupplierId?: string | null) => {
     try {
       let { error } = await supabase
@@ -5109,20 +4999,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         showToast('Ошибка обновления оплаты FBS: ' + (error?.message || 'неизвестно'), 'error');
       }
     }
-  };
-
-  const handleEditBoxLog = (log: any) => {
-    setEditBoxLogModal({
-      isOpen: true,
-      id: String(log.id || ''),
-      type: String(log.type || 'PURCHASE'),
-      date: mskYmd(new Date(log.created_at)),
-      quantity: String(log.quantity ?? 0),
-      items_quantity: String(log.items_quantity ?? 0),
-      delivery_price: String(log.delivery_price ?? 0),
-      price_per_box: String(log.price_per_box ?? 0),
-      supplier_id: String(log.supplier_id ?? ''),
-    });
   };
 
   const submitEditBoxLog = async () => {
@@ -5735,46 +5611,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     }
   }, [cwSelectedEmployee, cwSalaryIssueForm.employee_id, cwSalaryIssueForm.period_key, cwSalaryPeriods]);
 
-  const calculateSalaryPreview = async () => {
-    const employeeId = cwSalaryIssueForm.employee_id;
-    const period = cwSalaryPeriods.find(p => p.key === cwSalaryIssueForm.period_key);
-    if (!employeeId || !period) {
-      showToast('Выберите сотрудника и период', 'error');
-      return;
-    }
-
-    setCwSalaryIssueLoading(true);
-    try {
-      const { data, error } = await supabase
-        .from('work_logs')
-        .select('id, employee_id, quantity, work_rate_id, work_rates(price)')
-        .eq('employee_id', employeeId)
-        .gte('date', period.start)
-        .lte('date', period.end)
-        .is('deleted_at', null);
-
-      if (error) throw error;
-
-      const amount = (data || []).reduce((sum: number, row: any) => {
-        const qty = Number(row?.quantity || 0);
-        const price = Number(getWorkLogSnapshotPrice(row) || 0);
-        return sum + qty * price;
-      }, 0);
-
-      setCwSalaryIssuePreview({
-        amount: Number(amount.toFixed(2)),
-        logsCount: (data || []).length,
-        periodLabel: period.label,
-        periodStart: period.start,
-        periodEnd: period.end,
-      });
-    } catch (e: any) {
-      showToast('Ошибка расчета ЗП: ' + (e?.message || 'неизвестно'), 'error');
-    } finally {
-      setCwSalaryIssueLoading(false);
-    }
-  };
-
   const loadSalaryPayRows = async (periodKey: string) => {
     const period = cwSalaryPeriods.find((p) => p.key === periodKey);
     if (!period) { setSalaryPayRows([]); return; }
@@ -5944,7 +5780,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
   // Backup Bot State
   const [backupBotToken, setBackupBotToken] = useState(''); // грузится из app_settings.backup_bot_token; не хардкодить токен
-  const [backupChatId, setBackupChatId] = useState('498924112');
+  const [backupChatId] = useState('498924112');
   const [isBackupTokenLocked, setIsBackupTokenLocked] = useState(true);
 
   const handleDeleteWorkLog = (id: string) => {
@@ -5970,113 +5806,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
         setConfirmModal(prev => ({ ...prev, isOpen: false }));
       }
     );
-  };
-
-  const sendDatabaseBackupToTelegram = async () => {
-    if (!backupBotToken || !backupChatId) return;
-
-    // Global de-duplication guard: only one auto-backup per UTC hour slot across all clients
-    const slot = new Date();
-    slot.setUTCMinutes(0, 0, 0);
-    const slotId = slot.toISOString();
-
-    try {
-      // Try to claim slot by updating existing key only if value differs
-      const { data: updatedSlotRows, error: updateSlotError } = await supabase
-        .from('app_settings')
-        .update({ value: slotId })
-        .eq('key', 'database_backup_last_slot')
-        .neq('value', slotId)
-        .select('key');
-
-      if (updateSlotError) throw updateSlotError;
-
-      let slotClaimed = (updatedSlotRows || []).length > 0;
-
-      // If no row updated, either same slot already processed or key missing
-      if (!slotClaimed) {
-        const { error: insertSlotError } = await supabase
-          .from('app_settings')
-          .insert({ key: 'database_backup_last_slot', value: slotId });
-
-        if (!insertSlotError) {
-          slotClaimed = true;
-        } else {
-          // If duplicate key exists, it means another client likely already claimed this slot
-          const msg = String((insertSlotError as any)?.message || '').toLowerCase();
-          const code = String((insertSlotError as any)?.code || '').toLowerCase();
-          if (code === '23505' || msg.includes('duplicate')) {
-            console.log('Backup skipped: slot already claimed by another client', slotId);
-            return;
-          }
-          throw insertSlotError;
-        }
-      }
-
-      if (!slotClaimed) {
-        console.log('Backup skipped: slot not claimed', slotId);
-        return;
-      }
-
-      const tables = ['suppliers', 'products', 'supplies', 'boxes', 'supply_items', 'employees', 'receptions'];
-      const dbData: any = {};
-
-      for (const table of tables) {
-        const { data } = await supabase.from(table).select('*');
-        dbData[table] = data || [];
-      }
-
-      const blob = new Blob([JSON.stringify(dbData, null, 2)], { type: 'application/json' });
-      const fileName = `backup_${mskTodayYmd()}_${new Date().getHours()}h.json`;
-
-      const formData = new FormData();
-      formData.append('chat_id', backupChatId);
-      formData.append('document', blob, fileName);
-      formData.append('caption', `Автоматическая выгрузка базы данных\nВремя: ${new Date().toLocaleString('ru-RU')}`);
-
-      await fetch(`https://api.telegram.org/bot${backupBotToken}/sendDocument`, {
-        method: 'POST',
-        body: formData
-      });
-
-      console.log('Backup sent successfully');
-
-      // Update Database Logs
-      const newLog = {
-        version: `Backup ${new Date().toLocaleString('ru-RU')}`,
-        date: new Date().toLocaleDateString(),
-        details: 'Автоматическая выгрузка системы'
-      };
-
-      // Fetch latest logs first to avoid overwriting with stale state
-      const { data: existingSettings } = await supabase
-        .from('app_settings')
-        .select('value')
-        .eq('key', 'database_backup_logs')
-        .maybeSingle();
-
-      let currentLogs: any[] = [];
-      if (existingSettings && existingSettings.value) {
-         try {
-            currentLogs = typeof existingSettings.value === 'string'
-                ? JSON.parse(existingSettings.value)
-                : existingSettings.value;
-         } catch (e) {
-            console.error('Failed to parse existing logs', e);
-         }
-      }
-
-      const updated = [newLog, ...currentLogs];
-      setDatabaseLogs(updated);
-
-      await supabase.from('app_settings').upsert({
-          key: 'database_backup_logs',
-          value: JSON.stringify(updated)
-      });
-
-    } catch (e) {
-      console.error('Backup failed:', e);
-    }
   };
 
   const handleRestoreDatabase = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -7294,8 +7023,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       return [p.title, p.vendor_code, p.nm_id, p.barcode, p.size, p.color].some((value) => String(value || '').toLowerCase().includes(q));
     });
   }, [fboPalletBrandFilter, fboPalletCategoryFilter, fboPalletProductSearch, fboPalletProducts]);
-  const [apiBoxCount, setApiBoxCount] = useState('1');
-  const [loadingApiBoxes, setLoadingApiBoxes] = useState(false);
   const [fboBoxesExcelFile, setFboBoxesExcelFile] = useState<File | null>(null);
   const [fboBoxesGenerating, setFboBoxesGenerating] = useState(false);
   const [fboBoxesSupplierId, setFboBoxesSupplierId] = useState<string>('');
@@ -7951,36 +7678,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     return () => { cancelled = true; };
   }, [fboBoxesExcelFile]);
 
-  const getWbSupplyStatusLabel = (s: any) => {
-    const candidate = s?.status ?? s?.supplyStatus ?? s?.state ?? s?.statusName ?? s?.status_name ?? s?.currentStatus;
-    if (candidate != null && candidate !== '') {
-      if (typeof candidate === 'string' || typeof candidate === 'number') return String(candidate);
-      if (typeof candidate === 'object') return String(candidate.name || candidate.value || candidate.status || candidate.state || JSON.stringify(candidate));
-    }
-
-    if (typeof s?.done === 'boolean') return s.done ? 'Принято (done=true)' : 'В работе (done=false)';
-    if (typeof s?.isDone === 'boolean') return s.isDone ? 'Принято (isDone=true)' : 'В работе (isDone=false)';
-    if (s?.closedAt || s?.closed_at) return 'Закрыта';
-    if (s?.acceptanceAt || s?.acceptance_at) return 'Идет приемка';
-
-    return '-';
-  };
-
-  const getWbSupplyStatusMeta = (s: any) => {
-    const fields = [
-      ['status', s?.status],
-      ['supplyStatus', s?.supplyStatus],
-      ['state', s?.state],
-      ['statusName', s?.statusName ?? s?.status_name],
-      ['done', s?.done ?? s?.isDone],
-    ] as Array<[string, any]>;
-
-    return fields
-      .filter(([, v]) => v !== undefined && v !== null && v !== '')
-      .map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : String(v)}`)
-      .join(' | ');
-  };
-
   const parseFboBoxCodesFromRows = (rows: Record<string, any>[]) => {
     const first = rows[0] || {};
     const headers = Object.keys(first);
@@ -8256,99 +7953,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     } else {
         setBoxesList([]);
     }
-  };
-
-  const generateApiBoxesForCurrentSupply = async () => {
-    if (!currentSupply) return;
-    const count = Math.min(500, Math.max(1, parseInt(apiBoxCount || '1')));
-
-    const supplier = suppliers.find(s => s.id === currentSupply.supplier_id);
-    if (!supplier?.wb_api_token) {
-      showToast('Нет WB API токена для генерации коробок', 'error');
-      return;
-    }
-
-    setLoadingApiBoxes(true);
-    try {
-      const wbSupplyId = currentSupply.name;
-      let boxNames: string[] = [];
-
-      try {
-        const res = await fetch(`https://marketplace-api.wildberries.ru/api/v3/supplies/${encodeURIComponent(wbSupplyId)}/trbx`, {
-          method: 'POST',
-          headers: {
-            Authorization: supplier.wb_api_token.trim(),
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ quantity: count })
-        });
-
-        if (res.ok) {
-          const data = await res.json();
-          const arr = data?.trbxes || data?.data || [];
-          boxNames = (arr || []).map((x: any) => String(x?.barcode || x?.name || x)).filter(Boolean);
-        }
-      } catch (_) {}
-
-      if (boxNames.length === 0) {
-        boxNames = Array.from({ length: count }).map((_, i) => `${currentSupply.name}-BOX-${Date.now()}-${i + 1}`);
-      }
-
-      const payload = boxNames.map((name) => ({ name, supply_id: currentSupply.id }));
-      const { error } = await supabase.from('boxes').insert(payload);
-      if (error) throw error;
-
-      await fetchBoxesList(currentSupply.id);
-      await fetchSupplyStats(currentSupply.id);
-      showToast(`Сгенерировано коробок: ${boxNames.length}`, 'success');
-    } catch (e: any) {
-      console.error(e);
-      showToast(`Ошибка генерации коробок: ${e?.message || 'неизвестно'}`, 'error');
-    } finally {
-      setLoadingApiBoxes(false);
-    }
-  };
-
-  const printCurrentSupplyBoxes58x40 = async () => {
-    await ensurePdfLibs();
-    await ensureBwip();
-    if (!currentSupply) return;
-    const { data: boxes } = await supabase
-      .from('boxes')
-      .select('name,created_at')
-      .eq('supply_id', currentSupply.id)
-      .is('deleted_at', null)
-      .order('created_at', { ascending: false });
-
-    if (!boxes || boxes.length === 0) {
-      showToast('Нет коробок для печати', 'info');
-      return;
-    }
-
-    const doc = new lazyLibs.jsPDF({ orientation: 'landscape', unit: 'mm', format: [58, 40] });
-    const canvas = document.createElement('canvas');
-
-    boxes.forEach((b: any, i: number) => {
-      if (i > 0) doc.addPage([58, 40], 'landscape');
-      const txt = String(b.name || 'BOX');
-      lazyLibs.bwipjs.toCanvas(canvas, {
-        bcid: 'code128',
-        text: txt,
-        scale: 3,
-        height: 11,
-        includetext: false,
-        paddingwidth: 0,
-        paddingheight: 0,
-      });
-      doc.addImage(canvas.toDataURL('image/png'), 'PNG', 2.5, 7.5, 53, 15);
-      doc.setFont('Helvetica', 'bold');
-      doc.setFontSize(10.5);
-      doc.text(txt, 29, 25.8, { align: 'center' });
-      doc.setFontSize(8);
-      doc.text(`Коробка • ${currentSupply.name}`, 29, 33.2, { align: 'center' });
-    });
-
-    await printPdfDirect(doc, { widthMm: 58, heightMm: 40 });
   };
 
   useEffect(() => {
@@ -10296,52 +9900,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     }
   };
 
-  const handleDeleteWarehouseCost = async (id: string) => {
-    if (!await confirmDialog('Удалить запись?')) return;
-    const { error } = await supabase.from('supplier_warehouse_costs').delete().eq('id', id);
-    if (error) showToast('Ошибка удаления: ' + error.message, 'error');
-    else {
-        showToast('Запись удалена', 'success');
-        fetchWarehouseCosts();
-        fetchReportsData();
-    }
-  };
-
-  const handleEditWarehouseCost = (item: any) => {
-    setWarehouseCostForm({
-        month: item.month_date.slice(0, 7),
-        cost: item.cost.toString()
-    });
-  };
-
-  const handleSaveWarehouseCost = async () => {
-    if (!reportsReportForm.supplier_id) return;
-    if (!warehouseCostForm.cost) {
-        showToast('Введите стоимость', 'error');
-        return;
-    }
-
-    try {
-        const date = `${warehouseCostForm.month}-01`;
-        const { error } = await supabase.from('supplier_warehouse_costs').upsert({
-            supplier_id: reportsReportForm.supplier_id,
-            month_date: date,
-            cost: parseFloat(warehouseCostForm.cost),
-            updated_at: new Date().toISOString()
-        }, { onConflict: 'supplier_id, month_date' });
-
-        if (error) throw error;
-
-        showToast('Стоимость склада сохранена', 'success');
-        setWarehouseCostForm({ ...warehouseCostForm, cost: '' });
-        if (reportsReportResult) generateReportsReport();
-        fetchReportsData();
-        fetchWarehouseCosts();
-    } catch (e: any) {
-        showToast('Ошибка сохранения: ' + e.message, 'error');
-    }
-  };
-
   const softDeleteWithActor = async (table: string, id: string) => {
     const payload: any = { deleted_at: new Date().toISOString(), deleted_by: currentEmployee?.id || null };
     let res = await supabase.from(table).update(payload).eq('id', id);
@@ -10864,63 +10422,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     await softDeleteWithActor('suppliers', id);
   };
 
-  // Products Functions
-  const fetchProducts = async (supplierId: string = '') => {
-    setLoadingProducts(true);
-    let query = supabase.from('products').select('*').is('deleted_at', null).order('created_at', { ascending: false });
-
-    if (supplierId) {
-      query = query.eq('supplier_id', supplierId);
-    }
-
-    const { data, error } = await query;
-    if (error) console.error(error);
-    else setProducts(data || []);
-    setLoadingProducts(false);
-  };
-
-  const handleSupplierSelect = (id: string) => {
-    setSelectedSupplierId(id);
-    setLastImportedIds([]); // Clear undo history on supplier change
-    fetchProducts(id || '');
-  };
-
-  const checkBarcodeExists = async (barcode: string, supplierId: string) => {
-    if (!barcode || !supplierId) return false;
-    const { data } = await supabase.from('products').select('id').eq('barcode', barcode).eq('supplier_id', supplierId).maybeSingle();
-    return !!data;
-  };
-
-  const handleAddProduct = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedSupplierId) return;
-
-    // Check barcode
-    if (newProduct.barcode) {
-      const exists = await checkBarcodeExists(newProduct.barcode, selectedSupplierId);
-      if (exists) {
-        showToast(`Товар с баркодом ${newProduct.barcode} уже существует у этого поставщика!`, 'error');
-        return;
-      }
-    }
-
-    const { error } = await supabase.from('products').insert([{
-      ...newProduct,
-      supplier_id: selectedSupplierId
-    }]);
-
-    if (error) showToast('Ошибка: ' + error.message, 'error');
-    else {
-      showToast('Товар успешно добавлен', 'success');
-      setShowAddProductModal(false);
-      setNewProduct({ name: '', wb_sku: '', barcode: '', size: '', color: '' });
-    }
-  };
-
-  const handleDeleteProduct = (product: Product) => {
-    setProductToDelete(product);
-  };
-
   const confirmDeleteProduct = async () => {
     if (!productToDelete) return;
 
@@ -10931,213 +10432,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     if (error) showToast('Ошибка удаления: ' + error.message, 'error');
     else showToast('Товар удален', 'success');
     setProductToDelete(null);
-  };
-
-  const getValue = (row: any, keys: string[]) => {
-    const rowKeys = Object.keys(row);
-    for (const k of keys) {
-      const foundKey = rowKeys.find(rk => rk.toLowerCase().trim() === k.toLowerCase().trim());
-      if (foundKey) return row[foundKey];
-    }
-    return '';
-  };
-
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !selectedSupplierId) return;
-    const fileSizeError = ensureExcelFileSize(file);
-    if (fileSizeError) {
-      showToast(fileSizeError, 'error');
-      return;
-    }
-
-    const buff = await file.arrayBuffer();
-    const data = await readFirstSheetAsJson<any>(buff) as any[];
-    const rowLimitError = ensureExcelRowLimit(data.length);
-    if (rowLimitError) {
-      showToast(rowLimitError, 'error');
-      return;
-    }
-
-    if (!data.length) {
-      showToast('Файл пустой', 'error');
-      return;
-    }
-
-    const productsColumnsError = ensureRequiredColumns(Object.keys(data[0] || {}), [
-      { label: 'Barcode', aliases: ['Barcode', 'Баркод', 'Штрихкод'] },
-    ]);
-    if (productsColumnsError) {
-      showToast(productsColumnsError, 'error');
-      return;
-    }
-
-    try {
-      const productsToInsert: any[] = [];
-      let duplicatesCount = 0;
-
-      // Fetch all existing barcodes to check against
-      const { data: existingProducts } = await supabase.from('products').select('barcode');
-      const existingBarcodes = new Set(existingProducts?.map(p => p.barcode).filter(Boolean));
-
-      for (const row of data) {
-        const barcode = getValue(row, ['Barcode', 'Баркод', 'barcode', 'Штрихкод']);
-
-        if (barcode && existingBarcodes.has(String(barcode))) {
-          duplicatesCount++;
-          continue;
-        }
-
-        productsToInsert.push({
-          supplier_id: selectedSupplierId,
-          name: getValue(row, ['Name', 'Наименование', 'name', 'Название']) || 'Unknown',
-          wb_sku: getValue(row, ['SKU', 'WB Артикул', 'sku', 'Артикул', 'Артикул WB']),
-          barcode: String(barcode || ''),
-          size: String(getValue(row, ['Size', 'Размер', 'size', 'Tech Size', 'Размер товара']) || ''),
-          color: getValue(row, ['Color', 'Цвет', 'color'])
-        });
-      }
-
-      if (productsToInsert.length > 0) {
-        const { data: insertedData, error } = await supabase
-          .from('products')
-          .insert(productsToInsert)
-          .select('id');
-
-        if (error) {
-          showToast('Ошибка импорта: ' + error.message, 'error');
-        } else {
-          setLastImportedIds(insertedData.map(d => d.id));
-          showToast(`Импортировано ${productsToInsert.length} товаров. Пропущено дубликатов: ${duplicatesCount}`, 'success');
-        }
-      } else {
-        showToast(`Нет новых товаров для импорта. Пропущено дубликатов: ${duplicatesCount}`, 'info');
-      }
-
-      // Reset file input
-      if (fileInputRef.current) fileInputRef.current.value = '';
-    } catch (error: any) {
-      showToast('Ошибка чтения файла: ' + (error?.message || 'неизвестно'), 'error');
-    }
-  };
-
-  const handleSyncProductsFromWbCache = async () => {
-    if (syncingProductsFromWb) return;
-
-    setSyncingProductsFromWb(true);
-    try {
-      const { data: suppliersData, error: suppliersError } = await supabase.from('suppliers').select('id');
-      if (suppliersError) throw suppliersError;
-
-      const validSuppliers = new Set((suppliersData || []).map((s: any) => s.id));
-
-      const pageSize = 200;
-      let from = 0;
-      const sourceRows: Array<{ supplier_id: string; product_json: any }> = [];
-
-      while (true) {
-        const { data, error } = await supabase
-          .from('wb_products_cache')
-          .select('supplier_id, product_json')
-          .range(from, from + pageSize - 1);
-
-        if (error) throw error;
-        const chunk = data || [];
-        sourceRows.push(...chunk as any);
-        if (chunk.length < pageSize) break;
-        from += pageSize;
-      }
-
-      const extractColor = (p: any) => {
-        const arr = Array.isArray(p?.characteristics) ? p.characteristics : [];
-        for (const c of arr) {
-          const n = String(c?.name || c?.Name || '').toLowerCase();
-          if (n === 'цвет') {
-            const v = c?.value ?? c?.Value;
-            return Array.isArray(v) ? String(v[0] || '').trim() : String(v || '').trim();
-          }
-        }
-        return '';
-      };
-
-      const nextProducts: Array<{ supplier_id: string; name: string; wb_sku: string; barcode: string; size: string; color: string }> = [];
-
-      sourceRows.forEach((row) => {
-        const p = row.product_json || {};
-        const supplierId = row.supplier_id;
-        if (!validSuppliers.has(supplierId)) return;
-
-        const name = String(p.title || '').trim() || 'Unknown';
-        const wbSku = String(p.vendorCode || p.nmID || '').trim();
-        const color = extractColor(p);
-        const sizes = Array.isArray(p.sizes) && p.sizes.length ? p.sizes : [{ techSize: '', wbSize: '', skus: [''] }];
-
-        sizes.forEach((sz: any) => {
-          const size = String(sz?.techSize || sz?.wbSize || '').trim();
-          const skus = Array.isArray(sz?.skus) && sz.skus.length ? sz.skus : [''];
-          skus.forEach((sku: any) => {
-            nextProducts.push({
-              supplier_id: supplierId,
-              name,
-              wb_sku: wbSku,
-              barcode: String(sku || '').trim(),
-              size,
-              color,
-            });
-          });
-        });
-      });
-
-      const deduped: typeof nextProducts = [];
-      const seen = new Set<string>();
-      for (const p of nextProducts) {
-        const key = `${p.supplier_id}|${p.wb_sku}|${p.barcode}|${p.size}|${p.color}`.toLowerCase();
-        if (seen.has(key)) continue;
-        seen.add(key);
-        deduped.push(p);
-      }
-
-      const { error: clearError } = await supabase.from('products').delete().not('id', 'is', null);
-      if (clearError) throw clearError;
-
-      const insertChunk = 500;
-      for (let i = 0; i < deduped.length; i += insertChunk) {
-        const batch = deduped.slice(i, i + insertChunk);
-        const { error } = await supabase.from('products').insert(batch);
-        if (error) throw error;
-      }
-
-      showToast(`Синхронизация завершена: загружено ${deduped.length} товаров из Товары WB`, 'success');
-      setLastImportedIds([]);
-      await fetchProducts();
-    } catch (error: any) {
-      showToast(`Ошибка синхронизации из Товары WB: ${error?.message || 'неизвестно'}`, 'error');
-    } finally {
-      setSyncingProductsFromWb(false);
-    }
-  };
-
-  const handleUndoImport = async () => {
-    if (lastImportedIds.length === 0) return;
-    if (!(await confirmDialog({ title: 'Отмена импорта', tone: 'warning', confirmText: 'Отменить импорт', message: 'Отменить последний импорт? Это удалит все добавленные товары.' }))) return;
-
-    const batchSize = 100;
-    let hasError = false;
-
-    for (let i = 0; i < lastImportedIds.length; i += batchSize) {
-      const batch = lastImportedIds.slice(i, i + batchSize);
-      const { error } = await supabase.from('products').delete().in('id', batch);
-      if (error) {
-        showToast('Ошибка отмены: ' + error.message, 'error');
-        hasError = true;
-        break;
-      }
-    }
-
-    if (!hasError) {
-      showToast('Импорт отменен', 'success');
-      setLastImportedIds([]);
-    }
   };
 
   const handleToggleSupplyLockList = async (supply: Supply) => {
@@ -11276,26 +10570,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       persistReceptionMeta(next);
       return next;
     });
-  }, [persistReceptionMeta]);
-
-  const fillReceptionMetaCounts = useCallback(async (receptionIds: string[]) => {
-    if (!receptionIds.length) return;
-    try {
-      const { data } = await supabase.from('receptions').select('id, photos').in('id', receptionIds as any);
-      if (!data) return;
-      setReceptionMetaMap((prev) => {
-        const next = { ...(prev || {}) };
-        (data || []).forEach((row: any) => {
-          const photos = Array.isArray(row?.photos) ? row.photos : [];
-          const quantity = photos.reduce((sum: number, p: any) => sum + (parseInt(String(p?.quantity || '0'), 10) || 0), 0);
-          next[String(row.id)] = { count: photos.length, quantity };
-        });
-        persistReceptionMeta(next);
-        return next;
-      });
-    } catch (e) {
-      console.error('Failed to fetch reception counts:', e);
-    }
   }, [persistReceptionMeta]);
 
   const fetchReceptions = async (supplierId?: string) => {
@@ -11734,10 +11008,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     return true;
   }, [getCalendarEmployeeRule]);
 
-  const setCalendarEmployeeRule = useCallback((employeeId: string, rule: AccessRule) => {
-    updateAssemblyAccessEmployee('cw_calendar_employee_pick', employeeId, rule);
-  }, []);
-
   const getScheduleEmployeeRule = useCallback((employee: any): AccessRule => {
     const cfg = assemblyButtonAccess['cw_schedule_employee_pick'] || {};
     const byEmployee = cfg.employees?.[String(employee?.id || '')];
@@ -11751,10 +11021,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     if (rule === 'deny') return false;
     return true;
   }, [getScheduleEmployeeRule]);
-
-  const setScheduleEmployeeRule = useCallback((employeeId: string, rule: AccessRule) => {
-    updateAssemblyAccessEmployee('cw_schedule_employee_pick', employeeId, rule);
-  }, []);
 
   const isButtonVisibleForEmployee = useCallback((buttonId: string, employeeId: string) => {
     const emp = employees.find((e) => String(e.id) === String(employeeId));
@@ -11808,18 +11074,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     };
     runAutoScheduleNotify().catch(() => {});
   }, [currentEmployee, telegramBotToken, employees, isButtonVisibleForEmployee]);
-
-  const updateAssemblyAccessRole = (buttonId: string, roleKey: string, rule: AccessRule) => {
-    setAssemblyButtonAccess((prev) => {
-      const next = { ...prev };
-      const cfg = { ...(next[buttonId] || {}) };
-      const roles = { ...(cfg.roles || {}) };
-      roles[roleKey] = rule;
-      cfg.roles = roles;
-      next[buttonId] = cfg;
-      return next;
-    });
-  };
 
   const updateAssemblyAccessEmployee = (buttonId: string, employeeId: string, rule: AccessRule) => {
     if (!employeeId) return;
@@ -11978,9 +11232,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     });
     return Array.from(set).sort((a, b) => a.localeCompare(b, 'ru'));
   }, [employees]);
-
-
-  const [editedTokens, setEditedTokens] = useState<{[key: string]: string}>({});
 
   useEffect(() => {
     const stored = localStorage.getItem('current_employee');
@@ -12169,11 +11420,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [revokingDeviceSessionId, setRevokingDeviceSessionId] = useState<string | null>(null);
   const [activityLogs, setActivityLogs] = useState<any[]>([]);
   const [loadingLogs, setLoadingLogs] = useState(false);
-  const [instagramConfig, setInstagramConfig] = useState({ appId: '', redirectUri: '' });
-  const [instagramAccessToken, setInstagramAccessToken] = useState('');
-  const [instagramSaving, setInstagramSaving] = useState(false);
-  const [instagramLoadingChats, setInstagramLoadingChats] = useState(false);
-  const [instagramChats, setInstagramChats] = useState<any[]>([]);
   const getCurrentBarterMonth = () => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -12230,7 +11476,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [barterGlobalExtra, setBarterGlobalExtra] = useState(0);
   const [adGlobalExtra, setAdGlobalExtra] = useState(0);
   const [barterDbReady, setBarterDbReady] = useState(false);
-  const [barterMonthCollapsed, setBarterMonthCollapsed] = useState(false);
+  const [barterMonthCollapsed] = useState(false);
   const [barterCollapsedCards, setBarterCollapsedCards] = useState<Record<string, boolean>>({});
   const [barterCardSaveState, setBarterCardSaveState] = useState<Record<string, 'saving' | 'saved' | 'error'>>({});
   const [barterPreviewGallery, setBarterPreviewGallery] = useState<{ images: string[]; index: number; closing?: boolean; closeMode?: 'fade' | 'down' } | null>(null);
@@ -12731,40 +11977,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     } else {
         await logEmployeeChange('delete', deletedSnapshot, null);
         showToast('Сотрудник удален', 'success');
-    }
-  };
-
-  const handleToggleDatabase = async (employeeId: string, currentValue: boolean) => {
-    try {
-      const { error } = await supabase
-        .from('employees')
-        .update({ can_access_database: !currentValue })
-        .eq('id', employeeId);
-
-      if (error) throw error;
-
-      // Optimistic update
-      setEmployees(prev => prev.map(emp => emp.id === employeeId ? { ...emp, can_access_database: !currentValue } : emp));
-
-      showToast(`Доступ к базе данных ${!currentValue ? 'разрешен' : 'запрещен'}`, 'success');
-    } catch (e) {
-      console.error('Error toggling database access:', e);
-      showToast('Ошибка при изменении доступа', 'error');
-    }
-  };
-
-  const handleSaveToken = async (employeeId: string, token: string) => {
-    try {
-      const { error } = await supabase
-        .from('employees')
-        .update({ token: token })
-        .eq('id', employeeId);
-
-      if (error) throw error;
-      showToast('Токен сохранен', 'success');
-    } catch (e) {
-      console.error('Error saving token:', e);
-      showToast('Ошибка при сохранении токена', 'error');
     }
   };
 
@@ -14047,88 +13259,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     return localRows;
   };
 
-  const saveBartersToDb = async () => {
-    const currentSupplierId = String(barterTopSupplierId || barterSupplierId || '').trim();
-    if (!currentSupplierId) {
-      showToast('Сначала выберите поставщика', 'error');
-      return;
-    }
-    try {
-      setBarterSaving(true);
-      await persistBarterRowsForSupplier(barterRows || [], currentSupplierId, {
-        removedIds: barterExplicitlyRemovedIds,
-        successMessage: 'Сохранено в отдельные записи БД',
-      });
-    } catch (e: any) {
-      showToast('Ошибка сохранения: ' + (e?.message || 'неизвестно'), 'error');
-    } finally {
-      setBarterSaving(false);
-    }
-  };
-
-
-  const saveInstagramSettings = async () => {
-    try {
-      setInstagramSaving(true);
-      const cfg = { appId: instagramConfig.appId.trim(), redirectUri: instagramConfig.redirectUri.trim() };
-      const upserts: any[] = [{ key: 'instagram_oauth_config_v1', value: JSON.stringify(cfg) }];
-      if (instagramAccessToken.trim()) upserts.push({ key: 'instagram_access_token_v1', value: instagramAccessToken.trim() });
-      const { error } = await supabase.from('app_settings').upsert(upserts, { onConflict: 'key' });
-      if (error) throw error;
-      showToast('Instagram настройки сохранены', 'success');
-    } catch (e: any) {
-      showToast('Ошибка сохранения Instagram: ' + (e?.message || 'неизвестно'), 'error');
-    } finally {
-      setInstagramSaving(false);
-    }
-  };
-
-  const connectInstagramOAuth = () => {
-    const appId = instagramConfig.appId.trim();
-    const redirectUri = instagramConfig.redirectUri.trim();
-    if (!appId || !redirectUri) {
-      showToast('Укажите App ID и Redirect URI', 'error');
-      return;
-    }
-    const scope = encodeURIComponent('instagram_basic,instagram_manage_messages,pages_show_list,pages_manage_metadata');
-    const url = `https://www.facebook.com/v20.0/dialog/oauth?client_id=${encodeURIComponent(appId)}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scope}&response_type=code`;
-    window.open(url, '_blank', 'noopener,noreferrer');
-  };
-
-  const loadInstagramChats = async () => {
-    const token = instagramAccessToken.trim();
-    if (!token) return showToast('Укажите Access Token', 'error');
-
-    try {
-      setInstagramLoadingChats(true);
-      setInstagramChats([]);
-
-      // 1) Get pages available for the token
-      const pagesRes = await fetch(`https://graph.facebook.com/v20.0/me/accounts?fields=id,name,access_token&access_token=${encodeURIComponent(token)}`);
-      const pagesJson = await pagesRes.json();
-      const page = (pagesJson?.data || [])[0];
-      if (!page?.id) throw new Error('Не найдена страница Facebook для токена');
-
-      // 2) Find connected IG business account
-      const igRes = await fetch(`https://graph.facebook.com/v20.0/${page.id}?fields=instagram_business_account{id,username}&access_token=${encodeURIComponent(page.access_token || token)}`);
-      const igJson = await igRes.json();
-      const igId = igJson?.instagram_business_account?.id;
-      if (!igId) throw new Error('Instagram Business аккаунт не найден (проверьте привязку к Facebook Page)');
-
-      // 3) Load conversations
-      const convRes = await fetch(`https://graph.facebook.com/v20.0/${igId}/conversations?fields=id,updated_time,participants&access_token=${encodeURIComponent(page.access_token || token)}`);
-      const convJson = await convRes.json();
-      const convs = convJson?.data || [];
-
-      setInstagramChats(convs);
-      showToast(`Загружено диалогов: ${convs.length}`, 'success');
-    } catch (e: any) {
-      showToast('Ошибка загрузки диалогов: ' + (e?.message || 'неизвестно'), 'error');
-    } finally {
-      setInstagramLoadingChats(false);
-    }
-  };
-
   const barterFilteredProducts = useMemo(() => {
     const term = barterProductSearch.trim().toLowerCase();
     return (barterCatalogProducts || []).filter((p: any) => {
@@ -15254,28 +14384,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     }
   };
 
-  const fetchReportMetric = async (metric: string, start?: string, end?: string) => {
-    const { data: stats, error } = await supabase.rpc('get_supplier_stats', {
-        p_start_date: start || null,
-        p_end_date: end || null
-    });
-
-    if (error) {
-        console.error(`Error fetching ${metric}:`, error);
-        return;
-    }
-
-    if (metric === 'stock') {
-        setReportStockData(stats.map((s: any) => ({ name: s.supplier_name, value: s.received - s.shipped })));
-    } else if (metric === 'payment') {
-        setReportPaymentData(stats.map((s: any) => ({ name: s.supplier_name, value: s.total_payment })));
-    } else if (metric === 'boxes') {
-        setReportBoxData(stats.map((s: any) => ({ name: s.supplier_name, value: s.boxes })));
-    } else if (metric === 'packaging') {
-        setReportPackagingData(stats.map((s: any) => ({ name: s.supplier_name, value: s.packaging_cost })));
-    }
-  };
-
   const fetchReportsData = async () => {
     setLoadingReports(true);
     try {
@@ -15522,30 +14630,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     if (!updatedRows || updatedRows.length === 0) {
       const { error: insertError } = await supabase.from('app_settings').insert({ key: 'analytics_costs_v1', value: payload });
       if (insertError) throw insertError;
-    }
-  };
-
-  const saveUploadedCosts = async () => {
-    if (!uploadedSelectedSupplierId) {
-      showToast('Сначала выберите поставщика', 'error');
-      return;
-    }
-    try {
-      setUploadedSavingCosts(true);
-      const nextByCode: Record<string, number> = { ...(uploadedPersistedCostByCode || {}) };
-      Object.entries(uploadedCostByKey || {}).forEach(([key, val]) => {
-        const num = Number(String(val ?? '').replace(',', '.'));
-        if (key && Number.isFinite(num) && String(val).trim() !== '') nextByCode[key] = num;
-      });
-      await persistUploadedCostsByCode(nextByCode);
-      setUploadedPersistedCostByCode(nextByCode);
-      logAction('Аналитика: изменение себестоимости', `Поставщик ${suppliers.find((s:any)=>String(s.id)===uploadedSelectedSupplierId)?.name || uploadedSelectedSupplierId} · позиций: ${Object.keys(nextByCode).length}`, currentEmployee?.id);
-      showToast('Себестоимость сохранена', 'success');
-    } catch (e: any) {
-      console.error('saveUploadedCosts error', e);
-      showToast('Не удалось сохранить себестоимость', 'error');
-    } finally {
-      setUploadedSavingCosts(false);
     }
   };
 
@@ -18423,8 +17507,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     if (y === 2026) return 0.06;
     return 0;
   };
-
-  const getAnalyticsCostsKey = (supplierId?: string | null) => `analytics_costs_v1:${String(supplierId || 'global')}`;
   const visibleUploadedAnalyticsSuppliers = (uploadedAnalyticsSuppliers || []).filter((s: any) => String(currentEmployee?.role || '').toLowerCase() === 'admin' || String(s?.name || '').trim() !== 'ИП Власенко И А');
 
   const getUploadedTaxRate = (summary: any) => {
@@ -18437,41 +17519,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     return Number(summary?.sales_net || 0) * getUploadedTaxRate(summary);
   };
   const getCurrentUploadedTaxRate = () => getUploadedTaxRate(uploadedReportSummary);
-
-  const formatAdsCell = (value: any) => {
-    if (value === null || value === undefined || value === '') return '-';
-    const n = Number(String(value).replace(/\s/g, '').replace(',', '.'));
-    if (Number.isFinite(n) && String(value).trim() !== '') return n.toLocaleString('ru-RU', { maximumFractionDigits: 2 });
-    return String(value);
-  };
-
-  const getAdsSheetViewRows = (sheetKey: string, sheet: { columns: string[]; rows: any[] }) => {
-    const q = String(adsSheetFilters[sheetKey] || '').trim().toLowerCase();
-    const sort = adsSheetSorts[sheetKey];
-
-    let rows = Array.isArray(sheet.rows) ? [...sheet.rows] : [];
-
-    if (q) {
-      rows = rows.filter((row: any) =>
-        sheet.columns.some((col) => String(row?.[col] ?? '').toLowerCase().includes(q)),
-      );
-    }
-
-    if (sort?.col) {
-      rows.sort((a: any, b: any) => {
-        const av = a?.[sort.col];
-        const bv = b?.[sort.col];
-        const an = Number(String(av ?? '').replace(/\s/g, '').replace(',', '.'));
-        const bn = Number(String(bv ?? '').replace(/\s/g, '').replace(',', '.'));
-        let cmp = 0;
-        if (Number.isFinite(an) && Number.isFinite(bn)) cmp = an - bn;
-        else cmp = String(av ?? '').localeCompare(String(bv ?? ''), 'ru', { numeric: true });
-        return sort.dir === 'asc' ? cmp : -cmp;
-      });
-    }
-
-    return rows;
-  };
 
   const normalizeAdsKey = (v: any) => String(v || '').toLowerCase().replace(/\s+/g, '').replace(/[._-]+/g, '');
   const normalizeNm = (v: any) => String(v ?? '').replace(/\s+/g, '').replace(/[^0-9a-zA-Zа-яА-Я_-]/g, '');
@@ -18819,18 +17866,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     }
   }, [chartUploadedKeys, uploadedChartKey]);
 
-  const chartUploadedData = useMemo(() => {
-    const item = uploadedChartKey ? (uploadedDailySeries || {})[uploadedChartKey] : null;
-    const pts = Array.isArray(item?.points) ? item.points : [];
-    const maxV = Math.max(1, ...pts.map((p: any) => Number(p?.[uploadedChartMetric] || 0)));
-    return pts.map((p: any, i: number) => ({
-      idx: i,
-      date: String(p?.date || ''),
-      value: Number(p?.[uploadedChartMetric] || 0),
-      yNorm: Number(p?.[uploadedChartMetric] || 0) / maxV,
-    }));
-  }, [uploadedDailySeries, uploadedChartKey, uploadedChartMetric]);
-
   const sortedFilteredUploadedAnalytics = useMemo(() => {
     const q = uploadedSearch.trim().toLowerCase();
     const filtered = (uploadedReportAnalytics || []).filter((row: any) => {
@@ -19038,132 +18073,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       }
     );
   };
-
-  // Trash Functions
-  const [trashTab, setTrashTab] = useState('suppliers');
-  const [trashItems, setTrashItems] = useState<any[]>([]);
-  const [trashDeletedByMap, setTrashDeletedByMap] = useState<Record<string, string>>({});
-  const [trashSearch, setTrashSearch] = useState('');
-  const [trashDeletedFrom, setTrashDeletedFrom] = useState('');
-  const [trashDeletedTo, setTrashDeletedTo] = useState('');
-  const [loadingTrash, setLoadingTrash] = useState(false);
-
-  const resolveTrashTable = (tab: string) => {
-    if (tab === 'products') return 'products';
-    if (tab === 'supplies') return 'supplies';
-    if (tab === 'receptions') return 'receptions';
-    if (tab === 'employees') return 'employees';
-    return 'suppliers';
-  };
-
-  const fetchTrashItems = async () => {
-    setLoadingTrash(true);
-    const table = resolveTrashTable(trashTab);
-
-    let query = supabase.from(table).select('*').not('deleted_at', 'is', null).order('deleted_at', { ascending: false });
-
-    if (trashTab === 'products') query = query.select('id, name, wb_sku, supplier_id, deleted_at, supplier:suppliers(name)');
-    if (trashTab === 'supplies') query = query.select('id, name, status, supplier_id, created_at, deleted_at, supplier:suppliers(name)');
-    if (trashTab === 'receptions') query = query.select('id, status, supplier_id, created_at, deleted_at, supplier:suppliers(name)');
-    if (trashTab === 'employees') query = query.select('id, full_name, role, login, deleted_at');
-    if (trashTab === 'suppliers') query = query.select('id, name, telegram_chat_id, deleted_at');
-
-    const { data, error } = await query;
-    if (error) {
-      console.error(error);
-      setTrashItems([]);
-      setTrashDeletedByMap({});
-    } else {
-      const items = data || [];
-      setTrashItems(items);
-
-      setTrashDeletedByMap({});
-    }
-    setLoadingTrash(false);
-  };
-
-  const filteredTrashItems = useMemo(() => {
-    const q = trashSearch.trim().toLowerCase();
-    const fromTs = trashDeletedFrom ? new Date(`${trashDeletedFrom}T00:00:00`).getTime() : null;
-    const toTs = trashDeletedTo ? new Date(`${trashDeletedTo}T23:59:59`).getTime() : null;
-
-    return (trashItems || []).filter((item: any) => {
-      const deletedTs = item?.deleted_at ? new Date(item.deleted_at).getTime() : null;
-      if (fromTs && (!deletedTs || deletedTs < fromTs)) return false;
-      if (toTs && (!deletedTs || deletedTs > toTs)) return false;
-
-      if (!q) return true;
-      const hay = [
-        item?.name,
-        item?.full_name,
-        item?.login,
-        item?.wb_sku,
-        item?.status,
-        item?.supplier?.name,
-        trashDeletedByMap[String(item?.deleted_by || '')],
-      ].map((x) => String(x || '').toLowerCase()).join(' | ');
-      return hay.includes(q);
-    });
-  }, [trashItems, trashSearch, trashDeletedFrom, trashDeletedTo, trashDeletedByMap]);
-
-  const handleRestore = async (id: string) => {
-    const table = resolveTrashTable(trashTab);
-    const { error } = await supabase.from(table).update({ deleted_at: null }).eq('id', id);
-    if (error) showToast('Ошибка: ' + error.message, 'error');
-    else {
-      showToast('Восстановлено', 'success');
-      fetchTrashItems();
-      fetchSuppliers();
-      fetchProducts(selectedSupplierId || '');
-      fetchSuppliesList();
-      fetchReceptions();
-      fetchEmployees();
-    }
-  };
-
-  const handlePermanentDelete = async (id: string) => {
-    if (!await confirmDialog('Удалить безвозвратно? Это действие нельзя отменить.')) return;
-    const table = resolveTrashTable(trashTab);
-
-    // Handle dependencies manually since we don't have CASCADE set up in DB
-    // Now handled by DB CASCADE constraints
-
-    const { error } = await supabase.from(table).delete().eq('id', id);
-    if (error) showToast('Ошибка: ' + error.message, 'error');
-    else {
-      showToast('Удалено навсегда', 'success');
-      fetchTrashItems();
-    }
-  };
-
-  const printQR = (id: string, title: string) => {
-    const elem = document.getElementById(id);
-    if (!elem) return;
-
-    const win = window.open('', 'Print', 'height=600,width=800');
-    if (win) {
-        win.document.write('<html><head><title>Print QR</title>');
-        win.document.write('</head><body style="display:flex;justify-content:center;align-items:center;height:100vh;flex-direction:column;font-family:sans-serif;">');
-        win.document.write(`<h2>${title}</h2>`);
-        win.document.write(elem.innerHTML);
-        win.document.write('</body></html>');
-        win.document.close();
-        win.focus();
-        setTimeout(() => {
-          win.print();
-          win.close();
-        }, 500);
-    }
-  };
-
-  const [labelBuilder, setLabelBuilder] = useState({
-    productName: '',
-    article: '',
-    size: '',
-    barcode: '',
-    qr: '',
-    quantity: '1',
-  });
 
   const [wbLayoutEditor, setWbLayoutEditor] = useState({
     withChz: {
@@ -19858,81 +18767,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     }
   };
 
-  const handleGenerateLabelsPdf = async () => {
-    await ensurePdfLibs();
-    await ensureBwip();
-    try {
-      const qty = Math.min(200, Math.max(1, parseInt(labelBuilder.quantity || '1')));
-      const doc = new lazyLibs.jsPDF({ orientation: 'landscape', unit: 'mm', format: [58, 40] }); // XPrinter 420B: 58x40
-
-      for (let i = 0; i < qty; i++) {
-        if (i > 0) doc.addPage([58, 40], 'landscape');
-
-        // Left block: DataMatrix (from current QR field)
-        if (labelBuilder.qr) {
-          const dmCanvas = document.createElement('canvas');
-          try {
-            lazyLibs.bwipjs.toCanvas(dmCanvas, {
-              bcid: 'datamatrix',
-              // Разделители GS возвращаем перед кодированием: без них этикетка
-              // считывается не тем кодом, что записан в скан-файл.
-              text: restoreDataMatrixGs(labelBuilder.qr),
-              binarytext: true,
-              parsefnc: false,
-              scale: 2,
-              includetext: false,
-            });
-            const dmImg = dmCanvas.toDataURL('image/png');
-            doc.addImage(dmImg, 'PNG', 2.2, 3, 19.5, 19.5);
-
-            doc.setFontSize(6.5);
-            doc.text(labelBuilder.qr.slice(0, 24), 2.2, 24.4);
-          } catch (e) {
-            console.error('DataMatrix render error', e);
-          }
-        }
-
-        // Right text block (current fields only)
-        const rightX = 23.5;
-        const rightW = 32;
-        doc.setFontSize(8.8);
-        const title = doc.splitTextToSize(labelBuilder.productName || 'Товар', rightW);
-        doc.text(title.slice(0, 2), rightX, 6.5);
-
-        doc.setFontSize(7.4);
-        doc.text(`Артикул: ${labelBuilder.article || '-'}`, rightX, 13.8);
-        doc.text(`Размер: ${labelBuilder.size || '-'}`, rightX, 17.7);
-
-        // Bottom barcode block
-        if (labelBuilder.barcode) {
-          const bcCanvas = document.createElement('canvas');
-          const isEan13 = /^\d{13}$/.test(labelBuilder.barcode.trim());
-          try {
-            lazyLibs.bwipjs.toCanvas(bcCanvas, {
-              bcid: isEan13 ? 'ean13' : 'code128',
-              text: labelBuilder.barcode.trim(),
-              scale: 2,
-              height: 8,
-              includetext: true,
-              textxalign: 'center',
-            });
-            const bcImg = bcCanvas.toDataURL('image/png');
-            doc.addImage(bcImg, 'PNG', 23.5, 23.2, 31.5, 12.8);
-          } catch (e) {
-            console.error('Barcode render error', e);
-            doc.setFontSize(7);
-            doc.text(labelBuilder.barcode, rightX, 33);
-          }
-        }
-      }
-
-      await printPdfDirect(doc, { widthMm: 58, heightMm: 40 });
-      showToast(`Этикеток: ${qty} — отправлено в печать`, 'success');
-    } catch (e: any) {
-      showToast(`Ошибка генерации этикеток: ${e?.message || 'неизвестно'}`, 'error');
-    }
-  };
-
   const menuItems = useMemo(() => [
     { id: 'instruction', icon: BookOpen, label: 'Инструкция' },
     { id: 'tasks', icon: CheckSquare, label: 'Задачи' },
@@ -20387,74 +19221,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       showToast(`Ошибка чтения файла: ${err?.message || 'неизвестно'}`, 'error');
     } finally {
       if (warehouseFileInputRef.current) warehouseFileInputRef.current.value = '';
-    }
-  };
-
-
-
-
-  const generateReportsReport = async () => {
-    if (!reportsReportForm.supplier_id) {
-      showToast('Выберите поставщика', 'error');
-      return;
-    }
-
-    try {
-      const { data, error } = await supabase.rpc('get_supplier_stats', {
-        p_supplier_id: reportsReportForm.supplier_id,
-        p_start_date: reportsReportForm.start,
-        p_end_date: reportsReportForm.end
-      });
-
-      if (error) throw error;
-
-      // Fetch box stats for average price
-      const { data: boxData, error: boxError } = await supabase.rpc('get_box_stats');
-      let avgPrice = 0;
-      if (!boxError && boxData && boxData.length > 0) {
-          avgPrice = boxData[0].avg_price || 0;
-      }
-
-      // Fetch all-time stats
-      const { data: allTimeData, error: allTimeError } = await supabase.rpc('get_supplier_stats', {
-        p_supplier_id: reportsReportForm.supplier_id,
-        p_start_date: '2000-01-01',
-        p_end_date: '2099-12-31'
-      });
-
-      let allTimeStats = null;
-      if (!allTimeError && allTimeData && allTimeData.length > 0) {
-          allTimeStats = allTimeData[0];
-      }
-
-      if (data && data.length > 0) {
-        setReportsReportResult({ ...data[0], avgBoxPrice: avgPrice, allTime: allTimeStats });
-      } else if (allTimeStats) {
-        // Even if no data for period, we might want to show all-time stats?
-        // For now, let's keep the behavior that we need period data to show the report,
-        // OR we can allow showing just all-time stats.
-        // But the UI is "Results for period".
-        // Let's stick to: if data exists for period, we show it + all time.
-        // If no data for period, we show null (as before).
-        // Wait, if I want to see "All Time" stats, I might want to see them even if current month is empty.
-        // But the user workflow is "Generate Report" (implied for the selected period).
-
-        // Let's try to be safe: if period data is empty, but we have allTimeStats, maybe we should show it?
-        // But the UI structure relies on reportsReportResult properties like 'received', 'shipped' etc.
-        // If I set reportsReportResult to just allTimeStats, it might be confusing.
-
-        // Let's stick to the original logic: only show if data exists for period.
-        // If the user wants all time, they can select a wider period.
-        // BUT, the specific request is "Average cost per unit FOR ALL TIME".
-        // So even if I select "This Month", I want to see "All Time Average".
-
-        setReportsReportResult(null);
-      } else {
-        setReportsReportResult(null);
-      }
-    } catch (error) {
-      console.error('Error generating report:', error);
-      showToast('Ошибка при формировании отчета', 'error');
     }
   };
 
