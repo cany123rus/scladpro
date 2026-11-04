@@ -1,10 +1,13 @@
 // Вынесено из Dashboard.tsx автоматически (ленивая загрузка раздела). Данные приходят пропсами из Dashboard.
 /* eslint-disable */
+import { useState } from 'react';
 import { TelegramSettingsSection } from '../dashboardComponents';
 import { Lock, LockOpen, Save, Send } from 'lucide-react';
 import { Select } from '../../components/ui/Select';
 
 export function Tab_telegram(props: any) {
+  // Блокировка токена «Логи входа»: состояние нигде не было объявлено, и раздел падал при открытии.
+  const [isFileTokenLocked, setIsFileTokenLocked] = useState(true);
   const { backupBotToken, handleRestoreDatabase, handleSaveSetting, handleSendTelegram, handleSendTelegramMenu, isBackupTokenLocked, isReceptionTokenLocked, isTokenLocked, selectedBotForManual, sendingTelegram, setBackupBotToken, setIsBackupTokenLocked, setIsReceptionTokenLocked, setIsTokenLocked, setSelectedBotForManual, setTelegramBotToken, setTelegramBotTokenFile, setTelegramFile, setTelegramMessage, setTelegramReceptionBotToken, setTelegramSupplierId, suppliers, telegramBotToken, telegramBotTokenFile, telegramFileRef, telegramMessage, telegramReceptionBotToken, telegramSupplierId } = props;
   return (
 <TelegramSettingsSection>
