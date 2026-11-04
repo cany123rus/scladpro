@@ -12667,7 +12667,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   }, [currentEmployee?.id]);
   // Тик для пересчёта «онлайн» (чтобы чужие записи уходили в офлайн по таймауту).
   useEffect(() => {
-    const iv = setInterval(() => setPresenceTick((t) => t + 1), 30000);
+    // Перерисовка всего Dashboard — дорогая; не делаем её в фоновой вкладке и реже (окно «онлайн» 8 мин).
+    const iv = setInterval(() => { if (document.visibilityState === 'visible') setPresenceTick((t) => t + 1); }, 60000);
     return () => clearInterval(iv);
   }, []);
 
