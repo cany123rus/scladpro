@@ -39,6 +39,8 @@ const FbsSearch = lazyNamed(() => import('../components/FbsSearch'), 'FbsSearch'
 const AdminPanel = lazyNamed(() => import('./AdminPanel'), 'AdminPanel', 'adminpanel');
 const InstructionTab = lazyNamed(() => import('./InstructionTab'), 'InstructionTab', 'instruction');
 const SalesMap = React.lazy(() => import('../components/SalesMap'));
+// Окно загрузки и привязки файлов с кодами ЧЗ открывается редко — грузим его отдельным куском.
+const ChzFileLinker = React.lazy(() => import('../components/ChzFileLinker'));
 import { SectionSkeleton } from '../components/Skeleton';
 import NightToggle from '../components/NightToggle';
 import PushToggle from '../components/PushToggle';
@@ -60,6 +62,9 @@ import { DashboardDatabaseTab } from './DashboardDatabaseTab';
 import { drawReportHeader, drawMetaLines, drawKpiChips, reportFooter, reportTableStyles } from './pdfReportKit';
 import { Select } from '../components/ui/Select';
 import { QtyField } from '../components/ui/QtyField';
+import { notifyChzStockChanged } from '../components/FbsChzStockPanel';
+import { HS_CATEGORY_USE_EVENT, hsCategoryKey, loadDisabledHsCategories, setHsCategoryEnabled } from '../utils/chzCategoryUse';
+import type { FileUploadSummary } from '../components/ChzFileLinker';
 
 import { DASHBOARD_TAB_IDS, isDashboardTabId } from '../constants/dashboardTabs';
 import { normalizeDataMatrixText, parseChzCodesText, restoreDataMatrixGs } from '../utils/honestSign';
@@ -552,23 +557,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [honestSignCodes, setHonestSignCodes] = useState<any[]>([]);
   const [loadingHonestSign, setLoadingHonestSign] = useState(false);
   const [honestSignTab, setHonestSignTab] = useState<'codes' | 'print' | 'base' | 'printed'>('codes');
-  const [honestSignBaseCategory, setHonestSignBaseCategory] = useState('');
-  const [honestSignBaseGender, setHonestSignBaseGender] = useState<'male' | 'female' | ''>('');
-  /*
-   * Размер загружаемых марок.
-   *
-   * Марка выпускается под конкретный размер, и без него подбор кода к заданию
-   * остаётся приблизительным: пол и категория совпадают у всей линейки.
-   */
-  const [honestSignBaseSize, setHonestSignBaseSize] = useState('');
-  const [honestSignSizes, setHonestSignSizes] = useState<Array<{ size: string; cards: number }>>([]);
-  /*
-   * «Без размера» — осознанный выбор, а не пропуск поля.
-   *
-   * Бывает, что марки заказаны на всю линейку сразу. Тогда размер не пишем
-   * вовсе, и подбор берёт такую марку под любой размер этой категории и пола.
-   */
-  const [honestSignBaseNoSize, setHonestSignBaseNoSize] = useState(false);
+  // Окно загрузки и привязки файлов с кодами ЧЗ к товарам.
+  const [showHsFileLinker, setShowHsFileLinker] = useState(false);
   const [honestSignUploadHistory, setHonestSignUploadHistory] = useState<any[]>([]);
   const [honestSignPrintedHistory, setHonestSignPrintedHistory] = useState<any[]>([]);
   const [supplierCategories, setSupplierCategories] = useState<string[]>([]);
@@ -579,6 +569,19 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
   const [isPrintingCodes, setIsPrintingCodes] = useState(false);
   const [showReturnCodesModal, setShowReturnCodesModal] = useState(false);
   const [returnCodesInput, setReturnCodesInput] = useState('');
+  // Галочка «Использовать» в карточках категорий ЧЗ: снята — коды не подбираются и не печатаются.
+  const [hsDisabledKeys, setHsDisabledKeys] = useState<Set<string>>(() => new Set());
+  // Окно удаления кодов: category === null — все коды поставщика.
+  const [hsDelete, setHsDelete] = useState<{
+    open: boolean;
+    category: string | null;
+    scope: 'free' | 'all';
+    confirmText: string;
+    counts: { free: number; all: number } | null;
+    counting: boolean;
+    busy: boolean;
+    progress: string;
+  }>({ open: false, category: null, scope: 'free', confirmText: '', counts: null, counting: false, busy: false, progress: '' });
 
   const normalizeHSCategory = (value: string) => {
     const raw = String(value || '').trim();
@@ -611,7 +614,8 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     const normalized = normalizeHSGender(value);
     if (normalized === 'male') return 'Муж';
     if (normalized === 'female') return 'Жен';
-    return '-';
+    // Коды без пола подходят обоим — это «унисекс», а не пропуск.
+    return 'Любой';
   };
 
   const fetchSupplierCategories = async (supplierId: string) => {
@@ -884,50 +888,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     setHonestSignRawCategories(rawNames);
     setHonestSignCategoryStats(Array.from(merged.values()));
   };
-
-  /*
-   * Размеры подтягиваем под выбранную категорию.
-   *
-   * Список берём из карточек поставщика: показывать все размеры магазина, когда
-   * грузят марки на костюмы, — верный способ выбрать чужой.
-   */
-  useEffect(() => {
-    if (!honestSignSupplierId) {
-      setHonestSignSizes([]);
-      return;
-    }
-
-    let cancelled = false;
-    // Объединённая категория в базе может лежать под несколькими названиями — спрашиваем по каждому.
-    const selectedNorm = honestSignBaseCategory ? normalizeHSCategory(honestSignBaseCategory) : '';
-    const names = selectedNorm
-      ? Array.from(new Set([honestSignBaseCategory, ...honestSignRawCategories.filter((c) => normalizeHSCategory(c) === selectedNorm)]))
-      : [null];
-    Promise.all(
-      names.map((name) => supabase.rpc('hs_supplier_sizes', { p_supplier: honestSignSupplierId, p_category: name })),
-    ).then((results) => {
-      if (cancelled) return;
-      const failed = results.find((r) => r.error);
-      if (failed) {
-        console.warn('Размеры не загрузились', failed.error);
-        setHonestSignSizes([]);
-        return;
-      }
-      const bySize = new Map<string, number>();
-      results.forEach((r) => (r.data || []).forEach((row: any) => {
-        const size = String(row?.size || '');
-        bySize.set(size, (bySize.get(size) || 0) + Number(row?.cards || 0));
-      }));
-      setHonestSignSizes(Array.from(bySize, ([size, cards]) => ({ size, cards })));
-    });
-
-    return () => { cancelled = true; };
-  }, [honestSignSupplierId, honestSignBaseCategory, honestSignRawCategories]);
-
-  // Сменили категорию — прежний размер к ней может не относиться.
-  useEffect(() => {
-    setHonestSignBaseSize('');
-  }, [honestSignBaseCategory]);
 
   /*
    * За теми же данными второй раз не ходим.
@@ -6273,6 +6233,182 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     }
   };
 
+  /*
+   * Галочка «Использовать» у категории ЧЗ.
+   *
+   * Читаем при выборе поставщика и когда галочку поменяли в другом месте.
+   */
+  useEffect(() => {
+    if (!honestSignSupplierId) { setHsDisabledKeys(new Set()); return; }
+    let cancelled = false;
+    const load = () => {
+      loadDisabledHsCategories(honestSignSupplierId).then((keys) => { if (!cancelled) setHsDisabledKeys(keys); });
+    };
+    load();
+    const onChanged = (e: Event) => {
+      const target = String((e as CustomEvent)?.detail?.supplierId || '');
+      if (!target || target === honestSignSupplierId) load();
+    };
+    window.addEventListener(HS_CATEGORY_USE_EVENT, onChanged);
+    return () => { cancelled = true; window.removeEventListener(HS_CATEGORY_USE_EVENT, onChanged); };
+  }, [honestSignSupplierId]);
+
+  const handleToggleHsCategoryUse = async (category: string, enabled: boolean) => {
+    if (!honestSignSupplierId) return;
+    const key = hsCategoryKey(category);
+    const previous = hsDisabledKeys;
+    // Сразу меняем вид, при ошибке возвращаем как было.
+    setHsDisabledKeys((prev) => {
+      const next = new Set(prev);
+      if (enabled) next.delete(key); else next.add(key);
+      return next;
+    });
+    try {
+      await setHsCategoryEnabled(honestSignSupplierId, category, enabled);
+      notifyChzStockChanged(honestSignSupplierId);
+      showToast(enabled ? `«${category}»: коды снова используются` : `«${category}»: коды не используются`, 'success');
+    } catch (e: any) {
+      setHsDisabledKeys(previous);
+      showToast(`Не удалось сохранить галочку: ${e?.message || 'неизвестно'}`, 'error');
+    }
+  };
+
+  /*
+   * Удаление кодов ЧЗ из базы.
+   *
+   * Раньше стереть можно было только загрузку из «Истории» (файл ± минута), и
+   * лишь пока она там видна: у напечатанных и отсканированных кодов имя файла
+   * меняется, и из истории они пропадают. Здесь выбор по категории или весь
+   * поставщик, «свободные» отдельно от «всех». Перед удалением копия кодов
+   * скачивается файлом — ошибку можно откатить, загрузив его обратно.
+   */
+  const hsDeleteCategoryNames = (category: string | null): string[] => {
+    if (!category) return [];
+    const norm = normalizeHSCategory(category);
+    return Array.from(new Set([category, ...honestSignRawCategories.filter((c) => normalizeHSCategory(c) === norm)]));
+  };
+
+  // Один и тот же отбор для подсчёта, копии и удаления — чтобы показанное число совпадало с удалённым.
+  const hsDeleteFilter = (q: any, category: string | null, scope: 'free' | 'all') => {
+    let query = q.eq('supplier_id', honestSignSupplierId);
+    if (category) {
+      const names = hsDeleteCategoryNames(category);
+      const list = names.map((n) => `"${n.replace(/"/g, '\\"')}"`).join(',');
+      query = normalizeHSCategory(category) === 'Без категории'
+        ? query.or(`category.is.null,category.in.(${list})`)
+        : query.in('category', names);
+    }
+    if (scope === 'free') {
+      query = query
+        .neq('file_name', 'Напечатанные QR')
+        .neq('file_name', 'Отсканировано')
+        .neq('status', 'printed')
+        .neq('status', 'scanned');
+    }
+    return query;
+  };
+
+  const countHsDeleteTargets = async (category: string | null) => {
+    setHsDelete((prev) => ({ ...prev, counting: true, counts: null }));
+    try {
+      const count = async (scope: 'free' | 'all') => {
+        const { count: n, error } = await hsDeleteFilter(
+          supabase.from('unified_honest_sign_codes').select('id', { count: 'exact', head: true }),
+          category,
+          scope,
+        );
+        if (error) throw error;
+        return Number(n || 0);
+      };
+      const [free, all] = await Promise.all([count('free'), count('all')]);
+      setHsDelete((prev) => ({ ...prev, counting: false, counts: { free, all } }));
+    } catch (e: any) {
+      setHsDelete((prev) => ({ ...prev, counting: false }));
+      showToast(`Не удалось посчитать коды: ${e?.message || 'неизвестно'}`, 'error');
+    }
+  };
+
+  const openHsDelete = (category: string | null) => {
+    if (!honestSignSupplierId) return;
+    setHsDelete({ open: true, category, scope: 'free', confirmText: '', counts: null, counting: false, busy: false, progress: '' });
+    void countHsDeleteTargets(category);
+  };
+
+  const closeHsDelete = () => {
+    // Во время удаления окно не закрываем — иначе не видно, чем кончилось.
+    setHsDelete((prev) => (prev.busy ? prev : { ...prev, open: false }));
+  };
+
+  const downloadHsBackup = async (category: string | null, scope: 'free' | 'all') => {
+    const quote = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const lines: string[] = ['code;category;gender;size;file_name;status'];
+    for (let from = 0; ; from += 1000) {
+      const { data, error } = await hsDeleteFilter(
+        supabase.from('unified_honest_sign_codes').select('code, category, gender, size, file_name, status'),
+        category,
+        scope,
+      ).order('id', { ascending: true }).range(from, from + 999);
+      if (error) throw error;
+      (data || []).forEach((r: any) => {
+        lines.push([r.code, r.category, r.gender, r.size, r.file_name, r.status].map(quote).join(';'));
+      });
+      if (!data || data.length < 1000) break;
+    }
+    // BOM, чтобы Excel открыл кириллицу правильно.
+    const blob = new Blob(['﻿' + lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
+    link.href = url;
+    link.download = `chz-kopiya-pered-udaleniem-${stamp}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    return lines.length - 1;
+  };
+
+  const handleDeleteHsCodes = async () => {
+    const { category, scope, counts } = hsDelete;
+    if (!honestSignSupplierId || !counts || hsDelete.busy) return;
+    const total = scope === 'free' ? counts.free : counts.all;
+    if (total <= 0 || hsDelete.confirmText.trim().toUpperCase() !== 'УДАЛИТЬ') return;
+
+    setHsDelete((prev) => ({ ...prev, busy: true, progress: 'Сохраняю копию кодов…' }));
+    try {
+      const saved = await downloadHsBackup(category, scope);
+
+      let deleted = 0;
+      // Каждый раз берём первую страницу: удалённые строки из выборки пропадают сами.
+      for (let guard = 0; guard < 500; guard += 1) {
+        const { data: page, error: pageError } = await hsDeleteFilter(
+          supabase.from('unified_honest_sign_codes').select('id'),
+          category,
+          scope,
+        ).order('id', { ascending: true }).limit(200);
+        if (pageError) throw pageError;
+        const ids = (page || []).map((r: any) => r.id).filter(Boolean);
+        if (ids.length === 0) break;
+        const { error: deleteError } = await supabase.from('unified_honest_sign_codes').delete().in('id', ids);
+        if (deleteError) throw deleteError;
+        deleted += ids.length;
+        setHsDelete((prev) => ({ ...prev, progress: `Удалено ${deleted} из ${total}…` }));
+      }
+
+      showToast(`Удалено кодов: ${deleted}. Копия (${saved}) скачана файлом`, 'success');
+      setHsDelete((prev) => ({ ...prev, open: false, busy: false, progress: '', confirmText: '' }));
+      fetchHonestSignUploadHistory();
+      fetchHonestSignPrintedHistory();
+      fetchHonestSignCategoryStats();
+      notifyChzStockChanged(honestSignSupplierId);
+    } catch (e: any) {
+      console.error('Delete codes error:', e);
+      setHsDelete((prev) => ({ ...prev, busy: false, progress: '' }));
+      showToast(`Ошибка удаления кодов: ${e?.message || 'неизвестно'}`, 'error');
+      fetchHonestSignCategoryStats();
+    }
+  };
+
   const handleReturnCodes = async () => {
     if (!returnCodesInput.trim()) return;
 
@@ -6328,51 +6464,26 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     }
   };
 
-  const importHonestSignCodes = async (rawCodes: string[], fileName: string) => {
+  /*
+   * Загрузка файла с кодами поставщику — без категории, пола и размера.
+   *
+   * Всё это проставляет привязка файла к товару («Привязать файлы к товарам»), а
+   * до неё файл ни к одному заказу не подбирается. Возвращает, сколько кодов
+   * добавлено (0 — файл пуст, все коды уже в базе или была ошибка).
+   */
+  const importHonestSignCodes = async (rawCodes: string[], fileName: string): Promise<number> => {
     /*
      * Коды храним в том виде, в каком их отдаёт сканер: без невидимого GS.
      * Раньше CSV из «Честного знака» ложился как есть, с GS внутри, и при скане
      * код не совпадал с базой: остаток не уменьшался, а код записывался второй раз.
      */
     const codes = rawCodes.map((c) => normalizeDataMatrixText(String(c || ''))).filter(Boolean);
-    if (codes.length === 0) {
-      showToast('Файл пуст или не содержит кодов', 'error');
-      return;
-    }
-
-    if (!honestSignSupplierId) {
-      showToast('Выберите поставщика', 'error');
-      return;
-    }
-
-    if (!honestSignBaseCategory) {
-      showToast('Выберите категорию', 'error');
-      return;
-    }
-
-    const normalizedGender = normalizeHSGender(honestSignBaseGender);
-    if (!normalizedGender) {
-      showToast('Выберите пол: мужской или женский', 'error');
-      return;
-    }
-
-    /*
-     * Размер спрашиваем сразу, пока человек помнит, какой файл грузит.
-     * Исключение — отметка «без размера»: тогда марка подойдёт любому размеру
-     * этой категории и пола, и это выбор, а не забытое поле.
-     */
-    const normalizedSize = honestSignBaseNoSize ? '' : String(honestSignBaseSize || '').trim();
-    if (!honestSignBaseNoSize && !normalizedSize) {
-      showToast('Выберите размер или отметьте «без размера»', 'error');
-      return;
-    }
+    if (codes.length === 0 || !honestSignSupplierId) return 0;
 
     try {
-      setLoadingHonestSign(true);
-
-      const uniqueCodes = Array.from(new Set(codes.map(c => String(c).trim()).filter(Boolean)));
+      const uniqueCodes = Array.from(new Set(codes.map((c) => String(c).trim()).filter(Boolean)));
       const checkChunkSize = 80;
-      const duplicates: string[] = [];
+      const duplicates = new Set<string>();
 
       for (let i = 0; i < uniqueCodes.length; i += checkChunkSize) {
         const chunk = uniqueCodes.slice(i, i + checkChunkSize);
@@ -6380,53 +6491,33 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
           .from('unified_honest_sign_codes')
           .select('code')
           .filter('code', 'in', pgInList(chunk));
-
         if (checkError) throw checkError;
-        if (existing) duplicates.push(...existing.map(c => c.code));
+        (existing || []).forEach((c: any) => duplicates.add(c.code));
       }
 
-      const duplicateSet = new Set(duplicates);
-      const codesToInsert = uniqueCodes.filter(code => !duplicateSet.has(code));
+      const codesToInsert = uniqueCodes.filter((code) => !duplicates.has(code));
+      if (codesToInsert.length === 0) return 0;
 
-      if (codesToInsert.length === 0) {
-        showToast(`Все коды (${uniqueCodes.length}) уже существуют в базе`, 'warning');
-        return;
-      }
-
-      const dataToInsert = codesToInsert.map(code => ({
+      const rows = codesToInsert.map((code) => ({
         supplier_id: honestSignSupplierId,
-        category: normalizeHSCategory(honestSignBaseCategory),
-        gender: normalizedGender,
-        // Пустой размер храним как NULL: «нет значения» и «пустая строка» —
-        // разные вещи, а подбор проверяет именно наличие.
-        size: normalizedSize || null,
+        category: null,
+        gender: null,
+        size: null,
         code,
         file_name: fileName,
-        status: 'new'
+        status: 'new',
       }));
 
       const chunkSize = 250;
-      for (let i = 0; i < dataToInsert.length; i += chunkSize) {
-        const chunk = dataToInsert.slice(i, i + chunkSize);
-        const { error } = await supabase.from('unified_honest_sign_codes').insert(chunk);
+      for (let i = 0; i < rows.length; i += chunkSize) {
+        const { error } = await supabase.from('unified_honest_sign_codes').insert(rows.slice(i, i + chunkSize));
         if (error) throw error;
       }
-
-      if (duplicates.length > 0) {
-        showToast(`Загружено ${codesToInsert.length} кодов. Пропущено дубликатов: ${duplicates.length}`, 'warning');
-      } else {
-        showToast(`Успешно загружено ${codesToInsert.length} кодов`, 'success');
-      }
-
-      setHonestSignBaseCategory('');
-      setHonestSignBaseGender('');
-      fetchHonestSignUploadHistory();
-      fetchHonestSignCategoryStats();
+      return codesToInsert.length;
     } catch (error: any) {
       console.error('Error uploading codes:', error);
-      showToast(`Ошибка при загрузке кодов: ${error.message || 'Неизвестная ошибка'}`, 'error');
-    } finally {
-      setLoadingHonestSign(false);
+      showToast(`Ошибка при загрузке «${fileName}»: ${error?.message || 'неизвестная ошибка'}`, 'error');
+      return 0;
     }
   };
 
@@ -6485,43 +6576,47 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     );
   };
 
-  const handleHonestSignBaseUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
+  /** Загрузка пачки файлов из окна привязки: у каждого свой разбор, итог — одной сводкой. */
+  const uploadHsFiles = async (files: File[]): Promise<FileUploadSummary> => {
+    const summary: FileUploadSummary = { files: 0, codes: 0, failed: [] };
+    if (!honestSignSupplierId) { showToast('Выберите поставщика', 'error'); return summary; }
+    setLoadingHonestSign(true);
     try {
-      const { codes, broken } = await parseCodesFromFile(file);
-      if (!confirmBrokenChzLines(codes, broken)) return;
-      await importHonestSignCodes(codes, file.name);
-    } catch (error: any) {
-      console.error('Honest Sign file upload error:', error);
-      showToast(`Ошибка чтения файла: ${error?.message || 'неизвестно'}`, 'error');
+      for (const file of files) {
+        try {
+          const { codes, broken } = await parseCodesFromFile(file);
+          if (!confirmBrokenChzLines(codes, broken)) { summary.failed.push(file.name); continue; }
+          const added = await importHonestSignCodes(codes, file.name);
+          if (added > 0) { summary.files += 1; summary.codes += added; } else { summary.failed.push(file.name); }
+        } catch (error: any) {
+          console.error('Honest Sign file upload error:', error);
+          showToast(`Ошибка чтения файла «${file.name}»: ${error?.message || 'неизвестно'}`, 'error');
+          summary.failed.push(file.name);
+        }
+      }
     } finally {
-      if (e.target) e.target.value = '';
+      setLoadingHonestSign(false);
     }
+    return summary;
   };
 
-  const handleHonestSignBaseImportFromTelegram = async () => {
+  /** Последний файл из Telegram поставщика — туда же, в окно привязки. */
+  const importHsFromTelegram = async (): Promise<FileUploadSummary | null> => {
     if (!honestSignSupplierId) {
       showToast('Выберите поставщика', 'error');
-      return;
+      return null;
     }
 
-    if (!honestSignBaseCategory) {
-      showToast('Сначала выберите категорию', 'error');
-      return;
-    }
-
-    const supplier = suppliers.find(s => s.id === honestSignSupplierId);
+    const supplier = suppliers.find((s) => s.id === honestSignSupplierId);
     if (!supplier?.telegram_chat_id) {
       showToast('У поставщика не заполнен Telegram Chat ID', 'error');
-      return;
+      return null;
     }
 
     const token = telegramBotToken.trim();
     if (!token) {
       showToast('Не настроен Telegram bot token', 'error');
-      return;
+      return null;
     }
 
     try {
@@ -6538,28 +6633,27 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       const msg = updates[0];
       if (!msg?.document?.file_id) {
         showToast('В Telegram не найден файл-документ для выбранного поставщика', 'warning');
-        return;
+        return null;
       }
 
-      const fileId = msg.document.file_id;
       const originalName = msg.document.file_name || `telegram_${Date.now()}.txt`;
-
-      const fileJson = await telegramService.getFile(token, fileId);
+      const fileJson = await telegramService.getFile(token, msg.document.file_id);
       if (!fileJson?.ok || !fileJson?.result?.file_path) throw new Error(fileJson?.description || 'Telegram getFile error');
 
-      const dlUrl = telegramService.getFileDownloadUrl(token, fileJson.result.file_path);
-      const dlRes = await fetch(dlUrl);
+      const dlRes = await fetch(telegramService.getFileDownloadUrl(token, fileJson.result.file_path));
       if (!dlRes.ok) throw new Error(`Ошибка скачивания файла: ${dlRes.status}`);
 
       const blob = await dlRes.blob();
-      const file = new File([blob], originalName, { type: blob.type || 'application/octet-stream' });
+      const file = new File([blob], `tg_${originalName}`, { type: blob.type || 'application/octet-stream' });
       const { codes, broken } = await parseCodesFromFile(file);
-      if (!confirmBrokenChzLines(codes, broken)) return;
+      if (!confirmBrokenChzLines(codes, broken)) return { files: 0, codes: 0, failed: [file.name] };
 
-      await importHonestSignCodes(codes, `tg_${originalName}`);
+      const added = await importHonestSignCodes(codes, file.name);
+      return added > 0 ? { files: 1, codes: added, failed: [] } : { files: 0, codes: 0, failed: [file.name] };
     } catch (e: any) {
       console.error('Telegram import error:', e);
       showToast(`Ошибка импорта из Telegram: ${e?.message || 'неизвестно'}`, 'error');
+      return null;
     } finally {
       setLoadingHonestSign(false);
     }
@@ -24995,7 +25089,11 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                 <div className="oc-card p-6 mb-6">
                     <h2 className="text-lg font-bold text-slate-900 mb-4">Загрузка базы кодов</h2>
 
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                    <p className="mb-4 text-sm text-slate-600">
+                      Выберите поставщика, откройте привязку, загрузите файлы с кодами (можно сразу все) и привяжите каждый файл к товару.
+                    </p>
+
+                    <div className="mb-6 grid grid-cols-1 items-end gap-4 md:grid-cols-3">
                         <div>
                             <label className="block text-sm font-medium text-slate-700 mb-2">Выберите поставщика</label>
                             <Select
@@ -25007,73 +25105,16 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                               {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                             </Select>
                         </div>
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-2">Категории товаров по поставщику</label>
-                            <SearchSelect
-                              value={honestSignBaseCategory}
-                              onChange={setHonestSignBaseCategory}
-                              disabled={loadingCategories}
-                              emptyLabel="-- Выберите категорию --"
-                              placeholder={loadingCategories ? 'Загрузка...' : '-- Выберите категорию --'}
-                              options={supplierCategories.length > 0
-                                ? supplierCategories.map((c) => ({ value: c, label: c }))
-                                : [
-                                  { value: 'clothing', label: 'Одежда' },
-                                  { value: 'shoes', label: 'Обувь' },
-                                  { value: 'linen', label: 'Белье' },
-                                  { value: 'other', label: 'Другое' },
-                                ]}
-                              ariaLabel="Категория"
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-2">Пол</label>
-                            <Select
-                              value={honestSignBaseGender}
-                              onChange={(e) => setHonestSignBaseGender(normalizeHSGender(e.target.value) as 'male' | 'female' | '')}
-                              className="w-full p-3 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                        <div className="md:col-span-2">
+                            <button
+                              type="button"
+                              onClick={() => setShowHsFileLinker(true)}
+                              disabled={!honestSignSupplierId}
+                              className="flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-5 py-3 font-medium text-white shadow-lg shadow-indigo-200 transition-colors hover:bg-indigo-700 disabled:opacity-50 disabled:shadow-none md:w-auto"
                             >
-                              <option value="">-- Выберите пол --</option>
-                              <option value="male">Мужской</option>
-                              <option value="female">Женский</option>
-                            </Select>
-                        </div>
-                        <div>
-                            {/* Размеры — только те, что есть у карточек выбранной категории:
-                                весь размерный ряд магазина здесь только мешает. */}
-                            <label className="block text-sm font-medium text-slate-700 mb-2">Размер</label>
-                            <Select
-                              value={honestSignBaseSize}
-                              onChange={(e) => setHonestSignBaseSize(e.target.value)}
-                              className="w-full p-3 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none disabled:bg-slate-100 disabled:text-slate-400"
-                              disabled={!honestSignSupplierId || honestSignBaseNoSize}
-                            >
-                              <option value="">-- Выберите размер --</option>
-                              {honestSignSizes.map((s) => (
-                                <option key={s.size} value={s.size}>
-                                  {s.size} ({s.cards})
-                                </option>
-                              ))}
-                            </Select>
-
-                            <label className="mt-2 flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
-                              <input
-                                type="checkbox"
-                                checked={honestSignBaseNoSize}
-                                onChange={(e) => {
-                                  setHonestSignBaseNoSize(e.target.checked);
-                                  if (e.target.checked) setHonestSignBaseSize('');
-                                }}
-                                className="w-4 h-4"
-                              />
-                              без размера — подойдут любому размеру этой категории и пола
-                            </label>
-
-                            {honestSignSupplierId && honestSignSizes.length === 0 && !honestSignBaseNoSize && (
-                              <p className="mt-1 text-xs text-slate-500">
-                                У карточек этой категории размеров не нашлось — проверьте выбор категории или отметьте «без размера».
-                              </p>
-                            )}
+                              <Link className="h-5 w-5" />
+                              Привязать файлы к товарам
+                            </button>
                         </div>
                     </div>
 
@@ -25081,22 +25122,63 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                       <div className="mb-6">
                         <h3 className="text-sm font-semibold text-slate-700 mb-3">Инфографика по ЧЗ в категориях</h3>
                         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                          {honestSignCategoryStats.map((s) => (
-                            <div key={s.category} className="bg-slate-50 border border-slate-200 rounded-lg p-3">
-                              <div className="font-medium text-slate-900 mb-2">{s.category}</div>
-                              <div className="text-xs text-slate-600 space-y-1">
-                                <div>Всего: <span className="font-semibold text-slate-900">{s.total}</span></div>
-                                <div>В базе: <span className="font-semibold text-indigo-700">{s.inBase}</span></div>
-                                <div>Напечатано: <span className="font-semibold text-green-700">{s.printed}</span></div>
-                                <div>Отсканировано: <span className="font-semibold text-orange-700">{s.scanned}</span></div>
+                          {honestSignCategoryStats.map((s) => {
+                            const used = !hsDisabledKeys.has(hsCategoryKey(s.category));
+                            return (
+                              <div
+                                key={s.category}
+                                className={`border rounded-lg p-3 transition-colors ${used ? 'bg-slate-50 border-slate-200' : 'bg-slate-100 border-slate-300'}`}
+                              >
+                                <div className="flex items-start justify-between gap-2 mb-2">
+                                  <div className={`font-medium ${used ? 'text-slate-900' : 'text-slate-500'}`}>{s.category}</div>
+                                  <label
+                                    className="flex shrink-0 cursor-pointer select-none items-center gap-1.5 text-xs font-medium text-slate-700"
+                                    title="Снята — коды категории остаются в базе, но не подбираются, не печатаются и не считаются остатком"
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={used}
+                                      onChange={(e) => handleToggleHsCategoryUse(s.category, e.target.checked)}
+                                      className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                                    />
+                                    Использовать
+                                  </label>
+                                </div>
+                                <div className={`text-xs space-y-1 ${used ? 'text-slate-600' : 'text-slate-400'}`}>
+                                  <div>Всего: <span className="font-semibold text-slate-900">{s.total}</span></div>
+                                  <div>В базе: <span className="font-semibold text-indigo-700">{s.inBase}</span></div>
+                                  <div>Напечатано: <span className="font-semibold text-green-700">{s.printed}</span></div>
+                                  <div>Отсканировано: <span className="font-semibold text-orange-700">{s.scanned}</span></div>
+                                </div>
+                                {!used && (
+                                  <div className="mt-2 rounded bg-amber-50 px-2 py-1 text-xs text-amber-800">
+                                    Не используется: коды не подбираются и не печатаются
+                                  </div>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => openHsDelete(s.category)}
+                                  className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-red-600 hover:text-red-800"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                  Удалить коды…
+                                </button>
                               </div>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       </div>
                     )}
 
-                    <div className="flex justify-end mb-4">
+                    <div className="flex flex-wrap justify-end gap-2 mb-4">
+                        <button
+                            onClick={() => openHsDelete(null)}
+                            disabled={!honestSignSupplierId}
+                            className="flex items-center gap-2 px-4 py-2 bg-red-50 text-red-700 rounded-lg hover:bg-red-100 transition-colors disabled:opacity-50"
+                        >
+                            <Trash2 className="w-4 h-4" />
+                            Удалить коды…
+                        </button>
                         <button
                             onClick={() => setShowReturnCodesModal(true)}
                             className="flex items-center gap-2 px-4 py-2 bg-yellow-100 text-yellow-700 rounded-lg hover:bg-yellow-200 transition-colors"
@@ -25104,45 +25186,6 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                             <RotateCcw className="w-4 h-4" />
                             Вернуть в базу
                         </button>
-                    </div>
-
-                    <div className="flex items-center justify-center w-full mb-8">
-                        <label
-                          className={`flex flex-col items-center justify-center w-full h-64 border-2 border-dashed rounded-lg transition-colors ${
-                            !honestSignSupplierId || !honestSignBaseCategory || !honestSignBaseGender || (!honestSignBaseSize && !honestSignBaseNoSize)
-                              ? 'border-slate-200 bg-slate-100 cursor-not-allowed opacity-70'
-                              : 'border-slate-300 cursor-pointer bg-slate-50 hover:bg-slate-100'
-                          }`}
-                          onClick={(ev) => {
-                            if (!honestSignSupplierId || !honestSignBaseCategory || !honestSignBaseGender || (!honestSignBaseSize && !honestSignBaseNoSize)) {
-                              ev.preventDefault();
-                              showToast('Сначала выберите поставщика, категорию и пол', 'error');
-                            }
-                          }}
-                        >
-                            <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                                <Upload className="w-8 h-8 mb-4 text-slate-500" />
-                                <p className="mb-2 text-sm text-slate-500"><span className="font-semibold">Нажмите для загрузки</span> или перетащите файл</p>
-                                <p className="text-xs text-slate-500">CSV, Excel или TXT файл с кодами</p>
-                            </div>
-                            <input
-                              type="file"
-                              className="hidden"
-                              accept=".csv,.txt,.xlsx,.xls"
-                              onChange={handleHonestSignBaseUpload}
-                              disabled={!honestSignSupplierId || !honestSignBaseCategory || !honestSignBaseGender || (!honestSignBaseSize && !honestSignBaseNoSize)}
-                            />
-                        </label>
-                    </div>
-
-                    <div className="flex justify-end mb-8">
-                      <button
-                        onClick={handleHonestSignBaseImportFromTelegram}
-                        disabled={loadingHonestSign || !honestSignSupplierId || !honestSignBaseCategory || !honestSignBaseGender || (!honestSignBaseSize && !honestSignBaseNoSize)}
-                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        {loadingHonestSign ? 'Загрузка...' : 'Загрузить файл из Telegram'}
-                      </button>
                     </div>
 
                     {honestSignUploadHistory.length > 0 && (
@@ -32865,6 +32908,115 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
                         Вернуть в базу
                     </button>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {showHsFileLinker && honestSignSupplierId && (
+            <React.Suspense fallback={null}>
+              <ChzFileLinker
+                supplierId={honestSignSupplierId}
+                supplierName={suppliers.find((s) => s.id === honestSignSupplierId)?.name}
+                categories={supplierCategories}
+                onUploadFiles={uploadHsFiles}
+                onImportTelegram={suppliers.find((s) => s.id === honestSignSupplierId)?.telegram_chat_id ? importHsFromTelegram : undefined}
+                onClose={() => { setShowHsFileLinker(false); fetchHonestSignUploadHistory(); }}
+                onChanged={() => { fetchHonestSignCategoryStats(); }}
+              />
+            </React.Suspense>
+          )}
+
+          {hsDelete.open && (
+            <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-[60] p-4" onClick={closeHsDelete}>
+              <div className="bg-white p-6 md:p-8 rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="text-2xl font-bold text-slate-900">Удалить коды</h3>
+                  <button onClick={closeHsDelete} disabled={hsDelete.busy} className="text-slate-400 hover:text-slate-600 transition-colors disabled:opacity-40">
+                    <X className="w-6 h-6" />
+                  </button>
+                </div>
+                <p className="text-slate-600 mb-4 text-sm leading-relaxed">
+                  {hsDelete.category
+                    ? <>Категория: <b>{hsDelete.category}</b>.</>
+                    : <>Все категории выбранного поставщика.</>}{' '}
+                  Перед удалением на устройство скачается файл с копией — по нему коды можно загрузить обратно.
+                </p>
+
+                <div className="space-y-2 mb-4">
+                  {([
+                    { id: 'free', title: 'Только свободные', hint: 'Не напечатанные и не отсканированные — то, что лежит в базе и ещё не пошло в дело.', n: hsDelete.counts?.free },
+                    { id: 'all', title: 'Все коды', hint: 'Включая напечатанные и отсканированные. Из истории печати и сканов они пропадут.', n: hsDelete.counts?.all },
+                  ] as const).map((opt) => (
+                    <label
+                      key={opt.id}
+                      className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition-colors ${
+                        hsDelete.scope === opt.id ? 'border-red-300 bg-red-50' : 'border-slate-200 hover:bg-slate-50'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="hs-delete-scope"
+                        checked={hsDelete.scope === opt.id}
+                        disabled={hsDelete.busy}
+                        onChange={() => setHsDelete((prev) => ({ ...prev, scope: opt.id, confirmText: '' }))}
+                        className="mt-1"
+                      />
+                      <span className="min-w-0">
+                        <span className="block text-sm font-semibold text-slate-900">
+                          {opt.title}
+                          <span className="ml-2 tabular-nums text-slate-500">
+                            {hsDelete.counting ? 'считаю…' : opt.n === undefined ? '' : `${opt.n} шт`}
+                          </span>
+                        </span>
+                        <span className="block text-xs text-slate-500">{opt.hint}</span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+
+                {(() => {
+                  const total = hsDelete.counts ? (hsDelete.scope === 'free' ? hsDelete.counts.free : hsDelete.counts.all) : 0;
+                  const confirmed = hsDelete.confirmText.trim().toUpperCase() === 'УДАЛИТЬ';
+                  return (
+                    <>
+                      {total > 0 && (
+                        <div className="mb-4">
+                          <label className="block text-sm text-slate-700 mb-1">
+                            Будет удалено <b>{total}</b> кодов. Чтобы подтвердить, напишите <b>УДАЛИТЬ</b>:
+                          </label>
+                          <input
+                            value={hsDelete.confirmText}
+                            onChange={(e) => setHsDelete((prev) => ({ ...prev, confirmText: e.target.value }))}
+                            disabled={hsDelete.busy}
+                            autoComplete="off"
+                            className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 outline-none focus:ring-2 focus:ring-red-400"
+                            placeholder="УДАЛИТЬ"
+                          />
+                        </div>
+                      )}
+                      {hsDelete.counts && total === 0 && (
+                        <p className="mb-4 text-sm text-slate-500">По этому выбору кодов нет — удалять нечего.</p>
+                      )}
+                      {hsDelete.progress && <p className="mb-3 text-sm text-slate-600">{hsDelete.progress}</p>}
+                      <div className="flex justify-end gap-3">
+                        <button
+                          onClick={closeHsDelete}
+                          disabled={hsDelete.busy}
+                          className="px-5 py-2.5 text-slate-600 hover:bg-slate-100 rounded-xl font-medium transition-colors disabled:opacity-40"
+                        >
+                          Отмена
+                        </button>
+                        <button
+                          onClick={handleDeleteHsCodes}
+                          disabled={hsDelete.busy || hsDelete.counting || total <= 0 || !confirmed}
+                          className="px-5 py-2.5 bg-red-600 text-white rounded-xl hover:bg-red-700 font-medium shadow-lg shadow-red-200 transition-all disabled:opacity-40 disabled:shadow-none"
+                        >
+                          {hsDelete.busy ? 'Удаляю…' : 'Удалить'}
+                        </button>
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
             </div>
           )}

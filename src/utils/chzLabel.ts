@@ -81,12 +81,16 @@ export interface ChzPoolItem {
   category: string;
   gender: string;
   size?: string;
+  /** Привязка к конкретным карточкам (nmId). Пусто — марка подходит любой карточке категории. */
+  nmIds?: readonly number[] | null;
 }
 
 export interface ChzProductMeta {
   gender: string;
   subject: string;
   size?: string;
+  /** Артикул WB карточки из задания — нужен марке, привязанной к товарам. */
+  nmId?: number;
 }
 
 /**
@@ -117,7 +121,10 @@ export const normalizeHsSize = (raw: string): string => {
  *    товара тоже не подходит: «наверное, мужской» — не основание клеить марку;
  *  - то же и с размером: указан у марки — должен совпасть с размером задания;
  *  - категории, если обе известны, должны совпадать;
- *  - хотя бы одно совпадение обязательно, иначе это подбор вслепую.
+ *  - хотя бы одно совпадение обязательно, иначе это подбор вслепую;
+ *  - марка, привязанная к товарам (nmIds), подходит только им — и само это
+ *    совпадение считается достаточным. Среди подходящих марок привязанные
+ *    берём первыми: они уже выбраны под этот товар, а общие пригодятся другим.
  *
  * Не нашли подходящей — печатаем стикер без ЧЗ. Отсутствие марки заметят и
  * исправят, а чужая марка уедет с товаром молча.
@@ -132,8 +139,14 @@ export function matchChzCodeForProduct(
   const productSize = normalizeHsSize(product?.size || '');
   const anyGender = isSheepskinSubject(product?.subject || '');
 
-  return pool.find((item) => {
+  const productNmId = Number(product?.nmId || 0);
+
+  const fits = (item: ChzPoolItem): boolean => {
     if (used.has(item.code)) return false;
+
+    const linked = Array.isArray(item.nmIds) && item.nmIds.length > 0;
+    // Привязанная к товарам марка чужому товару не подходит, даже если категория та же.
+    if (linked && !(productNmId > 0 && item.nmIds!.includes(productNmId))) return false;
 
     const codeGender = String(item.gender || '').trim().toLowerCase();
     const codeCategory = normalizeHsCategoryName(item.category);
@@ -146,8 +159,10 @@ export function matchChzCodeForProduct(
     const genderMatched = !anyGender && Boolean(codeGender && codeGender === productGender);
     const sizeMatched = Boolean(codeSize && codeSize === productSize);
     const categoryMatched = Boolean(codeCategory && productSubject && codeCategory === productSubject);
-    return genderMatched || sizeMatched || categoryMatched;
-  });
+    return linked || genderMatched || sizeMatched || categoryMatched;
+  };
+
+  return pool.find((item) => Array.isArray(item.nmIds) && item.nmIds.length > 0 && fits(item)) ?? pool.find(fits);
 }
 
 export interface ChzLabelData {

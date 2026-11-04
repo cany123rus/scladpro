@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, ChevronDown, RefreshCw } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { normalizeHsCategoryName } from '../utils/chzLabel';
+import { HS_CATEGORY_USE_EVENT, hsCategoryKey, loadDisabledHsCategories } from '../utils/chzCategoryUse';
 
 /**
  * Честный знак поставщика: сколько осталось и на сколько хватит.
@@ -135,6 +136,22 @@ export default function FbsChzStockPanel({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [reloadTick, setReloadTick] = useState(0);
+  // Категории со снятой галочкой «Использовать» (в остаток и расход не идут).
+  const [disabledKeys, setDisabledKeys] = useState<Set<string>>(() => new Set());
+  useEffect(() => {
+    if (!supplierId) { setDisabledKeys(new Set()); return; }
+    let cancelled = false;
+    const load = () => {
+      loadDisabledHsCategories(supplierId).then((keys) => { if (!cancelled) setDisabledKeys(keys); });
+    };
+    load();
+    const onChanged = (e: Event) => {
+      const target = String((e as CustomEvent)?.detail?.supplierId || '');
+      if (!target || target === supplierId) load();
+    };
+    window.addEventListener(HS_CATEGORY_USE_EVENT, onChanged);
+    return () => { cancelled = true; window.removeEventListener(HS_CATEGORY_USE_EVENT, onChanged); };
+  }, [supplierId]);
   // Мягкий пересчёт: остаток заново, заказы WB — из кэша (если свежие).
   const [softTick, setSoftTick] = useState(0);
   const ordersCacheRef = useRef<{ supplierId: string; at: number; nmIds: number[] | null; note: string } | null>(null);
@@ -219,6 +236,7 @@ export default function FbsChzStockPanel({
   const groups = useMemo(() => {
     const map = new Map<string, { category: string; inBase: number; used: number; periodDays: number; rows: ForecastRow[] }>();
     for (const row of rows) {
+      if (disabledKeys.has(hsCategoryKey(row.category))) continue;
       // Объединённые категории ЧЗ (куртки / бомберы / дублёнки и др.) считаем одной строкой.
       const key = normalizeHsCategoryName(row.category) || row.category;
       const label = key === 'куртки / бомберы / дублёнки' ? 'Куртки / Бомберы / Дублёнки' : row.category;
@@ -241,7 +259,17 @@ export default function FbsChzStockPanel({
       const sb = forecast(b.inBase, b.used, b.periodDays).status;
       return order[sa] - order[sb] || b.used - a.used || a.category.localeCompare(b.category, 'ru');
     });
-  }, [rows]);
+  }, [rows, disabledKeys]);
+
+  // Сколько категорий исключено галочкой — чтобы пропажа карточки не удивляла.
+  const hiddenCategories = useMemo(() => {
+    const keys = new Set<string>();
+    for (const row of rows) {
+      const key = hsCategoryKey(row.category);
+      if (disabledKeys.has(key)) keys.add(key);
+    }
+    return keys.size;
+  }, [rows, disabledKeys]);
 
   const totals = useMemo(() => {
     const inBase = groups.reduce((s, g) => s + g.inBase, 0);
@@ -352,6 +380,11 @@ export default function FbsChzStockPanel({
                 );
               })}
             </div>
+          )}
+          {hiddenCategories > 0 && (
+            <p className="mt-3 rounded-lg bg-slate-100 px-3 py-2 text-xs text-slate-600">
+              Не используется категорий: {hiddenCategories} — они не считаются в остатке. Включить обратно можно галочкой в «Базе кодов ЧЗ».
+            </p>
           )}
           {source === 'scans' && (
             <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
