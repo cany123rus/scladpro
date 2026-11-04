@@ -136,11 +136,8 @@ export default function ChzFileLinker({
   const groupsRef = useRef<HsFileGroup[]>([]);
   groupsRef.current = groups;
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  // Esc окно не закрывает: он закрывает выпадающий список категорий, и закрытие всего окна
+  // вместе с ним стирало бы рабочий набор файлов. Закрывает крестик, «Готово» и клик по фону.
 
   const reloadGroups = useCallback(async (): Promise<HsFileGroup[]> => {
     setGroupsError('');
