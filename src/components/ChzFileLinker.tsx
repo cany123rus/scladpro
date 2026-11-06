@@ -272,11 +272,14 @@ export default function ChzFileLinker({
     workingGroups.forEach((g) => {
       if (!hsGroupFromTable(g) || g.nmIds.length > 0) return;
       const article = fold(g.article || '');
+      // Товары только той же категории: «куртка» подсказывает куртки, бомберы и дублёнки, но не костюмы.
+      const sameCategory = (p: HsLinkProduct) => !g.category || !p.subject || matchesCategory(g, p.subject);
       const byArticle = article ? products.filter((p) => fold(p.vendorCode) === article) : [];
       if (byArticle.length > 0) { map.set(g.key, { products: byArticle, exact: true }); return; }
       const color = fold(g.color || '');
       const size = normalizeHsSize(g.size || '');
       const matched = products.filter((p) => {
+        if (!sameCategory(p)) return false;
         const pc = fold(p.color);
         const colorOk = !color || (pc && (pc === color || pc.includes(color) || color.includes(pc)));
         const sizeOk = !size || p.sizes.some((s) => normalizeHsSize(s) === size);
@@ -285,7 +288,7 @@ export default function ChzFileLinker({
       if (matched.length > 0) map.set(g.key, { products: matched, exact: false });
     });
     return map;
-  }, [workingGroups, products]);
+  }, [workingGroups, products, matchesCategory]);
 
   const filterByCategory = !showAllCategories && selectedCategories.length > 0;
   const visibleFiles = useMemo(() => {
