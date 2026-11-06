@@ -2,7 +2,6 @@ import React, { useEffect, useState, useRef, useMemo, useCallback, useDeferredVa
 // WB Products Component (Updated Layout v11 - Multi-supplier fetch, Enhanced UI)
 import { Loader2, AlertCircle, Image as ImageIcon, ExternalLink, RefreshCw, Printer, Minus, Plus, Search, Filter, X, Package, Pencil, Database, CheckCircle2, Trash2 } from 'lucide-react';
 import JsBarcode from 'jsbarcode';
-import html2canvas from 'html2canvas';
 import { SearchSelect } from './ui/SearchSelect';
 // jsPDF и bwip-js — по требованию: раздел открывается без 1,2 МБ библиотек печати.
 import { ensureBwip, ensurePdfLibs, lazyLibs } from '../pages/dashboardLazyLibs';

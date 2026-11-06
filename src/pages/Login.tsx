@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useNavigate } from 'react-router-dom';
 import { QrCode, User, Lock, Loader2, Camera, X, Eye, EyeOff, Delete, KeyRound } from 'lucide-react';
-import jsQR from 'jsqr';
 import { telegramService } from '../services/telegram.service';
 import { storeCurrentEmployee } from '../utils/employeeStorage';
 
@@ -539,6 +538,8 @@ export default function Login() {
             videoRef.current.setAttribute('playsinline', 'true'); // required for iOS
             
             await videoRef.current.play().catch(e => console.error("Video play error:", e));
+            // jsQR (~280 КБ) нужен только при сканировании QR — грузим по требованию, а не в стартовый бандл.
+            const jsQR = (await import('jsqr')).default;
             
             const scan = () => {
               if (!scanning || !videoRef.current || !canvasRef.current) return;

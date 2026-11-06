@@ -35,7 +35,7 @@
 - Палитра: **slate** (не gray!) + акцент indigo/violet. Классы `oc-card`, `oc-input`,
   `oc-select`, `btn-primary/success/danger/ghost` в `src/index.css`.
 - Модалки: единый стиль — фон `bg-slate-900/50 backdrop-blur-sm`, панель `rounded-3xl`,
-  градиентная шапка с иконкой. Переиспользуемый `src/components/Modal.tsx`.
+  градиентная шапка с иконкой. (`Modal.tsx` удалён как неиспользуемый.) Dashboard разбит: разделы и окна лежат в `src/pages/dashboard/*.tsx` (грузятся лениво, данные — пропсами).
 - Скелетоны загрузки: `src/components/Skeleton.tsx` (`PageSkeleton`, `SectionSkeleton`).
 - Бэкап дизайна перед переделкой: папка `design-backup/*.bak` + git-коммит `716fac2`.
 
