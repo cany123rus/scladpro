@@ -435,27 +435,49 @@ export default function ChzFileLinker({
     selectedCategories.find((c) => normalizeHsCategoryName(c) === normalizeHsCategoryName(p.subject)) || p.subject || null;
 
   /** Привязать группу к товарам. Группа из таблицы ЧЗ сохраняет свой размер из файла, у остальных размер задаёт выбор справа. */
-  /** Проверка категорий перед привязкой: true — можно продолжать. Неподходящие — только с галочкой и после вопроса. */
-  const confirmMismatch = (pairs: Array<[HsFileGroup, HsLinkProduct[]]>): boolean => {
+  type LinkPlan = { items: Array<[HsFileGroup, HsLinkProduct[]]>; note?: string };
+  // Окно «что к чему привяжется»: любая привязка сначала показывает его и ждёт подтверждения.
+  const [plan, setPlan] = useState<LinkPlan | null>(null);
+
+  const mismatchOf = (items: LinkPlan['items']): string[] => {
     const bad = new Set<string>();
-    pairs.forEach(([g, ts]) => ts.forEach((p) => {
+    items.forEach(([g, ts]) => ts.forEach((p) => {
       if (!categoryFits(g, p)) bad.add(`файл «${g.category}${g.color ? ` · ${g.color}` : ''}» → товар ${p.vendorCode || p.nmId} (${p.subject})`);
     }));
-    if (bad.size === 0) return true;
-    const list = Array.from(bad);
-    if (!allowMismatch) {
-      setNotice({ tone: 'err', text: `Категория не подходит: ${list.slice(0, 3).join('; ')}${list.length > 3 ? ` и ещё ${list.length - 3}` : ''}. Чтобы всё равно привязать, включите «Разрешить неподходящие категории».` });
-      return false;
-    }
-    return window.confirm(
-      `Категории НЕ совпадают:\n\n${list.slice(0, 8).join('\n')}${list.length > 8 ? `\n…и ещё ${list.length - 8}` : ''}\n\n`
-      + 'Марка чужой категории уедет с товаром. Точно привязать?',
-    );
+    return Array.from(bad);
   };
 
-  const linkTo = async (g: HsFileGroup, targets: HsLinkProduct[], silent = false, checked = false): Promise<boolean> => {
+  /** Показать окно подтверждения. Товары чужой категории — только при включённой галочке. */
+  const askPlan = (items: LinkPlan['items'], note?: string) => {
+    if (items.length === 0 || busyKey) return;
+    const bad = mismatchOf(items);
+    if (bad.length > 0 && !allowMismatch) {
+      setNotice({ tone: 'err', text: `Категория не подходит: ${bad.slice(0, 3).join('; ')}${bad.length > 3 ? ` и ещё ${bad.length - 3}` : ''}. Чтобы всё равно привязать, включите «Разрешить неподходящие категории».` });
+      return;
+    }
+    setNotice(null);
+    setPlan({ items, note });
+  };
+
+  /** Привязать одну группу к товарам (через окно подтверждения). */
+  const linkTo = (g: HsFileGroup, targets: HsLinkProduct[]) => askPlan([[g, targets]]);
+
+  /** Подтверждено: выполняем привязку по плану. */
+  const runPlan = async () => {
+    if (!plan || busyKey) return;
+    const { items, note } = plan;
+    setPlan(null);
+    let done = 0;
+    for (const [g, targets] of items) {
+      if (await doLink(g, targets, items.length > 1)) done += 1;
+    }
+    if (items.length > 1) {
+      setNotice({ tone: done === items.length ? 'ok' : 'err', text: `Привязано: ${done} из ${items.length}.${note ? ` ${note}` : ''}` });
+    }
+  };
+
+  const doLink = async (g: HsFileGroup, targets: HsLinkProduct[], silent = false): Promise<boolean> => {
     if (targets.length === 0 || busyKey) return false;
-    if (!checked && !confirmMismatch([[g, targets]])) return false;
     setBusyKey(g.key);
     if (!silent) setNotice(null);
     try {
@@ -485,7 +507,7 @@ export default function ChzFileLinker({
     }
   };
 
-  const link = (g: HsFileGroup) => linkTo(g, picked);
+  const link = (g: HsFileGroup) => { linkTo(g, picked); };
 
   // Группы, где подсказка однозначна: артикул совпал или подошёл ровно один товар.
   const confidentGroups = useMemo(
@@ -496,19 +518,13 @@ export default function ChzFileLinker({
     [visibleFiles, suggestions],
   );
 
-  const linkConfident = async () => {
+  const linkConfident = () => {
     if (busyKey || confidentGroups.length === 0) return;
-    if (!window.confirm(`Привязать ${confidentGroups.length} групп к подходящим товарам (по артикулу или по цвету и размеру)?`)) return;
-    let done = 0;
-    const plan = confidentGroups.flatMap((g): Array<[HsFileGroup, HsLinkProduct[]]> => {
-      const s = suggestions.get(g.key);
-      return s ? [[g, s.products]] : [];
+    const items = confidentGroups.flatMap((g): LinkPlan['items'] => {
+      const sg = suggestions.get(g.key);
+      return sg ? [[g, sg.products]] : [];
     });
-    if (!confirmMismatch(plan)) return;
-    for (const [g, targets] of plan) {
-      if (await linkTo(g, targets, true, true)) done += 1;
-    }
-    setNotice({ tone: done === confidentGroups.length ? 'ok' : 'err', text: `Привязано групп: ${done} из ${confidentGroups.length}` });
+    askPlan(items);
   };
 
   // Группы из таблицы ЧЗ собираем по товару: «Куртка · Чёрный» — одна карточка, внутри неё размеры.
@@ -545,27 +561,22 @@ export default function ChzFileLinker({
    * Привязка по размерам: каждый размер получает только те из выбранных (или подсказанных) товаров,
    * у которых этот размер есть. Размер, которому ничего не подошло, остаётся без привязки.
    */
-  const linkFamilyBySize = async (groups: HsFileGroup[], source: 'picked' | 'hints') => {
+  const linkFamilyBySize = (groups: HsFileGroup[], source: 'picked' | 'hints') => {
     if (busyKey) return;
     setNotice(null);
-    let done = 0;
     const skipped: string[] = [];
-    const todo = groups.filter((g) => g.nmIds.length === 0);
-    const plan: Array<[HsFileGroup, HsLinkProduct[]]> = [];
-    for (const g of todo) {
+    const items: LinkPlan['items'] = [];
+    for (const g of groups.filter((x) => x.nmIds.length === 0)) {
       const pool = source === 'picked' ? picked : (suggestions.get(g.key)?.products || []);
       const targets = pool.filter((p) => (source === 'picked' ? fitsProduct(p, g.size) : hasSize(p, g.size)));
       if (targets.length === 0) { skipped.push(g.size || '—'); continue; }
-      plan.push([g, targets]);
+      items.push([g, targets]);
     }
-    if (plan.length > 0 && !confirmMismatch(plan)) return;
-    for (const [g, targets] of plan) {
-      if (await linkTo(g, targets, true, true)) done += 1;
+    if (items.length === 0) {
+      setNotice({ tone: 'err', text: `Не нашлось товара с нужным размером${skipped.length ? `: ${skipped.join(', ')}` : ''}.` });
+      return;
     }
-    setNotice({
-      tone: done > 0 ? 'ok' : 'err',
-      text: `Привязано размеров: ${done}.${skipped.length ? ` Не нашлось товара с размером: ${skipped.join(', ')}.` : ''}`,
-    });
+    askPlan(items, skipped.length ? `Без привязки останутся размеры: ${skipped.join(', ')}.` : undefined);
   };
 
   const unlink = async (g: HsFileGroup) => {
@@ -848,7 +859,7 @@ export default function ChzFileLinker({
                 {confidentGroups.length > 0 && (
                   <button
                     type="button"
-                    onClick={() => void linkConfident()}
+                    onClick={() => linkConfident()}
                     disabled={Boolean(busyKey)}
                     className="inline-flex !min-h-0 w-full items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-emerald-700 disabled:opacity-40"
                   >
@@ -923,7 +934,7 @@ export default function ChzFileLinker({
                           <div className="mt-2 flex flex-wrap gap-1.5">
                             <button
                               type="button"
-                              onClick={() => void linkFamilyBySize(fam.groups, 'picked')}
+                              onClick={() => linkFamilyBySize(fam.groups, 'picked')}
                               disabled={picked.length === 0 || pickedFit === 0 || Boolean(busyKey)}
                               title={picked.length === 0 ? 'Выберите товары слева' : 'Каждый размер получит те из выбранных товаров, где такой размер есть'}
                               className="inline-flex !min-h-0 items-center gap-1 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-indigo-700 disabled:opacity-40"
@@ -932,7 +943,7 @@ export default function ChzFileLinker({
                             </button>
                             <button
                               type="button"
-                              onClick={() => void linkFamilyBySize(fam.groups, 'hints')}
+                              onClick={() => linkFamilyBySize(fam.groups, 'hints')}
                               disabled={hintFit === 0 || Boolean(busyKey)}
                               title="Каждый размер — к товарам того же цвета, где есть этот размер"
                               className="inline-flex !min-h-0 items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-emerald-700 disabled:opacity-40"
@@ -962,12 +973,12 @@ export default function ChzFileLinker({
                                 </div>
                                 <div className="flex shrink-0 gap-1.5">
                                   {!linked && hint && (
-                                    <button type="button" onClick={() => void linkTo(g, hint.products.filter((p) => hasSize(p, g.size)).length > 0 ? hint.products.filter((p) => hasSize(p, g.size)) : hint.products)} disabled={Boolean(busyKey)} className="inline-flex !min-h-0 items-center gap-1 rounded-md bg-emerald-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-emerald-700 disabled:opacity-40">
+                                    <button type="button" onClick={() => linkTo(g, hint.products.filter((p) => hasSize(p, g.size)).length > 0 ? hint.products.filter((p) => hasSize(p, g.size)) : hint.products)} disabled={Boolean(busyKey)} className="inline-flex !min-h-0 items-center gap-1 rounded-md bg-emerald-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-emerald-700 disabled:opacity-40">
                                       {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle2 className="h-3 w-3" />} К подходящим
                                     </button>
                                   )}
                                   {!linked && (
-                                    <button type="button" onClick={() => void linkTo(g, fits)} disabled={fits.length === 0 || Boolean(busyKey)} title={picked.length === 0 ? 'Выберите товары слева' : fits.length === 0 ? 'Среди выбранных нет товара с этим размером' : 'Привязать к выбранным с этим размером'} className="inline-flex !min-h-0 items-center gap-1 rounded-md bg-indigo-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-indigo-700 disabled:opacity-40">
+                                    <button type="button" onClick={() => linkTo(g, fits)} disabled={fits.length === 0 || Boolean(busyKey)} title={picked.length === 0 ? 'Выберите товары слева' : fits.length === 0 ? 'Среди выбранных нет товара с этим размером' : 'Привязать к выбранным с этим размером'} className="inline-flex !min-h-0 items-center gap-1 rounded-md bg-indigo-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-indigo-700 disabled:opacity-40">
                                       <Link2 className="h-3 w-3" /> {fits.length > 0 ? `К выбранным (${fits.length})` : 'К выбранным'}
                                     </button>
                                   )}
@@ -1041,7 +1052,7 @@ export default function ChzFileLinker({
                                   <>
                                     <button
                                       type="button"
-                                      onClick={() => void linkFamilyBySize(scopeOpen, 'picked')}
+                                      onClick={() => linkFamilyBySize(scopeOpen, 'picked')}
                                       disabled={picked.length === 0 || pickedFitScope === 0 || Boolean(busyKey)}
                                       title={picked.length === 0 ? 'Выберите товары слева' : 'Каждый размер получит те из выбранных товаров, где такой размер есть'}
                                       className="inline-flex !min-h-0 items-center gap-1 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-indigo-700 disabled:opacity-40"
@@ -1050,7 +1061,7 @@ export default function ChzFileLinker({
                                     </button>
                                     <button
                                       type="button"
-                                      onClick={() => void linkFamilyBySize(scopeOpen, 'hints')}
+                                      onClick={() => linkFamilyBySize(scopeOpen, 'hints')}
                                       disabled={hintFitScope === 0 || Boolean(busyKey)}
                                       title="Каждый размер — к товарам той же категории и цвета, где есть этот размер"
                                       className="inline-flex !min-h-0 items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-emerald-700 disabled:opacity-40"
@@ -1128,7 +1139,7 @@ export default function ChzFileLinker({
                             {!linked && hint && (
                               <button
                                 type="button"
-                                onClick={() => void linkTo(g, hint.products)}
+                                onClick={() => linkTo(g, hint.products)}
                                 disabled={Boolean(busyKey)}
                                 title="Привязать к подсказанным товарам"
                                 className="inline-flex !min-h-0 items-center justify-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-emerald-700 disabled:opacity-40"
@@ -1139,7 +1150,7 @@ export default function ChzFileLinker({
                             {!toThis && (
                               <button
                                 type="button"
-                                onClick={() => void link(g)}
+                                onClick={() => link(g)}
                                 disabled={!(fromTable ? picked.length > 0 : canLink) || Boolean(busyKey)}
                                 title={picked.length === 0 ? 'Сначала выберите товары слева' : sizeNeeded && !size && !fromTable ? 'Выберите размер' : linked ? 'Перепривязать к выбранным товарам' : 'Привязать к выбранным товарам'}
                                 className="inline-flex !min-h-0 items-center justify-center gap-1 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-indigo-700 disabled:opacity-40"
@@ -1171,10 +1182,84 @@ export default function ChzFileLinker({
         )}
 
         <div className="flex shrink-0 items-center justify-between gap-3 border-t border-slate-100 px-4 py-3 md:px-5">
-          <span className="text-xs text-slate-500">Привязка применяется сразу. Привязанные коды печатаются только на свой товар. Файлы, уже разнесённые по базе, здесь не показываются.</span>
+          <span className="text-xs text-slate-500">Привязка применяется после подтверждения. Привязанные коды печатаются только на свой товар. Файлы, уже разнесённые по базе, здесь не показываются.</span>
           <button onClick={onClose} className="shrink-0 whitespace-nowrap rounded-xl bg-slate-100 px-5 py-2.5 font-medium text-slate-700 transition-colors hover:bg-slate-200">Готово</button>
         </div>
       </div>
+
+      {plan && (() => {
+        const bad = mismatchOf(plan.items);
+        const totalCodes = plan.items.reduce((n, [g]) => n + g.codes, 0);
+        const productIds = new Set<number>();
+        plan.items.forEach(([, ts]) => ts.forEach((p) => productIds.add(p.nmId)));
+        return (
+          <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-900/60 p-3" onClick={(e) => { e.stopPropagation(); setPlan(null); }}>
+            <div
+              className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+              role="dialog"
+              aria-modal="true"
+              aria-label="Подтверждение привязки"
+            >
+              <div className="shrink-0 border-b border-slate-100 px-5 py-4">
+                <h4 className="text-lg font-bold text-slate-900">Проверьте, что к чему привяжется</h4>
+                <p className="mt-0.5 text-sm text-slate-500">
+                  Групп: {plan.items.length} · кодов: {totalCodes} · товаров: {productIds.size}
+                </p>
+              </div>
+              <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-5 py-3">
+                {bad.length > 0 && (
+                  <div className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-800">
+                    <b>Категории не совпадают.</b> Марка чужой категории уедет с товаром: проверьте красные строки.
+                  </div>
+                )}
+                {plan.items.map(([g, targets]) => {
+                  const fromTable = hsGroupFromTable(g);
+                  const sizeText = fromTable ? (g.size || 'любой размер') : (sizeNeeded ? (size || '—') : 'все размеры');
+                  const rowBad = targets.some((p) => !categoryFits(g, p));
+                  return (
+                    <div key={g.key} className={`rounded-lg border p-2.5 ${rowBad ? 'border-rose-300 bg-rose-50' : 'border-slate-200 bg-white'}`}>
+                      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                        <span className="text-sm font-semibold text-slate-900">
+                          {fromTable ? `${g.category} · ${g.color || 'цвет не указан'}` : g.fileName}
+                        </span>
+                        <span className="rounded bg-white px-1.5 py-0.5 text-xs font-bold text-slate-900 ring-1 ring-slate-300">размер {sizeText}</span>
+                        <span className="text-xs font-medium tabular-nums text-indigo-700">{g.codes} шт</span>
+                      </div>
+                      <div className="mt-1.5 flex flex-wrap items-center gap-1 text-xs">
+                        <span className="text-slate-500">→</span>
+                        {targets.map((p) => {
+                          const fits = categoryFits(g, p);
+                          return (
+                            <span
+                              key={p.nmId}
+                              className={`rounded px-1.5 py-0.5 font-medium ring-1 ${fits ? 'bg-emerald-50 text-emerald-800 ring-emerald-200' : 'bg-rose-100 text-rose-800 ring-rose-300'}`}
+                              title={p.title}
+                            >
+                              {p.vendorCode || p.nmId} · {sizeText}{fits ? '' : ` · ${p.subject}`}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+                {plan.note && <p className="text-xs text-slate-500">{plan.note}</p>}
+              </div>
+              <div className="flex shrink-0 items-center justify-end gap-2 border-t border-slate-100 px-5 py-3">
+                <button type="button" onClick={() => setPlan(null)} className="rounded-xl bg-slate-100 px-5 py-2.5 font-medium text-slate-700 transition-colors hover:bg-slate-200">Отмена</button>
+                <button
+                  type="button"
+                  onClick={() => void runPlan()}
+                  className={`rounded-xl px-5 py-2.5 font-medium text-white transition-colors ${bad.length > 0 ? 'bg-rose-600 hover:bg-rose-700' : 'bg-indigo-600 hover:bg-indigo-700'}`}
+                >
+                  {bad.length > 0 ? 'Всё равно привязать' : 'Привязать'}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
