@@ -32,6 +32,18 @@ export const hsNmIdsSupported = async (): Promise<boolean> => {
   return nmIdsSupport;
 };
 
+// Колонки color / article (таблица ЧЗ с описанием товара) — тоже необязательные.
+let metaSupport: boolean | null = null;
+
+export const hsMetaSupported = async (): Promise<boolean> => {
+  if (metaSupport !== null) return metaSupport;
+  const { error } = await supabase.from('unified_honest_sign_codes').select('color, article').limit(1);
+  if (!error) metaSupport = true;
+  else if (error.code === '42703' || /color|article/i.test(error.message || '')) metaSupport = false;
+  else return false;
+  return metaSupport;
+};
+
 /** Колонки кодов для подбора: nm_ids — только если база уже умеет. */
 export const hsPoolColumns = async (): Promise<string> =>
   (await hsNmIdsSupported()) ? 'code, category, gender, size, nm_ids' : 'code, category, gender, size';
@@ -159,10 +171,19 @@ export type HsFileGroup = {
   size: string | null;
   nmIds: number[];
   codes: number;
+  /** Цвет и артикул поставщика — из таблицы ЧЗ. undefined — база без этих колонок. */
+  color?: string | null;
+  article?: string | null;
 };
 
 /** Функции hs_file_groups в базе ещё нет — нужна миграция 20261105_hs_file_groups.sql. */
 export const HS_FILE_GROUPS_MISSING = 'HS_FILE_GROUPS_MISSING';
+
+export const hsGroupKey = (g: Pick<HsFileGroup, 'fileName' | 'firstAt' | 'category' | 'gender' | 'size' | 'nmIds' | 'color' | 'article'>): string =>
+  [g.fileName, g.firstAt, g.category, g.gender, g.size, g.nmIds.join(','), g.color ?? '', g.article ?? ''].join('|');
+
+/** Группа пришла из таблицы ЧЗ (есть артикул поставщика): её товар известен, привязка уточняет карточки. */
+export const hsGroupFromTable = (g: Pick<HsFileGroup, 'article'>): boolean => Boolean(g.article);
 
 export const loadHsFileGroups = async (supplierId: string): Promise<HsFileGroup[]> => {
   const { data, error } = await supabase.rpc('hs_file_groups', { p_supplier: supplierId });
@@ -177,8 +198,11 @@ export const loadHsFileGroups = async (supplierId: string): Promise<HsFileGroup[
     const category = r?.category == null ? null : str(r.category);
     const gender = r?.gender == null ? null : str(r.gender);
     const size = r?.size == null ? null : str(r.size);
+    const hasMeta = r && 'color' in r;
+    const color = hasMeta ? (r.color == null ? null : str(r.color)) : undefined;
+    const article = hasMeta ? (r.article == null ? null : str(r.article)) : undefined;
     return {
-      key: [fileName, r?.first_at, category, gender, size, nmIds.join(',')].join('|'),
+      key: hsGroupKey({ fileName, firstAt: str(r?.first_at), category, gender, size, nmIds, color, article }),
       fileName,
       firstAt: str(r?.first_at),
       lastAt: str(r?.last_at),
@@ -187,6 +211,8 @@ export const loadHsFileGroups = async (supplierId: string): Promise<HsFileGroup[
       size,
       nmIds,
       codes: Number(r?.codes || 0),
+      color,
+      article,
     };
   });
 };
@@ -221,6 +247,8 @@ const fileGroupFilter = (q: any, supplierId: string, g: HsFileGroup) => {
   query = g.category === null ? query.is('category', null) : query.eq('category', g.category);
   query = g.gender === null ? query.is('gender', null) : query.eq('gender', g.gender);
   query = g.size === null ? query.is('size', null) : query.eq('size', g.size);
+  if (g.color !== undefined) query = g.color === null ? query.is('color', null) : query.eq('color', g.color);
+  if (g.article !== undefined) query = g.article === null ? query.is('article', null) : query.eq('article', g.article);
   query = g.nmIds.length === 0 ? query.is('nm_ids', null) : query.eq('nm_ids', `{${g.nmIds.join(',')}}`);
   return query;
 };
@@ -232,13 +260,15 @@ const fileGroupFilter = (q: any, supplierId: string, g: HsFileGroup) => {
 export const linkHsFile = async (
   supplierId: string,
   group: HsFileGroup,
-  nmId: number,
+  /** Один код может подходить нескольким карточкам — например, одна и та же дублёнка у двух селлеров или в двух цветовых карточках. */
+  nmIds: number[],
   size: string | null,
   /** Категория товара: проставляется файлу, у которого категории ещё нет (загружен «без привязки»). */
   category?: string | null,
 ): Promise<number> => {
-  const patch: Record<string, unknown> = { nm_ids: [nmId], size: size || null };
-  if (category && hsFileHasNoCategory(group)) patch.category = category;
+  const patch: Record<string, unknown> = { nm_ids: Array.from(new Set(nmIds)), size: size || null };
+  // Категория товара точнее записи из таблицы («Дубленка» → «Куртки / Бомберы / Дублёнки»): подбор сверяет именно её.
+  if (category && (hsFileHasNoCategory(group) || hsGroupFromTable(group))) patch.category = category;
   const { data, error } = await fileGroupFilter(
     supabase.from('unified_honest_sign_codes').update(patch),
     supplierId,

@@ -67,7 +67,8 @@ import { HS_CATEGORY_USE_EVENT, hsCategoryKey, loadDisabledHsCategories, setHsCa
 import type { FileUploadSummary } from '../components/ChzFileLinker';
 
 import { DASHBOARD_TAB_IDS, isDashboardTabId } from '../constants/dashboardTabs';
-import { normalizeDataMatrixText, parseChzCodesText, restoreDataMatrixGs } from '../utils/honestSign';
+import { hsMetaSupported } from '../utils/chzProductLinks';
+import { normalizeDataMatrixText, parseChzCodesText, parseChzTable, type ChzCodeMeta, restoreDataMatrixGs } from '../utils/honestSign';
 import {
   DEFAULT_CHZ_TAIL_LAYOUT,
   DEFAULT_FBS_COMBO_LAYOUT,
@@ -6471,7 +6472,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
    * до неё файл ни к одному заказу не подбирается. Возвращает, сколько кодов
    * добавлено (0 — файл пуст, все коды уже в базе или была ошибка).
    */
-  const importHonestSignCodes = async (rawCodes: string[], fileName: string): Promise<number> => {
+  const importHonestSignCodes = async (rawCodes: string[], fileName: string, meta?: Map<string, ChzCodeMeta>): Promise<number> => {
     /*
      * Коды храним в том виде, в каком их отдаёт сканер: без невидимого GS.
      * Раньше CSV из «Честного знака» ложился как есть, с GS внутри, и при скане
@@ -6498,15 +6499,22 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
       const codesToInsert = uniqueCodes.filter((code) => !duplicates.has(code));
       if (codesToInsert.length === 0) return 0;
 
-      const rows = codesToInsert.map((code) => ({
-        supplier_id: honestSignSupplierId,
-        category: null,
-        gender: null,
-        size: null,
-        code,
-        file_name: fileName,
-        status: 'new',
-      }));
+      // Таблица ЧЗ описывает каждый код (тип, цвет, пол, размер, артикул) — сохраняем.
+      // Без колонок color/article (миграция ещё не применена) цвет и артикул пропускаем.
+      const withMeta = meta && meta.size > 0 && (await hsMetaSupported());
+      const rows = codesToInsert.map((code) => {
+        const m = meta?.get(code);
+        return {
+          supplier_id: honestSignSupplierId,
+          category: m?.category ?? null,
+          gender: m?.gender ?? null,
+          size: m?.size ?? null,
+          ...(withMeta ? { color: m?.color ?? null, article: m?.article ?? null } : {}),
+          code,
+          file_name: fileName,
+          status: 'new',
+        };
+      });
 
       const chunkSize = 250;
       for (let i = 0; i < rows.length; i += chunkSize) {
@@ -6529,7 +6537,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
    * Пересохранённый через Excel файл тоже собирается обратно — см. parseChzCodesText.
    * Строки, из которых полный код не собрать, возвращаются отдельно.
    */
-  const parseCodesFromFile = async (file: File): Promise<{ codes: string[]; broken: Array<{ line: number; value: string }> }> => {
+  const parseCodesFromFile = async (file: File): Promise<{ codes: string[]; broken: Array<{ line: number; value: string }>; meta?: Map<string, ChzCodeMeta> }> => {
     const fileSizeError = ensureExcelFileSize(file);
     if (fileSizeError) {
       throw new Error(fileSizeError);
@@ -6538,12 +6546,19 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     const lowerName = String(file.name || '').toLowerCase();
 
     let text = '';
+    let meta: Map<string, ChzCodeMeta> | undefined;
     if (lowerName.endsWith('.xlsx') || lowerName.endsWith('.xls')) {
       const data = await file.arrayBuffer();
       const jsonData = await readFirstSheetAsJson<any[]>(data, { header: 1 });
       const rowLimitError = ensureExcelRowLimit(jsonData.length);
       if (rowLimitError) {
         throw new Error(rowLimitError);
+      }
+      // Выгрузка из кабинета ЧЗ: у каждого кода есть товар, цвет, размер — берём и их.
+      const table = parseChzTable(jsonData);
+      if (table) {
+        meta = table.meta;
+        if (table.skipped > 0) showToast(`Выведенные из оборота коды пропущены: ${table.skipped}`, 'warning');
       }
       // Excel хранит GS как _x001D_ — возвращаем символ, дальше разбор общий.
       text = jsonData
@@ -6558,7 +6573,7 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     if (rowLimitError) {
       throw new Error(rowLimitError);
     }
-    return { codes: parsed.codes, broken: parsed.broken };
+    return { codes: parsed.codes, broken: parsed.broken, meta };
   };
 
   /** Есть битые строки — спрашиваем, грузить ли целые. false — загрузку отменить. */
@@ -6584,9 +6599,9 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
     try {
       for (const file of files) {
         try {
-          const { codes, broken } = await parseCodesFromFile(file);
+          const { codes, broken, meta } = await parseCodesFromFile(file);
           if (!confirmBrokenChzLines(codes, broken)) { summary.failed.push(file.name); continue; }
-          const added = await importHonestSignCodes(codes, file.name);
+          const added = await importHonestSignCodes(codes, file.name, meta);
           if (added > 0) { summary.files += 1; summary.codes += added; } else { summary.failed.push(file.name); }
         } catch (error: any) {
           console.error('Honest Sign file upload error:', error);
@@ -6645,10 +6660,10 @@ export default function Dashboard({ forcedTab }: DashboardProps) {
 
       const blob = await dlRes.blob();
       const file = new File([blob], `tg_${originalName}`, { type: blob.type || 'application/octet-stream' });
-      const { codes, broken } = await parseCodesFromFile(file);
+      const { codes, broken, meta } = await parseCodesFromFile(file);
       if (!confirmBrokenChzLines(codes, broken)) return { files: 0, codes: 0, failed: [file.name] };
 
-      const added = await importHonestSignCodes(codes, file.name);
+      const added = await importHonestSignCodes(codes, file.name, meta);
       return added > 0 ? { files: 1, codes: added, failed: [] } : { files: 0, codes: 0, failed: [file.name] };
     } catch (e: any) {
       console.error('Telegram import error:', e);

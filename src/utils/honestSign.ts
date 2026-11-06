@@ -225,3 +225,62 @@ export const stickerKey = (raw: string) => normalizeScanStickerText(raw)
   .replace(/^\][A-Za-z0-9]{2}/, '')
   .replace(/\D+/g, '')
   .trim();
+
+// ─── Таблица ЧЗ с описанием товара ──────────────────────────────────────────
+
+/** Что известно о коде из таблицы «Честного знака»: товар, цвет, размер, артикул поставщика. */
+export type ChzCodeMeta = {
+  category: string | null;
+  gender: 'male' | 'female' | null;
+  size: string | null;
+  color: string | null;
+  article: string | null;
+};
+
+const cell = (v: unknown) => String(v ?? '').trim();
+const sentenceCase = (v: string) => (v ? v.charAt(0).toUpperCase() + v.slice(1).toLowerCase() : '');
+
+/**
+ * Выгрузка «Честного знака» из личного кабинета (Excel) — не просто список кодов:
+ * в каждой строке есть тип товара, цвет, пол, размер и артикул. Раньше мы брали
+ * из неё только код и потом привязывали файл к товару вручную; теперь читаем
+ * всё, и файл с дублёнками разных цветов сам раскладывается на группы
+ * «дублёнка · коричневая · S · 30 шт».
+ *
+ * rows — строки листа как массивы (header: 1). Возвращает null, если это не такая
+ * таблица (обычный столбец кодов), — тогда работает прежний разбор.
+ * Выведенные из оборота коды пропускаются, о них сообщает skipped.
+ */
+export const parseChzTable = (rows: unknown[][]): { meta: Map<string, ChzCodeMeta>; skipped: number } | null => {
+  const headerIndex = rows.slice(0, 5).findIndex((r) => Array.isArray(r) && r.some((c) => /^ки(\s|$)/i.test(cell(c))));
+  if (headerIndex < 0) return null;
+  const header = (rows[headerIndex] as unknown[]).map((c) => cell(c).toLowerCase());
+  const col = (...names: string[]) => header.findIndex((h) => names.some((n) => h === n));
+  const codeCol = header.findIndex((h) => /^ки(\s|$)/.test(h));
+  const typeCol = col('тип товара');
+  const colorCol = col('цвет');
+  const sizeCol = col('размер');
+  // Без цвета и размера таблица ничего не добавляет к списку кодов.
+  if (codeCol < 0 || (colorCol < 0 && sizeCol < 0)) return null;
+  const genderCol = col('пол');
+  const articleCol = col('артикул');
+  const statusCol = col('статус');
+
+  const meta = new Map<string, ChzCodeMeta>();
+  let skipped = 0;
+  for (const row of rows.slice(headerIndex + 1)) {
+    if (!Array.isArray(row)) continue;
+    const raw = cell(row[codeCol]).replace(/_x001D_/gi, GS_SEPARATOR);
+    if (!raw) continue;
+    if (statusCol >= 0 && /выведен|списан/i.test(cell(row[statusCol]))) { skipped += 1; continue; }
+    const genderRaw = genderCol >= 0 ? cell(row[genderCol]).toLowerCase() : '';
+    meta.set(normalizeDataMatrixText(raw), {
+      category: typeCol >= 0 ? sentenceCase(cell(row[typeCol])) || null : null,
+      gender: /^муж/.test(genderRaw) ? 'male' : /^жен/.test(genderRaw) ? 'female' : null,
+      size: sizeCol >= 0 ? cell(row[sizeCol]).toUpperCase() || null : null,
+      color: colorCol >= 0 ? cell(row[colorCol]).toLowerCase() || null : null,
+      article: articleCol >= 0 ? cell(row[articleCol]) || null : null,
+    });
+  }
+  return meta.size > 0 ? { meta, skipped } : null;
+};
