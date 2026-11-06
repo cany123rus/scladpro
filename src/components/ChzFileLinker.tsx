@@ -34,6 +34,7 @@ export type FileUploadSummary = { files: number; codes: number; failed: string[]
 
 const CATEGORIES_KEY = 'hs_linker_categories_v1';
 const PRODUCT_PAGE = 50;
+const SIZE_ORDER = ['xxs', 'xs', 's', 'm', 'l', 'xl', '2xl', '3xl', '4xl', '5xl', '6xl'];
 const fold = (v: string) => v.toLowerCase().replace(/ё/g, 'е');
 const genderLabel = (g: string | null) => (g === 'male' ? 'Муж' : g === 'female' ? 'Жен' : 'Любой пол');
 /** Устойчивый номер загрузки: ключ группы меняется при привязке, а имя и время вставки — нет. */
@@ -374,6 +375,52 @@ export default function ChzFileLinker({
     setNotice({ tone: done === confidentGroups.length ? 'ok' : 'err', text: `Привязано групп: ${done} из ${confidentGroups.length}` });
   };
 
+  // Группы из таблицы ЧЗ собираем по товару: «Куртка · Чёрный» — одна карточка, внутри неё размеры.
+  const families = useMemo(() => {
+    const map = new Map<string, { key: string; fileName: string; category: string; color: string; gender: string | null; groups: HsFileGroup[] }>();
+    visibleFiles.filter(hsGroupFromTable).forEach((g) => {
+      const key = [g.fileName, fold(g.category || ''), fold(g.color || '')].join('|');
+      const fam = map.get(key) || { key, fileName: g.fileName, category: g.category || '', color: g.color || '', gender: g.gender, groups: [] };
+      fam.groups.push(g);
+      map.set(key, fam);
+    });
+    const rank = (size: string | null) => {
+      const n = normalizeHsSize(size || '');
+      const i = SIZE_ORDER.indexOf(n);
+      if (i >= 0) return i;
+      const num = parseFloat(n);
+      return Number.isFinite(num) ? 100 + num : 1000;
+    };
+    map.forEach((fam) => fam.groups.sort((a, b) => rank(a.size) - rank(b.size)));
+    return Array.from(map.values());
+  }, [visibleFiles]);
+  const plainFiles = useMemo(() => visibleFiles.filter((g) => !hsGroupFromTable(g)), [visibleFiles]);
+
+  /** Подходит ли карточка по размеру: в ней должен быть именно такой размер. */
+  const hasSize = (p: HsLinkProduct, size: string | null) => !size || p.sizes.some((x) => normalizeHsSize(x) === normalizeHsSize(size));
+
+  /**
+   * Привязка по размерам: каждый размер получает только те из выбранных (или подсказанных) товаров,
+   * у которых этот размер есть. Размер, которому ничего не подошло, остаётся без привязки.
+   */
+  const linkFamilyBySize = async (fam: { groups: HsFileGroup[] }, source: 'picked' | 'hints') => {
+    if (busyKey) return;
+    setNotice(null);
+    let done = 0;
+    const skipped: string[] = [];
+    const todo = fam.groups.filter((g) => g.nmIds.length === 0);
+    for (const g of todo) {
+      const pool = source === 'picked' ? picked : (suggestions.get(g.key)?.products || []);
+      const targets = pool.filter((p) => hasSize(p, g.size));
+      if (targets.length === 0) { skipped.push(g.size || '—'); continue; }
+      if (await linkTo(g, targets, true)) done += 1;
+    }
+    setNotice({
+      tone: done > 0 ? 'ok' : 'err',
+      text: `Привязано размеров: ${done}.${skipped.length ? ` Не нашлось товара с размером: ${skipped.join(', ')}.` : ''}`,
+    });
+  };
+
   const unlink = async (g: HsFileGroup) => {
     if (busyKey) return;
     setBusyKey(g.key);
@@ -681,7 +728,100 @@ export default function ChzFileLinker({
                 ) : visibleFiles.length === 0 ? (
                   <p className="py-10 text-center text-sm text-slate-500">Файлов выбранных категорий нет — отметьте «Показать все файлы».</p>
                 ) : (
-                  visibleFiles.map((g) => {
+                  <>
+                  {families.map((fam) => {
+                    const total = fam.groups.reduce((n, g) => n + g.codes, 0);
+                    const open = fam.groups.filter((g) => g.nmIds.length === 0);
+                    const pickedFit = open.filter((g) => picked.some((p) => hasSize(p, g.size))).length;
+                    const hintFit = open.filter((g) => (suggestions.get(g.key)?.products || []).length > 0).length;
+                    return (
+                      <div key={fam.key} className="rounded-xl border border-slate-200 bg-white p-3">
+                        <div className="flex items-start gap-2">
+                          <FileText className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
+                          <div className="min-w-0 flex-1">
+                            <div className="text-sm font-semibold text-slate-900">
+                              {fam.category} · <span className="capitalize">{fam.color || 'цвет не указан'}</span>
+                            </div>
+                            <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[11px]">
+                              {fam.gender && <span className="rounded bg-slate-100 px-1.5 py-0.5 text-slate-600">{genderLabel(fam.gender)}</span>}
+                              <span className="rounded bg-indigo-50 px-1.5 py-0.5 font-medium tabular-nums text-indigo-700">{total} шт</span>
+                              <span className="rounded bg-slate-100 px-1.5 py-0.5 text-slate-600">размеров: {fam.groups.length}</span>
+                              <span className="break-all text-slate-400">файл «{fam.fileName}»</span>
+                            </div>
+                          </div>
+                        </div>
+                        {open.length > 0 && (
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => void linkFamilyBySize(fam, 'picked')}
+                              disabled={picked.length === 0 || pickedFit === 0 || Boolean(busyKey)}
+                              title={picked.length === 0 ? 'Выберите товары слева' : 'Каждый размер получит те из выбранных товаров, где такой размер есть'}
+                              className="inline-flex !min-h-0 items-center gap-1 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-indigo-700 disabled:opacity-40"
+                            >
+                              <Link2 className="h-3.5 w-3.5" /> Привязать по размерам к выбранным{picked.length > 0 ? ` (${picked.length})` : ''}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void linkFamilyBySize(fam, 'hints')}
+                              disabled={hintFit === 0 || Boolean(busyKey)}
+                              title="Каждый размер — к товарам того же цвета, где есть этот размер"
+                              className="inline-flex !min-h-0 items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-emerald-700 disabled:opacity-40"
+                            >
+                              <CheckCircle2 className="h-3.5 w-3.5" /> По цвету и размеру ({hintFit})
+                            </button>
+                          </div>
+                        )}
+                        <div className="mt-2 divide-y divide-slate-100 rounded-lg border border-slate-100">
+                          {fam.groups.map((g) => {
+                            const linked = g.nmIds.length > 0;
+                            const hint = suggestions.get(g.key);
+                            const fits = picked.filter((p) => hasSize(p, g.size));
+                            const busy = busyKey === g.key;
+                            return (
+                              <div key={g.key} className={`flex flex-wrap items-center gap-2 px-2.5 py-2 ${linked ? 'bg-emerald-50' : ''}`}>
+                                <span className="w-12 shrink-0 text-sm font-bold text-slate-900">{g.size || '—'}</span>
+                                <span className="shrink-0 rounded bg-indigo-50 px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-indigo-700">{g.codes} шт</span>
+                                <div className="min-w-0 flex-1 text-xs text-slate-600">
+                                  {linked ? (
+                                    <span className="inline-flex items-center gap-1 font-medium text-emerald-700"><CheckCircle2 className="h-3.5 w-3.5" /> {linkedLabel(g)}</span>
+                                  ) : hint ? (
+                                    <span className="flex flex-wrap items-center gap-1">
+                                      <span>{hint.exact ? 'артикул:' : 'подходят:'}</span>
+                                      {hint.products.slice(0, 3).map((p) => (
+                                        <span key={p.nmId} className="rounded bg-amber-50 px-1.5 py-0.5 font-medium text-amber-800">{p.vendorCode || p.nmId}</span>
+                                      ))}
+                                      {hint.products.length > 3 && <span className="text-slate-400">+{hint.products.length - 3}</span>}
+                                    </span>
+                                  ) : (
+                                    <span className="text-slate-400">нет подсказки</span>
+                                  )}
+                                </div>
+                                <div className="flex shrink-0 gap-1.5">
+                                  {!linked && hint && (
+                                    <button type="button" onClick={() => void linkTo(g, hint.products.filter((p) => hasSize(p, g.size)).length > 0 ? hint.products.filter((p) => hasSize(p, g.size)) : hint.products)} disabled={Boolean(busyKey)} className="inline-flex !min-h-0 items-center gap-1 rounded-md bg-emerald-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-emerald-700 disabled:opacity-40">
+                                      {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle2 className="h-3 w-3" />} К подходящим
+                                    </button>
+                                  )}
+                                  {!linked && (
+                                    <button type="button" onClick={() => void linkTo(g, fits)} disabled={fits.length === 0 || Boolean(busyKey)} title={picked.length === 0 ? 'Выберите товары слева' : fits.length === 0 ? 'Среди выбранных нет товара с этим размером' : 'Привязать к выбранным с этим размером'} className="inline-flex !min-h-0 items-center gap-1 rounded-md bg-indigo-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-indigo-700 disabled:opacity-40">
+                                      <Link2 className="h-3 w-3" /> {fits.length > 0 ? `К выбранным (${fits.length})` : 'К выбранным'}
+                                    </button>
+                                  )}
+                                  {linked && (
+                                    <button type="button" onClick={() => void unlink(g)} disabled={Boolean(busyKey)} className="inline-flex !min-h-0 items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-slate-600 ring-1 ring-slate-200 hover:bg-slate-100 disabled:opacity-40">
+                                      <Link2Off className="h-3 w-3" /> Отвязать
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {plainFiles.map((g) => {
                     const linked = g.nmIds.length > 0;
                     const toThis = picked.length > 0 && picked.every((p) => g.nmIds.includes(p.nmId)) && g.nmIds.length === picked.length;
                     const fromTable = hsGroupFromTable(g);
@@ -769,7 +909,8 @@ export default function ChzFileLinker({
                         </div>
                       </div>
                     );
-                  })
+                  })}
+                  </>
                 )}
               </div>
             </section>
