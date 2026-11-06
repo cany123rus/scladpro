@@ -45,18 +45,23 @@ type Scope = 'article' | 'size';
 type Sort = 'name' | 'new';
 
 const ProductRow = memo(function ProductRow({
-  product, active, filesCount, showSubject, onPick,
+  product, active, filesCount, showSubject, onPick, selectedSizes, onToggleSize,
 }: {
   product: HsLinkProduct;
   active: boolean;
   filesCount: number;
   showSubject: boolean;
   onPick: (p: HsLinkProduct) => void;
+  /** Размеры, отмеченные на этом товаре: файлы привязываются только к ним. Пусто — ко всем размерам. */
+  selectedSizes?: string[];
+  onToggleSize: (p: HsLinkProduct, size: string) => void;
 }) {
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       onClick={() => onPick(product)}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onPick(product); } }}
       aria-pressed={active}
       className={`flex w-full gap-3 rounded-xl border p-2.5 text-left transition-all ${
         active ? 'border-indigo-400 bg-indigo-50 shadow-sm ring-1 ring-indigo-300' : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'
@@ -82,15 +87,73 @@ const ProductRow = memo(function ProductRow({
         <span className="block truncate text-xs text-slate-500">{showSubject && product.subject ? `${product.subject} · ` : ''}{product.title}</span>
         <span className="mt-1 flex flex-wrap items-center gap-1">
           {product.color && <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-600">{product.color}</span>}
-          {product.sizes.slice(0, 7).map((s) => (
-            <span key={s} className="rounded bg-white px-1.5 py-0.5 text-[11px] font-medium text-slate-700 ring-1 ring-slate-200">{s}</span>
-          ))}
-          {product.sizes.length > 7 && <span className="text-[11px] text-slate-400">+{product.sizes.length - 7}</span>}
+          {product.sizes.map((s) => {
+            const on = Boolean(selectedSizes?.some((x) => normalizeHsSize(x) === normalizeHsSize(s)));
+            return (
+              <button
+                key={s}
+                type="button"
+                onClick={(e) => { e.stopPropagation(); onToggleSize(product, s); }}
+                aria-pressed={on}
+                title={on ? 'Файлы этого размера привязываются к товару — нажмите, чтобы убрать' : 'Привязывать к этому товару файлы размера ' + s}
+                className={`!min-h-0 rounded px-1.5 py-0.5 text-[11px] font-medium ring-1 transition-colors ${
+                  on ? 'bg-indigo-600 text-white ring-indigo-600' : 'bg-white text-slate-700 ring-slate-200 hover:bg-indigo-50 hover:ring-indigo-300'
+                }`}
+              >
+                {s}
+              </button>
+            );
+          })}
         </span>
       </span>
-    </button>
+    </div>
   );
 });
+
+const COLLAPSED_COUNT = 3;
+
+/** Список подходящих товаров: сначала три, остальные — по кнопке «ещё N». Нажатие на товар выбирает его слева. */
+function SuggestList({
+  title, products, pickedNmIds, onPick,
+}: {
+  title: string;
+  products: HsLinkProduct[];
+  pickedNmIds: ReadonlySet<number>;
+  onPick: (p: HsLinkProduct) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const shown = open ? products : products.slice(0, COLLAPSED_COUNT);
+  const rest = products.length - COLLAPSED_COUNT;
+  return (
+    <div>
+      <div className="mb-1 text-[11px] text-slate-500">{title} ({products.length}):</div>
+      <div className={`flex flex-wrap items-center gap-1 ${open ? 'max-h-40 overflow-y-auto' : ''}`}>
+        {shown.map((p) => (
+          <button
+            key={p.nmId}
+            type="button"
+            onClick={() => onPick(p)}
+            title={`Выбрать товар. Размеры: ${p.sizes.join(', ') || '—'}`}
+            className={`!min-h-0 rounded px-1.5 py-0.5 text-[11px] font-medium ring-1 ${
+              pickedNmIds.has(p.nmId) ? 'bg-indigo-600 text-white ring-indigo-600' : 'bg-amber-50 text-amber-800 ring-amber-200 hover:bg-amber-100'
+            }`}
+          >
+            {p.vendorCode || p.nmId}
+          </button>
+        ))}
+        {rest > 0 && (
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            className="!min-h-0 rounded px-1.5 py-0.5 text-[11px] font-medium text-indigo-600 underline hover:text-indigo-800"
+          >
+            {open ? 'свернуть' : `ещё ${rest}`}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export default function ChzFileLinker({
   supplierId, supplierName, categories, onUploadFiles, onImportTelegram, onClose, onChanged,
@@ -129,6 +192,8 @@ export default function ChzFileLinker({
   const [codesFilter, setCodesFilter] = useState<'all' | 'with' | 'without'>('all');
   const [limit, setLimit] = useState(PRODUCT_PAGE);
   const [picked, setPicked] = useState<HsLinkProduct[]>([]);
+  // Размеры, отмеченные на выбранных товарах: nmId → размеры. Нет записи — товар берёт файлы любого своего размера.
+  const [sizeSel, setSizeSel] = useState<Record<number, string[]>>({});
 
   const [scope, setScope] = useState<Scope>('article');
   const [size, setSize] = useState('');
@@ -184,6 +249,7 @@ export default function ChzFileLinker({
   const categoriesKey = selectedCategories.join('\u0001');
   useEffect(() => {
     setPicked([]);
+    setSizeSel({});
     setProducts([]);
     setProductsError('');
     try { localStorage.setItem(CATEGORIES_KEY, JSON.stringify(selectedCategories)); } catch { /* приватный режим */ }
@@ -272,6 +338,26 @@ export default function ChzFileLinker({
   // Товары выбираются галочкой: нажали — выбран, нажали ещё раз — снят.
   const pickProduct = useCallback((p: HsLinkProduct) => {
     setPicked((prev) => (prev.some((x) => x.nmId === p.nmId) ? prev.filter((x) => x.nmId !== p.nmId) : [...prev, p]));
+    setSizeSel((prev) => {
+      if (!(p.nmId in prev)) return prev;
+      const next = { ...prev };
+      delete next[p.nmId];
+      return next;
+    });
+    setNotice(null);
+  }, []);
+
+  // Размер на карточке товара: первое нажатие выбирает товар вместе с этим размером, дальше размеры добавляются и снимаются.
+  const toggleProductSize = useCallback((p: HsLinkProduct, size: string) => {
+    setPicked((prev) => (prev.some((x) => x.nmId === p.nmId) ? prev : [...prev, p]));
+    setSizeSel((prev) => {
+      const cur = prev[p.nmId] || [];
+      const has = cur.some((x) => normalizeHsSize(x) === normalizeHsSize(size));
+      const list = has ? cur.filter((x) => normalizeHsSize(x) !== normalizeHsSize(size)) : [...cur, size];
+      const next = { ...prev };
+      if (list.length > 0) next[p.nmId] = list; else delete next[p.nmId];
+      return next;
+    });
     setNotice(null);
   }, []);
 
@@ -417,6 +503,12 @@ export default function ChzFileLinker({
 
   /** Подходит ли карточка по размеру: в ней должен быть именно такой размер. */
   const hasSize = (p: HsLinkProduct, size: string | null) => !size || p.sizes.some((x) => normalizeHsSize(x) === normalizeHsSize(size));
+  /** Выбранный товар берёт файл этого размера: размер есть в карточке и не исключён отметками на ней. */
+  const fitsProduct = (p: HsLinkProduct, size: string | null) => {
+    if (!hasSize(p, size)) return false;
+    const marked = sizeSel[p.nmId];
+    return !size || !marked || marked.length === 0 || marked.some((x) => normalizeHsSize(x) === normalizeHsSize(size));
+  };
 
   /**
    * Привязка по размерам: каждый размер получает только те из выбранных (или подсказанных) товаров,
@@ -430,7 +522,7 @@ export default function ChzFileLinker({
     const todo = groups.filter((g) => g.nmIds.length === 0);
     for (const g of todo) {
       const pool = source === 'picked' ? picked : (suggestions.get(g.key)?.products || []);
-      const targets = pool.filter((p) => hasSize(p, g.size));
+      const targets = pool.filter((p) => (source === 'picked' ? fitsProduct(p, g.size) : hasSize(p, g.size)));
       if (targets.length === 0) { skipped.push(g.size || '—'); continue; }
       if (await linkTo(g, targets, true)) done += 1;
     }
@@ -584,6 +676,8 @@ export default function ChzFileLinker({
                         filesCount={filesByNm.get(p.nmId) || 0}
                         showSubject={selectedCategories.length > 1}
                         onPick={pickProduct}
+                        selectedSizes={sizeSel[p.nmId]}
+                        onToggleSize={toggleProductSize}
                       />
                     ))}
                     {filteredProducts.length > limit && (
@@ -649,10 +743,10 @@ export default function ChzFileLinker({
                           title="Убрать из выбора"
                           className="inline-flex !min-h-0 items-center gap-1 rounded-md bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700 hover:bg-indigo-100"
                         >
-                          {p.vendorCode || p.nmId}{p.color ? ` · ${p.color}` : ''} <X className="h-3 w-3" />
+                          {p.vendorCode || p.nmId}{p.color ? ` · ${p.color}` : ''}{sizeSel[p.nmId]?.length ? ` · ${sizeSel[p.nmId].join(', ')}` : ' · все размеры'} <X className="h-3 w-3" />
                         </button>
                       ))}
-                      <button type="button" onClick={() => setPicked([])} className="!min-h-0 text-xs text-slate-400 underline hover:text-slate-600">снять всё</button>
+                      <button type="button" onClick={() => { setPicked([]); setSizeSel({}); }} className="!min-h-0 text-xs text-slate-400 underline hover:text-slate-600">снять всё</button>
                     </div>
                     <div className="flex flex-wrap items-center gap-1.5">
                       <button
@@ -760,7 +854,7 @@ export default function ChzFileLinker({
                   {families.map((fam) => {
                     const total = fam.groups.reduce((n, g) => n + g.codes, 0);
                     const open = fam.groups.filter((g) => g.nmIds.length === 0);
-                    const pickedFit = open.filter((g) => picked.some((p) => hasSize(p, g.size))).length;
+                    const pickedFit = open.filter((g) => picked.some((p) => fitsProduct(p, g.size))).length;
                     const hintFit = open.filter((g) => (suggestions.get(g.key)?.products || []).length > 0).length;
                     return (
                       <div key={fam.key} className="rounded-xl border border-slate-200 bg-white p-3">
@@ -806,25 +900,19 @@ export default function ChzFileLinker({
                           {fam.groups.map((g) => {
                             const linked = g.nmIds.length > 0;
                             const hint = suggestions.get(g.key);
-                            const fits = picked.filter((p) => hasSize(p, g.size));
+                            const fits = picked.filter((p) => fitsProduct(p, g.size));
                             const busy = busyKey === g.key;
                             return (
                               <div key={g.key} className={`flex flex-wrap items-center gap-2 px-2.5 py-2 ${linked ? 'bg-emerald-50' : ''}`}>
                                 <span className="w-12 shrink-0 text-sm font-bold text-slate-900">{g.size || '—'}</span>
                                 <span className="shrink-0 rounded bg-indigo-50 px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-indigo-700">{g.codes} шт</span>
-                                <div className="min-w-0 flex-1 text-xs text-slate-600">
+                                <div className="order-last basis-full text-xs text-slate-600">
                                   {linked ? (
                                     <span className="inline-flex items-center gap-1 font-medium text-emerald-700"><CheckCircle2 className="h-3.5 w-3.5" /> {linkedLabel(g)}</span>
                                   ) : hint ? (
-                                    <span className="flex flex-wrap items-center gap-1">
-                                      <span>{hint.exact ? 'артикул:' : 'подходят:'}</span>
-                                      {hint.products.slice(0, 3).map((p) => (
-                                        <span key={p.nmId} className="rounded bg-amber-50 px-1.5 py-0.5 font-medium text-amber-800">{p.vendorCode || p.nmId}</span>
-                                      ))}
-                                      {hint.products.length > 3 && <span className="text-slate-400">+{hint.products.length - 3}</span>}
-                                    </span>
+                                    <SuggestList title={hint.exact ? 'Совпал артикул' : 'Подходят'} products={hint.products} pickedNmIds={pickedNmIds} onPick={pickProduct} />
                                   ) : (
-                                    <span className="text-slate-400">нет подсказки</span>
+                                    <span className="text-slate-400">нет подходящих товаров</span>
                                   )}
                                 </div>
                                 <div className="flex shrink-0 gap-1.5">
@@ -856,7 +944,7 @@ export default function ChzFileLinker({
                           const scope = chosen.length > 0 ? chosen : fam.groups;
                           const scopeOpen = scope.filter((g) => g.nmIds.length === 0);
                           const scopeLinked = scope.filter((g) => g.nmIds.length > 0);
-                          const pickedFitScope = scopeOpen.filter((g) => picked.some((p) => hasSize(p, g.size))).length;
+                          const pickedFitScope = scopeOpen.filter((g) => picked.some((p) => fitsProduct(p, g.size))).length;
                           const hintFitScope = scopeOpen.filter((g) => (suggestions.get(g.key)?.products || []).length > 0).length;
                           const label = chosen.length > 0 ? `выбранные размеры (${chosen.length})` : 'все размеры';
                           return (
@@ -892,6 +980,17 @@ export default function ChzFileLinker({
                                   {chosen.length === fam.groups.length ? 'снять выбор' : 'выбрать все'}
                                 </button>
                               </div>
+                              {(() => {
+                                const seen = new Map<number, HsLinkProduct>();
+                                scopeOpen.forEach((g) => (suggestions.get(g.key)?.products || []).forEach((p) => seen.set(p.nmId, p)));
+                                const list = Array.from(seen.values());
+                                if (list.length === 0) return null;
+                                return (
+                                  <div className="mt-2 rounded-lg bg-slate-50 p-2">
+                                    <SuggestList title="Подходят по категории и цвету" products={list} pickedNmIds={pickedNmIds} onPick={pickProduct} />
+                                  </div>
+                                );
+                              })()}
                               <div className="mt-2 flex flex-wrap items-center gap-1.5">
                                 {scopeOpen.length > 0 && (
                                   <>
@@ -970,12 +1069,8 @@ export default function ChzFileLinker({
                               <span className="text-slate-400">{new Date(g.firstAt).toLocaleDateString('ru-RU')}</span>
                             </div>
                             {!linked && hint && (
-                              <div className="mt-1.5 flex flex-wrap items-center gap-1 text-xs text-slate-600">
-                                <span>{hint.exact ? 'Артикул совпал:' : 'Подходят по цвету и размеру:'}</span>
-                                {hint.products.slice(0, 4).map((p) => (
-                                  <span key={p.nmId} className="rounded bg-amber-50 px-1.5 py-0.5 font-medium text-amber-800">{p.vendorCode || p.nmId}</span>
-                                ))}
-                                {hint.products.length > 4 && <span className="text-slate-400">+{hint.products.length - 4}</span>}
+                              <div className="mt-1.5 text-xs text-slate-600">
+                                <SuggestList title={hint.exact ? 'Артикул совпал' : 'Подходят по цвету и размеру'} products={hint.products} pickedNmIds={pickedNmIds} onPick={pickProduct} />
                               </div>
                             )}
                             {linked && (
