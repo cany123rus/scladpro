@@ -301,6 +301,14 @@ export default function ChzFileLinker({
     return Array.from(found);
   }, [categories, matchesCategory]);
 
+  // Привязка к товару другой категории (файл «куртка», товар «костюм») по умолчанию запрещена:
+  // чужая марка уедет с товаром молча. Галочка разрешает, но каждый раз спрашивает подтверждение.
+  const [allowMismatch, setAllowMismatch] = useState(false);
+  const categoryFits = useCallback((g: HsFileGroup, p: HsLinkProduct): boolean => {
+    if (hsFileHasNoCategory(g) || !p.subject) return true;
+    return matchesCategory(g, p.subject);
+  }, [matchesCategory]);
+
   const autoCategoriesDone = useRef(false);
   useEffect(() => {
     if (groupsLoading || autoCategoriesDone.current) return;
@@ -375,7 +383,7 @@ export default function ChzFileLinker({
       if (!hsGroupFromTable(g) || g.nmIds.length > 0) return;
       const article = fold(g.article || '');
       // Товары только той же категории: «куртка» подсказывает куртки, бомберы и дублёнки, но не костюмы.
-      const sameCategory = (p: HsLinkProduct) => !g.category || !p.subject || matchesCategory(g, p.subject);
+      const sameCategory = (p: HsLinkProduct) => allowMismatch || categoryFits(g, p);
       const byArticle = article ? products.filter((p) => fold(p.vendorCode) === article) : [];
       if (byArticle.length > 0) { map.set(g.key, { products: byArticle, exact: true }); return; }
       const color = fold(g.color || '');
@@ -390,7 +398,7 @@ export default function ChzFileLinker({
       if (matched.length > 0) map.set(g.key, { products: matched, exact: false });
     });
     return map;
-  }, [workingGroups, products, matchesCategory]);
+  }, [workingGroups, products, categoryFits, allowMismatch]);
 
   const filterByCategory = !showAllCategories && selectedCategories.length > 0;
   const visibleFiles = useMemo(() => {
@@ -427,8 +435,27 @@ export default function ChzFileLinker({
     selectedCategories.find((c) => normalizeHsCategoryName(c) === normalizeHsCategoryName(p.subject)) || p.subject || null;
 
   /** Привязать группу к товарам. Группа из таблицы ЧЗ сохраняет свой размер из файла, у остальных размер задаёт выбор справа. */
-  const linkTo = async (g: HsFileGroup, targets: HsLinkProduct[], silent = false): Promise<boolean> => {
+  /** Проверка категорий перед привязкой: true — можно продолжать. Неподходящие — только с галочкой и после вопроса. */
+  const confirmMismatch = (pairs: Array<[HsFileGroup, HsLinkProduct[]]>): boolean => {
+    const bad = new Set<string>();
+    pairs.forEach(([g, ts]) => ts.forEach((p) => {
+      if (!categoryFits(g, p)) bad.add(`файл «${g.category}${g.color ? ` · ${g.color}` : ''}» → товар ${p.vendorCode || p.nmId} (${p.subject})`);
+    }));
+    if (bad.size === 0) return true;
+    const list = Array.from(bad);
+    if (!allowMismatch) {
+      setNotice({ tone: 'err', text: `Категория не подходит: ${list.slice(0, 3).join('; ')}${list.length > 3 ? ` и ещё ${list.length - 3}` : ''}. Чтобы всё равно привязать, включите «Разрешить неподходящие категории».` });
+      return false;
+    }
+    return window.confirm(
+      `Категории НЕ совпадают:\n\n${list.slice(0, 8).join('\n')}${list.length > 8 ? `\n…и ещё ${list.length - 8}` : ''}\n\n`
+      + 'Марка чужой категории уедет с товаром. Точно привязать?',
+    );
+  };
+
+  const linkTo = async (g: HsFileGroup, targets: HsLinkProduct[], silent = false, checked = false): Promise<boolean> => {
     if (targets.length === 0 || busyKey) return false;
+    if (!checked && !confirmMismatch([[g, targets]])) return false;
     setBusyKey(g.key);
     if (!silent) setNotice(null);
     try {
@@ -473,9 +500,13 @@ export default function ChzFileLinker({
     if (busyKey || confidentGroups.length === 0) return;
     if (!window.confirm(`Привязать ${confidentGroups.length} групп к подходящим товарам (по артикулу или по цвету и размеру)?`)) return;
     let done = 0;
-    for (const g of confidentGroups) {
+    const plan = confidentGroups.flatMap((g): Array<[HsFileGroup, HsLinkProduct[]]> => {
       const s = suggestions.get(g.key);
-      if (s && (await linkTo(g, s.products, true))) done += 1;
+      return s ? [[g, s.products]] : [];
+    });
+    if (!confirmMismatch(plan)) return;
+    for (const [g, targets] of plan) {
+      if (await linkTo(g, targets, true, true)) done += 1;
     }
     setNotice({ tone: done === confidentGroups.length ? 'ok' : 'err', text: `Привязано групп: ${done} из ${confidentGroups.length}` });
   };
@@ -520,11 +551,16 @@ export default function ChzFileLinker({
     let done = 0;
     const skipped: string[] = [];
     const todo = groups.filter((g) => g.nmIds.length === 0);
+    const plan: Array<[HsFileGroup, HsLinkProduct[]]> = [];
     for (const g of todo) {
       const pool = source === 'picked' ? picked : (suggestions.get(g.key)?.products || []);
       const targets = pool.filter((p) => (source === 'picked' ? fitsProduct(p, g.size) : hasSize(p, g.size)));
       if (targets.length === 0) { skipped.push(g.size || '—'); continue; }
-      if (await linkTo(g, targets, true)) done += 1;
+      plan.push([g, targets]);
+    }
+    if (plan.length > 0 && !confirmMismatch(plan)) return;
+    for (const [g, targets] of plan) {
+      if (await linkTo(g, targets, true, true)) done += 1;
     }
     setNotice({
       tone: done > 0 ? 'ok' : 'err',
@@ -799,6 +835,15 @@ export default function ChzFileLinker({
                     className="h-4 w-4 rounded border-slate-300 text-indigo-600"
                   />
                   Расширенный режим (подсказки и кнопки у каждого размера)
+                </label>
+                <label className="flex cursor-pointer select-none items-center gap-2 text-xs text-slate-600" title="Подсказки и привязка будут показывать товары любых категорий; перед привязкой — вопрос">
+                  <input
+                    type="checkbox"
+                    checked={allowMismatch}
+                    onChange={(e) => setAllowMismatch(e.target.checked)}
+                    className="h-4 w-4 rounded border-slate-300 text-amber-600"
+                  />
+                  Разрешить неподходящие категории (с подтверждением)
                 </label>
                 {confidentGroups.length > 0 && (
                   <button
