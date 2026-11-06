@@ -34,6 +34,7 @@ export type FileUploadSummary = { files: number; codes: number; failed: string[]
 
 const CATEGORIES_KEY = 'hs_linker_categories_v1';
 const PRODUCT_PAGE = 50;
+const EXPANDED_KEY = 'hs_linker_expanded_v1';
 const SIZE_ORDER = ['xxs', 'xs', 's', 'm', 'l', 'xl', '2xl', '3xl', '4xl', '5xl', '6xl'];
 const fold = (v: string) => v.toLowerCase().replace(/ё/g, 'е');
 const genderLabel = (g: string | null) => (g === 'male' ? 'Муж' : g === 'female' ? 'Жен' : 'Любой пол');
@@ -134,6 +135,21 @@ export default function ChzFileLinker({
   const [showAllCategories, setShowAllCategories] = useState(false);
   const [fileQuery, setFileQuery] = useState('');
   const [sort, setSort] = useState<Sort>('name');
+  // Расширенный режим: у каждого размера своя строка с подсказками. По умолчанию — компактные кнопки размеров.
+  const [expanded, setExpanded] = useState<boolean>(() => {
+    try { return localStorage.getItem(EXPANDED_KEY) === '1'; } catch { return false; }
+  });
+  const toggleExpanded = (value: boolean) => {
+    setExpanded(value);
+    try { localStorage.setItem(EXPANDED_KEY, value ? '1' : '0'); } catch { /* приватный режим */ }
+  };
+  // Отмеченные кнопки размеров: по товару (семейству) — набор размеров.
+  const [selSizes, setSelSizes] = useState<Record<string, string[]>>({});
+  const toggleSize = (famKey: string, size: string) => setSelSizes((prev) => {
+    const cur = new Set(prev[famKey] || []);
+    if (cur.has(size)) cur.delete(size); else cur.add(size);
+    return { ...prev, [famKey]: Array.from(cur) };
+  });
   const [busyKey, setBusyKey] = useState('');
   const [uploading, setUploading] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -406,12 +422,12 @@ export default function ChzFileLinker({
    * Привязка по размерам: каждый размер получает только те из выбранных (или подсказанных) товаров,
    * у которых этот размер есть. Размер, которому ничего не подошло, остаётся без привязки.
    */
-  const linkFamilyBySize = async (fam: { groups: HsFileGroup[] }, source: 'picked' | 'hints') => {
+  const linkFamilyBySize = async (groups: HsFileGroup[], source: 'picked' | 'hints') => {
     if (busyKey) return;
     setNotice(null);
     let done = 0;
     const skipped: string[] = [];
-    const todo = fam.groups.filter((g) => g.nmIds.length === 0);
+    const todo = groups.filter((g) => g.nmIds.length === 0);
     for (const g of todo) {
       const pool = source === 'picked' ? picked : (suggestions.get(g.key)?.products || []);
       const targets = pool.filter((p) => hasSize(p, g.size));
@@ -681,6 +697,15 @@ export default function ChzFileLinker({
                     {sort === 'name' ? 'По названию' : 'Сначала новые'}
                   </button>
                 </div>
+                <label className="flex cursor-pointer select-none items-center gap-2 text-xs text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={expanded}
+                    onChange={(e) => toggleExpanded(e.target.checked)}
+                    className="h-4 w-4 rounded border-slate-300 text-indigo-600"
+                  />
+                  Расширенный режим (подсказки и кнопки у каждого размера)
+                </label>
                 {confidentGroups.length > 0 && (
                   <button
                     type="button"
@@ -753,11 +778,13 @@ export default function ChzFileLinker({
                             </div>
                           </div>
                         </div>
+                        {expanded ? (
+                        <>
                         {open.length > 0 && (
                           <div className="mt-2 flex flex-wrap gap-1.5">
                             <button
                               type="button"
-                              onClick={() => void linkFamilyBySize(fam, 'picked')}
+                              onClick={() => void linkFamilyBySize(fam.groups, 'picked')}
                               disabled={picked.length === 0 || pickedFit === 0 || Boolean(busyKey)}
                               title={picked.length === 0 ? 'Выберите товары слева' : 'Каждый размер получит те из выбранных товаров, где такой размер есть'}
                               className="inline-flex !min-h-0 items-center gap-1 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-indigo-700 disabled:opacity-40"
@@ -766,7 +793,7 @@ export default function ChzFileLinker({
                             </button>
                             <button
                               type="button"
-                              onClick={() => void linkFamilyBySize(fam, 'hints')}
+                              onClick={() => void linkFamilyBySize(fam.groups, 'hints')}
                               disabled={hintFit === 0 || Boolean(busyKey)}
                               title="Каждый размер — к товарам того же цвета, где есть этот размер"
                               className="inline-flex !min-h-0 items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-emerald-700 disabled:opacity-40"
@@ -821,6 +848,89 @@ export default function ChzFileLinker({
                             );
                           })}
                         </div>
+                        </>
+                        ) : (
+                        (() => {
+                          const sel = new Set(selSizes[fam.key] || []);
+                          const chosen = fam.groups.filter((g) => sel.has(g.size || ''));
+                          const scope = chosen.length > 0 ? chosen : fam.groups;
+                          const scopeOpen = scope.filter((g) => g.nmIds.length === 0);
+                          const scopeLinked = scope.filter((g) => g.nmIds.length > 0);
+                          const pickedFitScope = scopeOpen.filter((g) => picked.some((p) => hasSize(p, g.size))).length;
+                          const hintFitScope = scopeOpen.filter((g) => (suggestions.get(g.key)?.products || []).length > 0).length;
+                          const label = chosen.length > 0 ? `выбранные размеры (${chosen.length})` : 'все размеры';
+                          return (
+                            <>
+                              <div className="mt-2 flex flex-wrap gap-1.5">
+                                {fam.groups.map((g) => {
+                                  const isLinked = g.nmIds.length > 0;
+                                  const isSel = sel.has(g.size || '');
+                                  return (
+                                    <button
+                                      key={g.key}
+                                      type="button"
+                                      onClick={() => toggleSize(fam.key, g.size || '')}
+                                      aria-pressed={isSel}
+                                      title={isLinked ? `Привязан: ${linkedLabel(g)}` : `${g.codes} шт без привязки`}
+                                      className={`inline-flex !min-h-0 items-center gap-1 rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${
+                                        isSel ? 'bg-indigo-600 text-white ring-1 ring-indigo-600'
+                                          : isLinked ? 'bg-emerald-100 text-emerald-800 ring-1 ring-emerald-300 hover:bg-emerald-200'
+                                            : 'bg-white text-slate-700 ring-1 ring-slate-300 hover:bg-slate-100'
+                                      }`}
+                                    >
+                                      {g.size || '—'}
+                                      <span className={`text-[10px] font-medium tabular-nums ${isSel ? 'text-indigo-100' : 'opacity-60'}`}>{g.codes}</span>
+                                      {isLinked && <CheckCircle2 className="h-3 w-3" />}
+                                    </button>
+                                  );
+                                })}
+                                <button
+                                  type="button"
+                                  onClick={() => setSelSizes((prev) => ({ ...prev, [fam.key]: chosen.length === fam.groups.length ? [] : fam.groups.map((g) => g.size || '') }))}
+                                  className="!min-h-0 rounded-md px-2 py-1 text-[11px] text-slate-500 underline hover:text-slate-700"
+                                >
+                                  {chosen.length === fam.groups.length ? 'снять выбор' : 'выбрать все'}
+                                </button>
+                              </div>
+                              <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                                {scopeOpen.length > 0 && (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() => void linkFamilyBySize(scopeOpen, 'picked')}
+                                      disabled={picked.length === 0 || pickedFitScope === 0 || Boolean(busyKey)}
+                                      title={picked.length === 0 ? 'Выберите товары слева' : 'Каждый размер получит те из выбранных товаров, где такой размер есть'}
+                                      className="inline-flex !min-h-0 items-center gap-1 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-indigo-700 disabled:opacity-40"
+                                    >
+                                      <Link2 className="h-3.5 w-3.5" /> К выбранным товарам{picked.length > 0 ? ` (${picked.length})` : ''}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => void linkFamilyBySize(scopeOpen, 'hints')}
+                                      disabled={hintFitScope === 0 || Boolean(busyKey)}
+                                      title="Каждый размер — к товарам той же категории и цвета, где есть этот размер"
+                                      className="inline-flex !min-h-0 items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-emerald-700 disabled:opacity-40"
+                                    >
+                                      <CheckCircle2 className="h-3.5 w-3.5" /> По цвету и размеру
+                                    </button>
+                                  </>
+                                )}
+                                {scopeLinked.length > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={async () => { for (const g of scopeLinked) await unlink(g); }}
+                                    disabled={Boolean(busyKey)}
+                                    className="inline-flex !min-h-0 items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-medium text-slate-600 ring-1 ring-slate-200 transition-colors hover:bg-slate-100 disabled:opacity-40"
+                                  >
+                                    <Link2Off className="h-3.5 w-3.5" /> Отвязать
+                                  </button>
+                                )}
+                                <span className="text-[11px] text-slate-400">действует на: {label}</span>
+                              </div>
+                            </>
+                          );
+                        })()
+                        )}
                       </div>
                     );
                   })}
