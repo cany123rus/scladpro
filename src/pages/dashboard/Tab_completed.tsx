@@ -7,8 +7,12 @@ import { Select } from '../../components/ui/Select';
 import { QtyField } from '../../components/ui/QtyField';
 import { confirmDialog } from '../../components/ConfirmDialog';
 import { SearchSelect } from '../../components/ui/SearchSelect';
+import { useState } from 'react';
+import { ClipboardList } from 'lucide-react';
+import { PickingSheetPicker } from '../../components/PickingSheetPicker';
 
 export function Tab_completed(props: any) {
+  const [pickSheetOpen, setPickSheetOpen] = useState(false);
   const { CW_TIME_RATE_KEY, adjustBoxStock, boxAdjustValue, boxStock, completedWorkStep, currentEmployee, cwForm, cwFormItems, cwPackagingRateForm, cwPackagingRates, cwPurchaseForm, cwPurchaseHistory, cwPurchaseHistorySupplierFilter, cwPurchaseOtherRows, cwPurchaseRows, cwRateBulkModal, cwRateForm, cwRateHistoryModal, cwReportDatePickerMonth, cwReportDatePickerOpen, cwReportExcludedDates, cwReportForm, cwReportModalOpen, cwReportPickingEnd, cwReportResult, cwSelectedDate, cwSelectedEmployee, cwSelectedPeriod, cwWorkLogs, cwWorkRateEmployeePrices, cwWorkRateHistory, cwWorkRateSnapshots, cwWorkRates, editingPackagingId, editingWorkLogId, employees, ensureCwTimeRateId, fetchCwPurchaseHistory, fetchTempWorkerLogs, getCwRateEmployeeConfig, getCwTimeRatePrice, getDatesInRange, getEffectiveWorkRatePrice, getWorkLogSnapshotPrice, handleDeleteWorkLog, handleDownloadCwReportExcel, handleDownloadCwReportPdf, handleSendEmployeeReport, hasAssemblyButtonAccess, inlineRateEdit, isCalendarEmployeeVisible, isEmployeeOnline, isTimeBasedWorkRate, loadBoxStock, loadCwWorkRateEmployeePrices, loadDeliveryData, loadEmployeeSchedule, loadTempWorkerMeta, logAssemblyChange, mskTodayYmd, openSalaryPayModal, packagingTypeTemplates, saveCwRateEmployeeConfig, setBoxAdjustValue, setCompletedWorkStep, setCwForm, setCwFormItems, setCwPackagingRateForm, setCwPackagingRates, setCwPurchaseEdit, setCwPurchaseForm, setCwPurchaseHistorySupplierFilter, setCwPurchaseOtherRows, setCwPurchaseRows, setCwRateBulkModal, setCwRateForm, setCwRateHistoryModal, setCwReportDatePickerMonth, setCwReportDatePickerOpen, setCwReportExcludedDates, setCwReportForm, setCwReportModalOpen, setCwReportPickingEnd, setCwReportResult, setCwScheduleEmployeeId, setCwScheduleInlineError, setCwScheduleModalOpen, setCwScheduleMonth, setCwSelectedDate, setCwSelectedEmployee, setCwSelectedPeriod, setCwWorkLogs, setCwWorkRateEmployeePrices, setCwWorkRateHistory, setCwWorkRateSnapshots, setCwWorkRates, setEditingPackagingId, setEditingWorkLogId, setInlineRateEdit, setPackagingNewTemplate, setShowGeneralReportModal, setShowPackagingTemplateModal, setShowPalletModal, setShowTempWorkerHistory, showToast, submitWorkRate, suppliers, telegramBotToken } = props;
   return (
 <div className="max-w-6xl mx-auto px-3 sm:px-4">
@@ -1053,6 +1057,30 @@ export function Tab_completed(props: any) {
                                     >
                                       + Добавить товар
                                     </button>
+                                    {!editingWorkLogId && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setPickSheetOpen(true)}
+                                      className="ml-2 inline-flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg border border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+                                    >
+                                      <ClipboardList className="h-4 w-4" /> Добавить лист
+                                    </button>
+                                    )}
+                                    {pickSheetOpen && cwSelectedDate && (
+                                      <PickingSheetPicker
+                                        suppliers={suppliers}
+                                        workRates={cwWorkRates}
+                                        initialDate={cwSelectedDate.toLocaleDateString('en-CA')}
+                                        initialSupplierId={cwFormItems.find((x: any) => x.supplier_id)?.supplier_id || ''}
+                                        onClose={() => setPickSheetOpen(false)}
+                                        onRateCreated={(rate) => setCwWorkRates((prev: any[]) => [...prev, rate])}
+                                        showToast={showToast}
+                                        onAdd={(rows) => setCwFormItems((prev: any[]) => {
+                                          const filled = prev.filter((x) => x.supplier_id || x.work_rate_id || x.quantity);
+                                          return [...filled, ...rows.map((r) => ({ supplier_id: r.supplier_id, work_rate_id: r.work_rate_id, quantity: r.quantity, time_hours: '', time_minutes: '', packaging_used: 'no', packaging: '' }))];
+                                        })}
+                                      />
+                                    )}
                                   </div>
 
                                   <button
