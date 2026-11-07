@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { ClipboardList, X, Check } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
@@ -112,6 +113,12 @@ export function PickingSheetPicker(props: {
   const [qty, setQty] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [recorded, setRecorded] = useState<Recorded>({});
+
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, []);
 
   useEffect(() => {
     setListId(''); setChecked({}); setQty({}); setLists([]);
@@ -234,7 +241,7 @@ export function PickingSheetPicker(props: {
     return Math.max(0, l.tasks.length - used);
   };
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center bg-slate-900/50 sm:p-4" onClick={onClose}>
       <div
         className="flex h-[94dvh] w-full flex-col overflow-hidden rounded-t-3xl bg-white shadow-2xl sm:h-auto sm:max-h-[90vh] sm:max-w-xl sm:rounded-3xl"
@@ -336,6 +343,7 @@ export function PickingSheetPicker(props: {
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
