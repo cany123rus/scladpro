@@ -268,7 +268,12 @@ export const linkHsFile = async (
 ): Promise<number> => {
   const patch: Record<string, unknown> = { nm_ids: Array.from(new Set(nmIds)), size: size || null };
   // Категория товара точнее записи из таблицы («Дубленка» → «Куртки / Бомберы / Дублёнки»): подбор сверяет именно её.
-  if (category && (hsFileHasNoCategory(group) || hsGroupFromTable(group))) patch.category = category;
+  // Файл из таблицы ЧЗ хранит свою исходную категорию («Куртка», «Дубленка»): стираем её только тогда,
+  // когда она не из того же семейства, что товар, — иначе подбор по категории не сработает.
+  if (category && (hsFileHasNoCategory(group)
+    || (hsGroupFromTable(group) && normalizeHsCategoryName(group.category || '') !== normalizeHsCategoryName(category)))) {
+    patch.category = category;
+  }
   const { data, error } = await fileGroupFilter(
     supabase.from('unified_honest_sign_codes').update(patch),
     supplierId,

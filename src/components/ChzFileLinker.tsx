@@ -194,6 +194,8 @@ export default function ChzFileLinker({
   const [picked, setPicked] = useState<HsLinkProduct[]>([]);
   // Показывать уже привязанные группы (обычно скрыты): чтобы проверить, отвязать или перепривязать.
   const [showLinked, setShowLinked] = useState(false);
+  // Галочки у привязанных групп в панели «Уже привязано»: отвязываем только отмеченные.
+  const [unlinkSel, setUnlinkSel] = useState<Set<string>>(() => new Set());
   // Размеры, отмеченные на выбранных товарах: nmId → размеры. Нет записи — товар берёт файлы любого своего размера.
   const [sizeSel, setSizeSel] = useState<Record<number, string[]>>({});
 
@@ -634,16 +636,23 @@ export default function ChzFileLinker({
     }
   };
 
-  const unlinkAllFromPicked = async () => {
-    if (busyKey || linkedToPicked.length === 0) return;
-    if (!window.confirm(`Отвязать ${linkedToPicked.length} групп от выбранных товаров? Файлы снова появятся в списке для привязки.`)) return;
-    const todo = [...linkedToPicked];
+  const unlinkChecked = async () => {
+    const todo = linkedToPicked.filter((g) => unlinkSel.has(g.key));
+    if (busyKey || todo.length === 0) return;
+    if (!window.confirm(`Отвязать отмеченные группы (${todo.length}) от выбранных товаров? Файлы снова появятся в списке для привязки.`)) return;
     let done = 0;
-    for (const g of todo) {
+    for (const g of [...todo]) {
       if (await unlinkFromPicked(g, true)) done += 1;
     }
+    setUnlinkSel(new Set());
     setNotice({ tone: done === todo.length ? 'ok' : 'err', text: `Отвязано групп: ${done} из ${todo.length}. Файлы снова ждут привязки.` });
   };
+
+  const toggleUnlinkSel = (key: string) => setUnlinkSel((prev) => {
+    const next = new Set(prev);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    return next;
+  });
 
   // Загрузка: после неё подтягиваем список и оставляем на виду всё, что появилось.
   const afterUpload = async (summary: FileUploadSummary | null) => {
@@ -873,27 +882,48 @@ export default function ChzFileLinker({
                     <p className="text-xs text-slate-500">Обычный файл подойдёт: <b className="text-slate-700">{scopeText}</b>. У групп из таблицы ЧЗ размер берётся из самой таблицы.</p>
                     {linkedToPicked.length > 0 && (
                       <div className="rounded-xl bg-white p-2.5 ring-1 ring-slate-200">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-xs font-semibold text-slate-700">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <label className="flex cursor-pointer select-none items-center gap-2 text-xs font-semibold text-slate-700">
+                            <input
+                              type="checkbox"
+                              checked={linkedToPicked.length > 0 && linkedToPicked.every((g) => unlinkSel.has(g.key))}
+                              onChange={(e) => setUnlinkSel(e.target.checked ? new Set(linkedToPicked.map((g) => g.key)) : new Set())}
+                              className="h-4 w-4 rounded border-slate-300 text-rose-600"
+                              aria-label="Отметить все привязанные группы"
+                            />
                             Уже привязано к выбранным: {linkedToPicked.length} гр., {linkedToPicked.reduce((n, g) => n + g.codes, 0)} шт
-                          </span>
+                          </label>
                           <button
                             type="button"
-                            onClick={() => void unlinkAllFromPicked()}
-                            disabled={Boolean(busyKey)}
+                            onClick={() => void unlinkChecked()}
+                            disabled={Boolean(busyKey) || !linkedToPicked.some((g) => unlinkSel.has(g.key))}
                             className="inline-flex !min-h-0 items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-rose-700 ring-1 ring-rose-200 transition-colors hover:bg-rose-50 disabled:opacity-40"
                           >
-                            <Link2Off className="h-3 w-3" /> Отвязать все
+                            <Link2Off className="h-3 w-3" /> Отвязать выбранные ({linkedToPicked.filter((g) => unlinkSel.has(g.key)).length})
                           </button>
                         </div>
-                        <div className="mt-1.5 max-h-40 space-y-1 overflow-y-auto">
+                        <div className="mt-1.5 max-h-52 space-y-1 overflow-y-auto">
                           {linkedToPicked.map((g) => (
-                            <div key={g.key} className="flex items-center gap-2 rounded-lg bg-slate-50 px-2 py-1 text-xs">
+                            <div key={g.key} className={`flex items-center gap-2 rounded-lg px-2 py-1 text-xs ${unlinkSel.has(g.key) ? 'bg-rose-50' : 'bg-slate-50'}`}>
+                              <input
+                                type="checkbox"
+                                checked={unlinkSel.has(g.key)}
+                                onChange={() => toggleUnlinkSel(g.key)}
+                                className="h-4 w-4 shrink-0 rounded border-slate-300 text-rose-600"
+                                aria-label="Отметить для отвязки"
+                              />
                               <span className="min-w-0 flex-1">
-                                <span className="block truncate font-medium text-slate-800">
-                                  {hsGroupFromTable(g) ? `${g.category} · ${g.color || '—'} · ${g.size || '—'}` : `${g.fileName}${g.size ? ` · ${g.size}` : ''}`}
+                                <span className="block break-all font-medium text-slate-800">файл «{g.fileName}»</span>
+                                <span className="block text-[11px] text-slate-600">
+                                  {[
+                                    g.article ? `арт. ${g.article}` : null,
+                                    g.color ? g.color : null,
+                                    g.size ? `размер ${g.size}` : null,
+                                    g.gender ? genderLabel(g.gender) : null,
+                                    g.category ? `категория: ${g.category}` : null,
+                                  ].filter(Boolean).join(' · ')}
                                 </span>
-                                <span className="block truncate text-[11px] text-slate-500">{linkedLabel(g)}</span>
+                                <span className="block text-[11px] text-emerald-700">→ {linkedLabel(g)}</span>
                               </span>
                               <span className="shrink-0 tabular-nums text-indigo-700">{g.codes} шт</span>
                               <button
