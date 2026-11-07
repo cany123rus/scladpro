@@ -131,7 +131,17 @@ export function PickingSheetPicker(props: {
         if (error) throw error;
         const raw = (data as any)?.value;
         const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
-        const arr: PickingList[] = Array.isArray(parsed) ? parsed : [];
+        let arr: PickingList[] = Array.isArray(parsed) ? parsed : [];
+        // Старый общий список (до разделения по поставщикам): добавляем то, чего нет в списке поставщика.
+        try {
+          const { data: old } = await supabase.from('app_settings').select('value').eq('key', PICK_KEY).maybeSingle();
+          const oraw = (old as any)?.value;
+          const oparsed = typeof oraw === 'string' ? JSON.parse(oraw) : oraw;
+          if (Array.isArray(oparsed)) {
+            const have = new Set(arr.map((x) => x.id));
+            arr = [...arr, ...oparsed.filter((x: PickingList) => x?.id && !have.has(x.id))];
+          }
+        } catch { /* старые листы необязательны */ }
         const rec = await loadRecorded(supplierId);
 
         // Предметы WB по баркодам этого поставщика.
@@ -241,6 +251,41 @@ export function PickingSheetPicker(props: {
     return Math.max(0, l.tasks.length - used);
   };
 
+  const catsBlock = list ? (
+<div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-medium text-slate-500">Категории — отметьте собранное</div>
+                {open.length > 0 && <button type="button" onClick={toggleAll} className="min-h-[44px] px-2 text-sm font-semibold text-indigo-600 active:opacity-60">{allOn ? 'Снять все' : 'Всё собрано'}</button>}
+              </div>
+              {categories.map((c) => {
+                const done = c.count === 0;
+                const on = !!checked[c.name] && !done;
+                return (
+                  <div key={c.name} className={`rounded-2xl border px-4 py-3 ${done ? 'border-slate-100 bg-slate-50 opacity-60' : on ? 'border-emerald-300 bg-emerald-50' : 'border-slate-200'}`}>
+                    <label className="flex min-h-[32px] items-center gap-3">
+                      <input type="checkbox" className="h-6 w-6 shrink-0 accent-emerald-600" disabled={done} checked={on} onChange={(e) => toggle(c.name, c.count, e.target.checked)} />
+                      <span className="min-w-0 flex-1 truncate text-base font-medium text-slate-800">{c.name}</span>
+                      <span className="shrink-0 text-sm tabular-nums text-slate-500">
+                        {done ? 'записано' : c.count === c.total ? `${c.count} шт` : `${c.count} из ${c.total}`}
+                      </span>
+                    </label>
+                    {on && (
+                      <div className="mt-2 flex items-center justify-end gap-2 text-sm text-slate-600">
+                        <span>Собрано сейчас:</span>
+                        <input
+                          type="number" inputMode="numeric" pattern="[0-9]*" min={1} max={c.count} value={qty[c.name] ?? String(c.count)}
+                          onChange={(e) => setQty((p) => ({ ...p, [c.name]: e.target.value }))}
+                          className="h-11 w-24 rounded-xl border border-slate-300 px-3 text-right text-base"
+                        />
+                        <span>из {c.count}</span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+  ) : null;
+
   return createPortal(
     <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center bg-slate-900/50 sm:p-4" onClick={onClose}>
       <div
@@ -277,8 +322,8 @@ export function PickingSheetPicker(props: {
               {visibleLists.map((l) => {
                 const left = listLeft(l);
                 return (
+                  <div key={l.id}>
                   <button
-                    key={l.id}
                     type="button"
                     onClick={() => { setListId(l.id); setChecked({}); setQty({}); }}
                     className={`flex min-h-[56px] w-full items-center justify-between gap-3 rounded-2xl border px-4 py-2.5 text-left text-sm transition-colors active:scale-[0.99] ${l.id === listId ? 'border-indigo-400 bg-indigo-50' : 'border-slate-200 hover:bg-slate-50'} ${left === 0 ? 'opacity-60' : ''}`}
@@ -291,45 +336,13 @@ export function PickingSheetPicker(props: {
                       {left === 0 ? 'всё записано' : `осталось ${left}`}
                     </span>
                   </button>
-                );
-              })}
-            </div>
-          )}
-
-          {list && (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <div className="text-xs font-medium text-slate-500">Категории — отметьте собранное</div>
-                {open.length > 0 && <button type="button" onClick={toggleAll} className="min-h-[44px] px-2 text-sm font-semibold text-indigo-600 active:opacity-60">{allOn ? 'Снять все' : 'Всё собрано'}</button>}
-              </div>
-              {categories.map((c) => {
-                const done = c.count === 0;
-                const on = !!checked[c.name] && !done;
-                return (
-                  <div key={c.name} className={`rounded-2xl border px-4 py-3 ${done ? 'border-slate-100 bg-slate-50 opacity-60' : on ? 'border-emerald-300 bg-emerald-50' : 'border-slate-200'}`}>
-                    <label className="flex min-h-[32px] items-center gap-3">
-                      <input type="checkbox" className="h-6 w-6 shrink-0 accent-emerald-600" disabled={done} checked={on} onChange={(e) => toggle(c.name, c.count, e.target.checked)} />
-                      <span className="min-w-0 flex-1 truncate text-base font-medium text-slate-800">{c.name}</span>
-                      <span className="shrink-0 text-sm tabular-nums text-slate-500">
-                        {done ? 'записано' : c.count === c.total ? `${c.count} шт` : `${c.count} из ${c.total}`}
-                      </span>
-                    </label>
-                    {on && (
-                      <div className="mt-2 flex items-center justify-end gap-2 text-sm text-slate-600">
-                        <span>Собрано сейчас:</span>
-                        <input
-                          type="number" inputMode="numeric" pattern="[0-9]*" min={1} max={c.count} value={qty[c.name] ?? String(c.count)}
-                          onChange={(e) => setQty((p) => ({ ...p, [c.name]: e.target.value }))}
-                          className="h-11 w-24 rounded-xl border border-slate-300 px-3 text-right text-base"
-                        />
-                        <span>из {c.count}</span>
-                      </div>
-                    )}
+                  {l.id === listId && <div className="mt-2 pl-1 sm:pl-2">{catsBlock}</div>}
                   </div>
                 );
               })}
             </div>
           )}
+
         </div>
 
         <div className="flex shrink-0 items-center justify-between gap-3 border-t border-slate-100 bg-white px-4 py-3 sm:px-5 sm:py-4">
