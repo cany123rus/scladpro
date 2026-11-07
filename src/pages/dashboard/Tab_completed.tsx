@@ -1063,7 +1063,7 @@ export function Tab_completed(props: any) {
                                       onClick={() => setPickSheetOpen(true)}
                                       className="ml-2 inline-flex min-h-[48px] items-center gap-1.5 px-4 py-2 text-sm rounded-xl border border-emerald-300 bg-emerald-50/50 font-semibold text-emerald-700 hover:bg-emerald-50 active:bg-emerald-100"
                                     >
-                                      <ClipboardList className="h-4 w-4" /> Добавить лист
+                                      <ClipboardList className="h-4 w-4" /> Добавить поставку
                                     </button>
                                     )}
                                     {pickSheetOpen && cwSelectedDate && (

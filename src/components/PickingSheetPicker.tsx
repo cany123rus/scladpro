@@ -102,8 +102,7 @@ export function PickingSheetPicker(props: {
   const { suppliers, workRates, initialDate, initialSupplierId, pending, onClose, onAdd, onRateCreated, showToast } = props;
 
   const [supplierId, setSupplierId] = useState(initialSupplierId || '');
-  const [day, setDay] = useState(initialDate);
-  const [onlyDay, setOnlyDay] = useState(false);
+  const [fromDay, setFromDay] = useState(() => `${initialDate.slice(0, 7)}-01`);
   const [lists, setLists] = useState<PickingList[]>([]);
   const [loading, setLoading] = useState(false);
   const [listId, setListId] = useState('');
@@ -113,6 +112,7 @@ export function PickingSheetPicker(props: {
   const [qty, setQty] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [recorded, setRecorded] = useState<Recorded>({});
+  const [loadError, setLoadError] = useState('');
 
   useEffect(() => {
     const prev = document.body.style.overflow;
@@ -125,40 +125,74 @@ export function PickingSheetPicker(props: {
     if (!supplierId) return;
     let cancelled = false;
     setLoading(true);
+    setLoadError('');
     (async () => {
       try {
-        const { data, error } = await supabase.from('app_settings').select('value').eq('key', `${PICK_KEY}:${supplierId}`).maybeSingle();
-        if (error) throw error;
-        const raw = (data as any)?.value;
-        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
-        let arr: PickingList[] = Array.isArray(parsed) ? parsed : [];
-        // Старый общий список (до разделения по поставщикам): добавляем то, чего нет в списке поставщика.
-        try {
-          const { data: old } = await supabase.from('app_settings').select('value').eq('key', PICK_KEY).maybeSingle();
-          const oraw = (old as any)?.value;
-          const oparsed = typeof oraw === 'string' ? JSON.parse(oraw) : oraw;
-          if (Array.isArray(oparsed)) {
-            const have = new Set(arr.map((x) => x.id));
-            arr = [...arr, ...oparsed.filter((x: PickingList) => x?.id && !have.has(x.id))];
+        const { data: sup, error: se } = await supabase.from('suppliers').select('wb_api_token').eq('id', supplierId).maybeSingle();
+        if (se) throw se;
+        const token = norm((sup as any)?.wb_api_token);
+        if (!token) throw new Error('У этого поставщика не задан токен WB');
+        const wb = async (url: string) => {
+          const res = await fetch(url, { cache: 'no-store', headers: { Authorization: token, 'Content-Type': 'application/json' } });
+          if (!res.ok) throw new Error(`WB ${res.status}: ${(await res.text()).slice(0, 160)}`);
+          const t = await res.text();
+          return t ? JSON.parse(t) : {};
+        };
+
+        // Все поставки ФБС кабинета (как в разделе «Поставки»).
+        const supplies: any[] = [];
+        for (let next = 0, i = 0; i < 20; i++) {
+          const d = await wb(`https://marketplace-api.wildberries.ru/api/v3/supplies?limit=1000&next=${next}`);
+          const batch: any[] = d?.supplies || [];
+          supplies.push(...batch);
+          if (!batch.length || typeof d?.next !== 'number' || d.next === next || d.next === 0) break;
+          next = d.next;
+        }
+        const fromMs = new Date(`${fromDay}T00:00:00+03:00`).getTime();
+        const shown = supplies.filter((x) => new Date(x.createdAt).getTime() >= fromMs);
+
+        // Задания этих поставок: список заказов с поставкой, группируем по supplyId.
+        const wanted = new Set(shown.map((x) => String(x.id)));
+        const bySupply = new Map<string, PickTask[]>();
+        const nmIds = new Set<number>();
+        if (wanted.size) {
+          const dateFrom = Math.floor(Math.max(fromMs - 86_400_000, Date.now() - 30 * 86_400_000) / 1000);
+          for (let next = 0, i = 0; i < 300; i++) {
+            const d = await wb(`https://marketplace-api.wildberries.ru/api/v3/orders?limit=1000&next=${next}&dateFrom=${dateFrom}`);
+            const batch: any[] = d?.orders || [];
+            for (const o of batch) {
+              const sid = String(o?.supplyId ?? '');
+              if (!wanted.has(sid)) continue;
+              const nm = Number(o?.nmId) || 0;
+              if (nm) nmIds.add(nm);
+              const arr = bySupply.get(sid) || [];
+              arr.push({ task: String(o?.id ?? ''), barcode: nm ? `nm:${nm}` : '', name: norm(o?.article), article: norm(o?.article) });
+              bySupply.set(sid, arr);
+            }
+            if (!batch.length || typeof d?.next !== 'number' || d.next === next) break;
+            next = d.next;
           }
-        } catch { /* старые листы необязательны */ }
+        }
+
+        const arr: PickingList[] = shown
+          .map((x) => ({ id: String(x.id), name: norm(x.name) || String(x.id), fileName: '', uploadedAt: x.createdAt, tasks: bySupply.get(String(x.id)) || [] }))
+          .sort((a, b) => b.uploadedAt.localeCompare(a.uploadedAt));
         const rec = await loadRecorded(supplierId);
 
-        // Предметы WB по баркодам этого поставщика.
+        // Предмет WB по номенклатуре — из карточек этого поставщика.
         const map: Record<string, string> = {};
         const PAGE = 1000;
         for (let from = 0; from < 30_000; from += PAGE) {
           const { data: rows, error: e2 } = await supabase
             .from('wb_products_cache')
-            .select('nm_id, subject:product_json->>subjectName, sizes:product_json->sizes')
+            .select('nm_id, subject:product_json->>subjectName')
             .eq('supplier_id', supplierId)
             .order('nm_id')
             .range(from, from + PAGE - 1);
           if (e2) break;
           for (const r of (rows ?? []) as any[]) {
             const subject = norm(r?.subject);
-            if (!subject) continue;
-            for (const s of r?.sizes ?? []) for (const sku of s?.skus ?? []) map[norm(sku)] = subject;
+            if (subject) map[`nm:${r.nm_id}`] = subject;
           }
           if ((rows ?? []).length < PAGE) break;
         }
@@ -167,19 +201,16 @@ export function PickingSheetPicker(props: {
         setRecorded(rec);
         setSubjectByBarcode(map);
       } catch (e: any) {
-        if (!cancelled) showToast(`Не удалось загрузить листы: ${e?.message || e}`, 'error');
+        if (!cancelled) { setLoadError(String(e?.message || e)); showToast(`Не удалось загрузить поставки: ${e?.message || e}`, 'error'); }
       } finally {
         if (!cancelled) setLoading(false);
       }
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [supplierId]);
+  }, [supplierId, fromDay]);
 
-  const visibleLists = useMemo(
-    () => lists.filter((l) => !onlyDay || ymd(l.uploadedAt) === day).sort((a, b) => b.uploadedAt.localeCompare(a.uploadedAt)),
-    [lists, day, onlyDay],
-  );
+  const visibleLists = lists;
 
   const list = visibleLists.find((l) => l.id === listId) || null;
 
@@ -187,10 +218,10 @@ export function PickingSheetPicker(props: {
     if (!list) return [] as Array<{ name: string; count: number; total: number }>;
     const m = new Map<string, number>();
     for (const t of list.tasks) {
-      const cat = capitalize(subjectByBarcode[norm(t.barcode)] || norm(t.name).split(/\s+/)[0] || 'Без категории');
+      const cat = capitalize(subjectByBarcode[norm(t.barcode)] || 'Без категории');
       m.set(cat, (m.get(cat) || 0) + 1);
     }
-    const key = `${supplierId}:${list.id}`;
+    const key = `${supplierId}:fbs:${list.id}`;
     return [...m.entries()]
       .map(([name, total]) => {
         const used = (recorded[key]?.[name] || 0) + pending.filter((p) => p.key === key && p.category === name).reduce((a, p) => a + p.quantity, 0);
@@ -233,7 +264,7 @@ export function PickingSheetPicker(props: {
           known.push(rate!);
           onRateCreated(data as any);
         }
-        rows.push({ supplier_id: supplierId, work_rate_id: String(rate!.id), quantity: String(c.take), pick: { key: `${supplierId}:${list!.id}`, category: c.name } });
+        rows.push({ supplier_id: supplierId, work_rate_id: String(rate!.id), quantity: String(c.take), pick: { key: `${supplierId}:fbs:${list!.id}`, category: c.name } });
       }
       onAdd(rows);
       showToast(`Добавлено строк: ${rows.length} (${total} шт). Нажмите «Сохранить».`, 'success');
@@ -246,7 +277,7 @@ export function PickingSheetPicker(props: {
   }
 
   const listLeft = (l: PickingList) => {
-    const key = `${supplierId}:${l.id}`;
+    const key = `${supplierId}:fbs:${l.id}`;
     const used = Object.values(recorded[key] || {}).reduce((a, b) => a + b, 0) + pending.filter((p) => p.key === key).reduce((a, p) => a + p.quantity, 0);
     return Math.max(0, l.tasks.length - used);
   };
@@ -294,7 +325,7 @@ export function PickingSheetPicker(props: {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-100 px-4 py-3 sm:px-5 sm:py-4">
-          <div className="flex items-center gap-2 text-base font-bold text-slate-900"><ClipboardList className="h-5 w-5 text-indigo-600" /> Добавить лист</div>
+          <div className="flex items-center gap-2 text-base font-bold text-slate-900"><ClipboardList className="h-5 w-5 text-indigo-600" /> Добавить поставку</div>
           <button onClick={onClose} className="-mr-2 flex h-11 w-11 items-center justify-center rounded-full hover:bg-slate-100 active:bg-slate-200" aria-label="Закрыть"><X className="h-5 w-5" /></button>
         </div>
 
@@ -304,18 +335,18 @@ export function PickingSheetPicker(props: {
               <option value="">Поставщик…</option>
               {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
-            <input type="date" value={day} onChange={(e) => { setDay(e.target.value); setListId(''); }} disabled={!onlyDay} className="oc-select min-h-[48px] text-base disabled:opacity-40" />
+            <label className="flex min-h-[48px] items-center gap-2 text-sm text-slate-600">
+              <span className="shrink-0">Поставки с</span>
+              <input type="date" value={fromDay} onChange={(e) => e.target.value && setFromDay(e.target.value)} className="oc-select min-h-[48px] min-w-0 flex-1 text-base" />
+            </label>
           </div>
-          <label className="flex min-h-[44px] items-center gap-3 text-sm text-slate-600">
-            <input type="checkbox" className="h-5 w-5" checked={onlyDay} onChange={(e) => { setOnlyDay(e.target.checked); setListId(''); }} /> Только листы, загруженные в выбранный день
-          </label>
 
           {!supplierId ? (
             <div className="py-6 text-center text-sm text-slate-400">Выберите поставщика</div>
           ) : loading ? (
-            <div className="py-6 text-center text-sm text-slate-400">Загружаем листы…</div>
+            <div className="py-6 text-center text-sm text-slate-400">Загружаем поставки ФБС из WB…</div>
           ) : visibleLists.length === 0 ? (
-            <div className="py-6 text-center text-sm text-slate-400">{lists.length === 0 ? 'У этого поставщика нет листов подбора' : 'Листов за этот день нет — снимите галочку выше'}</div>
+            <div className="py-6 text-center text-sm text-slate-400">{loadError ? loadError : lists.length === 0 ? 'Поставок ФБС с этой даты нет — сдвиньте дату «Поставки с» раньше' : 'Поставок с этой даты нет — сдвиньте дату «Поставки с» раньше'}</div>
           ) : (
             <div className="space-y-2">
               <div className="text-xs font-medium text-slate-500">Лист</div>
@@ -330,7 +361,7 @@ export function PickingSheetPicker(props: {
                   >
                     <span className="min-w-0">
                       <span className="block truncate font-medium text-slate-800">{l.name || l.fileName}</span>
-                      <span className="block text-xs text-slate-500">{ymd(l.uploadedAt).split('-').reverse().join('.')} · всего {l.tasks.length} шт</span>
+                      <span className="block text-xs text-slate-500">{ymd(l.uploadedAt).split('-').reverse().join('.')} · заданий {l.tasks.length}</span>
                     </span>
                     <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${left === 0 ? 'bg-slate-100 text-slate-500' : 'bg-emerald-100 text-emerald-700'}`}>
                       {left === 0 ? 'всё записано' : `осталось ${left}`}
