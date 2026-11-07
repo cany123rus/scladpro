@@ -9,7 +9,7 @@ import { confirmDialog } from '../../components/ConfirmDialog';
 import { SearchSelect } from '../../components/ui/SearchSelect';
 import { useState } from 'react';
 import { ClipboardList } from 'lucide-react';
-import { PickingSheetPicker, commitPickingRecorded } from '../../components/PickingSheetPicker';
+import { PickingSheetPicker, commitPickingLinks } from '../../components/PickingSheetPicker';
 
 export function Tab_completed(props: any) {
   const [pickSheetOpen, setPickSheetOpen] = useState(false);
@@ -1147,6 +1147,7 @@ export function Tab_completed(props: any) {
                                             packaging: x.packaging_used === 'yes' ? x.packaging : '',
                                             packaging_used: x.packaging_used === 'yes',
                                             supplier_id: x.supplier_id || null,
+                                            _pick: x.pick || null,
                                           });
                                         }
 
@@ -1156,7 +1157,9 @@ export function Tab_completed(props: any) {
                                         const nextSnapshots = { ...(cwWorkRateSnapshots || {}) } as Record<string, number>;
                                         let createdCount = 0;
                                         let updatedCount = 0;
-                                        for (const item of itemsToInsert) {
+                                        const pickLinks: Array<{ log: string; key: string; cat: string; qty: number }> = [];
+                                        for (const itemRaw of itemsToInsert) {
+                                          const { _pick, ...item } = itemRaw;
                                           const existing = (existingLogs || []).find((row: any) =>
                                             String(row.employee_id) === String(item.employee_id) &&
                                             String(row.date) === String(item.date) &&
@@ -1172,24 +1175,24 @@ export function Tab_completed(props: any) {
                                               nextSnapshots[String(existing.id)] = Number(getEffectiveWorkRatePrice(String(existing.work_rate_id || ''), String(existing.employee_id || item.employee_id || '')) || 0);
                                             }
                                             updatedCount += 1;
+                                            if (_pick) pickLinks.push({ log: String(existing.id), key: _pick.key, cat: _pick.category, qty: Number(item.quantity || 0) });
                                             await logAssemblyChange('work_logs', 'update', existing, { ...existing, quantity: newQty });
                                           } else {
                                             const { data: created } = await supabase.from('work_logs').insert([item]).select('*').maybeSingle();
                                             if (created) {
                                               nextSnapshots[String(created.id)] = Number(getEffectiveWorkRatePrice(String(created.work_rate_id || ''), String(created.employee_id || '')) || 0);
                                               createdCount += 1;
+                                              if (_pick) pickLinks.push({ log: String(created.id), key: _pick.key, cat: _pick.category, qty: Number(item.quantity || 0) });
                                               logAssemblyChange('work_logs', 'create', null, created);
                                             }
                                           }
                                         }
                                         setCwWorkRateSnapshots(nextSnapshots);
                                         await supabase.from('app_settings').upsert([{ key: 'cw_work_rate_snapshots_v1', value: JSON.stringify(nextSnapshots) }], { onConflict: 'key' });
+                                        try { await commitPickingLinks(pickLinks); } catch {}
                                         showToast(`Создано: ${createdCount}, обновлено: ${updatedCount}`, 'success');
                                       }
 
-                                      if (!editingWorkLogId) {
-                                        try { await commitPickingRecorded(cwFormItems.map((x: any) => ({ pick: x.pick, quantity: parseInt(x.quantity || '0') || 0 }))); } catch {}
-                                      }
                                       setCompletedWorkStep('CALENDAR');
                                       setCwForm({ quantity: '', work_rate_id: '', packaging: '', packaging_used: 'no', supplier_id: '' });
                                       setCwFormItems([{ supplier_id: '', work_rate_id: '', quantity: '', time_hours: '', time_minutes: '', packaging_used: '', packaging: '' }]);

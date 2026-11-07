@@ -20,32 +20,62 @@ interface PickingList { id: string; name: string; fileName: string; uploadedAt: 
 /** pick — откуда строка: по нему после сохранения записи учитываем, сколько листа уже записано. */
 export interface PickingFormRow { supplier_id: string; work_rate_id: string; quantity: string; pick: { key: string; category: string } }
 
-const REC_KEY = 'cw_picking_recorded_v1';
+const REC_KEY = 'cw_picking_recorded_v1'; // старый учёт без привязки к записям (остаётся как есть)
+const LINKS_KEY = 'cw_picking_links_v1';
 type Recorded = Record<string, Record<string, number>>;
+interface PickLink { log: string; key: string; cat: string; qty: number }
 
-async function readRecorded(): Promise<Recorded> {
-  const { data } = await supabase.from('app_settings').select('value').eq('key', REC_KEY).maybeSingle();
+async function readJson(key: string): Promise<any> {
+  const { data } = await supabase.from('app_settings').select('value').eq('key', key).maybeSingle();
   const raw = (data as any)?.value;
-  try {
-    const v = typeof raw === 'string' ? JSON.parse(raw) : raw;
-    return v && typeof v === 'object' ? v : {};
-  } catch { return {}; }
+  try { return typeof raw === 'string' ? JSON.parse(raw) : raw; } catch { return null; }
 }
 
 /**
- * Фиксирует записанное из листов. Вызывается ПОСЛЕ сохранения записи в календаре:
- * пока человек не нажал «Сохранить», остаток листа не уменьшается.
+ * Записанное из листов считаем ПО ЖИВЫМ ЗАПИСЯМ календаря, а не счётчиком.
+ * Каждая запись помнит, из какого листа и категории она пришла. Удалили запись
+ * (или уменьшили количество) — штуки сами возвращаются в лист; вернули запись
+ * кнопкой «отменить» — снова считаются записанными.
  */
-export async function commitPickingRecorded(items: Array<{ pick?: { key: string; category: string }; quantity: number }>) {
-  const withPick = items.filter((i) => i.pick && i.quantity > 0);
-  if (!withPick.length) return;
-  const rec = await readRecorded();
-  for (const i of withPick) {
-    const k = i.pick!.key;
-    rec[k] = rec[k] || {};
-    rec[k][i.pick!.category] = (rec[k][i.pick!.category] || 0) + i.quantity;
+async function loadRecorded(supplierId: string): Promise<Recorded> {
+  const rec: Recorded = {};
+  const add = (k: string, c: string, n: number) => { rec[k] = rec[k] || {}; rec[k][c] = (rec[k][c] || 0) + n; };
+
+  const legacy = await readJson(REC_KEY);
+  if (legacy && typeof legacy === 'object') {
+    for (const [k, cats] of Object.entries<any>(legacy)) {
+      if (!k.startsWith(`${supplierId}:`)) continue;
+      for (const [c, n] of Object.entries<any>(cats || {})) add(k, c, Number(n) || 0);
+    }
   }
-  await supabase.from('app_settings').upsert([{ key: REC_KEY, value: JSON.stringify(rec) }], { onConflict: 'key' });
+
+  const links: PickLink[] = (await readJson(LINKS_KEY)) || [];
+  const mine = links.filter((l) => l.key.startsWith(`${supplierId}:`));
+  if (!mine.length) return rec;
+  const ids = [...new Set(mine.map((l) => l.log))];
+  const alive = new Map<string, number>();
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data } = await supabase.from('work_logs').select('id, quantity').in('id', ids.slice(i, i + 200)).is('deleted_at', null);
+    for (const r of (data ?? []) as any[]) alive.set(String(r.id), Number(r.quantity) || 0);
+  }
+  // Если запись потом уменьшили, отдаём ей не больше её текущего количества.
+  const left = new Map(alive);
+  for (const l of mine) {
+    const cap = left.get(l.log);
+    if (cap == null) continue;
+    const take = Math.min(l.qty, cap);
+    left.set(l.log, cap - take);
+    if (take > 0) add(l.key, l.cat, take);
+  }
+  return rec;
+}
+
+/** Запоминает, какие записи календаря пришли из каких листов. Вызывать после сохранения записи. */
+export async function commitPickingLinks(links: PickLink[]) {
+  const fresh = links.filter((l) => l.log && l.qty > 0);
+  if (!fresh.length) return;
+  const all: PickLink[] = (await readJson(LINKS_KEY)) || [];
+  await supabase.from('app_settings').upsert([{ key: LINKS_KEY, value: JSON.stringify([...all, ...fresh]) }], { onConflict: 'key' });
 }
 
 const norm = (v: unknown) => String(v ?? '').trim();
@@ -95,7 +125,7 @@ export function PickingSheetPicker(props: {
         const raw = (data as any)?.value;
         const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
         const arr: PickingList[] = Array.isArray(parsed) ? parsed : [];
-        const rec = await readRecorded();
+        const rec = await loadRecorded(supplierId);
 
         // Предметы WB по баркодам этого поставщика.
         const map: Record<string, string> = {};
