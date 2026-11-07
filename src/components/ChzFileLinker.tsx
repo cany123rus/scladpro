@@ -40,6 +40,8 @@ const fold = (v: string) => v.toLowerCase().replace(/ё/g, 'е');
 const genderLabel = (g: string | null) => (g === 'male' ? 'Муж' : g === 'female' ? 'Жен' : 'Любой пол');
 /** Устойчивый номер загрузки: ключ группы меняется при привязке, а имя и время вставки — нет. */
 const sidOf = (g: HsFileGroup) => `${g.fileName}|${g.firstAt}`;
+/** Товар в таблице ЧЗ: файл + цвет + артикул без номера размера («дубленка_жен_3» → «дубленка_жен»). */
+const famKeyOf = (g: HsFileGroup) => [g.fileName, fold(g.color || ''), fold(g.article || '').replace(/[_\-\s]*\d+$/, '')].join('|');
 
 type Scope = 'article' | 'size';
 type Sort = 'name' | 'new';
@@ -278,10 +280,14 @@ export default function ChzFileLinker({
 
   // Ждут привязки: у файла нет категории (загружен «без привязки») или это группа из таблицы ЧЗ — и товаров ещё нет.
   // Плюс всё, с чем работали в этом окне.
-  const workingGroups = useMemo(
-    () => groups.filter((g) => ((hsFileHasNoCategory(g) || hsGroupFromTable(g)) && (g.nmIds.length === 0 || (showLinked && hsGroupFromTable(g)))) || sessionSids.has(sidOf(g))),
-    [groups, sessionSids, showLinked],
-  );
+  // Привязанные размеры того же товара остаются в карточке (зелёными), пока в нём есть хоть один свободный:
+  // иначе кажется, что размер пропал.
+  const workingGroups = useMemo(() => {
+    const pendingFamilies = new Set(groups.filter((g) => hsGroupFromTable(g) && g.nmIds.length === 0).map(famKeyOf));
+    return groups.filter((g) => ((hsFileHasNoCategory(g) || hsGroupFromTable(g))
+      && (g.nmIds.length === 0 || (hsGroupFromTable(g) && (showLinked || pendingFamilies.has(famKeyOf(g))))))
+      || sessionSids.has(sidOf(g)));
+  }, [groups, sessionSids, showLinked]);
 
   // Файл относится к категории, если она записана у кодов или (у файла без категории) названа в имени.
   const stemsByCategory = useMemo(() => new Map(categories.map((c) => [c, categoryNameStems(c)])), [categories]);
@@ -542,7 +548,7 @@ export default function ChzFileLinker({
   const families = useMemo(() => {
     const map = new Map<string, { key: string; fileName: string; category: string; color: string; gender: string | null; groups: HsFileGroup[] }>();
     visibleFiles.filter(hsGroupFromTable).forEach((g) => {
-      const key = [g.fileName, fold(g.category || ''), fold(g.color || '')].join('|');
+      const key = famKeyOf(g);
       const fam = map.get(key) || { key, fileName: g.fileName, category: g.category || '', color: g.color || '', gender: g.gender, groups: [] };
       fam.groups.push(g);
       map.set(key, fam);
@@ -554,7 +560,12 @@ export default function ChzFileLinker({
       const num = parseFloat(n);
       return Number.isFinite(num) ? 100 + num : 1000;
     };
-    map.forEach((fam) => fam.groups.sort((a, b) => rank(a.size) - rank(b.size)));
+    map.forEach((fam) => {
+      fam.groups.sort((a, b) => rank(a.size) - rank(b.size));
+      // Название категории — из свободной группы: у уже привязанных оно могло замениться категорией товара.
+      const open = fam.groups.find((g) => g.nmIds.length === 0 && g.category);
+      if (open?.category) fam.category = open.category;
+    });
     return Array.from(map.values());
   }, [visibleFiles]);
   const plainFiles = useMemo(() => visibleFiles.filter((g) => !hsGroupFromTable(g)), [visibleFiles]);
