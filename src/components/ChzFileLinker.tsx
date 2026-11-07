@@ -192,6 +192,8 @@ export default function ChzFileLinker({
   const [codesFilter, setCodesFilter] = useState<'all' | 'with' | 'without'>('all');
   const [limit, setLimit] = useState(PRODUCT_PAGE);
   const [picked, setPicked] = useState<HsLinkProduct[]>([]);
+  // Показывать уже привязанные группы (обычно скрыты): чтобы проверить, отвязать или перепривязать.
+  const [showLinked, setShowLinked] = useState(false);
   // Размеры, отмеченные на выбранных товарах: nmId → размеры. Нет записи — товар берёт файлы любого своего размера.
   const [sizeSel, setSizeSel] = useState<Record<number, string[]>>({});
 
@@ -272,8 +274,8 @@ export default function ChzFileLinker({
   // Ждут привязки: у файла нет категории (загружен «без привязки») или это группа из таблицы ЧЗ — и товаров ещё нет.
   // Плюс всё, с чем работали в этом окне.
   const workingGroups = useMemo(
-    () => groups.filter((g) => ((hsFileHasNoCategory(g) || hsGroupFromTable(g)) && g.nmIds.length === 0) || sessionSids.has(sidOf(g))),
-    [groups, sessionSids],
+    () => groups.filter((g) => ((hsFileHasNoCategory(g) || hsGroupFromTable(g)) && (g.nmIds.length === 0 || (showLinked && hsGroupFromTable(g)))) || sessionSids.has(sidOf(g))),
+    [groups, sessionSids, showLinked],
   );
 
   // Файл относится к категории, если она записана у кодов или (у файла без категории) названа в имени.
@@ -380,7 +382,7 @@ export default function ChzFileLinker({
   const suggestions = useMemo(() => {
     const map = new Map<string, { products: HsLinkProduct[]; exact: boolean }>();
     workingGroups.forEach((g) => {
-      if (!hsGroupFromTable(g) || g.nmIds.length > 0) return;
+      if (!hsGroupFromTable(g)) return;
       const article = fold(g.article || '');
       // Товары только той же категории: «куртка» подсказывает куртки, бомберы и дублёнки, но не костюмы.
       const sameCategory = (p: HsLinkProduct) => allowMismatch || categoryFits(g, p);
@@ -474,6 +476,8 @@ export default function ChzFileLinker({
     if (items.length > 1) {
       setNotice({ tone: done === items.length ? 'ok' : 'err', text: `Привязано: ${done} из ${items.length}.${note ? ` ${note}` : ''}` });
     }
+    // Выбор не переносим на следующий файл: иначе следующая привязка молча уйдёт на те же товары.
+    if (done > 0) { setPicked([]); setSizeSel({}); }
   };
 
   const doLink = async (g: HsFileGroup, targets: HsLinkProduct[], silent = false): Promise<boolean> => {
@@ -513,7 +517,7 @@ export default function ChzFileLinker({
   const confidentGroups = useMemo(
     () => visibleFiles.filter((g) => {
       const s = suggestions.get(g.key);
-      return Boolean(s) && (s!.exact || s!.products.length === 1);
+      return g.nmIds.length === 0 && Boolean(s) && (s!.exact || s!.products.length === 1);
     }),
     [visibleFiles, suggestions],
   );
@@ -566,7 +570,7 @@ export default function ChzFileLinker({
     setNotice(null);
     const skipped: string[] = [];
     const items: LinkPlan['items'] = [];
-    for (const g of groups.filter((x) => x.nmIds.length === 0)) {
+    for (const g of groups) {
       const pool = source === 'picked' ? picked : (suggestions.get(g.key)?.products || []);
       const targets = pool.filter((p) => (source === 'picked' ? fitsProduct(p, g.size) : hasSize(p, g.size)));
       if (targets.length === 0) { skipped.push(g.size || '—'); continue; }
@@ -595,6 +599,50 @@ export default function ChzFileLinker({
     } finally {
       setBusyKey('');
     }
+  };
+
+  // Файлы, уже привязанные к выбранным товарам: видно, что к ним привязано, и можно отвязать.
+  const linkedToPicked = useMemo(
+    () => (picked.length === 0 ? [] : groups.filter((g) => g.nmIds.some((id) => pickedNmIds.has(id)))),
+    [groups, picked.length, pickedNmIds],
+  );
+
+  /** Отвязать группу от выбранных товаров. Привязки к другим товарам остаются; если других нет — файл снова ждёт привязки. */
+  const unlinkFromPicked = async (g: HsFileGroup, silent = false): Promise<boolean> => {
+    if (busyKey) return false;
+    setBusyKey(g.key);
+    if (!silent) setNotice(null);
+    try {
+      const remaining = g.nmIds.filter((id) => !pickedNmIds.has(id));
+      const updated = remaining.length === 0
+        ? await unlinkHsFile(supplierId, g)
+        : await linkHsFile(supplierId, g, remaining, g.size);
+      if (updated === 0) throw new Error('файл уже изменён — обновляю список');
+      setSessionSids((prev) => new Set(prev).add(sidOf(g)));
+      patchGroup(g.key, { nmIds: remaining });
+      if (!silent) {
+        setNotice({ tone: 'ok', text: remaining.length === 0 ? `Файл отвязан и снова ждёт привязки (${updated} шт)` : `Отвязано от выбранных, остальные привязки сохранены (${updated} шт)` });
+      }
+      onChanged?.();
+      return true;
+    } catch (e: any) {
+      setNotice({ tone: 'err', text: `Не удалось отвязать: ${e?.message || 'ошибка'}` });
+      void reloadGroups();
+      return false;
+    } finally {
+      setBusyKey('');
+    }
+  };
+
+  const unlinkAllFromPicked = async () => {
+    if (busyKey || linkedToPicked.length === 0) return;
+    if (!window.confirm(`Отвязать ${linkedToPicked.length} групп от выбранных товаров? Файлы снова появятся в списке для привязки.`)) return;
+    const todo = [...linkedToPicked];
+    let done = 0;
+    for (const g of todo) {
+      if (await unlinkFromPicked(g, true)) done += 1;
+    }
+    setNotice({ tone: done === todo.length ? 'ok' : 'err', text: `Отвязано групп: ${done} из ${todo.length}. Файлы снова ждут привязки.` });
   };
 
   // Загрузка: после неё подтягиваем список и оставляем на виду всё, что появилось.
@@ -823,6 +871,44 @@ export default function ChzFileLinker({
                       ))}
                     </div>
                     <p className="text-xs text-slate-500">Обычный файл подойдёт: <b className="text-slate-700">{scopeText}</b>. У групп из таблицы ЧЗ размер берётся из самой таблицы.</p>
+                    {linkedToPicked.length > 0 && (
+                      <div className="rounded-xl bg-white p-2.5 ring-1 ring-slate-200">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-semibold text-slate-700">
+                            Уже привязано к выбранным: {linkedToPicked.length} гр., {linkedToPicked.reduce((n, g) => n + g.codes, 0)} шт
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => void unlinkAllFromPicked()}
+                            disabled={Boolean(busyKey)}
+                            className="inline-flex !min-h-0 items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-rose-700 ring-1 ring-rose-200 transition-colors hover:bg-rose-50 disabled:opacity-40"
+                          >
+                            <Link2Off className="h-3 w-3" /> Отвязать все
+                          </button>
+                        </div>
+                        <div className="mt-1.5 max-h-40 space-y-1 overflow-y-auto">
+                          {linkedToPicked.map((g) => (
+                            <div key={g.key} className="flex items-center gap-2 rounded-lg bg-slate-50 px-2 py-1 text-xs">
+                              <span className="min-w-0 flex-1">
+                                <span className="block truncate font-medium text-slate-800">
+                                  {hsGroupFromTable(g) ? `${g.category} · ${g.color || '—'} · ${g.size || '—'}` : `${g.fileName}${g.size ? ` · ${g.size}` : ''}`}
+                                </span>
+                                <span className="block truncate text-[11px] text-slate-500">{linkedLabel(g)}</span>
+                              </span>
+                              <span className="shrink-0 tabular-nums text-indigo-700">{g.codes} шт</span>
+                              <button
+                                type="button"
+                                onClick={() => void unlinkFromPicked(g)}
+                                disabled={Boolean(busyKey)}
+                                className="inline-flex !min-h-0 shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-slate-600 ring-1 ring-slate-200 hover:bg-white disabled:opacity-40"
+                              >
+                                <Link2Off className="h-3 w-3" /> Отвязать
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </>
                 ) : (
                   <p className="text-sm text-slate-500">Отметьте товары слева (можно несколько) и нажмите «Привязать» у нужного файла, либо возьмите подсказку прямо в группе.</p>
@@ -846,6 +932,15 @@ export default function ChzFileLinker({
                     className="h-4 w-4 rounded border-slate-300 text-indigo-600"
                   />
                   Расширенный режим (подсказки и кнопки у каждого размера)
+                </label>
+                <label className="flex cursor-pointer select-none items-center gap-2 text-xs text-slate-600" title="Показать группы, которые уже привязаны к товарам, чтобы проверить их, отвязать или привязать заново">
+                  <input
+                    type="checkbox"
+                    checked={showLinked}
+                    onChange={(e) => setShowLinked(e.target.checked)}
+                    className="h-4 w-4 rounded border-slate-300 text-indigo-600"
+                  />
+                  Показать уже привязанные (проверить, отвязать, привязать заново)
                 </label>
                 <label className="flex cursor-pointer select-none items-center gap-2 text-xs text-slate-600" title="Подсказки и привязка будут показывать товары любых категорий; перед привязкой — вопрос">
                   <input
@@ -934,7 +1029,7 @@ export default function ChzFileLinker({
                           <div className="mt-2 flex flex-wrap gap-1.5">
                             <button
                               type="button"
-                              onClick={() => linkFamilyBySize(fam.groups, 'picked')}
+                              onClick={() => linkFamilyBySize(open, 'picked')}
                               disabled={picked.length === 0 || pickedFit === 0 || Boolean(busyKey)}
                               title={picked.length === 0 ? 'Выберите товары слева' : 'Каждый размер получит те из выбранных товаров, где такой размер есть'}
                               className="inline-flex !min-h-0 items-center gap-1 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-indigo-700 disabled:opacity-40"
@@ -943,7 +1038,7 @@ export default function ChzFileLinker({
                             </button>
                             <button
                               type="button"
-                              onClick={() => linkFamilyBySize(fam.groups, 'hints')}
+                              onClick={() => linkFamilyBySize(open, 'hints')}
                               disabled={hintFit === 0 || Boolean(busyKey)}
                               title="Каждый размер — к товарам того же цвета, где есть этот размер"
                               className="inline-flex !min-h-0 items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-emerald-700 disabled:opacity-40"
@@ -1000,8 +1095,10 @@ export default function ChzFileLinker({
                           const scope = chosen.length > 0 ? chosen : fam.groups;
                           const scopeOpen = scope.filter((g) => g.nmIds.length === 0);
                           const scopeLinked = scope.filter((g) => g.nmIds.length > 0);
-                          const pickedFitScope = scopeOpen.filter((g) => picked.some((p) => fitsProduct(p, g.size))).length;
-                          const hintFitScope = scopeOpen.filter((g) => (suggestions.get(g.key)?.products || []).length > 0).length;
+                          // Выбраны размеры вручную — действуем именно на них (в том числе перепривязываем); иначе — только на свободные.
+                          const actionGroups = chosen.length > 0 ? chosen : scopeOpen;
+                          const pickedFitScope = actionGroups.filter((g) => picked.some((p) => fitsProduct(p, g.size))).length;
+                          const hintFitScope = actionGroups.filter((g) => (suggestions.get(g.key)?.products || []).length > 0).length;
                           const label = chosen.length > 0 ? `выбранные размеры (${chosen.length})` : 'все размеры';
                           return (
                             <>
@@ -1038,7 +1135,7 @@ export default function ChzFileLinker({
                               </div>
                               {(() => {
                                 const seen = new Map<number, HsLinkProduct>();
-                                scopeOpen.forEach((g) => (suggestions.get(g.key)?.products || []).forEach((p) => seen.set(p.nmId, p)));
+                                actionGroups.forEach((g) => (suggestions.get(g.key)?.products || []).forEach((p) => seen.set(p.nmId, p)));
                                 const list = Array.from(seen.values());
                                 if (list.length === 0) return null;
                                 return (
@@ -1048,11 +1145,11 @@ export default function ChzFileLinker({
                                 );
                               })()}
                               <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                                {scopeOpen.length > 0 && (
+                                {actionGroups.length > 0 && (
                                   <>
                                     <button
                                       type="button"
-                                      onClick={() => linkFamilyBySize(scopeOpen, 'picked')}
+                                      onClick={() => linkFamilyBySize(actionGroups, 'picked')}
                                       disabled={picked.length === 0 || pickedFitScope === 0 || Boolean(busyKey)}
                                       title={picked.length === 0 ? 'Выберите товары слева' : 'Каждый размер получит те из выбранных товаров, где такой размер есть'}
                                       className="inline-flex !min-h-0 items-center gap-1 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-indigo-700 disabled:opacity-40"
@@ -1061,7 +1158,7 @@ export default function ChzFileLinker({
                                     </button>
                                     <button
                                       type="button"
-                                      onClick={() => linkFamilyBySize(scopeOpen, 'hints')}
+                                      onClick={() => linkFamilyBySize(actionGroups, 'hints')}
                                       disabled={hintFitScope === 0 || Boolean(busyKey)}
                                       title="Каждый размер — к товарам той же категории и цвета, где есть этот размер"
                                       className="inline-flex !min-h-0 items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-emerald-700 disabled:opacity-40"
