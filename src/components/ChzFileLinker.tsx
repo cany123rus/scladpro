@@ -451,6 +451,8 @@ export default function ChzFileLinker({
   type LinkPlan = { items: Array<[HsFileGroup, HsLinkProduct[]]>; note?: string; /** Добавить товары к уже привязанным, а не заменить их. */ append?: boolean };
   // Окно «что к чему привяжется»: любая привязка сначала показывает его и ждёт подтверждения.
   const [plan, setPlan] = useState<LinkPlan | null>(null);
+  // В окне подтверждения: заменить прежние привязки группы вместо того, чтобы дописать новый товар.
+  const [planReplace, setPlanReplace] = useState(false);
 
   const mismatchOf = (items: LinkPlan['items']): string[] => {
     const bad = new Set<string>();
@@ -469,6 +471,7 @@ export default function ChzFileLinker({
       return;
     }
     setNotice(null);
+    setPlanReplace(false);
     setPlan({ items, note, append });
   };
 
@@ -488,7 +491,9 @@ export default function ChzFileLinker({
     setPlan(null);
     let done = 0;
     for (const [g, targets] of items) {
-      if (await doLink(g, targets, items.length > 1, append)) done += 1;
+      // Группа уже привязана к другим товарам — по умолчанию они сохраняются, новый товар дописывается.
+      const keepOld = Boolean(append) || (!planReplace && g.nmIds.length > 0);
+      if (await doLink(g, targets, items.length > 1, keepOld)) done += 1;
     }
     if (items.length > 1) {
       setNotice({ tone: done === items.length ? 'ok' : 'err', text: `Привязано: ${done} из ${items.length}.${note ? ` ${note}` : ''}` });
@@ -1499,8 +1504,22 @@ export default function ChzFileLinker({
                     <b>Категории не совпадают.</b> Марка чужой категории уедет с товаром: проверьте красные строки.
                   </div>
                 )}
+                {!plan.append && plan.items.some(([g]) => g.nmIds.length > 0) && (
+                  <label className="flex cursor-pointer select-none items-start gap-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={planReplace}
+                      onChange={(e) => setPlanReplace(e.target.checked)}
+                      className="mt-0.5 h-4 w-4 rounded border-slate-300 text-rose-600"
+                    />
+                    <span>
+                      <b>Заменить прежние привязки.</b> Сейчас часть групп уже привязана к другим товарам: по умолчанию они сохраняются, а выбранные товары добавляются. Поставьте галочку, чтобы отвязать их от прежних товаров.
+                    </span>
+                  </label>
+                )}
                 {plan.items.map(([g, targets]) => {
                   const fromTable = hsGroupFromTable(g);
+                  const adding = Boolean(plan.append) || (!planReplace && g.nmIds.length > 0);
                   const sizeText = fromTable ? (g.size || 'любой размер') : (sizeNeeded ? (size || '—') : 'все размеры');
                   const rowBad = targets.some((p) => !categoryFits(g, p));
                   return (
@@ -1512,11 +1531,13 @@ export default function ChzFileLinker({
                         <span className="rounded bg-white px-1.5 py-0.5 text-xs font-bold text-slate-900 ring-1 ring-slate-300">размер {sizeText}</span>
                         <span className="text-xs font-medium tabular-nums text-indigo-700">{g.codes} шт</span>
                       </div>
-                      {plan.append && (
-                        <div className="mt-1 text-[11px] text-slate-500">Уже привязан: {linkedLabel(g)} — они сохранятся, добавятся новые:</div>
+                      {g.nmIds.length > 0 && (
+                        <div className={`mt-1 text-[11px] ${adding ? 'text-slate-500' : 'text-rose-700'}`}>
+                          Уже привязан: {linkedLabel(g)} — {adding ? 'сохранится, добавятся новые:' : 'будет заменён на:'}
+                        </div>
                       )}
                       <div className="mt-1.5 flex flex-wrap items-center gap-1 text-xs">
-                        <span className="text-slate-500">{plan.append ? '+' : '→'}</span>
+                        <span className="text-slate-500">{adding && g.nmIds.length > 0 ? '+' : '→'}</span>
                         {targets.map((p) => {
                           const fits = categoryFits(g, p);
                           return (
