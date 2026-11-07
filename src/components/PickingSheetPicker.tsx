@@ -102,7 +102,7 @@ export function PickingSheetPicker(props: {
 
   const [supplierId, setSupplierId] = useState(initialSupplierId || '');
   const [day, setDay] = useState(initialDate);
-  const [allDays, setAllDays] = useState(false);
+  const [onlyDay, setOnlyDay] = useState(false);
   const [lists, setLists] = useState<PickingList[]>([]);
   const [loading, setLoading] = useState(false);
   const [listId, setListId] = useState('');
@@ -160,8 +160,8 @@ export function PickingSheetPicker(props: {
   }, [supplierId]);
 
   const visibleLists = useMemo(
-    () => lists.filter((l) => allDays || ymd(l.uploadedAt) === day).sort((a, b) => b.uploadedAt.localeCompare(a.uploadedAt)),
-    [lists, day, allDays],
+    () => lists.filter((l) => !onlyDay || ymd(l.uploadedAt) === day).sort((a, b) => b.uploadedAt.localeCompare(a.uploadedAt)),
+    [lists, day, onlyDay],
   );
 
   const list = visibleLists.find((l) => l.id === listId) || null;
@@ -252,10 +252,10 @@ export function PickingSheetPicker(props: {
               <option value="">Поставщик…</option>
               {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
-            <input type="date" value={day} onChange={(e) => { setDay(e.target.value); setListId(''); }} disabled={allDays} className="oc-select min-h-[48px] text-base disabled:opacity-50" />
+            <input type="date" value={day} onChange={(e) => { setDay(e.target.value); setListId(''); }} disabled={!onlyDay} className="oc-select min-h-[48px] text-base disabled:opacity-40" />
           </div>
           <label className="flex min-h-[44px] items-center gap-3 text-sm text-slate-600">
-            <input type="checkbox" className="h-5 w-5" checked={allDays} onChange={(e) => { setAllDays(e.target.checked); setListId(''); }} /> Показать листы за все дни
+            <input type="checkbox" className="h-5 w-5" checked={onlyDay} onChange={(e) => { setOnlyDay(e.target.checked); setListId(''); }} /> Только листы, загруженные в выбранный день
           </label>
 
           {!supplierId ? (
@@ -263,7 +263,7 @@ export function PickingSheetPicker(props: {
           ) : loading ? (
             <div className="py-6 text-center text-sm text-slate-400">Загружаем листы…</div>
           ) : visibleLists.length === 0 ? (
-            <div className="py-6 text-center text-sm text-slate-400">Листов за этот день нет{lists.length > 0 ? ' — попробуйте «за все дни»' : ''}</div>
+            <div className="py-6 text-center text-sm text-slate-400">{lists.length === 0 ? 'У этого поставщика нет листов подбора' : 'Листов за этот день нет — снимите галочку выше'}</div>
           ) : (
             <div className="space-y-2">
               <div className="text-xs font-medium text-slate-500">Лист</div>
