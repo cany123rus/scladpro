@@ -9,7 +9,7 @@ import { confirmDialog } from '../../components/ConfirmDialog';
 import { SearchSelect } from '../../components/ui/SearchSelect';
 import { useState } from 'react';
 import { ClipboardList } from 'lucide-react';
-import { PickingSheetPicker } from '../../components/PickingSheetPicker';
+import { PickingSheetPicker, commitPickingRecorded } from '../../components/PickingSheetPicker';
 
 export function Tab_completed(props: any) {
   const [pickSheetOpen, setPickSheetOpen] = useState(false);
@@ -1039,7 +1039,7 @@ export function Tab_completed(props: any) {
                                             <button
                                               type="button"
                                               onClick={() => setCwFormItems(prev => prev.length > 1 ? prev.filter((_, i) => i !== idx) : prev)}
-                                              className="px-3 py-2 border border-red-200 text-red-600 rounded-lg hover:bg-red-50"
+                                              className="flex h-11 w-11 items-center justify-center border border-red-200 text-red-600 rounded-xl hover:bg-red-50 active:bg-red-100"
                                               disabled={cwFormItems.length === 1}
                                               title="Удалить строку"
                                             >
@@ -1053,7 +1053,7 @@ export function Tab_completed(props: any) {
                                       type="button"
                                       onClick={() => setCwFormItems(prev => [...prev, { supplier_id: '', work_rate_id: '', quantity: '', time_hours: '', time_minutes: '', packaging_used: '', packaging: '' }])}
 
-                                      className="px-3 py-2 text-sm rounded-lg border border-indigo-300 text-indigo-700 hover:bg-indigo-50"
+                                      className="min-h-[48px] px-4 py-2 text-sm rounded-xl border border-indigo-300 text-indigo-700 hover:bg-indigo-50 active:bg-indigo-100"
                                     >
                                       + Добавить товар
                                     </button>
@@ -1061,7 +1061,7 @@ export function Tab_completed(props: any) {
                                     <button
                                       type="button"
                                       onClick={() => setPickSheetOpen(true)}
-                                      className="ml-2 inline-flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg border border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+                                      className="ml-2 inline-flex min-h-[48px] items-center gap-1.5 px-4 py-2 text-sm rounded-xl border border-emerald-300 bg-emerald-50/50 font-semibold text-emerald-700 hover:bg-emerald-50 active:bg-emerald-100"
                                     >
                                       <ClipboardList className="h-4 w-4" /> Добавить лист
                                     </button>
@@ -1071,13 +1071,14 @@ export function Tab_completed(props: any) {
                                         suppliers={suppliers}
                                         workRates={cwWorkRates}
                                         initialDate={cwSelectedDate.toLocaleDateString('en-CA')}
+                                        pending={cwFormItems.filter((x: any) => x.pick).map((x: any) => ({ key: x.pick.key, category: x.pick.category, quantity: Number(x.quantity || 0) }))}
                                         initialSupplierId={cwFormItems.find((x: any) => x.supplier_id)?.supplier_id || ''}
                                         onClose={() => setPickSheetOpen(false)}
                                         onRateCreated={(rate) => setCwWorkRates((prev: any[]) => [...prev, rate])}
                                         showToast={showToast}
                                         onAdd={(rows) => setCwFormItems((prev: any[]) => {
                                           const filled = prev.filter((x) => x.supplier_id || x.work_rate_id || x.quantity);
-                                          return [...filled, ...rows.map((r) => ({ supplier_id: r.supplier_id, work_rate_id: r.work_rate_id, quantity: r.quantity, time_hours: '', time_minutes: '', packaging_used: 'no', packaging: '' }))];
+                                          return [...filled, ...rows.map((r) => ({ supplier_id: r.supplier_id, work_rate_id: r.work_rate_id, quantity: r.quantity, time_hours: '', time_minutes: '', packaging_used: 'no', packaging: '', pick: r.pick }))];
                                         })}
                                       />
                                     )}
@@ -1186,6 +1187,9 @@ export function Tab_completed(props: any) {
                                         showToast(`Создано: ${createdCount}, обновлено: ${updatedCount}`, 'success');
                                       }
 
+                                      if (!editingWorkLogId) {
+                                        try { await commitPickingRecorded(cwFormItems.map((x: any) => ({ pick: x.pick, quantity: parseInt(x.quantity || '0') || 0 }))); } catch {}
+                                      }
                                       setCompletedWorkStep('CALENDAR');
                                       setCwForm({ quantity: '', work_rate_id: '', packaging: '', packaging_used: 'no', supplier_id: '' });
                                       setCwFormItems([{ supplier_id: '', work_rate_id: '', quantity: '', time_hours: '', time_minutes: '', packaging_used: '', packaging: '' }]);
@@ -1193,7 +1197,7 @@ export function Tab_completed(props: any) {
                                       setCwWorkLogs(data || []);
                                     }}
                                     disabled={!hasAssemblyButtonAccess('cw_form_save')}
-                                    className={`w-full py-3 font-medium ${editingWorkLogId ? 'btn-primary' : 'btn-success'} ${!hasAssemblyButtonAccess('cw_form_save') ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                    className={`w-full min-h-[52px] py-3 text-base font-medium ${editingWorkLogId ? 'btn-primary' : 'btn-success'} ${!hasAssemblyButtonAccess('cw_form_save') ? 'opacity-50 cursor-not-allowed' : ''}`}
                                   >
                                     {editingWorkLogId ? 'Обновить' : 'Сохранить'}
                                   </button>
