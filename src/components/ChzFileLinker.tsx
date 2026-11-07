@@ -664,9 +664,12 @@ export default function ChzFileLinker({
   // Уже привязанные к другим товарам группы, подходящие выбранным: та же категория, цвет и размер.
   const suitableLinked = useMemo(() => {
     if (!showSuitable || picked.length === 0) return [];
+    // Цвет — мягкий признак: в карточке он бывает указан неверно («белый», а по факту чёрный).
+    // Такие группы не прячем, а ставим ниже и помечаем.
     return groups.filter((g) => g.nmIds.length > 0
       && !picked.every((p) => g.nmIds.includes(p.nmId))
-      && picked.some((p) => categoryFits(g, p) && colorMatches(g, p) && fitsProduct(p, g.size)));
+      && picked.some((p) => categoryFits(g, p) && fitsProduct(p, g.size)))
+      .sort((a, b) => Number(picked.some((p) => colorMatches(b, p))) - Number(picked.some((p) => colorMatches(a, p))));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showSuitable, groups, picked, sizeSel, categoryFits]);
 
@@ -680,7 +683,7 @@ export default function ChzFileLinker({
   const addToLinked = (groupsToAdd: HsFileGroup[]) => {
     const items: LinkPlan['items'] = [];
     groupsToAdd.forEach((g) => {
-      const targets = picked.filter((p) => categoryFits(g, p) && colorMatches(g, p) && fitsProduct(p, g.size) && !g.nmIds.includes(p.nmId));
+      const targets = picked.filter((p) => categoryFits(g, p) && fitsProduct(p, g.size) && !g.nmIds.includes(p.nmId));
       if (targets.length > 0) items.push([g, targets]);
     });
     if (items.length === 0) { setNotice({ tone: 'err', text: 'Нечего добавлять: выбранные товары уже привязаны или не подходят.' }); return; }
@@ -1016,6 +1019,9 @@ export default function ChzFileLinker({
                                       ].filter(Boolean).join(' · ')}
                                     </span>
                                     <span className="block text-[11px] text-emerald-700">уже привязан: {linkedLabel(g)}</span>
+                                    {!picked.some((p) => colorMatches(g, p)) && (
+                                      <span className="block text-[11px] text-amber-700">цвет файла «{g.color}» не совпадает с цветом в карточке: {picked.map((p) => p.color || '—').join(', ')}</span>
+                                    )}
                                   </span>
                                   <span className="shrink-0 tabular-nums text-indigo-700">{g.codes} шт</span>
                                   <button
@@ -1516,10 +1522,10 @@ export default function ChzFileLinker({
                           return (
                             <span
                               key={p.nmId}
-                              className={`rounded px-1.5 py-0.5 font-medium ring-1 ${!fits ? 'bg-rose-100 text-rose-800 ring-rose-300' : hasSize(p, g.size) ? 'bg-emerald-50 text-emerald-800 ring-emerald-200' : 'bg-amber-50 text-amber-800 ring-amber-300'}`}
+                              className={`rounded px-1.5 py-0.5 font-medium ring-1 ${!fits ? 'bg-rose-100 text-rose-800 ring-rose-300' : (hasSize(p, g.size) && colorMatches(g, p)) ? 'bg-emerald-50 text-emerald-800 ring-emerald-200' : 'bg-amber-50 text-amber-800 ring-amber-300'}`}
                               title={p.title}
                             >
-                              {p.vendorCode || p.nmId} · {sizeText}{fits ? '' : ` · ${p.subject}`}{hasSize(p, g.size) ? '' : ' · размера нет в карточке'}
+                              {p.vendorCode || p.nmId} · {sizeText}{fits ? '' : ` · ${p.subject}`}{hasSize(p, g.size) ? '' : ' · размера нет в карточке'}{colorMatches(g, p) ? '' : ` · цвет в карточке: ${p.color}`}
                             </span>
                           );
                         })}
