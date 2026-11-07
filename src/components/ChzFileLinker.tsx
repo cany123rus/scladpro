@@ -580,6 +580,18 @@ export default function ChzFileLinker({
   };
 
   /**
+   * Товары для привязки группы вручную. Сначала те из выбранных, у которых есть этот размер.
+   * Если ни у одного нет (размеры карточки записаны иначе, например числами), привязка всё равно возможна:
+   * берём выбранные товары без отметок размера, а окно подтверждения покажет, что размера в карточке нет.
+   * Товар с отмеченными размерами, среди которых этого нет, исключён намеренно.
+   */
+  const targetsForPicked = (g: HsFileGroup): HsLinkProduct[] => {
+    const fit = picked.filter((p) => fitsProduct(p, g.size));
+    if (fit.length > 0) return fit;
+    return picked.filter((p) => !(sizeSel[p.nmId]?.length));
+  };
+
+  /**
    * Привязка по размерам: каждый размер получает только те из выбранных (или подсказанных) товаров,
    * у которых этот размер есть. Размер, которому ничего не подошло, остаётся без привязки.
    */
@@ -590,7 +602,7 @@ export default function ChzFileLinker({
     const items: LinkPlan['items'] = [];
     for (const g of groups) {
       const pool = source === 'picked' ? picked : (suggestions.get(g.key)?.products || []);
-      const targets = pool.filter((p) => (source === 'picked' ? fitsProduct(p, g.size) : hasSize(p, g.size)));
+      const targets = source === 'picked' ? targetsForPicked(g) : pool.filter((p) => hasSize(p, g.size));
       if (targets.length === 0) { skipped.push(g.size || '—'); continue; }
       items.push([g, targets]);
     }
@@ -1158,7 +1170,7 @@ export default function ChzFileLinker({
                   {families.map((fam) => {
                     const total = fam.groups.reduce((n, g) => n + g.codes, 0);
                     const open = fam.groups.filter((g) => g.nmIds.length === 0);
-                    const pickedFit = open.filter((g) => picked.some((p) => fitsProduct(p, g.size))).length;
+                    const pickedFit = open.filter((g) => targetsForPicked(g).length > 0).length;
                     const hintFit = open.filter((g) => (suggestions.get(g.key)?.products || []).length > 0).length;
                     return (
                       <div key={fam.key} className="rounded-xl border border-slate-200 bg-white p-3">
@@ -1204,7 +1216,7 @@ export default function ChzFileLinker({
                           {fam.groups.map((g) => {
                             const linked = g.nmIds.length > 0;
                             const hint = suggestions.get(g.key);
-                            const fits = picked.filter((p) => fitsProduct(p, g.size));
+                            const fits = targetsForPicked(g);
                             const busy = busyKey === g.key;
                             return (
                               <div key={g.key} className={`flex flex-wrap items-center gap-2 px-2.5 py-2 ${linked ? 'bg-emerald-50' : ''}`}>
@@ -1226,7 +1238,7 @@ export default function ChzFileLinker({
                                     </button>
                                   )}
                                   {!linked && (
-                                    <button type="button" onClick={() => linkTo(g, fits)} disabled={fits.length === 0 || Boolean(busyKey)} title={picked.length === 0 ? 'Выберите товары слева' : fits.length === 0 ? 'Среди выбранных нет товара с этим размером' : 'Привязать к выбранным с этим размером'} className="inline-flex !min-h-0 items-center gap-1 rounded-md bg-indigo-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-indigo-700 disabled:opacity-40">
+                                    <button type="button" onClick={() => linkTo(g, fits)} disabled={fits.length === 0 || Boolean(busyKey)} title={picked.length === 0 ? 'Выберите товары слева' : fits.length === 0 ? 'Выбранные товары исключены отметками размеров' : 'Привязать к выбранным товарам (откроется окно проверки)'} className="inline-flex !min-h-0 items-center gap-1 rounded-md bg-indigo-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-indigo-700 disabled:opacity-40">
                                       <Link2 className="h-3 w-3" /> {fits.length > 0 ? `К выбранным (${fits.length})` : 'К выбранным'}
                                     </button>
                                   )}
@@ -1250,7 +1262,7 @@ export default function ChzFileLinker({
                           const scopeLinked = scope.filter((g) => g.nmIds.length > 0);
                           // Выбраны размеры вручную — действуем именно на них (в том числе перепривязываем); иначе — только на свободные.
                           const actionGroups = chosen.length > 0 ? chosen : scopeOpen;
-                          const pickedFitScope = actionGroups.filter((g) => picked.some((p) => fitsProduct(p, g.size))).length;
+                          const pickedFitScope = actionGroups.filter((g) => targetsForPicked(g).length > 0).length;
                           const hintFitScope = actionGroups.filter((g) => (suggestions.get(g.key)?.products || []).length > 0).length;
                           const label = chosen.length > 0 ? `выбранные размеры (${chosen.length})` : 'все размеры';
                           return (
@@ -1486,10 +1498,10 @@ export default function ChzFileLinker({
                           return (
                             <span
                               key={p.nmId}
-                              className={`rounded px-1.5 py-0.5 font-medium ring-1 ${fits ? 'bg-emerald-50 text-emerald-800 ring-emerald-200' : 'bg-rose-100 text-rose-800 ring-rose-300'}`}
+                              className={`rounded px-1.5 py-0.5 font-medium ring-1 ${!fits ? 'bg-rose-100 text-rose-800 ring-rose-300' : hasSize(p, g.size) ? 'bg-emerald-50 text-emerald-800 ring-emerald-200' : 'bg-amber-50 text-amber-800 ring-amber-300'}`}
                               title={p.title}
                             >
-                              {p.vendorCode || p.nmId} · {sizeText}{fits ? '' : ` · ${p.subject}`}
+                              {p.vendorCode || p.nmId} · {sizeText}{fits ? '' : ` · ${p.subject}`}{hasSize(p, g.size) ? '' : ' · размера нет в карточке'}
                             </span>
                           );
                         })}
