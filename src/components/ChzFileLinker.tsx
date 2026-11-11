@@ -200,8 +200,6 @@ export default function ChzFileLinker({
   const [unlinkSel, setUnlinkSel] = useState<Set<string>>(() => new Set());
   // «Подходящие уже привязанные»: группы, привязанные к другим товарам, но подходящие выбранному — к ним можно добавить ещё товар.
   const [showSuitable, setShowSuitable] = useState(false);
-  // Уже привязанные группы можно брать и не по размеру (нужного размера в файлах нет).
-  const [anySize, setAnySize] = useState(false);
   const [addSel, setAddSel] = useState<Set<string>>(() => new Set());
   // Размеры, отмеченные на выбранных товарах: nmId → размеры. Нет записи — товар берёт файлы любого своего размера.
   const [sizeSel, setSizeSel] = useState<Record<number, string[]>>({});
@@ -450,11 +448,13 @@ export default function ChzFileLinker({
     selectedCategories.find((c) => normalizeHsCategoryName(c) === normalizeHsCategoryName(p.subject)) || p.subject || null;
 
   /** Привязать группу к товарам. Группа из таблицы ЧЗ сохраняет свой размер из файла, у остальных размер задаёт выбор справа. */
-  type LinkPlan = { items: Array<[HsFileGroup, HsLinkProduct[]]>; note?: string; /** Добавить товары к уже привязанным, а не заменить их. */ append?: boolean; /** Ключи групп, у которых снимаем размер: коды станут подходить любому размеру товара. */ dropSize?: Set<string> };
+  type LinkPlan = { items: Array<[HsFileGroup, HsLinkProduct[]]>; note?: string; /** Добавить товары к уже привязанным, а не заменить их. */ append?: boolean };
   // Окно «что к чему привяжется»: любая привязка сначала показывает его и ждёт подтверждения.
   const [plan, setPlan] = useState<LinkPlan | null>(null);
   // В окне подтверждения: заменить прежние привязки группы вместо того, чтобы дописать новый товар.
   const [planReplace, setPlanReplace] = useState(false);
+  // В окне подтверждения: использовать коды не по размеру — размер у групп снимается, коды подходят любому размеру товара.
+  const [planAnySize, setPlanAnySize] = useState(false);
 
   const mismatchOf = (items: LinkPlan['items']): string[] => {
     const bad = new Set<string>();
@@ -465,7 +465,7 @@ export default function ChzFileLinker({
   };
 
   /** Показать окно подтверждения. Товары чужой категории — только при включённой галочке. */
-  const askPlan = (items: LinkPlan['items'], note?: string, append?: boolean, dropSize?: Set<string>) => {
+  const askPlan = (items: LinkPlan['items'], note?: string, append?: boolean, anySizeFrom?: boolean) => {
     if (items.length === 0 || busyKey) return;
     const bad = mismatchOf(items);
     if (bad.length > 0 && !allowMismatch) {
@@ -474,7 +474,8 @@ export default function ChzFileLinker({
     }
     setNotice(null);
     setPlanReplace(false);
-    setPlan({ items, note, append, dropSize });
+    setPlanAnySize(Boolean(anySizeFrom));
+    setPlan({ items, note, append });
   };
 
   /** Привязать одну группу к товарам (через окно подтверждения). */
@@ -489,13 +490,13 @@ export default function ChzFileLinker({
   /** Подтверждено: выполняем привязку по плану. */
   const runPlan = async () => {
     if (!plan || busyKey) return;
-    const { items, note, append, dropSize } = plan;
+    const { items, note, append } = plan;
     setPlan(null);
     let done = 0;
     for (const [g, targets] of items) {
       // Группа уже привязана к другим товарам — по умолчанию они сохраняются, новый товар дописывается.
       const keepOld = Boolean(append) || (!planReplace && g.nmIds.length > 0);
-      if (await doLink(g, targets, items.length > 1, keepOld, Boolean(dropSize?.has(g.key)))) done += 1;
+      if (await doLink(g, targets, items.length > 1, keepOld, planAnySize)) done += 1;
     }
     if (items.length > 1) {
       setNotice({ tone: done === items.length ? 'ok' : 'err', text: `Привязано: ${done} из ${items.length}.${note ? ` ${note}` : ''}` });
@@ -675,10 +676,10 @@ export default function ChzFileLinker({
     // Такие группы не прячем, а ставим ниже и помечаем.
     return groups.filter((g) => g.nmIds.length > 0
       && !picked.every((p) => g.nmIds.includes(p.nmId))
-      && picked.some((p) => categoryFits(g, p) && (anySize || fitsProduct(p, g.size))))
+      && picked.some((p) => categoryFits(g, p) && fitsProduct(p, g.size)))
       .sort((a, b) => Number(picked.some((p) => colorMatches(b, p))) - Number(picked.some((p) => colorMatches(a, p))));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showSuitable, anySize, groups, picked, sizeSel, categoryFits]);
+  }, [showSuitable, groups, picked, sizeSel, categoryFits]);
 
   const toggleAddSel = (key: string) => setAddSel((prev) => {
     const next = new Set(prev);
@@ -689,18 +690,13 @@ export default function ChzFileLinker({
   /** Дописать выбранные товары к уже привязанным группам (через окно подтверждения). */
   const addToLinked = (groupsToAdd: HsFileGroup[]) => {
     const items: LinkPlan['items'] = [];
-    const dropSize = new Set<string>();
     groupsToAdd.forEach((g) => {
-      const targets = picked.filter((p) => categoryFits(g, p) && (anySize || fitsProduct(p, g.size)) && !g.nmIds.includes(p.nmId));
-      if (targets.length > 0) {
-        items.push([g, targets]);
-        // Размер группы не совпал с размером товара — снимаем размер: коды подойдут любому размеру товара.
-        if (anySize && g.size && targets.some((p) => !fitsProduct(p, g.size))) dropSize.add(g.key);
-      }
+      const targets = picked.filter((p) => categoryFits(g, p) && fitsProduct(p, g.size) && !g.nmIds.includes(p.nmId));
+      if (targets.length > 0) items.push([g, targets]);
     });
     if (items.length === 0) { setNotice({ tone: 'err', text: 'Нечего добавлять: выбранные товары уже привязаны или не подходят.' }); return; }
     setAddSel(new Set());
-    askPlan(items, undefined, true, dropSize.size > 0 ? dropSize : undefined);
+    askPlan(items, undefined, true);
   };
 
   /** Отвязать группу от выбранных товаров. Привязки к другим товарам остаются; если других нет — файл снова ждёт привязки. */
@@ -728,6 +724,14 @@ export default function ChzFileLinker({
     } finally {
       setBusyKey('');
     }
+  };
+
+  /** Отмеченные привязанные группы — использовать не по размеру: открываем окно подтверждения с включённой галочкой. */
+  const useChecked = () => {
+    const todo = linkedToPicked.filter((g) => unlinkSel.has(g.key));
+    if (todo.length === 0 || busyKey) return;
+    const items: LinkPlan['items'] = todo.map((g) => [g, picked] as [HsFileGroup, HsLinkProduct[]]);
+    askPlan(items, undefined, true, true);
   };
 
   const unlinkChecked = async () => {
@@ -983,10 +987,6 @@ export default function ChzFileLinker({
                       />
                       Показать уже привязанные, подходящие к выбранному (привязать и к нему)
                     </label>
-                    <label className="flex cursor-pointer select-none items-center gap-2 rounded-lg bg-amber-50 px-2 py-1.5 text-xs font-medium text-amber-900 ring-1 ring-amber-200" title="Если нужного размера в файлах нет, можно взять уже привязанные коды другого размера">
-                      <input type="checkbox" checked={anySize} onChange={(e) => { setAnySize(e.target.checked); if (e.target.checked) setShowSuitable(true); }} className="h-4 w-4 rounded border-amber-400 text-amber-600" />
-                      Использовать не по размеру (взять уже привязанные коды любых размеров)
-                    </label>
                     {showSuitable && (
                       <div className="rounded-xl bg-white p-2.5 ring-1 ring-slate-200">
                         {suitableLinked.length === 0 ? (
@@ -1075,6 +1075,15 @@ export default function ChzFileLinker({
                             className="inline-flex !min-h-0 items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-rose-700 ring-1 ring-rose-200 transition-colors hover:bg-rose-50 disabled:opacity-40"
                           >
                             <Link2Off className="h-3 w-3" /> Отвязать выбранные ({linkedToPicked.filter((g) => unlinkSel.has(g.key)).length})
+                          </button>
+                          <button
+                            type="button"
+                            onClick={useChecked}
+                            disabled={Boolean(busyKey) || !linkedToPicked.some((g) => unlinkSel.has(g.key))}
+                            className="inline-flex !min-h-0 items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-amber-800 ring-1 ring-amber-300 transition-colors hover:bg-amber-50 disabled:opacity-40"
+                            title="Отмеченные группы подойдут любому размеру выбранных товаров"
+                          >
+                            <Link2 className="h-3 w-3" /> Использовать не по размеру ({linkedToPicked.filter((g) => unlinkSel.has(g.key)).length})
                           </button>
                         </div>
                         <div className="mt-1.5 max-h-52 space-y-1 overflow-y-auto">
@@ -1528,10 +1537,16 @@ export default function ChzFileLinker({
                     </span>
                   </label>
                 )}
+                <label className={`flex cursor-pointer select-none items-start gap-2 rounded-lg px-2.5 py-2 text-xs ring-1 ${planAnySize ? 'bg-amber-50 text-amber-900 ring-amber-300' : 'bg-slate-50 text-slate-700 ring-slate-200'}`}>
+                  <input type="checkbox" checked={planAnySize} onChange={(e) => setPlanAnySize(e.target.checked)} className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-amber-600" />
+                  <span>
+                    <b>Использовать не по размеру.</b> У этих групп размер снимается: коды подойдут любому размеру выбранных товаров (например, для M, если в файле только S и L). Это относится и к другим товарам, к которым группа уже привязана.
+                  </span>
+                </label>
                 {plan.items.map(([g, targets]) => {
                   const fromTable = hsGroupFromTable(g);
                   const adding = Boolean(plan.append) || (!planReplace && g.nmIds.length > 0);
-                  const dropped = Boolean(plan.dropSize?.has(g.key));
+                  const dropped = planAnySize;
                   const sizeText = dropped ? 'любой (размер снимается)' : fromTable ? (g.size || 'любой размер') : (sizeNeeded ? (size || '—') : 'все размеры');
                   const rowBad = targets.some((p) => !categoryFits(g, p));
                   return (
