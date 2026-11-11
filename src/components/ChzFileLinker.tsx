@@ -983,12 +983,12 @@ export default function ChzFileLinker({
                       />
                       Показать уже привязанные, подходящие к выбранному (привязать и к нему)
                     </label>
+                    <label className="flex cursor-pointer select-none items-center gap-2 rounded-lg bg-amber-50 px-2 py-1.5 text-xs font-medium text-amber-900 ring-1 ring-amber-200" title="Если нужного размера в файлах нет, можно взять уже привязанные коды другого размера">
+                      <input type="checkbox" checked={anySize} onChange={(e) => { setAnySize(e.target.checked); if (e.target.checked) setShowSuitable(true); }} className="h-4 w-4 rounded border-amber-400 text-amber-600" />
+                      Использовать не по размеру (взять уже привязанные коды любых размеров)
+                    </label>
                     {showSuitable && (
                       <div className="rounded-xl bg-white p-2.5 ring-1 ring-slate-200">
-                        <label className="mb-2 flex cursor-pointer select-none items-center gap-2 text-xs text-slate-600" title="Если нужного размера в файлах нет, можно взять уже привязанные коды другого размера">
-                          <input type="checkbox" checked={anySize} onChange={(e) => setAnySize(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-amber-600" />
-                          Использовать не по размеру (показать уже привязанные любых размеров)
-                        </label>
                         {suitableLinked.length === 0 ? (
                           <p className="text-xs text-slate-500">Подходящих групп, привязанных к другим товарам, нет.</p>
                         ) : (
