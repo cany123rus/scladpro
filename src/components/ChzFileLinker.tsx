@@ -200,6 +200,8 @@ export default function ChzFileLinker({
   const [unlinkSel, setUnlinkSel] = useState<Set<string>>(() => new Set());
   // «Подходящие уже привязанные»: группы, привязанные к другим товарам, но подходящие выбранному — к ним можно добавить ещё товар.
   const [showSuitable, setShowSuitable] = useState(false);
+  // Уже привязанные группы можно брать и не по размеру (нужного размера в файлах нет).
+  const [anySize, setAnySize] = useState(false);
   const [addSel, setAddSel] = useState<Set<string>>(() => new Set());
   // Размеры, отмеченные на выбранных товарах: nmId → размеры. Нет записи — товар берёт файлы любого своего размера.
   const [sizeSel, setSizeSel] = useState<Record<number, string[]>>({});
@@ -673,10 +675,10 @@ export default function ChzFileLinker({
     // Такие группы не прячем, а ставим ниже и помечаем.
     return groups.filter((g) => g.nmIds.length > 0
       && !picked.every((p) => g.nmIds.includes(p.nmId))
-      && picked.some((p) => categoryFits(g, p) && fitsProduct(p, g.size)))
+      && picked.some((p) => categoryFits(g, p) && (anySize || fitsProduct(p, g.size))))
       .sort((a, b) => Number(picked.some((p) => colorMatches(b, p))) - Number(picked.some((p) => colorMatches(a, p))));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showSuitable, groups, picked, sizeSel, categoryFits]);
+  }, [showSuitable, anySize, groups, picked, sizeSel, categoryFits]);
 
   const toggleAddSel = (key: string) => setAddSel((prev) => {
     const next = new Set(prev);
@@ -688,7 +690,7 @@ export default function ChzFileLinker({
   const addToLinked = (groupsToAdd: HsFileGroup[]) => {
     const items: LinkPlan['items'] = [];
     groupsToAdd.forEach((g) => {
-      const targets = picked.filter((p) => categoryFits(g, p) && fitsProduct(p, g.size) && !g.nmIds.includes(p.nmId));
+      const targets = picked.filter((p) => categoryFits(g, p) && (anySize || fitsProduct(p, g.size)) && !g.nmIds.includes(p.nmId));
       if (targets.length > 0) items.push([g, targets]);
     });
     if (items.length === 0) { setNotice({ tone: 'err', text: 'Нечего добавлять: выбранные товары уже привязаны или не подходят.' }); return; }
@@ -978,6 +980,10 @@ export default function ChzFileLinker({
                     </label>
                     {showSuitable && (
                       <div className="rounded-xl bg-white p-2.5 ring-1 ring-slate-200">
+                        <label className="mb-2 flex cursor-pointer select-none items-center gap-2 text-xs text-slate-600" title="Если нужного размера в файлах нет, можно взять уже привязанные коды другого размера">
+                          <input type="checkbox" checked={anySize} onChange={(e) => setAnySize(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-amber-600" />
+                          Использовать не по размеру (показать уже привязанные любых размеров)
+                        </label>
                         {suitableLinked.length === 0 ? (
                           <p className="text-xs text-slate-500">Подходящих групп, привязанных к другим товарам, нет.</p>
                         ) : (
