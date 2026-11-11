@@ -450,7 +450,7 @@ export default function ChzFileLinker({
     selectedCategories.find((c) => normalizeHsCategoryName(c) === normalizeHsCategoryName(p.subject)) || p.subject || null;
 
   /** Привязать группу к товарам. Группа из таблицы ЧЗ сохраняет свой размер из файла, у остальных размер задаёт выбор справа. */
-  type LinkPlan = { items: Array<[HsFileGroup, HsLinkProduct[]]>; note?: string; /** Добавить товары к уже привязанным, а не заменить их. */ append?: boolean };
+  type LinkPlan = { items: Array<[HsFileGroup, HsLinkProduct[]]>; note?: string; /** Добавить товары к уже привязанным, а не заменить их. */ append?: boolean; /** Ключи групп, у которых снимаем размер: коды станут подходить любому размеру товара. */ dropSize?: Set<string> };
   // Окно «что к чему привяжется»: любая привязка сначала показывает его и ждёт подтверждения.
   const [plan, setPlan] = useState<LinkPlan | null>(null);
   // В окне подтверждения: заменить прежние привязки группы вместо того, чтобы дописать новый товар.
@@ -465,7 +465,7 @@ export default function ChzFileLinker({
   };
 
   /** Показать окно подтверждения. Товары чужой категории — только при включённой галочке. */
-  const askPlan = (items: LinkPlan['items'], note?: string, append?: boolean) => {
+  const askPlan = (items: LinkPlan['items'], note?: string, append?: boolean, dropSize?: Set<string>) => {
     if (items.length === 0 || busyKey) return;
     const bad = mismatchOf(items);
     if (bad.length > 0 && !allowMismatch) {
@@ -474,7 +474,7 @@ export default function ChzFileLinker({
     }
     setNotice(null);
     setPlanReplace(false);
-    setPlan({ items, note, append });
+    setPlan({ items, note, append, dropSize });
   };
 
   /** Привязать одну группу к товарам (через окно подтверждения). */
@@ -489,13 +489,13 @@ export default function ChzFileLinker({
   /** Подтверждено: выполняем привязку по плану. */
   const runPlan = async () => {
     if (!plan || busyKey) return;
-    const { items, note, append } = plan;
+    const { items, note, append, dropSize } = plan;
     setPlan(null);
     let done = 0;
     for (const [g, targets] of items) {
       // Группа уже привязана к другим товарам — по умолчанию они сохраняются, новый товар дописывается.
       const keepOld = Boolean(append) || (!planReplace && g.nmIds.length > 0);
-      if (await doLink(g, targets, items.length > 1, keepOld)) done += 1;
+      if (await doLink(g, targets, items.length > 1, keepOld, Boolean(dropSize?.has(g.key)))) done += 1;
     }
     if (items.length > 1) {
       setNotice({ tone: done === items.length ? 'ok' : 'err', text: `Привязано: ${done} из ${items.length}.${note ? ` ${note}` : ''}` });
@@ -504,13 +504,13 @@ export default function ChzFileLinker({
     if (done > 0) { setPicked([]); setSizeSel({}); }
   };
 
-  const doLink = async (g: HsFileGroup, targets: HsLinkProduct[], silent = false, append = false): Promise<boolean> => {
+  const doLink = async (g: HsFileGroup, targets: HsLinkProduct[], silent = false, append = false, dropSize = false): Promise<boolean> => {
     if (targets.length === 0 || busyKey) return false;
     setBusyKey(g.key);
     if (!silent) setNotice(null);
     try {
       const fromTable = hsGroupFromTable(g);
-      const nextSize = fromTable ? g.size : (sizeNeeded ? size : null);
+      const nextSize = dropSize ? null : (fromTable ? g.size : (sizeNeeded ? size : null));
       const category = categoryOfProduct(targets[0]);
       // «Добавить»: прежние товары группы остаются, к ним дописываются новые.
       const nmIds = append ? Array.from(new Set([...g.nmIds, ...targets.map((t) => t.nmId)])) : targets.map((t) => t.nmId);
@@ -689,13 +689,18 @@ export default function ChzFileLinker({
   /** Дописать выбранные товары к уже привязанным группам (через окно подтверждения). */
   const addToLinked = (groupsToAdd: HsFileGroup[]) => {
     const items: LinkPlan['items'] = [];
+    const dropSize = new Set<string>();
     groupsToAdd.forEach((g) => {
       const targets = picked.filter((p) => categoryFits(g, p) && (anySize || fitsProduct(p, g.size)) && !g.nmIds.includes(p.nmId));
-      if (targets.length > 0) items.push([g, targets]);
+      if (targets.length > 0) {
+        items.push([g, targets]);
+        // Размер группы не совпал с размером товара — снимаем размер: коды подойдут любому размеру товара.
+        if (anySize && g.size && targets.some((p) => !fitsProduct(p, g.size))) dropSize.add(g.key);
+      }
     });
     if (items.length === 0) { setNotice({ tone: 'err', text: 'Нечего добавлять: выбранные товары уже привязаны или не подходят.' }); return; }
     setAddSel(new Set());
-    askPlan(items, undefined, true);
+    askPlan(items, undefined, true, dropSize.size > 0 ? dropSize : undefined);
   };
 
   /** Отвязать группу от выбранных товаров. Привязки к другим товарам остаются; если других нет — файл снова ждёт привязки. */
@@ -1526,7 +1531,8 @@ export default function ChzFileLinker({
                 {plan.items.map(([g, targets]) => {
                   const fromTable = hsGroupFromTable(g);
                   const adding = Boolean(plan.append) || (!planReplace && g.nmIds.length > 0);
-                  const sizeText = fromTable ? (g.size || 'любой размер') : (sizeNeeded ? (size || '—') : 'все размеры');
+                  const dropped = Boolean(plan.dropSize?.has(g.key));
+                  const sizeText = dropped ? 'любой (размер снимается)' : fromTable ? (g.size || 'любой размер') : (sizeNeeded ? (size || '—') : 'все размеры');
                   const rowBad = targets.some((p) => !categoryFits(g, p));
                   return (
                     <div key={g.key} className={`rounded-lg border p-2.5 ${rowBad ? 'border-rose-300 bg-rose-50' : 'border-slate-200 bg-white'}`}>
@@ -1552,7 +1558,7 @@ export default function ChzFileLinker({
                               className={`rounded px-1.5 py-0.5 font-medium ring-1 ${!fits ? 'bg-rose-100 text-rose-800 ring-rose-300' : (hasSize(p, g.size) && colorMatches(g, p)) ? 'bg-emerald-50 text-emerald-800 ring-emerald-200' : 'bg-amber-50 text-amber-800 ring-amber-300'}`}
                               title={p.title}
                             >
-                              {p.vendorCode || p.nmId} · {sizeText}{fits ? '' : ` · ${p.subject}`}{hasSize(p, g.size) ? '' : ' · размера нет в карточке'}{colorMatches(g, p) ? '' : ` · цвет в карточке: ${p.color}`}
+                              {p.vendorCode || p.nmId} · {sizeText}{fits ? '' : ` · ${p.subject}`}{dropped || hasSize(p, g.size) ? '' : ' · размера нет в карточке'}{colorMatches(g, p) ? '' : ` · цвет в карточке: ${p.color}`}
                             </span>
                           );
                         })}
